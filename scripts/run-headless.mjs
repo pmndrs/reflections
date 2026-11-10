@@ -281,6 +281,12 @@ async function ssrChecks(pages) {
         const w = st.wall;
         check(`${tag}: mirror floor shows the wall`, w.confidentFraction > 0.6 && w.lumCorrelation > 0.8 && w.hitDistanceMedianRelErr < 0.05,
           `${w.pixels} floor px reflect a visible wall point; ${(w.confidentFraction * 100).toFixed(1)}% with confidence >= 0.9; luminance correlation ${w.lumCorrelation.toFixed(3)}, mean abs rel diff ${w.meanAbsRelative.toFixed(3)}; hit distance median rel err ${w.hitDistanceMedianRelErr.toFixed(4)}`);
+        // W9: striping on reflected objects. Before D1000 (FFX's mip-1 surface depth in the hit
+        // test) every other column of the cube's reflection was rejected: cube ratio 69, sphere 331.
+        const o = st.objects;
+        const fmt = (k) => `${k} hf ${o[k].hfReflected.toFixed(3)} vs direct ${o[k].hfDirect.toFixed(4)} (ratio ${o[k].stripeRatio.toFixed(1)}), ${(o[k].confident * 100).toFixed(1)}% of ${o[k].reflectedPixels} px confident`;
+        check(`${tag}: reflected sphere and cube not striped`, o.cube.stripeRatio < 5 && o.cube.confident > 0.9 && o.sphere.stripeRatio < 100 && o.sphere.confident > 0.7,
+          `${fmt('cube')}; ${fmt('sphere')}`);
         if (variant === 'auto') {
           savePng('ssr-mirrorWall-grid.png', await p.T('window.__p.shot()'));
           await p.T("window.__p.setView('final')");

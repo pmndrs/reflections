@@ -385,6 +385,11 @@ async function main() {
     const pairs: [number, number][] = [];
     let wallPx = 0, wallConfident = 0, hitErr: number[] = [];
     const P = new THREE.Vector3(), Q = new THREE.Vector3(), d = new THREE.Vector3(), s = new THREE.Vector3();
+    // everything but the floor and the wall can sit between a floor point and its wall reflection
+    const blockers: THREE.Object3D[] = [];
+    kit!.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh && (o as THREE.Mesh).geometry.type !== 'PlaneGeometry') blockers.push(o); });
+    const occluder = new THREE.Raycaster();
+    occluder.near = 1e-3;
     const lum = (a: Float32Array, i: number) => (a[i * 4] + a[i * 4 + 1] + a[i * 4 + 2]) / 3;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const i = y * W + x;
@@ -408,6 +413,9 @@ async function main() {
       if (sx < 0 || sy < 0 || sx >= W || sy >= H) continue;
       const j = sy * W + sx;
       if (Math.abs(depth[j] - s.z) > 2e-4) continue; // the wall point is hidden (posts, objects)
+      occluder.set(P, d);
+      occluder.far = tw - 1e-3;
+      if (occluder.intersectObjects(blockers, false).length) continue; // the reflected ray meets an object before the wall
       wallPx++;
       if (conf[i] < 0.9) continue;
       wallConfident++;
@@ -424,6 +432,7 @@ async function main() {
       meanAbs = ad / n / Math.max(mb, 1e-6);
     }
     hitErr = hitErr.sort((a, b) => a - b);
+    const objects = kit!.id === 'mirrorWall' ? stripeStats(depth, nr, am, sc, rad, conf, invVP, eye) : null;
     return {
       scene: kit!.id, variant: ssr.variant, rays: counter[1], tiles: counter[3], misses: missCounter[1],
       geometry: geo / (W * H), meanConfidence: geo ? confSum / geo : 0, nonFinite,
@@ -433,7 +442,68 @@ async function main() {
         pixels: wallPx, confidentFraction: wallPx ? wallConfident / wallPx : 0, lumCorrelation: corr, meanAbsRelative: meanAbs,
         hitDistanceMedianRelErr: hitErr.length ? hitErr[hitErr.length >> 1] : NaN,
       } : null,
+      objects,
     };
+  }
+
+  /**
+   * Striping in reflected objects (mirrorWall's sphere and cube). For each object:
+   * - reflected mask: mirror-floor pixels whose exact planar reflection ray (three's raycaster
+   *   against the object meshes) hits the object;
+   * - direct mask: non-mirror pixels whose depth-reconstructed position lies on the object (local bbox);
+   * - `hf`: mean of |L - mean(left, right)| + |L - mean(up, down)| over mask-interior pixels, divided
+   *   by the mean L, with L = SSR radiance luminance (confidence x hit colour) in the reflection and
+   *   scene-colour luminance where the object is seen directly. Striping (rows or columns of
+   *   rejected hits) shows as reflected hf far above the direct one; `stripeRatio` = reflected / direct.
+   * - `confident`: fraction of the reflected mask with confidence >= 0.9.
+   */
+  function stripeStats(depth: Float32Array, nr: Float32Array, am: Float32Array, sc: Float32Array, rad: Float32Array, conf: Float32Array,
+    invVP: THREE.Matrix4, eye: THREE.Vector3) {
+    const meshes: THREE.Mesh[] = [];
+    kit!.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const g = m.geometry as N;
+      if (g.type === 'SphereGeometry' || (g.type === 'BoxGeometry' && g.parameters.width === g.parameters.height)) meshes.push(m);
+    });
+    const ray = new THREE.Raycaster();
+    const P = new THREE.Vector3(), d = new THREE.Vector3(), L = new THREE.Vector3();
+    const reflected = meshes.map(() => new Uint8Array(W * H)), direct = meshes.map(() => new Uint8Array(W * H));
+    const boxes = meshes.map((m) => { m.geometry.computeBoundingBox(); return m.geometry.boundingBox!.clone().expandByScalar(2e-3); });
+    const inv = meshes.map((m) => m.matrixWorld.clone().invert());
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (depth[i] >= 1 || depth[i] <= 0) continue;
+      P.set(((x + 0.5) / W) * 2 - 1, 1 - ((y + 0.5) / H) * 2, depth[i]).applyMatrix4(invVP);
+      const mirrorPx = am[i * 4 + 3] > 0.99 && nr[i * 4 + 3] < 0.03;
+      if (mirrorPx && nr[i * 4 + 1] > 0.99) {
+        d.copy(P).sub(eye).normalize(); d.y = -d.y;
+        ray.set(P, d);
+        const hit = ray.intersectObjects(meshes, false)[0];
+        if (hit) reflected[meshes.indexOf(hit.object as THREE.Mesh)][i] = 1;
+      } else if (!mirrorPx) {
+        meshes.forEach((_, k) => { if (boxes[k].containsPoint(L.copy(P).applyMatrix4(inv[k]))) direct[k][i] = 1; });
+      }
+    }
+    const lum = (a: Float32Array, i: number) => (a[i * 4] + a[i * 4 + 1] + a[i * 4 + 2]) / 3;
+    const hf = (mask: Uint8Array, img: Float32Array) => {
+      let s = 0, m = 0, n = 0;
+      for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+        const i = y * W + x;
+        if (!(mask[i] && mask[i - 1] && mask[i + 1] && mask[i - W] && mask[i + W])) continue;
+        const v = lum(img, i);
+        s += Math.abs(v - 0.5 * (lum(img, i - 1) + lum(img, i + 1))) + Math.abs(v - 0.5 * (lum(img, i - W) + lum(img, i + W)));
+        m += v; n++;
+      }
+      return { hf: n ? s / Math.max(m, 1e-9) : NaN, pixels: n };
+    };
+    return Object.fromEntries(meshes.map((m, k) => {
+      const r = hf(reflected[k], rad), dd = hf(direct[k], sc);
+      let n = 0, c = 0;
+      for (let i = 0; i < W * H; i++) if (reflected[k][i]) { n++; if (conf[i] >= 0.9) c++; }
+      const name = (m.geometry as N).type === 'SphereGeometry' ? 'sphere' : 'cube';
+      return [name, { reflectedPixels: r.pixels, directPixels: dd.pixels, hfReflected: r.hf, hfDirect: dd.hf, stripeRatio: r.hf / dd.hf, confident: n ? c / n : NaN }];
+    }));
   }
 }
 

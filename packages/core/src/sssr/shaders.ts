@@ -45,6 +45,7 @@
 //   WebGPU implementations clamp instead).
 // - Extracted roughness and hit distance are r32float (r8unorm / r16float are not core storage
 //   formats). Radiance keeps FFX's layout: rgb + world ray length in w.
+// - The hit-to-surface distance is measured at the mip the march ended on, not at mip 1 (D1000).
 // - The environment-map lookup is the radiance-fallback seam `sampleRadianceFallback(P, dir,
 //   perceptualRoughness)`, a WGSL snippet with its own @group(1) bindings.
 
@@ -530,13 +531,19 @@ fn marchStep(m: ptr<function, March>, occupancy: u32) {
   (*m).i += 1u;
 }
 
-fn validateHit(hit: vec3f, uv: vec2f, world_space_ray_direction: vec3f, screen_size: vec2f, depth_buffer_thickness: f32) -> f32 {
+// Port change (DIVERGES D1000): FFX measures the hit's distance to the surface at mip 1, the
+// min (max for reverse-Z) of a 2x2 block, so on any surface whose depth changes across two pixels
+// by more than the thickness, every other column or row of hits is rejected (the striping on
+// sloped and curved objects). The distance is measured at the mip the march ended on
+// (hit_mip, the ray's most detailed mip: 0 for mirrors), where the hit lies on the surface by
+// construction. The background test keeps FFX's mip-1 lookup.
+fn validateHit(hit: vec3f, uv: vec2f, world_space_ray_direction: vec3f, screen_size: vec2f, depth_buffer_thickness: f32, hit_mip: i32) -> f32 {
   if (hit.x < 0.0 || hit.y < 0.0 || hit.x > 1.0 || hit.y > 1.0) { return 0.0; }
   let manhattan_dist = abs(hit.xy - uv);
   if (manhattan_dist.x < (2.0 / screen_size.x) && manhattan_dist.y < (2.0 / screen_size.y)) { return 0.0; }
   let texel_coords = vec2i(screen_size * hit.xy);
-  let surface_z = loadDepth(texel_coords / 2, 1);
-  if (surface_z == FAR_PLANE) { return 0.0; }
+  if (loadDepth(texel_coords / 2, 1) == FAR_PLANE) { return 0.0; }
+  let surface_z = loadDepth(vec2i(getMipResolution(screen_size, hit_mip) * hit.xy), hit_mip);
   let hit_normal = loadWorldSpaceNormal(texel_coords);
   if (dot(hit_normal, world_space_ray_direction) > 0.0) { return 0.0; }
   let view_space_surface = screenSpaceToViewSpace(vec3f(hit.xy, surface_z));
@@ -614,7 +621,7 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   let world_space_hit = screenSpaceToWorldSpace(hit);
   let world_space_ray = world_space_hit - world_space_origin;
   var confidence = 0.0;
-  if (valid_hit) { confidence = validateHit(hit, (*r).uv, world_space_ray, screen_size, P.depthBufferThickness); }
+  if (valid_hit) { confidence = validateHit(hit, (*r).uv, world_space_ray, screen_size, P.depthBufferThickness, (*r).march.most_detailed_mip); }
   let world_ray_length = max(0.0, length(world_space_ray));
   var reflection_radiance = vec3f(0.0);
   if (confidence > 0.0) { reflection_radiance = loadInputColor(vec2i(screen_size * hit.xy)); }
