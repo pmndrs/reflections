@@ -320,6 +320,23 @@ async function hybridChecks(pages) {
   const hole = await p.T(`(${HOLE_STATS})(${JSON.stringify(shots.final)}, ${JSON.stringify(shots.noSSR)}, ${JSON.stringify(shots.source)})`);
   check('hybrid mirrorWall low: the probe fallback behind the sphere is not dark', hole.px > 500 && hole.final > 0.7 * hole.wall && hole.final > 0.8 * hole.noSSR,
     `${hole.px} fallback px around the sphere's reflection: mean ${hole.final.toFixed(1)} / 255 (probes-only ${hole.noSSR.toFixed(1)}), wall ${hole.wall.toFixed(1)}`);
+  // W22: mirrorWall 'lowSphere'. Floor px whose exact reflection hits the sphere (raycast) got the
+  // box-projected probe (the wall's cells) for 1 - confidence; the depth-aware blend (D2400) keeps
+  // the probe off hits it lies behind. Bounded cost: px whose reflection passes behind the sphere
+  // to the wall (the probe was right) get more of the hit. FFX's blend (depth-aware off): sphere
+  // probe weight 0.048, behind px hit weight 0.009; on: 0.004, 0.095.
+  await p.T("window.__p.setPose('lowSphere')");
+  const blend = {};
+  for (const on of [false, true]) {
+    await p.T(`window.__p.setDepthAware(${on})`);
+    await p.T('window.__p.hybrid.resetHistory()');
+    await p.T('window.__p.step(16)');
+    blend[on] = await p.T('window.__p.blendStats()');
+  }
+  savePng('hybrid-mirrorWall-lowSphere-final.png', await p.T('window.__p.shot()'));
+  const b = blend.true, f = blend.false;
+  check('hybrid mirrorWall lowSphere: the probe does not show through the reflected sphere', b.sphere.px > 5000 && b.sphereProbe < 0.02 && b.behindSSR < 0.2,
+    `${b.sphere.px} px reflect the sphere: probe weight ${b.sphereProbe.toFixed(3)} (FFX blend ${f.sphereProbe.toFixed(3)}); ${b.behind.px} px reflect the wall behind it: hit weight ${b.behindSSR.toFixed(3)} (FFX ${f.behindSSR.toFixed(3)})`);
 }
 
 /**

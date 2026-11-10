@@ -10,8 +10,9 @@
 //   // per frame:
 //   ssr.render(scene, camera); hybrid.update(); pipeline.render();
 //
-// Per frame `update()` renders the composite's raw specular signal (ssr + (1 - confidence) x SO x
-// probe/env) into an rgba16float target, runs the seam on it with the tracer's hit distance and the
+// Per frame `update()` renders the composite's raw specular signal (hit x w + (1 - w) x SO x
+// probe/env, w the composite's `ssrWeight`: the confidence, depth-aware by default, D2400) into an
+// rgba16float target, runs the seam on it with the tracer's hit distance and the
 // frame's guides, and copies the denoiser's output into `denoised`. Composites built by
 // `composite()` read it where `denoise` is on. Without a denoiser the composite is the raw signal
 // (SPEC: "with no denoiser, the resolve falls back to the probe term for rough pixels and to the raw
@@ -28,7 +29,7 @@ import type { ScreenSpaceReflectionsPass } from './ScreenSpaceReflectionsPass';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 
-export interface HybridReflectionsOptions extends Omit<ScreenSpaceCompositeOptions, 'uv' | 'denoised' | 'denoise'> {
+export interface HybridReflectionsOptions extends Omit<ScreenSpaceCompositeOptions, 'uv' | 'denoised' | 'denoise' | 'depthAware'> {
   /**
    * A denoiser-core `TemporalDenoiser<SpecularInputs>` on the pass's device. Its roughness gate
    * should match the tracer's (FFX: `roughnessThreshold` in alpha, 0.447^2 for our default). Null:
@@ -55,6 +56,11 @@ export class HybridReflections {
   readonly signalTarget: THREE.RenderTarget;
   /** 1 while composites use the denoised radiance (set by `update()`; read by every composite). */
   readonly denoiseActive = uniform(0);
+  /**
+   * Depth-aware blend (W22, D2400; the composite's `depthAware`), shared by the signal pass and every
+   * composite: 1 (default) keeps the probe off hits it lies behind, 0 = FFX's confidence blend.
+   */
+  readonly depthAware = uniform(1);
   /** The tracer's perceptual roughness threshold, for the source view. */
   readonly roughnessThreshold = uniform(0.447);
   /** Denoise when a denoiser is attached. Default true. */
@@ -112,7 +118,7 @@ export class HybridReflections {
     const { denoiser: _d, denoiserMotion: _m, denoiserRoughness: _r, ...rest } = this.options;
     return screenSpaceComposite(this.ssr, {
       ...rest, uv: opts.uv ?? uv(),
-      denoised: opts.signalOnly ? null : this.denoised, denoise: this.denoiseActive,
+      denoised: opts.signalOnly ? null : this.denoised, denoise: this.denoiseActive, depthAware: this.depthAware,
     });
   }
 
@@ -150,7 +156,8 @@ export class HybridReflections {
   resetHistory() { this.seam?.resetHistory(); }
 
   /**
-   * Debug: which source filled each pixel (HYBRID_SOURCE): background, SSR hit (confidence >= 0.5),
+   * Debug: which source filled each pixel (HYBRID_SOURCE): background, SSR hit (the composite's
+   * `ssrWeight` >= 0.5; FFX's confidence with the depth-aware blend off),
    * traced hit, rough (above the threshold, probe/env only), else the miss's fallback (probe where
    * local coverage >= 0.5, environment otherwise).
    */
@@ -161,7 +168,7 @@ export class HybridReflections {
     const rough = c.roughness.greaterThanEqual(roughnessThreshold);
     return c.geometry.not().select(float(HYBRID_SOURCE.background),
       traced.select(float(HYBRID_SOURCE.traced),
-        c.confidence.greaterThanEqual(0.5).select(float(HYBRID_SOURCE.ssr),
+        c.ssrWeight.greaterThanEqual(0.5).select(float(HYBRID_SOURCE.ssr),
           rough.select(float(HYBRID_SOURCE.rough), fallback))));
   }
 

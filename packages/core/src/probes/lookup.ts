@@ -105,6 +105,14 @@ fn pr_parallax(P: vec3f, dir: vec3f, boxSize: vec3f, boxPos: vec3f, origin: vec3
   let dist = (side * (boxSize * 0.5) + boxPos - P) / safe;
   return P + d * min(dist.x, min(dist.y, dist.z)) - origin;
 }
+// Distance from P along dir to where the ray leaves the box (pr_parallax's intersection).
+fn pr_parallaxDistance(P: vec3f, dir: vec3f, boxSize: vec3f, boxPos: vec3f) -> f32 {
+  let d = normalize(dir);
+  let side = step(vec3f(0.0), d) * 2.0 - 1.0;
+  let safe = side * max(abs(d), vec3f(1e-6));
+  let dist = (side * (boxSize * 0.5) + boxPos - P) / safe;
+  return min(dist.x, min(dist.y, dist.z));
+}
 // Lagarde 2014 (Frostbite), getSpecularDominantDir: a = perceptual^2.
 fn pr_dominantDirection(N: vec3f, R: vec3f, roughness: f32) -> vec3f {
   let a = roughness * roughness;
@@ -196,6 +204,54 @@ ${unroll === undefined ? `  for (var i = 0u; i < count; i++) {\n${volume}  }\n` 
 const SIGNATURE = 'P: vec3f, N: vec3f, R: vec3f, roughness: f32, envRotation: mat4x4f, frameIrr: vec3f, withEnv: bool';
 
 /**
+ * The proxy-share body (W22, DIVERGES D2400): the lookup's volume weights, walked in the same order,
+ * but instead of radiance each box-projected volume adds `weight x (1 - smoothstep(near, far, t))`,
+ * t the distance from P along dir to its projection box (the surface its radiance is projected
+ * onto). Volumes sampled without box projection and the environment are at infinity and add 0. In
+ * scope: P, dir, near, far. Returns the share of the probe term whose surface lies within ~near.
+ */
+const proxyBody = (o: Pick<ProbeLookupOptions, 'count'>, row: (i: string) => string) => {
+  const volume = /* wgsl */ `    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
+    let r0 = ${row('b')};
+    let r1 = ${row('b + 1u')};
+    let lp = P - r0.xyz;
+    let d = r1.xyz - abs(lp);
+    let inside = min(d.x, min(d.y, d.z));
+    let weight = clamp(inside / max(r0.w, 1e-6), 0.0, 1.0) * remaining;
+    if (weight > 0.0) {
+      let r2 = ${row('b + 2u')};
+      let r3 = ${row('b + 3u')};
+      let insideProjection = all(abs(lp - r2.xyz) <= r3.xyz * 0.5);
+      if ((u32(r1.w) & 1u) != 0u && insideProjection) {
+        share += weight * (1.0 - smoothstep(near, far, pr_parallaxDistance(P, dir, r3.xyz, r0.xyz + r2.xyz)));
+      }
+    }
+    remaining -= weight;
+`;
+  return /* wgsl */ `
+  let hdr = ${row('0u')};
+  let count = u32(hdr.x);
+  var share = 0.0;
+  var remaining = hdr.z;
+${o.count === undefined ? `  for (var i = 0u; i < count; i++) {\n${volume}  }\n` : Array.from({ length: o.count }, (_, k) => `  {\n    let i = ${k}u;\n${volume}  }\n`).join('')}  return share;
+`;
+};
+
+/**
+ * WGSL `fn <name>(table: ptr<storage, array<vec4f>, read>, P: vec3f, dir: vec3f, near: f32, far: f32) -> f32`:
+ * the share of the probe term at P along dir (volumes by weight, then the environment, as the
+ * lookup blends them) whose box-projected surface lies nearer than `near` along the ray, fading to
+ * 0 at `far`. The environment and volumes without box projection count as infinitely far. Pass the
+ * direction the lookup samples (R, or its dominant direction if the lookup bends it). A resolve
+ * uses it to tell whether the probe can be what a ray sees: a screen-space hit at distance h with
+ * share(h + tolerance) = 0 means the probe's surface is behind the hit (DIVERGES D2400). Needs
+ * {@link probeLookupIncludesWgsl} in the module. `count` unrolls the volume loop as in the lookup.
+ */
+export function probeProxyShareFunctionWgsl(options: Pick<ProbeLookupOptions, 'count'> = {}, name = 'probeProxyShare'): string {
+  return `fn ${name}(table: ptr<storage, array<vec4f>, read>, P: vec3f, dir: vec3f, near: f32, far: f32) -> f32 {${proxyBody(options, (i) => `(*table)[${i}]`)}}\n`;
+}
+
+/**
  * Module-scope WGSL for engines that own the bindings: the layout's sampling code and the shared
  * helpers (no bindings). Include it once per shader module, then call the function of
  * {@link probeLookupFunctionWgsl}.
@@ -241,6 +297,8 @@ export interface ProbeLookupModuleOptions extends ProbeLookupOptions {
  *   fn probeRadianceN(P, N, R, roughness) -> vec4f and probeRadianceWithEnvironmentN(...) -> vec3f
  *        the same with the shading normal (dominant direction, re-fit)
  *   fn probeSpecularOcclusion(NdotV: f32, ao: f32, roughness: f32) -> f32
+ *   fn probeProxyShare(P: vec3f, dir: vec3f, near: f32, far: f32) -> f32
+ *        see {@link probeProxyShareFunctionWgsl}
  *
  * `roughness` is perceptual. Without N (the first two), N = R: no dominant-direction bend, and the
  * re-fit evaluates irradiance about R.
@@ -266,5 +324,6 @@ fn probeRadianceWithEnvironmentN(P: vec3f, N: vec3f, R: vec3f, roughness: f32) -
 }
 fn probeRadiance(P: vec3f, R: vec3f, roughness: f32) -> vec4f { return probeRadianceN(P, normalize(R), R, roughness); }
 fn probeRadianceWithEnvironment(P: vec3f, R: vec3f, roughness: f32) -> vec3f { return probeRadianceWithEnvironmentN(P, normalize(R), R, roughness); }
+fn probeProxyShare(P: vec3f, dir: vec3f, near: f32, far: f32) -> f32 {${proxyBody(options, (i) => `pr_table[${i}]`)}}
 `;
 }
