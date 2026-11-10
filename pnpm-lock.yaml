@@ -11,6 +11,9 @@ importers:
       '@babylonjs/core':
         specifier: 9.35.0
         version: 9.35.0
+      '@pmndrs/bvh':
+        specifier: link:../bvh-worktrees/reflections-integration
+        version: link:../bvh-worktrees/reflections-integration
       '@pmndrs/reflections-babylon':
         specifier: workspace:*
         version: link:packages/babylon
@@ -63,6 +66,10 @@ importers:
       downsampler:
         specifier: link:../../../downsampler-reflections
         version: link:../../../downsampler-reflections
+    devDependencies:
+      '@pmndrs/bvh':
+        specifier: link:../../../bvh-worktrees/reflections-integration
+        version: link:../../../bvh-worktrees/reflections-integration
 
   packages/three:
     dependencies:

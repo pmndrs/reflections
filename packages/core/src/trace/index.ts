@@ -9,3 +9,9 @@ export {
   type TracedReflections, type TracedReflectionsOptions, type TracedReflectionsSettings, type TracedReflectionsDispatch, type TracedReflectionsStats,
 } from './pass';
 export { RT_SOURCE, RT_STATE, RT_STATE_HEADER } from './shaders';
+// The core provider: @pmndrs/bvh (optional peer, imported on demand) over engine-free geometry.
+export {
+  createPmndrsBvhTraceProvider, loadPmndrsBvh, PmndrsBvhTraceProvider, PMNDRS_BVH_LAYOUT_VERSION,
+  type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceScene, type BvhBuilderPreference,
+  type PmndrsBvhTraceProviderOptions, type PmndrsBvhBuildInfo,
+} from './pmndrsBvh';

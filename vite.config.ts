@@ -22,7 +22,7 @@ export default defineConfig({
       formats: ['es'],
     },
     rollupOptions: {
-      external: [/^three(\/|$)/, /^three-mesh-bvh(\/|$)/, /^@babylonjs\/core(\/|$)/],
+      external: [/^three(\/|$)/, /^three-mesh-bvh(\/|$)/, /^@babylonjs\/core(\/|$)/, /^@pmndrs\/bvh(\/|$)/],
       output: { chunkFileNames: 'chunks/reflections-[hash].js' },
     },
   },

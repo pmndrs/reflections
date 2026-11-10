@@ -12,5 +12,16 @@
   },
   "dependencies": {
     "downsampler": "link:../../../downsampler-reflections"
+  },
+  "peerDependencies": {
+    "@pmndrs/bvh": "*"
+  },
+  "peerDependenciesMeta": {
+    "@pmndrs/bvh": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@pmndrs/bvh": "link:../../../bvh-worktrees/reflections-integration"
   }
 }

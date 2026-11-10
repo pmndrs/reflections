@@ -52,11 +52,15 @@
   },
   "peerDependencies": {
     "@babylonjs/core": ">=9.35.0 <10",
+    "@pmndrs/bvh": "*",
     "three": ">=0.187.0",
     "three-mesh-bvh": ">=0.9.18"
   },
   "peerDependenciesMeta": {
     "@babylonjs/core": {
+      "optional": true
+    },
+    "@pmndrs/bvh": {
       "optional": true
     },
     "three": {
@@ -69,6 +73,7 @@
   "devDependencies": {
     "@babylonjs/core": "9.35.0",
     "@pmndrs/reflections-babylon": "workspace:*",
+    "@pmndrs/bvh": "link:../bvh-worktrees/reflections-integration",
     "@pmndrs/reflections-core": "workspace:*",
     "@pmndrs/reflections-three": "workspace:*",
     "@types/three": "^0.187.0",

@@ -30,12 +30,15 @@ const denoiserRepo = findDenoiser();
 // from its real path, so that checkout has to be on the allow list.
 const downsamplerLink = resolve(root, '../packages/core/node_modules/downsampler');
 const downsamplerRepo = existsSync(downsamplerLink) ? realpathSync(downsamplerLink) : null;
+// @pmndrs/bvh is linked the same way (the bvh-worktrees/reflections-integration checkout).
+const bvhLink = resolve(root, '../packages/core/node_modules/@pmndrs/bvh');
+const bvhRepo = existsSync(bvhLink) ? realpathSync(bvhLink) : null;
 
 export default defineConfig({
   root,
   server: {
     port: Number(process.env.REFLECTIONS_PORT ?? 5370), strictPort: true, host: '127.0.0.1',
-    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : []), ...(downsamplerRepo ? [downsamplerRepo] : [])] },
+    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : []), ...(downsamplerRepo ? [downsamplerRepo] : []), ...(bvhRepo ? [bvhRepo] : [])] },
   },
   define: { __DENOISER_SOURCE__: JSON.stringify(denoiserRepo ?? '') },
   resolve: {

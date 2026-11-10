@@ -30,6 +30,11 @@ export { screenSpaceComposite, type ScreenSpaceComposite, type ScreenSpaceCompos
 // three-mesh-bvh is an optional peer, imported on demand by MeshBVHTraceProvider.fromObjects.
 export { MeshBVHTraceProvider, defaultHitMaterial, textureMeanColor, type HitMaterial, type MeshBVHComputeDataLike, type MeshBVHTraceProviderOptions } from './trace/MeshBVHTraceProvider';
 export type { ScreenSpaceTraceOptions } from './sssr/ScreenSpaceReflectionsPass';
+// The core provider (@pmndrs/bvh, optional peer, imported on demand) built from a three scene.
+export {
+  bvhTraceSceneFromObjects, createPmndrsBvhTraceProviderFromObjects,
+  type PmndrsBvhFromObjectsOptions, type ThreeBvhTraceScene, type ThreePmndrsBvhTraceProvider,
+} from './trace/PmndrsBvhTraceProvider';
 
 // Hybrid resolve (phase 5): SSR -> RT -> probes -> environment, denoised through the denoise seam
 // (any denoiser-core-shaped TemporalDenoiser<SpecularInputs>, e.g. denoiser/ffx's FfxReflectionDenoiser).
