@@ -32,7 +32,7 @@
 import * as THREE from 'three/webgpu';
 import { bool, cameraPosition, code, float, mat4, materialEnvRotation, nodeObject, normalWorld, positionWorld, reflectVector, sampler, storage, texture, vec3, vec4, wgslFn } from 'three/tsl';
 import {
-  PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludesWgsl,
+  PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludesWgsl, probeProxyShareFunctionWgsl,
   probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
 } from '@pmndrs/reflections-core';
 import { probeOrigin, probeWorldScale, type ReflectionProbes } from './ReflectionProbes';
@@ -321,3 +321,60 @@ export const reflectionProbesLocal = (probes: ReflectionProbes, options: Omit<Pr
  */
 export const sampleReflectionProbesLocal = (probes: ReflectionProbes, position: N, direction: N, roughness: N, options: Omit<ProbeLookupOptions, 'position' | 'direction' | 'roughness' | 'coverage'> = {}): N =>
   nodeObject(new ReflectionProbesNode(probes, { ...options, position, direction, roughness, coverage: true }));
+
+const _proxyFns = new Map<string, N>();
+/**
+ * The share of a probe set's term at a world position along a direction (volumes by weight, then the
+ * environment, as {@link sampleReflectionProbes} blends them) whose box-projected surface lies
+ * nearer than `near`, fading to 0 at `far` (core's `probeProxyShareFunctionWgsl`, W22 / D2400). The
+ * environment and volumes without box projection are infinitely far. A float node; 0 during a bake.
+ */
+export class ReflectionProbesProxyNode extends THREE.Node {
+  static get type() { return 'ReflectionProbesProxyNode'; }
+  readonly probes: ReflectionProbes;
+  readonly positionNode: N;
+  readonly directionNode: N;
+  readonly nearNode: N;
+  readonly farNode: N;
+  private table: SetTable | null = null;
+  private renderer: THREE.WebGPURenderer | null = null;
+  private volumes = 0;
+
+  constructor(probes: ReflectionProbes, position: N, direction: N, near: N, far: N) {
+    super('float');
+    if (!probes.texture) throw new Error('ReflectionProbesProxyNode: bake the probes first.');
+    this.probes = probes;
+    this.positionNode = nodeObject(position);
+    this.directionNode = nodeObject(direction);
+    this.nearNode = nodeObject(near);
+    this.farNode = nodeObject(far);
+    this.updateBeforeType = THREE.NodeUpdateType.RENDER;
+    probes.track(this);
+  }
+
+  customCacheKey() {
+    return THREE.NodeUtils.hash(super.customCacheKey(), this.probes.bakedProbes.length);
+  }
+
+  updateBefore(frame?: { renderId: number }): undefined {
+    if (this.probes.bakedProbes.length !== this.volumes) { this.needsUpdate = true; return; }
+    if (this.renderer !== null && this.table !== null) writeTable(this.probes, this.table, this.renderer, frame?.renderId ?? -1);
+  }
+
+  setup(builder: N) {
+    const probes = this.probes;
+    this.renderer = builder.renderer;
+    this.volumes = probes.bakedProbes.length;
+    this.table = tableFor(probes);
+    this.updateBefore();
+    const { includes } = lookupFor({ layout: probeLayoutFor(probes) });
+    const key = `${this.volumes}`;
+    let fn = _proxyFns.get(key);
+    if (!fn) _proxyFns.set(key, (fn = wgslFn(probeProxyShareFunctionWgsl({ count: this.volumes }, 'probesProxyShare'), [includes]) as N));
+    return fn({ table: this.table.node, P: vec3(this.positionNode), dir: vec3(this.directionNode), near: float(this.nearNode), far: float(this.farNode) });
+  }
+}
+
+/** TSL function: {@link ReflectionProbesProxyNode}. */
+export const sampleReflectionProbesProxyShare = (probes: ReflectionProbes, position: N, direction: N, near: N, far: N): N =>
+  nodeObject(new ReflectionProbesProxyNode(probes, position, direction, near, far));

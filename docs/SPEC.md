@@ -312,6 +312,7 @@ The ray-traced layer is optional and off by default, as in what shipped: idTech 
 Edge cases:
 
 - **Screen-edge fade:** confidence goes to the next source down.
+- **Depth-aware blend (W22, DIVERGES D2400-D2402):** the thickness part of the confidence only hands weight to the probe where the probe's box-projected surface is not behind the hit. A reflected object in front of the room's walls stays opaque instead of showing the wall the probe projects. The screen-edge fade still blends to the probe, and rejected rays still take it.
 - **Specular occlusion:** the re-fit doesn't provide it. Apply Lagarde's term to the probe contribution from the app's AO, `saturate(pow(NdotV + AO, exp2(−16r − 1)) − 1 + AO)`; SSR and RT hits carry their own occlusion (DIVERGES D66).
 
 The composite uses the split-sum DFG term (`radiance × (F0 · A + B)`), the same one three's PBR uses, so a material looks the same lit by probes alone or by the hybrid.

@@ -8,9 +8,11 @@
 //
 //   probeEnv = reflectionProbes lookup (volumes by coverage, then the atlas's environment slot)
 //              x environmentIntensity; without probes, pmremTexture(environment) x intensity
-//   specular = mix(probeEnv, ssrHit, confidence) = ssrRadiance + (1 - confidence) x probeEnv
+//   specular = mix(probeEnv, ssrHit, w) = ssrHit x w + (1 - w) x probeEnv
 //   final    = lit - weight x probeEnv + weight x specular
-//            = lit + weight x (ssrRadiance - confidence x probeEnv)
+//
+// with w = confidence (FFX), or, with the depth-aware blend (W22, D2400, default), w raised toward
+// the screen-edge fade alone where the probe's box-projected surface lies behind the hit.
 //
 // (`ssrRadiance` is already confidence x hit, see ScreenSpaceReflectionsPass.radiance). This only
 // needs `lit` and an estimate of what three added, not a specular-free re-render; with confidence
@@ -30,9 +32,9 @@
 // screen-space value), so the same formula composes them: no RT-specific branch.
 import * as THREE from 'three/webgpu';
 import {
-  DFGLUT, float, getViewPosition, mix, normalize, pmremTexture, reflect, texture, uniform, uv, vec3, vec4,
+  DFGLUT, float, getViewPosition, int, mix, normalize, pmremTexture, reflect, smoothstep, texture, textureSize, uniform, uv, vec2, vec3, vec4,
 } from 'three/tsl';
-import { sampleReflectionProbes, sampleReflectionProbesLocal } from '../probes/ReflectionProbesNode';
+import { sampleReflectionProbes, sampleReflectionProbesLocal, sampleReflectionProbesProxyShare } from '../probes/ReflectionProbesNode';
 import type { ReflectionProbes } from '../probes/ReflectionProbes';
 import type { ScreenSpaceReflectionsPass } from './ScreenSpaceReflectionsPass';
 
@@ -71,6 +73,13 @@ export interface ScreenSpaceCompositeOptions {
   denoised?: THREE.Texture | null;
   /** Float node or uniform: 1 = composite `denoised`, 0 = the raw signal. Default a uniform(0) (returned as `denoise`). */
   denoise?: N;
+  /**
+   * Depth-aware blend (W22, DIVERGES D2400), a float node or uniform in [0, 1]: 1 (default) keeps the
+   * probe / environment term off a screen-space or traced hit wherever the probe's box-projected
+   * surface lies behind the hit (the probe can't be what the ray sees there), so only the screen-edge
+   * fade blends toward it; 0 = FFX's `mix(fallback, hit, confidence)`. Returned as `depthAware`.
+   */
+  depthAware?: N;
 }
 
 /** The composite and the terms it is built from, as TSL nodes (all linear HDR). */
@@ -87,7 +96,8 @@ export interface ScreenSpaceComposite {
   specular: N;
   /**
    * The raw specular signal the denoiser takes (FFX SSSR's `lerp(fallback, hit, confidence)`):
-   * ssr + (1 - confidence) x specularOcclusion x probeSpecular. rgb; 0 on the background.
+   * hit x ssrWeight + (1 - ssrWeight) x specularOcclusion x probeSpecular (ssrWeight = confidence
+   * with `depthAware` 0). rgb; 0 on the background.
    */
   signal: N;
   /** The denoised radiance as sampled (rgb; the raw signal when no `denoised` texture was given). */
@@ -101,6 +111,18 @@ export interface ScreenSpaceComposite {
   /** Perceptual roughness from the G-buffer. */
   roughness: N;
   confidence: N;
+  /**
+   * The weight the composite gives the SSR / traced hit against the probe / environment term:
+   * `confidence` where the probe is consistent with the hit (or `depthAware` is 0), up to the
+   * screen-edge fade alone where the probe's surface is behind the hit (D2400).
+   */
+  ssrWeight: N;
+  /** Screen-edge fade of the hit (FFX's vignette, recomputed at the hit along the mirror direction). */
+  hitFade: N;
+  /** Share of the probe term whose box-projected surface is not behind the hit (0 without probes). */
+  probeConsistency: N;
+  /** 1 = depth-aware blend on (a uniform unless `options.depthAware` was given). */
+  depthAware: N;
   /** SSR radiance (confidence x hit). */
   ssr: N;
   hitDistance: N;
@@ -170,7 +192,39 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
   const amount: N = uniform(1);
   const ssrRadiance: N = texture(ssr.radiance, at).rgb;
   const confidence: N = texture(ssr.confidence, at).x.toVar();
-  const signal: N = geometry.select(ssrRadiance.add(confidence.oneMinus().mul(specularOcclusion).mul(probeSpecular)), vec3(0)).toVar();
+  const hitDistance: N = texture(ssr.hitDistance, at).x.toVar();
+
+  // Depth-aware blend (W22, DIVERGES D2400). FFX's confidence is one number for two things: the
+  // screen-edge fade (vignette: the hit is real but about to leave the screen) and the thickness
+  // falloff (how far the ray was behind the depth buffer where the march stopped). FFX blends the
+  // fallback in for both. The fallback here is the probe, box-projected onto its proxy volume; where
+  // that surface lies behind the hit along the same ray (a reflected object in front of the room's
+  // walls), the probe shows what is behind the object: the wall pattern through the reflected sphere
+  // in mirrorWall. So: split the fade back out (the vignette at the hit, projected along the mirror
+  // direction), and give the thickness part's remainder to the hit for the share of the probe term
+  // whose surface is behind it. The screen-edge fade still blends to the probe (D41: no pop when the
+  // hit leaves the screen); rejected rays (confidence 0) still take the probe; a probe surface at or
+  // in front of the hit (the room's own walls) keeps FFX's blend.
+  const depthAware: N = options.depthAware ?? uniform(1);
+  const valid: N = hitDistance.greaterThan(0).and(confidence.greaterThan(1e-3));
+  const hitP: N = P.add(reflect(V.negate(), Nw).mul(hitDistance));
+  const clip: N = (ssr.uniforms.viewProjection as N).mul(vec4(hitP, 1));
+  const hitUV: N = clip.xy.div(clip.w.max(1e-6)).mul(0.5).add(0.5);
+  const size: N = vec2((textureSize as N)(texture(ssr.confidence), int(0)));
+  const edge: N = vec2(size.y.div(size.x), 1).mul(0.05); // FFX ValidateHit: 0.05 x (h / w, 1)
+  const border: N = smoothstep(vec2(0), edge, hitUV).mul(smoothstep(vec2(1).sub(edge), vec2(1), hitUV).oneMinus());
+  const hitFade: N = valid.select(border.x.mul(border.y), float(0)).toVar();
+  const hitThickness: N = confidence.div(hitFade.max(1e-4)).clamp(0, 1);
+  // the probe term's share whose surface is nearer than ~the hit (10 % slack for the hit's and the
+  // box's error, faded out by 25 %): the probe can be what the ray sees there
+  const probeConsistency: N = (options.probes
+    ? sampleReflectionProbesProxyShare(options.probes, P, R, hitDistance.mul(1.1), hitDistance.mul(1.25))
+    : float(0)).toVar();
+  const depthAwareWeight: N = hitFade.mul(hitThickness.oneMinus().mul(probeConsistency).oneMinus());
+  const ssrWeight: N = valid.select(mix(confidence, depthAwareWeight.max(confidence), float(depthAware).clamp(0, 1)), confidence).toVar();
+  // the tracer stores confidence x hit (black fallback): rescale to the new weight
+  const ssrTerm: N = valid.select(ssrRadiance.mul(ssrWeight.div(confidence.max(1e-3))), ssrRadiance);
+  const signal: N = geometry.select(ssrTerm.add(ssrWeight.oneMinus().mul(specularOcclusion).mul(probeSpecular)), vec3(0)).toVar();
   const denoise: N = options.denoise ?? uniform(0);
   const denoised: N = options.denoised ? texture(options.denoised, at).rgb : signal;
   const specular: N = options.denoised ? mix(signal, denoised, float(denoise).clamp(0, 1)).toVar() : signal;
@@ -178,8 +232,8 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
   const final: N = vec4(geometry.select(lit.add(delta).max(0), lit), 1);
   return {
     final, lit, weight, probeSpecular, specular, signal, denoised, denoise, specularOcclusion, coverage, roughness: float(nr.w),
-    confidence, ssr: ssrRadiance, geometry, amount,
-    hitDistance: texture(ssr.hitDistance, at).x,
+    confidence, ssrWeight, hitFade, probeConsistency, depthAware, ssr: ssrRadiance, geometry, amount,
+    hitDistance,
     source: texture(ssr.source, at).x,
   };
 }

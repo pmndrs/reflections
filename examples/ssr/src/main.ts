@@ -51,7 +51,7 @@ const bvhKind: BvhKind = q.get('bvh') === 'pmndrs' ? 'pmndrs' : 'three-mesh-bvh'
 const bvhBuilder = (q.get('bvhBuilder') ?? 'auto') as BvhBuilderPreference;
 const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
 
-const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'coverage', 'source', 'rtSource', 'grid'] as const;
+const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'ssrWeight', 'hitFade', 'probeConsistency', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'coverage', 'source', 'rtSource', 'grid'] as const;
 type View = (typeof VIEWS)[number];
 const GRID: View[] = ['final', 'raw', 'noSSR', 'confidence', 'hitDistance', 'misses', 'specular', 'signal', useRT ? 'rtSource' : 'source'];
 
@@ -253,6 +253,11 @@ async function main() {
         // local probe coverage (0 = environment only), on geometry
         case 'coverage': return c.geometry.select(vec3(c.coverage), vec3(0.02, 0.03, 0.08));
         case 'confidence': return c.geometry.select(vec3(c.confidence), vec3(0.02, 0.03, 0.08));
+        // the weight the composite gives the hit against the probe / environment term (W22)
+        case 'ssrWeight': return c.geometry.select(vec3(c.ssrWeight), vec3(0.02, 0.03, 0.08));
+        // its two inputs: the screen-edge fade at the hit, and the share of the probe term whose surface is not behind the hit
+        case 'hitFade': return c.geometry.select(vec3(c.hitFade), vec3(0.02, 0.03, 0.08));
+        case 'probeConsistency': return c.geometry.select(vec3(c.probeConsistency), vec3(0.02, 0.03, 0.08));
         case 'hitDistance': { const d = c.hitDistance; return d.greaterThan(0).select((vec3(1, 0.8, 0.5) as N).mul(d.div(d.add(2))), vec3(0)); }
         // traced = green, quad copy = yellow-green, neither = dimmed lit image
         case 'rays': return mask.r.greaterThan(0.5).select(vec3(0.1, 0.9, 0.2), mask.g.greaterThan(0.5).select(vec3(0.6, 0.8, 0.1), dim));
@@ -422,6 +427,10 @@ async function main() {
   const denoiseBox = document.createElement('input'); denoiseBox.type = 'checkbox'; denoiseBox.checked = hybrid.denoise; denoiseBox.disabled = !denoiser;
   denoiseBox.onchange = () => { hybrid.denoise = denoiseBox.checked; refreshUI(); if (!looping) frame(); };
   row(denoiser ? 'Denoise (FFX)' : 'Denoise (no denoiser found)', denoiseBox);
+  const depthBox = document.createElement('input'); depthBox.type = 'checkbox'; depthBox.checked = q.get('depthAware') !== '0';
+  hybrid.depthAware.value = depthBox.checked ? 1 : 0;
+  depthBox.onchange = () => { hybrid.depthAware.value = depthBox.checked ? 1 : 0; if (!looping) frame(); };
+  row('Depth-aware blend', depthBox);
   const pauseBox = document.createElement('input'); pauseBox.type = 'checkbox'; pauseBox.onchange = () => { paused = pauseBox.checked; };
   row('Pause', pauseBox);
   function refreshUI() {
@@ -458,6 +467,8 @@ async function main() {
       load: (id: string) => load(id),
       setPose, setView: (v: View) => setView(v),
       setSSR(on: boolean) { composite!.amount.value = on ? 1 : 0; },
+      /** W22: the composite's depth-aware blend (D2400) on / off (FFX's confidence blend). */
+      setDepthAware(on: boolean) { hybrid.depthAware.value = on ? 1 : 0; depthBox.checked = on; },
       setSettings(s: N) { Object.assign(ssr.settings, s); },
       setHitColor: (m: HitColorMode) => setHitColor(m),
       setRT(on: boolean) { ssr.rayTracing = on; },
@@ -487,6 +498,7 @@ async function main() {
         return { size: [W, H], variant: ssr.variant, frames: n, ms: Object.fromEntries(Object.entries(per).map(([k, v]) => [k, Number(med(v).toFixed(4))])) };
       },
       stats: () => stats(),
+      blendStats: () => blendStats(),
     },
   });
 
@@ -499,6 +511,82 @@ async function main() {
    * Any scene: mean confidence over the mirror panels facing the camera (normal toward +z), the
    * offscreen scene's behind-the-camera case.
    */
+  /**
+   * W22: where the composite's blend puts the probe on a reflected object. mirrorWall's mirror-floor
+   * pixels, classified by their exact planar reflection ray (three's raycaster, every mesh but the
+   * floor): `sphere` / `object` = the ray's first hit is the sphere / another object (cube, posts),
+   * so the probe (the wall, box-projected) is wrong there; `behind` = the first hit is the wall at a point the camera
+   * can't see (an object covers it), so screen space can't know and the probe is the right answer;
+   * `wall` = a visible wall point. Per class: pixel count, the tracer's confidence (0, partial
+   * (0, 0.9) and the tiny part of it (0, 1e-3), >= 0.9, mean) and the composite's SSR weight (`ssrWeight`, read from the view, the
+   * weight the hit gets against the probe/environment term). `sphereProbe` / `objectProbe` = mean
+   * probe weight (1 - ssrWeight) over those px: the wall showing through the reflected objects
+   * (part of it is the screen-edge fade, e.g. the posts at the frame's sides); `behindSSR` = mean
+   * SSR weight over `behind` px (a streak where the probe was right).
+   */
+  async function blendStats() {
+    await idle();
+    const keepView = viewSel.value as View;
+    setView('ssrWeight');
+    const url = await (async () => { frame(); const u = canvas.toDataURL('image/png'); await idle(); return u; })();
+    setView(keepView);
+    const img = new Image(); img.src = url; await img.decode();
+    const c2 = new OffscreenCanvas(W, H); const g2 = c2.getContext('2d')!; g2.drawImage(img, 0, 0);
+    const shown = g2.getImageData(0, 0, W, H).data;
+    const core = ssr.tracer!;
+    const t = ssr.gbuffer.gpuTextures();
+    const [depth, nr, am, conf] = await Promise.all([
+      readTexture(device, t.depth), readTexture(device, t.normal), readTexture(device, t.albedo), readTexture(device, core.outputs.confidence),
+    ]);
+    const cam = ssr.gbuffer.frame!.camera;
+    const VP = new THREE.Matrix4().fromArray(cam.projection as N).multiply(new THREE.Matrix4().fromArray(cam.view as N));
+    const invVP = VP.clone().invert();
+    const eye = new THREE.Vector3(...(cam.position as [number, number, number]));
+    const inverted = ssr.gbuffer.conventions.depthInverted;
+    // every mesh but the floor (a plane facing up)
+    const meshes: THREE.Object3D[] = [];
+    kit!.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || (m as N).isHelper) return;
+      if (m.geometry.type === 'PlaneGeometry' && m.getWorldDirection(new THREE.Vector3()).y > 0.99) return;
+      meshes.push(m);
+    });
+    const ray = new THREE.Raycaster();
+    ray.near = 1e-3;
+    const P = new THREE.Vector3(), d = new THREE.Vector3(), s = new THREE.Vector3();
+    type Acc = { px: number; zero: number; tiny: number; partial: number; confident: number; conf: number; weight: number };
+    const acc = (): Acc => ({ px: 0, zero: 0, tiny: 0, partial: 0, confident: 0, conf: 0, weight: 0 });
+    const cls: Record<string, Acc> = { sphere: acc(), object: acc(), behind: acc(), wall: acc() };
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (inverted ? depth[i] <= 0 : depth[i] >= 1) continue;
+      if (!(am[i * 4 + 3] > 0.99 && nr[i * 4 + 3] < 0.03 && nr[i * 4 + 1] > 0.99)) continue;
+      P.set(((x + 0.5) / W) * 2 - 1, 1 - ((y + 0.5) / H) * 2, depth[i]).applyMatrix4(invVP);
+      d.copy(P).sub(eye).normalize(); d.y = -d.y;
+      ray.set(P, d);
+      const first = ray.intersectObjects(meshes, false)[0];
+      if (!first) continue;
+      let k: string;
+      if ((first.object as THREE.Mesh).geometry.type === 'PlaneGeometry') {
+        s.copy(first.point).applyMatrix4(VP);
+        const sx = Math.floor((s.x * 0.5 + 0.5) * W), sy = Math.floor((0.5 - s.y * 0.5) * H);
+        const seen = sx >= 0 && sy >= 0 && sx < W && sy < H && Math.abs(depth[sy * W + sx] - s.z) < 2e-4;
+        k = seen ? 'wall' : 'behind';
+      } else k = (first.object as THREE.Mesh).geometry.type === 'SphereGeometry' ? 'sphere' : 'object';
+      const a = cls[k];
+      a.px++; a.conf += conf[i];
+      if (conf[i] <= 0) a.zero++; else if (conf[i] < 0.9) a.partial++; else a.confident++;
+      if (conf[i] > 0 && conf[i] < 1e-3) a.tiny++;
+      a.weight += shown[i * 4] / 255;
+    }
+    const out = Object.fromEntries(Object.entries(cls).map(([k, a]) => [k, {
+      px: a.px, zero: a.px ? a.zero / a.px : 0, tiny: a.px ? a.tiny / a.px : 0, partial: a.px ? a.partial / a.px : 0, confident: a.px ? a.confident / a.px : 0,
+      meanConfidence: a.px ? a.conf / a.px : 0, meanWeight: a.px ? a.weight / a.px : 0,
+    }]));
+    const probeShare = (a: Acc) => (a.px ? 1 - a.weight / a.px : 0);
+    return { ...out, sphereProbe: probeShare(cls.sphere), objectProbe: probeShare(cls.object), behindSSR: cls.behind.px ? cls.behind.weight / cls.behind.px : 0 };
+  }
+
   async function stats() {
     await idle();
     const core = ssr.tracer!;

@@ -113,6 +113,8 @@ export class ScreenSpaceReflectionsPass {
     projectionInverse: uniform(new THREE.Matrix4()),
     cameraWorld: uniform(new THREE.Matrix4()),
     cameraPosition: uniform(new THREE.Vector3()),
+    /** projection x view of the traced frame (the composite projects hits for the screen-edge fade, W22). */
+    viewProjection: uniform(new THREE.Matrix4()),
   };
   /**
    * With `settings.hitColor = 'history'`: the texture holding last frame's image (rgba16float,
@@ -240,6 +242,7 @@ export class ScreenSpaceReflectionsPass {
     this.uniforms.projectionInverse.value.copy(cam.projectionMatrixInverse);
     this.uniforms.cameraWorld.value.copy(cam.matrixWorld);
     this.uniforms.cameraPosition.value.setFromMatrixPosition(cam.matrixWorld);
+    this.uniforms.viewProjection.value.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
   }
 
   /** Forget last frame's colour (camera cut, scene switch); the next frame's hits use this frame's scene colour. */

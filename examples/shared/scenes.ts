@@ -34,6 +34,10 @@ export function mirrorWall(opts: SceneOptions = {}): KitScene {
     // low across the mirror floor toward the yellow sphere: the floor reflects the wall behind it,
     // which screen space can't see (the sphere covers it), so those pixels fall back to the probe (W12)
     low: { pos: [-1.1, 0.28, 2.6] as Vec3, target: [-1.6, 0.35, -1.2] as Vec3 },
+    // close to the sphere at its centre's height (W22): the floor reflects the sphere's underside,
+    // which the camera can't see, so many of those rays are thickness-uncertain; with FFX's blend the
+    // box-projected probe (the wall's D4 / D5 cells) showed through the reflected sphere
+    lowSphere: { pos: [-1.6, 0.45, 0.6] as Vec3, target: [-1.6, 0.3, -1.2] as Vec3 },
   };
   return {
     id: 'mirrorWall', title: 'Mirror floor facing a patterned wall', scene, camera: makeCamera(views.default, opts.aspect),
