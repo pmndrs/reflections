@@ -9,15 +9,14 @@
 //   moving         mirrorWall with animated objects: camera and object motion vectors
 import * as THREE from 'three/webgpu';
 import {
-  type KitScene, type SceneOptions, type Vec3, add, floor, glow, gradientEnvironment, makeCamera, mirror, newScene,
+  type KitScene, type SceneOptions, type Vec3, add, floor, floorProbe, glow, gradientEnvironment, makeCamera, mirror, newScene, skyEnvironment, useSky,
   patternTexture, std, studioLights,
 } from './kit';
 
 /** Mirror floor facing a lit, patterned wall. */
 export function mirrorWall(opts: SceneOptions = {}): KitScene {
   const scene = newScene();
-  scene.environment = gradientEnvironment();
-  scene.environmentIntensity = 0.3;
+  useSky(scene, new THREE.Vector3(3, 6, 6));
   floor(scene, mirror(0), 16);
   const wall = add(scene, new THREE.Mesh(new THREE.PlaneGeometry(10, 4), std(0xffffff, 0.75, 0, { map: patternTexture() })), [0, 2, -3]);
   wall.castShadow = false;
@@ -39,7 +38,8 @@ export function mirrorWall(opts: SceneOptions = {}): KitScene {
   return {
     id: 'mirrorWall', title: 'Mirror floor facing a patterned wall', scene, camera: makeCamera(views.default, opts.aspect),
     target: new THREE.Vector3(...views.default.target), views,
-    probes: [{ position: [0, 2, 0], influenceSize: [16, 4.2, 16], projectionSize: [16, 4.2, 12] }],
+    // projection box: back face on the wall (z = -3), the floor, the wall's top
+    probes: [floorProbe({ position: [0, 2, 0], influenceSize: [16, 4.2, 16], projectionSize: [16, 4.2, 12], projectionOffset: [0, 0, 3] })],
   };
 }
 
@@ -51,8 +51,7 @@ export function mirrorWall(opts: SceneOptions = {}): KitScene {
  */
 export function offscreen(opts: SceneOptions = {}): KitScene {
   const scene = newScene();
-  scene.environment = gradientEnvironment();
-  scene.environmentIntensity = 0.25;
+  useSky(scene, new THREE.Vector3(-3, 7, 3));
   floor(scene, mirror(0.02), 24);
   // dark back wall with a mirror panel facing the camera
   add(scene, new THREE.Mesh(new THREE.PlaneGeometry(14, 5), std(0x3b3f46, 0.9)), [0, 2.5, -4]);
@@ -78,15 +77,15 @@ export function offscreen(opts: SceneOptions = {}): KitScene {
   return {
     id: 'offscreen', title: 'Off screen: above the frame and behind the camera', scene, camera: makeCamera(views.default, opts.aspect),
     target: new THREE.Vector3(...views.default.target), views,
-    probes: [{ position: [0, 2.5, 2], influenceSize: [14, 5, 12], projectionSize: [14, 5, 12] }],
+    // influence 0.6 m past the walls too: the wall mirror (z = -3.95) sat on the back face (D1500)
+    probes: [floorProbe({ position: [0, 2.5, 2], influenceSize: [15.2, 5, 13.2], projectionSize: [14, 5, 12] })],
   };
 }
 
 /** Objects resting on a mirror floor: reflections must start exactly at the contact. */
 export function contact(opts: SceneOptions = {}): KitScene {
   const scene = newScene();
-  scene.environment = gradientEnvironment();
-  scene.environmentIntensity = 0.3;
+  useSky(scene, new THREE.Vector3(3, 6, 4));
   floor(scene, mirror(0.02, 0xd8d8d8), 20);
   add(scene, new THREE.Mesh(new THREE.PlaneGeometry(14, 5), std(0xffffff, 0.8, 0, { map: patternTexture({ cells: [14, 5], size: [1400, 500] }) })), [0, 2.5, -5]);
   add(scene, new THREE.Mesh(new THREE.SphereGeometry(0.5, 64, 32), std(0xe63946, 0.4)), [-2.2, 0.5, 0]);
@@ -106,15 +105,14 @@ export function contact(opts: SceneOptions = {}): KitScene {
   return {
     id: 'contact', title: 'Contact: objects resting on a mirror floor', scene, camera: makeCamera(views.default, opts.aspect),
     target: new THREE.Vector3(...views.default.target), views,
-    probes: [{ position: [0, 2.5, 0], influenceSize: [20, 5, 20], projectionSize: [20, 5, 10] }],
+    probes: [floorProbe({ position: [0, 2.5, 0], influenceSize: [20, 5, 20], projectionSize: [20, 5, 10] })],
   };
 }
 
 /** Spheres and floor strips from roughness 0 to 1; a metal row and a dielectric row. */
 export function roughnessRamp(opts: SceneOptions = {}): KitScene {
   const scene = newScene();
-  scene.environment = gradientEnvironment(new THREE.Vector3(0.3, 0.6, 0.7));
-  scene.environmentIntensity = 0.5;
+  useSky(scene, new THREE.Vector3(2, 6, 6));
   floor(scene, std(0x1b1b1d, 0.9), 24);
   const n = 11, dx = 0.75, x0 = -((n - 1) / 2) * dx;
   const sphere = new THREE.SphereGeometry(0.3, 64, 32);
@@ -141,7 +139,7 @@ export function roughnessRamp(opts: SceneOptions = {}): KitScene {
   return {
     id: 'roughnessRamp', title: 'Roughness ramp 0 to 1 (metal and dielectric)', scene, camera: makeCamera(views.default, opts.aspect),
     target: new THREE.Vector3(...views.default.target), views,
-    probes: [{ position: [0, 2, 0], influenceSize: [24, 4.2, 24], projectionSize: [12, 4.2, 10] }],
+    probes: [floorProbe({ position: [0, 2, 0], influenceSize: [24, 4.2, 24], projectionSize: [12, 4.2, 10] })],
   };
 }
 
@@ -151,8 +149,8 @@ export function roughnessRamp(opts: SceneOptions = {}): KitScene {
  */
 export function boxRoom(opts: SceneOptions = {}): KitScene {
   const scene = newScene();
-  const sky = new THREE.Color().setRGB(0.55, 0.72, 1.0).multiplyScalar(2.2);
-  scene.background = sky;
+  // the sky through the windows (background only: the closed room keeps a dim environment)
+  scene.background = skyEnvironment(new THREE.Vector3(14, 7, -6), { exposure: 2.2 });
   scene.environment = gradientEnvironment();
   scene.environmentIntensity = 0.15;
   const W = 8, H = 3, D = 6, T = 0.2; // inner size, wall thickness
@@ -210,7 +208,8 @@ export function boxRoom(opts: SceneOptions = {}): KitScene {
   return {
     id: 'boxRoom', title: 'Box room with windows (probe parallax)', scene, camera: makeCamera(views.default, opts.aspect),
     target: new THREE.Vector3(...views.default.target), views,
-    probes: [{ position: [0, H / 2, 0], influenceSize: [W + 0.1, H + 0.1, D + 0.1], projectionSize: [W, H, D], originOffset: [0, 0.1, 0] }],
+    // influence 0.6 m past the walls and floor (they sat on its faces at coverage ~0.1, D1500)
+    probes: [floorProbe({ position: [0, H / 2, 0], influenceSize: [W + 1.2, H + 0.1, D + 1.2], projectionSize: [W, H, D], originOffset: [0, 0.1, 0] })],
   };
 }
 
@@ -221,8 +220,7 @@ export function boxRoom(opts: SceneOptions = {}): KitScene {
  */
 export function facingMirrors(opts: SceneOptions = {}): KitScene {
   const scene = newScene();
-  scene.environment = gradientEnvironment();
-  scene.environmentIntensity = 0.3;
+  useSky(scene, new THREE.Vector3(1, 6, 5));
   floor(scene, std(0x6b6660, 0.85), 16);
   add(scene, new THREE.Mesh(new THREE.PlaneGeometry(8, 4), std(0xffffff, 0.8, 0, { map: patternTexture({ cells: [8, 4], size: [800, 400] }) })), [0, 2, -4]);
   for (const side of [-1, 1]) {
@@ -243,7 +241,8 @@ export function facingMirrors(opts: SceneOptions = {}): KitScene {
   return {
     id: 'facingMirrors', title: 'Two facing mirrors (mirror seen in a mirror)', scene, camera: makeCamera(views.default, opts.aspect),
     target: new THREE.Vector3(...views.default.target), views,
-    probes: [{ position: [0, 1.6, 0], influenceSize: [3.6, 3.2, 8], projectionSize: [3.6, 4, 8] }],
+    // influence 0.6 m past the mirrors (x = +-1.79), which sat on its x faces, and past the ends (D1500)
+    probes: [floorProbe({ position: [0, 1.6, 0], influenceSize: [4.8, 3.2, 9.2], projectionSize: [3.6, 4, 8] })],
   };
 }
 

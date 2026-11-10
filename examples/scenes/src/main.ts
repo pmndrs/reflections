@@ -140,7 +140,8 @@ async function main() {
       const size = new THREE.Vector3(...v.influenceSize);
       const c = new THREE.Vector3(...v.position);
       overlay.add(new THREE.Box3Helper(new THREE.Box3().setFromCenterAndSize(c, size), 0xffcc00));
-      if (v.projectionSize) overlay.add(new THREE.Box3Helper(new THREE.Box3().setFromCenterAndSize(c, new THREE.Vector3(...v.projectionSize)), 0x00ccff));
+      const pc = c.clone().add(new THREE.Vector3(...(v.projectionOffset ?? [0, 0, 0])));
+      overlay.add(new THREE.Box3Helper(new THREE.Box3().setFromCenterAndSize(pc, new THREE.Vector3(...(v.projectionSize ?? v.influenceSize))), 0x00ccff));
     }
     gbuffer.resetHistory();
     refreshUI();

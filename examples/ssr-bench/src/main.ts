@@ -301,6 +301,7 @@ async function main() {
       p.position.set(...v.position);
       if (v.projectionSize) p.projectionSize = new THREE.Vector3(...v.projectionSize);
       if (v.originOffset) p.originOffset.set(...v.originOffset);
+      if (v.projectionOffset) p.projectionOffset.set(...v.projectionOffset);
       if (v.blendDistance !== undefined) p.blendDistance = v.blendDistance;
       probes.add(p);
     }

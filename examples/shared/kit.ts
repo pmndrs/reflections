@@ -13,9 +13,39 @@ export interface ProbeVolume {
   influenceSize: Vec3;
   /** The box the lookup is projected onto (box projection); usually the room's walls. */
   projectionSize?: Vec3;
+  /** Projection box centre relative to `position` (#35046 `projectionOffset`). */
+  projectionOffset?: Vec3;
   /** Capture point relative to `position` (our extension over #35046). */
   originOffset?: Vec3;
   blendDistance?: number;
+}
+
+/**
+ * Extends a volume's influence box down to `below` under the floor at `floorY`, keeping its
+ * projection box and capture point where they were (via `projectionOffset` / `originOffset`).
+ *
+ * The influence weight fades in over `blendDistance` from every face of the box (#35046, as in
+ * Lagarde's and HDRP's influence volumes), so a receiver on a face gets weight ~0. A box whose bottom
+ * is the floor leaves the floor at coverage ~0 (mirrorWall's was 0.1 m inside: 0.2), and the floor
+ * then reflects mostly the environment, not the room (W12, D1500). HDRP's answer is the same: the
+ * influence volume encloses its receivers (or a per-face blend distance of 0 on that face); the
+ * projection (proxy) volume is the one that matches the walls.
+ */
+export function floorProbe(v: ProbeVolume, floorY = 0, below = 0.6): ProbeVolume {
+  const [px, py, pz] = v.position;
+  const [ix, iy, iz] = v.influenceSize;
+  const top = py + iy / 2;
+  const bottom = Math.min(py - iy / 2, floorY - below);
+  const cy = (top + bottom) / 2, dy = cy - py;
+  const po = v.projectionOffset ?? [0, 0, 0], oo = v.originOffset ?? [0, 0, 0];
+  return {
+    ...v,
+    position: [px, cy, pz],
+    influenceSize: [ix, top - bottom, iz],
+    projectionSize: v.projectionSize ?? v.influenceSize,
+    projectionOffset: [po[0], po[1] - dy, po[2]],
+    originOffset: [oo[0], oo[1] - dy, oo[2]],
+  };
 }
 
 export interface CameraView { pos: Vec3; target: Vec3; fov?: number }
@@ -137,6 +167,66 @@ export function gradientEnvironment(sun?: THREE.Vector3, sunStrength = 6) {
   tex.colorSpace = THREE.LinearSRGBColorSpace;
   tex.needsUpdate = true;
   return tex;
+}
+
+/**
+ * A procedural daylight sky (CPU float equirect, linear): deep blue zenith, pale hazy horizon, a
+ * dark warm ground, and a sun disc with a soft glow toward `sun` (world direction). Meant as both
+ * `scene.background` and `scene.environment` at intensity 1, so what a mirror reflects past the
+ * scene reads as sky (W12). Reflection probes capture it twice: the volumes see it as the
+ * background, the environment slot as `scene.environment`.
+ */
+export function skyEnvironment(sun: THREE.Vector3 = new THREE.Vector3(3, 6, 6), opts: { sunStrength?: number; exposure?: number } = {}) {
+  const { sunStrength = 60, exposure = 0.45 } = opts;
+  const w = 512, h = 256;
+  const data = new Float32Array(w * h * 4);
+  const dir = new THREE.Vector3();
+  const s = sun.clone().normalize();
+  const zenith = [0.10, 0.24, 0.62], horizon = [0.62, 0.72, 0.82], ground = [0.10, 0.09, 0.08];
+  // three's equirect lookup: u = atan(dir.z, dir.x) / 2pi + 0.5, v = asin(dir.y) / pi + 0.5; with
+  // flipY off, row 0 is v = 0 (straight down)
+  for (let y = 0; y < h; y++) {
+    const elevation = ((y + 0.5) / h - 0.5) * Math.PI;
+    for (let x = 0; x < w; x++) {
+      const azimuth = ((x + 0.5) / w - 0.5) * Math.PI * 2;
+      dir.set(Math.cos(elevation) * Math.cos(azimuth), Math.sin(elevation), Math.cos(elevation) * Math.sin(azimuth));
+      const up = dir.y;
+      const c = [0, 0, 0];
+      if (up >= 0) {
+        const k = Math.pow(up, 0.45);
+        for (let i = 0; i < 3; i++) c[i] = horizon[i] + (zenith[i] - horizon[i]) * k;
+      } else {
+        const k = Math.min(1, -up * 6);
+        for (let i = 0; i < 3; i++) c[i] = horizon[i] * 0.55 + (ground[i] - horizon[i] * 0.55) * k;
+      }
+      const d = dir.dot(s);
+      // disc (~1.3 degrees) plus a glow, warm
+      const disc = d > 0.99975 ? sunStrength : 0;
+      const glowK = Math.max(0, d) ** 64 * 0.6 + Math.max(0, d) ** 8 * 0.12;
+      const i4 = (y * w + x) * 4;
+      data[i4] = (c[0] + disc + glowK) * exposure;
+      data[i4 + 1] = (c[1] + disc * 0.95 + glowK * 0.9) * exposure;
+      data[i4 + 2] = (c[2] + disc * 0.85 + glowK * 0.7) * exposure;
+      data[i4 + 3] = 1;
+    }
+  }
+  const tex = new THREE.DataTexture(data, w, h, THREE.RGBAFormat, THREE.FloatType);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.colorSpace = THREE.LinearSRGBColorSpace;
+  tex.magFilter = tex.minFilter = THREE.LinearFilter;
+  tex.flipY = false;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Sets a {@link skyEnvironment} as the scene's background and environment (intensity 1). */
+export function useSky(scene: THREE.Scene, sun?: THREE.Vector3, opts?: { sunStrength?: number; exposure?: number }) {
+  const sky = skyEnvironment(sun, opts);
+  scene.background = sky;
+  scene.environment = sky;
+  scene.environmentIntensity = 1;
+  scene.backgroundIntensity = 1;
+  return sky;
 }
 
 /** Key + fill: a shadowed directional light and a dim hemisphere. Returns the key light. */

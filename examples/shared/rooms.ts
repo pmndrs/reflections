@@ -3,7 +3,7 @@
 // mirror ball on Ben's figure eight lowered to 1.2 m so its reflection lands next to it. The probe
 // setup (one per room plus a doorway probe) and the scenario poses are that page's.
 import * as THREE from 'three/webgpu';
-import { type KitScene, type SceneOptions, type Vec3, makeCamera } from './kit';
+import { type KitScene, type SceneOptions, type Vec3, floorProbe, makeCamera } from './kit';
 
 export function rooms(opts: SceneOptions = {}): KitScene {
   const scene = new THREE.Scene();
@@ -81,9 +81,9 @@ export function rooms(opts: SceneOptions = {}): KitScene {
     id: 'rooms', title: 'Two rooms (the scene of three.js #35046)', scene, camera: makeCamera(views.default, opts.aspect, 0.05, 60),
     target: new THREE.Vector3(...views.default.target), views,
     probes: [
-      { position: [-4, 2.5, 0], influenceSize: [8.4, 5.4, 8.4], projectionSize: [8, 5, 8] },
-      { position: [4, 2.5, 0], influenceSize: [8.4, 5.4, 8.4], projectionSize: [8, 5, 8] },
-      { position: [0, 1.9, 0], influenceSize: [2.4, 3.8, 2.5], projectionSize: [16, 3.8, 8] },
+      floorProbe({ position: [-4, 2.5, 0], influenceSize: [8.4, 5.4, 8.4], projectionSize: [8, 5, 8] }),
+      floorProbe({ position: [4, 2.5, 0], influenceSize: [8.4, 5.4, 8.4], projectionSize: [8, 5, 8] }),
+      floorProbe({ position: [0, 1.9, 0], influenceSize: [2.4, 3.8, 2.5], projectionSize: [16, 3.8, 8] }),
     ],
     update,
   };
