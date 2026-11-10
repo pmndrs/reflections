@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>SSR bench</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; padding: 16px; background: #111; color: #ddd; font: 14px/1.45 system-ui, sans-serif; }
+      .page { max-width: 1020px; }
+      code { background: #0006; padding: 0 .3em; border-radius: 4px; }
+      canvas { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; border: 1px solid #333; border-radius: 8px; display: block; }
+      pre { font-size: .8rem; white-space: pre-wrap; color: #9a9; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>SSR bench: ours vs three r187 <code>SSRNode</code></h1>
+      <p>
+        Phase 3 gate measurement (docs/research/ssr-gate.md). One method per page load:
+        <code>?method=ours | ours-accum | three-blur | three-stoch | three-denoise | reference</code>, <code>?scene=</code>,
+        <code>?w=&amp;h=</code>, <code>?base=1</code> (the method's G-buffer and lit image only, for timing).
+        <code>ours-accum</code> is a bench stand-in (exponential history with reprojection), not a product feature.
+        <code>reference</code> is a BVH-traced, many-sample estimate of the ideal screen-space answer (see the doc).
+        Driven headlessly by <code>pnpm check -- --ssr-bench</code>.
+      </p>
+      <canvas id="view" width="960" height="540"></canvas>
+      <pre id="status">starting...</pre>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
