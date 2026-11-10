@@ -48,6 +48,12 @@ export interface TracedReflectionsSettings {
   normalOffset?: number;
   /** A hit the camera sees this frame takes the scene colour there (D55). Default true. */
   reuseOnScreenHits?: boolean;
+  /**
+   * Where an on-screen hit takes its colour, as the SSSR tracer's `hitColor`: 'current' (default)
+   * = `inputs.color`; 'history' = `inputs.history` reprojected through `inputs.motion` (D1002).
+   * Pass the tracer's setting so both sources agree.
+   */
+  hitColor?: 'current' | 'history';
   /** Relative view-distance tolerance for that test. Default 0.02. */
   onScreenDepthTolerance?: number;
   /** The fallback's `P.iblFactor`. Default 1. */
@@ -229,7 +235,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     f[52] = fc[0]; f[53] = fc[1]; f[54] = fc[2]; f[55] = 1;
     const mvs = frame.inputs.motionVectorScale ?? [1, 1];
     f[56] = mvs[0]; f[57] = mvs[1];
-    u[58] = frame.inputs.history && frame.inputs.motion ? 1 : 0;
+    u[58] = (s.hitColor ?? 'current') === 'history' ? 1 : 0;
     device.queue.writeBuffer(params, 0, data);
   }
 
@@ -240,6 +246,10 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     if (!out.missList || !out.missCounter || !out.missArgs) throw new Error('rt: the SSSR tracer was created without `missList: true`');
     if (fallback.layout && !frame.fallbackBindGroup) throw new Error('rt: the radiance fallback needs fallbackBindGroup');
     if (shading.layout && !frame.hitShadingBindGroup) throw new Error('rt: the hit shading needs hitShadingBindGroup');
+    // the same checks as the SSSR tracer's for hitColor 'history'
+    const useHistory = (settings.hitColor ?? 'current') === 'history';
+    if (useHistory && (!inputs.history || !inputs.motion)) throw new Error("rt: hitColor 'history' needs inputs.history and inputs.motion");
+    if (useHistory && (inputs.history!.width !== W || inputs.history!.height !== H)) throw new Error(`rt: history is ${inputs.history!.width}x${inputs.history!.height}, expected ${W}x${H}`);
     writeParams(frame, settings);
     const traceGroup = device.createBindGroup({
       label: 'rt trace', layout: traceBgl,
@@ -256,9 +266,9 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
         { binding: 9, resource: out.hitDistance.createView() },
         { binding: 10, resource: out.confidence.createView() },
         { binding: 11, resource: source.createView() },
-        // the SSSR tracer's last-frame colour, when it was given one (hitColor 'history', D1002)
-        { binding: 12, resource: (inputs.history && inputs.motion ? inputs.history : noHistory).createView() },
-        { binding: 13, resource: (inputs.history && inputs.motion ? inputs.motion : noHistory).createView() },
+        // last frame's colour with hitColor 'history' (D1002)
+        { binding: 12, resource: (useHistory ? inputs.history! : noHistory).createView() },
+        { binding: 13, resource: (useHistory ? inputs.motion! : noHistory).createView() },
       ],
     });
     timer?.begin();
