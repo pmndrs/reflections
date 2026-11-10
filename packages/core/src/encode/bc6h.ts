@@ -205,6 +205,7 @@ fn encodeP1(block: ptr<function, vec4u>, blockMSLE: ptr<function, f32>) {
     let v = ep0; ep0 = ep1; ep1 = v;
   }
   for (var i = 0u; i < 16u; i++) { indices[i] = computeIndex4(h(dot(texels[i], dir)), e0, e1); }
+  indices[0] = min(indices[0], 7u); // r = 0.5 maps to 8 on both sides of the swap (D203)
 
   let u0 = unquantize10(ep0);
   let u1 = unquantize10(ep1);
@@ -299,6 +300,11 @@ fn encodeP2Pattern(block: ptr<function, vec4u>, blockMSLE: ptr<function, f32>, p
     let i1 = computeIndex3(h(dot(texels[i], d1)), p1e0, p1e1);
     indices[i] = select(i1, i0, pattern(pat, i) == 0u);
   }
+  // Anchors have one bit less. computeIndex3 maps r = 0.5 to exactly 4 in f32, and the swap above
+  // leaves r = 1 - r = 0.5, so without the clamp a 3-bit 4 lands in a 2-bit slot and its MSB
+  // corrupts the next texel's index (upstream has this too; D203). 3 and 4 are equally close.
+  indices[0] = min(indices[0], 3u);
+  indices[fixupID] = min(indices[fixupID], 3u);
 
   let e760 = floor(quantize7(p0min));
   var e761 = floor(quantize7(p0max));
