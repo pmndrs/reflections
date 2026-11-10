@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Regression checks</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; padding: 16px; background: #111; color: #ddd; font: 14px/1.45 system-ui, sans-serif; }
+      .dn-status { font-size: .8rem; white-space: pre-wrap; color: #9a9; }
+      canvas { width: 320px; height: 160px; background: #000; border: 1px solid #333; display: block; }
+    </style>
+  </head>
+  <body>
+    <h1>Regression checks</h1>
+    <p>
+      GPU repros for fixed bugs (G-buffer motion history, BC6H anchor indices, BC6H scratch limits), driven by
+      <code>pnpm check -- --only regressions</code>. <code>await __p.run()</code> returns every result.
+    </p>
+    <canvas id="view" width="320" height="160"></canvas>
+    <canvas id="log" width="16" height="16" style="display:none"></canvas>
+    <pre id="status" class="dn-status">starting...</pre>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

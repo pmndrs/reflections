@@ -28,7 +28,7 @@ The working state of the project: who is on what, which interfaces the workstrea
 | W7 | Phase 2 probe core: atlas + volume table + WGSL lookup in core, three node as a wrapper, SSSR probe fallback snippet, dominant direction, specular occlusion, re-fit, r < 0.2 experiment | code | `packages/core/src/probes/`, `packages/three/src/probes/` | 5380 | running | |
 | W8 | Phase 4: trace seam, three-mesh-bvh stopgap provider, RT pass over the miss list with per-tile cap, `?rt=1` | code | `packages/core/src/trace/`, `packages/three/src/trace/`, composite in `packages/three/src/sssr/` | 5381 | running | |
 | W9 | SSSR quality: reflection striping, hybrid thickness, last-frame hit colour | code | `packages/core/src/sssr/` (intersect) | 5382 | running | |
-| F1 | Review fixes: velocity MRT name, BC6H anchor overflow, resetHistory, BC6H binding size, history clocks, log depth / roughnessNode | code | `packages/three/src/frame/`, `packages/core/src/encode/` | 5379 | running | |
+| F1 | Fixes from the BC6H + G-buffer review: velocity MRT name, resetHistory, motion clock, BC6H anchor overflow and scratch limits, log depth, roughnessNode/metalnessNode, MeshBasic env, unjittered projection | fix | `examples/regressions/`, `packages/three/src/frame/`, `packages/core/src/encode/bc6h.ts`, `packages/core/src/frame/contract.ts` | 5379 | done (branch `worktree-agent-ad4260f8d73baf4fc`) | Every item has a check in `pnpm check --only regressions` (13 checks), each seen failing first (`15f2760`). Static instanced/skinned/batched motion 0.17 → 0; cut + reset 0.21 → 0; two renders per rAF diff 0.0145 → 0; jittered static 0.17 → 0; BC6H anchor overflow 128/7315 → 0; 144 MiB of blocks on default limits: validation error → ok. Left: skinned meshes keep three's per-animation-frame bone history (D700); 64×512 cubes can't exist at default limits (384 layers > 256). |
 
 ## Platform
 
@@ -45,7 +45,7 @@ These are the seams the streams code against before the others land. Change one 
 export interface BC6HEncodeOptions { quality?: 'fast' | 'normal'; }
 /** Encode every mip and layer of an rgba16float 2D-array (or cube) texture into a new bc6h-rgb-ufloat texture.
  *  Requires device.features.has('texture-compression-bc'). Mip extents below 4 px are padded to one block. */
-export function createBC6HEncoder(device: GPUDevice): {
+export function createBC6HEncoder(device: GPUDevice, options?: { maxScratchBytes?: number }): { // F1: scratch chunked to the device limits
   encode(src: GPUTexture, opts?: BC6HEncodeOptions): GPUTexture; // records into its own command encoder and submits
   encodeInto(cmd: GPUCommandEncoder, src: GPUTexture, dst: GPUTexture, opts?: BC6HEncodeOptions): void;
   destroy(): void;
@@ -100,19 +100,23 @@ interface FrameInputs { width; height; textures: FrameTextures; conventions: Fra
 interface FrameTextures { depth; normal; roughness: { texture, channel }; metalness: { texture, channel }; albedo; motion; sceneColor; lit? } // GPUTexture handles
 interface FrameConventions { depthInverted; depthLinear; normalUnpackMul; normalUnpackAdd; roughnessIsPerceptual; motionVectorScale: [x, y]; sceneColorSpecular: 'none' | 'direct' }
 // FrameCamera: denoiser-core's FrameCamera fields (view, projection, prevView, prevProjection, jitter, near, far, position, reversedDepth) + prevViewProjection
+//   + projectionJittered? (F1: `projection` is unjittered when the adapter is given it, D405)
 
 // packages/three/src/frame/FrameGBuffer.ts (exported from @pmndrs/reflections/three)
 const gbuffer = new FrameGBuffer(renderer, { lit?: boolean | 'auto', motion?: 'uv' | 'ndc', width?, height? });
-const frame: FrameInputs = gbuffer.render(scene, camera); // once per frame
+const frame: FrameInputs = gbuffer.render(scene, camera, { jitter?, projection? /* unjittered */ }); // each call = one frame of history
+gbuffer.resetHistory(); // next render: prev = current, motion 0
 gbuffer.textures.normalRoughness; // the three textures, for TSL sampling
 ```
 
-Layout from three: depth32float; normal = rgba16float world normal (mul 1, add 0) with perceptual roughness in .a; albedo = rgba8unorm base colour with metalness in .a; motion = rg16float uv-space, current − previous, `motionVectorScale` [1, 1]; sceneColor = rgba16float emissive + direct + indirect diffuse (no specular).
+Layout from three: depth32float; normal = rgba16float world normal (mul 1, add 0) with perceptual roughness in .a; albedo = rgba8unorm base colour with metalness in .a; motion = rg16float uv-space, current − previous, `motionVectorScale` [1, 1] (MRT slot and texture named `velocity`, which three needs for instanced/skinned/batched history, D700); sceneColor = rgba16float emissive + direct + indirect diffuse (no specular).
 
 ## Log
 
 - 2026-11-10: W6 first pass on `worktree-agent-af8188cd9d3970fd5`: three SSR adapter (`ScreenSpaceReflectionsPass`), first hybrid composite (`screenSpaceComposite`), `examples/ssr` + `pnpm check --only ssr`; core: confidence output, perceptual thresholds (D43 resolved), 2-D indirect args (the reviewer's 4K bug), buffer limits. Divergences D600-D606.
+- 2026-11-10: F1 (review fixes, G-buffer + BC6H): motion history now one clock (our camera history drives three's velocity), `velocity` MRT name, reset zeroes motion, BC6H anchor clamp (D203, upstream bug) and chunked scratch, log depth rejected (D701), D405 resolved. New `pnpm check --only regressions` page.
 - 2026-11-10: W4 first pass (`ff15973`): frame-contract types in core, `FrameGBuffer` (three MRT), scene kit (`examples/shared`), scenes viewer (`examples/scenes`), `pnpm assets`. Divergences D400–D406.
+- 2026-11-10: F1 merged (11 regression checks in `examples/regressions/`, each failing before its fix). Main check: 74 PASS, twice. One earlier run exited 2 with no FAIL line (harness threw, likely Chrome/CDP start-up under load from three worktrees); not reproduced. **Limit to design for:** default `maxTextureArrayLayers` is 256, so a 6-layer-per-probe atlas holds at most 42 slots (41 probes + environment) unless the app raises the limit; told W7.
 - 2026-11-10: W6 merged (three `ScreenSpaceReflectionsPass` + `screenSpaceComposite`, `examples/ssr`; perceptual thresholds, D43 resolved; separate confidence output; 2-D indirect args with a 4K all-mirror check, 7.56M rays, 82.1% hits). mirrorWall: 94.3% of wall-reflecting floor px at confidence ≥ 0.9, colour corr 0.955 vs the exact mirror image. Tracer through the adapter 0.81–0.91 ms at 1080p. **Visible artifact:** fine horizontal striping on reflected objects (sphere, cube, column bases) in `out/ssr-mirrorWall-final.png`; likely Hi-Z step or thickness, not yet diagnosed. **Cross-repo:** the denoiser must index tile workgroups 2-D (`wg.y*nwg.x + wg.x`) when it starts consuming our tile list. W5's 'time-sliced bake = full bake' failed once (75/255) in W6's worktree under GPU contention; passed twice on main at 0/255. Watch it.
 - 2026-11-10: W1 merged; phase 1 gate decided (SPEC roadmap row 1). Lookup cost: octa ≈ cube-hw, warp 1.24–1.38× slower; BC6H 0.35–0.41× the time when probes are scattered (cache-bound), same for cube or octa. Error: cube-hw best per byte (exact mirror mip). Every layout shows p99 35–46/255 for lookups at r < 0.2 (D101): next probe-quality item.
 - 2026-11-10: W5 merged (probe parity: shadow reuse 538→238 draws, projectionOffset, `reflectionProbesLocal()` coverage node, time-sliced bake, env recapture on change, world-space helper; fixed static-mesh uniform staleness D500 and destroyed-texture binding D501). Main check 42 PASS.
