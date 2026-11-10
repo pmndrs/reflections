@@ -16,7 +16,7 @@ import { createBC6HEncoder } from '@pmndrs/reflections/core';
 import { FrameGBuffer, getDevice } from '@pmndrs/reflections/three';
 // @ts-ignore vite raw import
 import bc6hSrc from '../../../packages/core/src/encode/bc6h.ts?raw';
-import { rtTileChecks, ssrHistoryChecks } from './ssr';
+import { gbufferFirstFrameChecks, rtHistoryChecks, rtStatsChecks, rtTileChecks, ssrHistoryChecks } from './ssr';
 import { rtLimitChecks } from './core';
 
 /** Stream F2's sections (SSR / RT and probe-core review), by name. */
@@ -24,6 +24,9 @@ const F2: Record<string, () => Promise<unknown>> = {
   ssrHistory: ssrHistoryChecks,
   rtTiles: rtTileChecks,
   rtLimits: rtLimitChecks,
+  rtHistory: rtHistoryChecks,
+  rtStats: rtStatsChecks,
+  gbufferFirstFrame: gbufferFirstFrameChecks,
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

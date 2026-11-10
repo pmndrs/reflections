@@ -377,6 +377,29 @@ function f2Checks(r) {
       !l.fourBuffersAndProbes.threw && !l.fourBuffersAndProbes.validationError && (l.raised.skipped !== undefined || (!l.raised.threw && !l.raised.validationError)),
       `4 + probes: ${d(l.fourBuffersAndProbes)}; raised: ${d(l.raised)}`);
   }
+  const gf = section('gbufferFirstFrame');
+  if (gf) {
+    for (const k of ['forward', 'reversed']) {
+      check(`gbuffer: the first frame's projection is the one three renders with (${k} depth)`, gf[k].maxDiff < 1e-6,
+        `max diff ${gf[k].maxDiff.toExponential(2)}; [10], [14]: first frame ${gf[k].firstFrame.map((v) => v.toFixed(4)).join(' ')}, rendered ${gf[k].rendered.map((v) => v.toFixed(4)).join(' ')}`);
+    }
+  }
+  const rh = section('rtHistory');
+  if (rh) {
+    check("rt on-screen reuse ignores inputs.history unless hitColor 'history'", rh.current.onScreen > 100 && rh.current.stale === 0 && rh.history.onScreen > 100 && rh.history.stale > 0.5 * rh.history.onScreen,
+      `current: ${rh.current.stale}/${rh.current.onScreen} on-screen hits from history; 'history': ${rh.history.stale}/${rh.history.onScreen}`);
+    check("rt hitColor 'history' rejects a wrong-size or missing history like the tracer",
+      !!rh.wrongSize.threw && /history/.test(rh.wrongSize.threw) && !rh.wrongSize.validationError && !!rh.missing.threw && !rh.missing.validationError,
+      `wrong size: ${rh.wrongSize.threw ?? 'no error'}${rh.wrongSize.validationError ? ` (validation: ${rh.wrongSize.validationError.slice(0, 80)})` : ''}; missing: ${rh.missing.threw ?? 'no error'}`);
+    check('rtHistory: no WebGPU errors', rh.gpuErrors.length === 0, rh.gpuErrors.slice(0, 2).join(' | '));
+  }
+  const rs = section('rtStats');
+  if (rs) {
+    check('rt readStats() reports the last dispatched frame while an earlier read is pending',
+      rs.a.onScreenHits > 0 && rs.b.onScreenHits === 0 && rs.c.onScreenHits > 0,
+      `on-screen hits: A (reuse on) ${rs.a.onScreenHits}, B (reuse off, read while A's was pending) ${rs.b.onScreenHits}, C (reuse on) ${rs.c.onScreenHits}`);
+    check('rtStats: no WebGPU errors', rs.gpuErrors.length === 0, rs.gpuErrors.slice(0, 2).join(' | '));
+  }
 }
 
 /** examples/regressions: GPU repros of review bugs (stream F1). Each check failed before its fix. */

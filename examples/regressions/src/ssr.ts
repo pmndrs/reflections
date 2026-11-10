@@ -170,3 +170,110 @@ export async function rtTileChecks() {
   renderer.dispose();
   return out;
 }
+
+/** Core tracer + traced pass on the rig's device, over one G-buffer frame (all rays to the miss list). */
+async function coreRtRig() {
+  const core = await import('@pmndrs/reflections/core');
+  const { FrameGBuffer, MeshBVHTraceProvider } = await import('@pmndrs/reflections/three');
+  const rig = await ssrRig();
+  const { renderer, device, scene, camera, width, height } = rig;
+  const provider = await MeshBVHTraceProvider.fromObjects(device, rig.meshes);
+  const gb = new FrameGBuffer(renderer, { width, height, lit: true });
+  const frame = gb.render(scene, camera);
+  const tracer = core.createScreenSpaceReflections(device, { width, height, depthInverted: frame.conventions.depthInverted, missList: true });
+  const rt = core.createTracedReflections(device, { width, height, provider });
+  const stale = device.createTexture({ size: [width, height], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT });
+  fillTexture(device, stale, [STALE, 0, STALE, 1]);
+  const inputs = core.screenSpaceInputsFromFrame(frame, tracer, { history: stale });
+  const run = (ssrHit: 'current' | 'history', rtSettings: Record<string, unknown>, rtInputs = inputs) => {
+    const cmd = device.createCommandEncoder();
+    tracer.dispatch(cmd, inputs, { hitColor: ssrHit, missConfidenceThreshold: 1.01, fallbackColor: [0, 0, 0] });
+    rt.dispatch(cmd, { tracer, inputs: rtInputs }, rtSettings as never);
+    device.queue.submit([cmd.finish()]);
+  };
+  /** Traced hits that reused the on-screen colour (source 4), and how many of those carry the stale colour. */
+  const onScreen = async () => {
+    const src = await readTexture(device, rt.source), rad = await readTexture(device, tracer.outputs.radiance);
+    let n = 0, stale = 0;
+    for (let i = 0; i < width * height; i++) if (Math.round(src.data[i]) === 4) { n++; if (rad.data[i * 4] > STALE / 4) stale++; }
+    return { onScreen: n, stale };
+  };
+  const dispose = () => { rt.destroy(); tracer.destroy(); provider.destroy(); stale.destroy(); gb.dispose(); renderer.dispose(); };
+  return { rig, device, inputs, tracer, rt, run, onScreen, dispose, width, height };
+}
+
+/**
+ * rtHistory: the traced pass's on-screen hit reuse reads last frame's colour only with its own
+ * `hitColor: 'history'` (the SSSR tracer's setting), not whenever `inputs.history` and
+ * `inputs.motion` are present; a wrong-size or missing history is rejected as the tracer rejects it.
+ */
+export async function rtHistoryChecks() {
+  const r = await coreRtRig();
+  const out: Record<string, unknown> = {};
+  r.run('current', {});
+  out.current = await r.onScreen();
+  r.run('history', { hitColor: 'history' });
+  out.history = await r.onScreen();
+  const small = r.device.createTexture({ size: [r.width / 2, r.height / 2], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING });
+  const attempt = (rtInputs: typeof r.inputs) => {
+    r.device.pushErrorScope('validation');
+    let threw: string | null = null;
+    try { r.run('current', { hitColor: 'history' }, rtInputs); } catch (e) { threw = String((e as Error).message); }
+    return r.device.popErrorScope().then((err) => ({ threw, validationError: err?.message ?? null }));
+  };
+  out.wrongSize = await attempt({ ...r.inputs, history: small });
+  out.missing = await attempt({ ...r.inputs, history: undefined });
+  await r.device.queue.onSubmittedWorkDone();
+  small.destroy();
+  out.gpuErrors = r.rig.gpuErrors;
+  r.dispose();
+  return out;
+}
+
+/**
+ * rtStats: readStats() reports the last dispatched frame even while an earlier read is pending.
+ * Frame A reuses on-screen hits (onScreenHits > 0), frame B doesn't (0): a read started after B
+ * must say 0.
+ */
+export async function rtStatsChecks() {
+  const r = await coreRtRig();
+  r.run('current', { reuseOnScreenHits: true });
+  const a = r.rt.readStats();
+  r.run('current', { reuseOnScreenHits: false });
+  const b = r.rt.readStats();
+  const [sa, sb] = await Promise.all([a, b]);
+  r.run('current', { reuseOnScreenHits: true });
+  const sc = await r.rt.readStats();
+  const out = { a: sa, b: sb, c: sc, gpuErrors: r.rig.gpuErrors };
+  r.dispose();
+  return out;
+}
+
+/**
+ * gbufferFirstFrame: the first FrameGBuffer.render() of a camera three has not rendered yet returns
+ * the projection three rasterises with. three switches a camera to WebGPU clip space (and to
+ * reversed depth) inside render(), so a projection read before it is WebGL's on that first frame,
+ * and depth unprojects to wrong world positions (traced rays started off the surface).
+ */
+export async function gbufferFirstFrameChecks() {
+  const { FrameGBuffer } = await import('@pmndrs/reflections/three');
+  const out: Record<string, unknown> = {};
+  for (const reversedDepthBuffer of [false, true]) {
+    const renderer = new THREE.WebGPURenderer({ canvas: document.createElement('canvas'), reversedDepthBuffer } as never);
+    renderer.setSize(W, H, false);
+    await renderer.init();
+    const scene = new THREE.Scene();
+    scene.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial()));
+    const camera = new THREE.PerspectiveCamera(50, W / H, 0.1, 100);
+    camera.position.set(0, 1, 5);
+    camera.lookAt(0, 0, 0);
+    const gb = new FrameGBuffer(renderer, { width: W, height: H });
+    const frame = gb.render(scene, camera);
+    const after = camera.projectionMatrix.elements;
+    let maxDiff = 0;
+    for (let i = 0; i < 16; i++) maxDiff = Math.max(maxDiff, Math.abs(frame.camera.projection[i] - after[i]));
+    out[reversedDepthBuffer ? 'reversed' : 'forward'] = { maxDiff, firstFrame: [frame.camera.projection[10], frame.camera.projection[14]], rendered: [after[10], after[14]] };
+    gb.dispose(); renderer.dispose();
+  }
+  return out;
+}
