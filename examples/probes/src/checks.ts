@@ -40,14 +40,20 @@ async function diff(a: string, b: string) {
   };
   const A = await px(a), B = await px(b);
   let sum = 0, max = 0, over = 0;
+  const box = [Infinity, Infinity, -1, -1];
+  const width = Math.round(Math.sqrt((A.length / 4) * 16 / 9));
   for (let k = 0; k < A.length; k += 4) {
     let m = 0;
     for (let c = 0; c < 3; c++) { const d = Math.abs(A[k + c] - B[k + c]); sum += d; m = Math.max(m, d); }
     if (m > max) max = m;
-    if (m > 2) over++;
+    if (m > 2) {
+      over++;
+      const i = k / 4, x = i % width, y = Math.floor(i / width);
+      box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y); box[2] = Math.max(box[2], x); box[3] = Math.max(box[3], y);
+    }
   }
-  // over: fraction of pixels off by more than 2 / 255 in any channel
-  return { mean: sum / (A.length * 0.75), max, over: over / (A.length / 4) };
+  // over: fraction of pixels off by more than 2 / 255 in any channel; box: their bounds (x0, y0, x1, y1)
+  return { mean: sum / (A.length * 0.75), max, over: over / (A.length / 4), box: over ? box : null, a, b };
 }
 
 export function makeChecks(p: Page) {
@@ -300,6 +306,39 @@ export function makeChecks(p: Page) {
       const result = { slicedVsFull: await diff(sliced, fullShot), oneVsFull: await diff(one, fullShot) };
       restore();
       return result;
+    },
+
+    /**
+     * Stress variant of the time slicing (W7): renders interleaved with bake slices in the same frame,
+     * no explicit frame advance, the mirror sphere visible in the view but hidden in the captures (so
+     * the shadow map the captures render differs from the view's). After every slice, a shot must equal
+     * a shot taken after advancing the frame (which re-renders the shadow map for the view).
+     */
+    async timeSliceStress() {
+      p.setGrid(true, 0.05);
+      p.dynamicObject.visible = true;
+      p.dynamicObject.position.set(0, 1.4, 1.2);
+      p.dynamicMaterial.roughness = 0;
+      bake();
+      await settle();
+      const order = [...p.probes.bakedProbes];
+      const max: number[] = [];
+      const failures: object[] = [];
+      for (let k = 0; k < 3; k++) {
+        await p.shot();
+        const grid = p.grid.visible;
+        p.grid.visible = p.dynamicObject.visible = false;
+        p.probes.bake(renderer, scene, { ...bakeOptions(), probes: [order[k]] });
+        p.grid.visible = grid; p.dynamicObject.visible = true;
+        const same = await p.shot();
+        nextFrame();
+        const fresh = await p.shot();
+        const d = await diff(same, fresh);
+        max.push(d.max);
+        if (d.max > 1) failures.push({ slice: k, max: d.max, box: d.box, over: d.over, same, fresh });
+      }
+      restore();
+      return { max, failures };
     },
 
     /**

@@ -418,8 +418,20 @@ async function main() {
       check('two probe sets of equal size keep their own programs', ck.left[0] > 200 && ck.left[2] < 50 && ck.right[2] > 200 && ck.right[0] < 50 && ck.keysDiffer,
         `left ${ck.left}, right ${ck.right}, keys differ ${ck.keysDiffer}`);
       const ts = await C('timeSlice');
-      check('time-sliced bake over 3 calls = full bake', ts.slicedVsFull.max <= 1, `max ${ts.slicedVsFull.max} / 255`);
+      // Residual under heavy GPU load from other processes (W7, HANDOFF): ~0.075 % of pixels, scattered
+      // over the point-light highlights of the grid spheres, differ between two renders of the same
+      // state (seen at max 75-81 / 255). Not the probes: tolerate up to 0.15 % of pixels. A missing or
+      // stale slice changes far more (one slice alone: tens of / 255 over the reflections; a stale
+      // shadow map: 0.26 % in one compact patch, density 0.3 in its bounding box, against 0.003 for the
+      // residual's scatter; the stress check below catches it).
+      const pixels = 960 * 540;
+      const residual = (d) => d.max <= 1 || (d.over < 0.0015 && d.box && (d.over * pixels) / ((d.box[2] - d.box[0] + 1) * (d.box[3] - d.box[1] + 1)) < 0.05);
+      check('time-sliced bake over 3 calls = full bake', residual(ts.slicedVsFull), `max ${ts.slicedVsFull.max} / 255, ${(ts.slicedVsFull.over * 100).toFixed(3)} % px`);
+      if (ts.slicedVsFull.max > 1) { console.log(`  box ${ts.slicedVsFull.box}, ${(ts.slicedVsFull.over * 100).toFixed(3)} % px`); savePng('timeslice-sliced.png', ts.slicedVsFull.a); savePng('timeslice-full.png', ts.slicedVsFull.b); }
       check('one slice alone differs from the full bake', ts.oneVsFull.max > 8, `max ${ts.oneVsFull.max} / 255`);
+      const tss = await C('timeSliceStress');
+      check('bake slices between renders of one frame: the view keeps its own shadows', tss.failures.every(residual), `max per slice ${tss.max.join(' ')} / 255`);
+      for (const f of tss.failures) { console.log(`  slice ${f.slice}: box ${f.box}, ${(f.over * 100).toFixed(3)} % px`); savePng(`slice-${f.slice}-same.png`, f.same); savePng(`slice-${f.slice}-fresh.png`, f.fresh); }
       const ev = await C('environment');
       const n = ev.counts;
       check('environment captured only when it changed', n.noEnvironment === 3 && n.added === 4 && n.unchanged === 3 && n.versionBumped === 4 && n.always === 4 && n.slicedUnchanged === 0 && n.removed === 3,

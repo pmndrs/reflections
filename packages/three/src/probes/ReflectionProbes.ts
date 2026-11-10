@@ -254,6 +254,15 @@ export class ReflectionProbes extends THREE.Object3D {
     r.autoClear = r.autoClearColor = r.autoClearDepth = r.autoClearStencil = true;
     if (background === null) scene.background = r.getClearColor(_clear).clone();
 
+    // The bake gets a node frame of its own. three renders a shadow map at most once per camera per
+    // frame (ShadowNode's camera-frame check, which also blocks `needsUpdate`), and the map is shared:
+    // a bake in the frame of an earlier render overwrote the map with the capture's visibility while
+    // the view camera, already done for the frame, skipped re-rendering it, so the next render of
+    // that frame drew stale shadows (a sliced bake between renders; with the loop stopped, the checks
+    // flaked at 75/255 whenever no rAF tick advanced the frame in between). D802.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (r as any)._nodes.nodeFrame.update();
+
     // Shadow maps don't depend on the camera, so render each one once for the whole bake instead of
     // once per captured face (#35046, 2b95820110). Restored in `finally`.
     const shadows: THREE.LightShadow[] = [];

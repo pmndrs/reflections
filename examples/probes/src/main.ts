@@ -292,7 +292,10 @@ async function main() {
   const page = {
       THREE, scene, camera, renderer, controls, probes, probesHelper, gridMaterial, dynamicMaterial, dynamicObject, grid, params, capture,
       get node() { return node; },
-      stop() { renderer.setAnimationLoop(null); },
+      // setAnimationLoop(null) leaves three's internal rAF running, which keeps advancing the node
+      // frame at times that depend on load; stop it too, so a stopped page only advances when told
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      stop() { renderer.setAnimationLoop(null); (renderer as any)._animation.stop(); },
       start() { renderer.setAnimationLoop(animate); },
       setLookup(v: Lookup) { params.lookup = v; install(); },
       setRefit(on: boolean, clamp?: number) { params.refit = on; if (clamp !== undefined) probes.refitClamp = clamp; install(); },
