@@ -12,3 +12,7 @@ export { ReflectionProbesHelper } from './probes/ReflectionProbesHelper';
 
 // Shared sampling: GGX lobe sample, per-pixel seed, firefly clamp, reference accumulation.
 export { AccumulateNode, clampSample, ggxLobeSample, pixelSeed } from './sampling';
+
+// Frame contract G-buffer: one MRT render of a three scene into the core's FrameInputs.
+export { FrameGBuffer, getDevice, getGPUTexture, type FrameGBufferOptions, type FrameTargetName } from './frame/FrameGBuffer';
+export { sceneColorNoSpecular, gbufferRoughness, gbufferMetalness } from './frame/nodes';

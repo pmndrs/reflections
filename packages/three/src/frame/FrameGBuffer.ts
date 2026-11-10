@@ -1,0 +1,212 @@
+// The frame contract (packages/core/src/frame/contract.ts) filled from a three.js scene.
+//
+// One render of the scene with WebGPURenderer MRT, the pattern the denoiser repo's three-temporal
+// pages use (`setMRT(mrt({ output, diffuseColor, normal, velocity }))`), but into our own render
+// target instead of a PassNode so it works with or without a RenderPipeline. The GPUTextures come
+// from the renderer's backend (`backend.get(texture).texture`), as in ./probes and denoiser/three.
+//
+// Targets (WebGPU's default `maxColorAttachmentBytesPerSample` is 32; the default set uses 28):
+//
+//   name             format        contents
+//   output           rgba16float   scene colour WITHOUT specular (emissive + direct + indirect diffuse), a = alpha
+//   normalRoughness  rgba16float   world normal (raw, unit) in xyz, perceptual roughness in w
+//   albedoMetalness  rgba8unorm    linear base colour in rgb, metalness in a
+//   motion           rg16float     uv-space motion, current - previous (or three's NDC velocity, option)
+//   lit (optional)   rgba16float   three's full lit output (+8 bytes: needs a raised limit, see `lit`)
+//   depth            depth32float  hardware depth (reverse-Z if the renderer uses it)
+import * as THREE from 'three/webgpu';
+import { diffuseColor, mrt, normalWorld, output, vec2, vec4, velocity } from 'three/tsl';
+import {
+  FrameCameraHistory, type FrameCamera, type FrameConventions, type FrameInputs, type FrameTextures,
+} from '@pmndrs/reflections-core';
+import { gbufferMetalness, gbufferRoughness, sceneColorNoSpecular } from './nodes';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type N = any;
+
+interface BackendLike { device?: GPUDevice; isWebGPUBackend?: boolean; get(o: object): { texture?: GPUTexture } | undefined }
+const backendOf = (r: THREE.WebGPURenderer) => (r as unknown as { backend: BackendLike }).backend;
+
+/** The GPUDevice behind an initialized WebGPURenderer. */
+export function getDevice(renderer: THREE.WebGPURenderer): GPUDevice {
+  const device = backendOf(renderer)?.device;
+  if (!device || backendOf(renderer).isWebGPUBackend !== true) throw new Error('reflections/three: renderer is not initialized or not on the WebGPU backend');
+  return device;
+}
+
+/** The GPUTexture behind a three texture; it must already be allocated (rendered to or initialized). */
+export function getGPUTexture(renderer: THREE.WebGPURenderer, texture: THREE.Texture): GPUTexture {
+  const gpu = backendOf(renderer).get(texture)?.texture;
+  if (!gpu) throw new Error(`reflections/three: texture "${texture.name || texture.uuid}" has no GPU allocation yet`);
+  return gpu;
+}
+
+export type FrameTargetName = 'output' | 'normalRoughness' | 'albedoMetalness' | 'motion' | 'lit';
+
+export interface FrameGBufferOptions {
+  /** Render size in pixels. Default: the renderer's drawing-buffer size, followed on each render(). */
+  width?: number;
+  height?: number;
+  /**
+   * Also write three's full lit image (8 more bytes per sample, 36 in all). `'auto'` (default)
+   * enables it when the device allows it (`maxColorAttachmentBytesPerSample >= 36`; request it with
+   * `new WebGPURenderer({ requiredLimits: { maxColorAttachmentBytesPerSample: 64 } })`).
+   */
+  lit?: boolean | 'auto';
+  /** 'uv' (default): uv-space motion, scale [1, 1]. 'ndc': three's velocity as is, scale [0.5, -0.5] (what denoiser/three expects). */
+  motion?: 'uv' | 'ndc';
+}
+
+const BYTES = { base: 8 + 8 + 8 + 4, lit: 8 };
+
+/**
+ * Renders a scene into the frame-contract G-buffer and hands out the GPU textures.
+ *
+ * ```ts
+ * const gbuffer = new FrameGBuffer(renderer);
+ * const frame = gbuffer.render(scene, camera); // FrameInputs: GPUTextures + conventions + camera
+ * ```
+ *
+ * Call `render()` once per frame: the previous-frame matrices (camera struct) and three's velocity
+ * history both advance per render. Transparent objects blend into `output` (scene colour) only;
+ * the guide targets take whatever was drawn last.
+ */
+export class FrameGBuffer {
+  readonly renderer: THREE.WebGPURenderer;
+  readonly renderTarget: THREE.RenderTarget;
+  readonly mrt: N;
+  readonly lit: boolean;
+  readonly motionMode: 'uv' | 'ndc';
+  /** three textures by target name (plus `depth`), for TSL sampling (debug views, composites). */
+  readonly textures: Record<FrameTargetName, THREE.Texture | undefined> & { depth: THREE.DepthTexture };
+  private readonly history = new FrameCameraHistory();
+  private readonly fixedSize: boolean;
+  private frameIndex = 0;
+  private last: FrameInputs | null = null;
+
+  constructor(renderer: THREE.WebGPURenderer, options: FrameGBufferOptions = {}) {
+    this.renderer = renderer;
+    const device = getDevice(renderer);
+    const limit = device.limits.maxColorAttachmentBytesPerSample;
+    const wantLit = options.lit ?? 'auto';
+    this.lit = wantLit === 'auto' ? limit >= BYTES.base + BYTES.lit : wantLit;
+    if (this.lit && limit < BYTES.base + BYTES.lit) {
+      throw new Error(`FrameGBuffer: lit needs maxColorAttachmentBytesPerSample >= ${BYTES.base + BYTES.lit}, device has ${limit}`);
+    }
+    this.motionMode = options.motion ?? 'uv';
+    this.fixedSize = options.width !== undefined && options.height !== undefined;
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    const w = options.width ?? size.x, h = options.height ?? size.y;
+
+    const names: FrameTargetName[] = ['output', 'normalRoughness', 'albedoMetalness', 'motion'];
+    if (this.lit) names.push('lit');
+    const depth = new THREE.DepthTexture(w, h, THREE.FloatType);
+    depth.name = 'depth';
+    const rt = new THREE.RenderTarget(w, h, { count: names.length, type: THREE.HalfFloatType, depthTexture: depth, depthBuffer: true });
+    rt.textures.forEach((t, i) => {
+      t.name = names[i];
+      t.minFilter = t.magFilter = THREE.NearestFilter;
+      t.generateMipmaps = false;
+    });
+    const albedo = rt.textures[2];
+    albedo.type = THREE.UnsignedByteType; // rgba8unorm
+    const motion = rt.textures[3];
+    motion.format = THREE.RGFormat; // rg16float
+    this.renderTarget = rt;
+    this.textures = Object.fromEntries([...names.map((n, i) => [n, rt.textures[i]]), ['depth', depth]]) as never;
+
+    const motionNode = this.motionMode === 'uv' ? (velocity as N).mul(vec2(0.5, -0.5)) : velocity;
+    const outputs: Record<string, N> = {
+      output: vec4(sceneColorNoSpecular, (diffuseColor as N).a),
+      normalRoughness: vec4(normalWorld, gbufferRoughness),
+      albedoMetalness: vec4((diffuseColor as N).rgb, gbufferMetalness),
+      motion: motionNode,
+    };
+    if (this.lit) outputs.lit = output;
+    this.mrt = mrt(outputs);
+    // guides clear to zero (no surface); scene colour keeps the renderer's clear / background
+    for (const n of ['normalRoughness', 'albedoMetalness', 'motion', 'lit']) this.mrt.setClearColor(n, 0x000000, 0);
+  }
+
+  /** The contract's convention flags for this G-buffer. */
+  get conventions(): FrameConventions {
+    return {
+      depthInverted: this.renderer.reversedDepthBuffer === true,
+      depthLinear: false,
+      normalUnpackMul: 1,
+      normalUnpackAdd: 0,
+      roughnessIsPerceptual: true,
+      motionVectorScale: this.motionMode === 'uv' ? [1, 1] : [0.5, -0.5],
+      sceneColorSpecular: 'none',
+    };
+  }
+
+  get width() { return this.renderTarget.width; }
+  get height() { return this.renderTarget.height; }
+
+  setSize(width: number, height: number) {
+    if (width === this.renderTarget.width && height === this.renderTarget.height) return;
+    this.renderTarget.setSize(width, height);
+  }
+
+  /** Drop the previous-frame camera (camera cut, scene switch). */
+  resetHistory() { this.history.reset(); }
+
+  /**
+   * Render `scene` from `camera` into the G-buffer and return the frame's inputs.
+   * `jitter`: the sub-pixel offset (pixels) already applied to `camera` this frame, if any.
+   */
+  render(scene: THREE.Scene, camera: THREE.Camera, opts: { jitter?: readonly [number, number] } = {}): FrameInputs {
+    const r = this.renderer;
+    if (!this.fixedSize) {
+      const size = r.getDrawingBufferSize(new THREE.Vector2());
+      this.setSize(size.x, size.y);
+    }
+    const prevTarget = r.getRenderTarget();
+    const prevMRT = r.getMRT();
+    r.setRenderTarget(this.renderTarget);
+    r.setMRT(this.mrt);
+    r.render(scene, camera);
+    r.setRenderTarget(prevTarget);
+    r.setMRT(prevMRT);
+
+    camera.updateMatrixWorld();
+    const p = camera.matrixWorld.elements;
+    const cam = camera as THREE.PerspectiveCamera;
+    const frameCamera: FrameCamera = this.history.update({
+      view: camera.matrixWorldInverse.elements,
+      projection: camera.projectionMatrix.elements,
+      near: cam.near ?? 0.1, far: cam.far ?? 1000,
+      position: [p[12], p[13], p[14]],
+      jitter: opts.jitter,
+      reversedDepth: r.reversedDepthBuffer === true,
+    });
+    this.last = { width: this.width, height: this.height, textures: this.gpuTextures(), conventions: this.conventions, camera: frameCamera, frameIndex: this.frameIndex++ };
+    return this.last;
+  }
+
+  /** The last render's inputs (null before the first render). */
+  get frame(): FrameInputs | null { return this.last; }
+
+  /** The GPU handles behind the targets (valid after the first render; reallocated on resize). */
+  gpuTextures(): FrameTextures {
+    const g = (t: THREE.Texture) => getGPUTexture(this.renderer, t);
+    const nr = g(this.textures.normalRoughness!);
+    const am = g(this.textures.albedoMetalness!);
+    return {
+      depth: g(this.textures.depth),
+      normal: nr,
+      roughness: { texture: nr, channel: 3 },
+      metalness: { texture: am, channel: 3 },
+      albedo: am,
+      motion: g(this.textures.motion!),
+      sceneColor: g(this.textures.output!),
+      lit: this.textures.lit ? g(this.textures.lit) : undefined,
+    };
+  }
+
+  dispose() {
+    this.renderTarget.dispose();
+    this.textures.depth.dispose();
+  }
+}

@@ -4,6 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes)
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
 import { spawn } from 'node:child_process';
@@ -18,6 +19,8 @@ const PORT = Number(process.env.REFLECTIONS_PORT ?? 5370); // set per worktree s
 const OUT = process.env.OUT ?? path.join(ROOT, 'out');
 const args = process.argv.slice(2);
 const compareUrl = args.includes('--compare') ? args[args.indexOf('--compare') + 1] : null;
+const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
+const runs = (section) => !only || only === section;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const results = { checks: [], logs: [] };
@@ -117,8 +120,67 @@ const IMAGE_STATS = `async (a, b) => {
   return out;
 }`;
 
+/**
+ * examples/scenes: every procedural scene (and every downloaded asset scene) renders into the
+ * frame-contract G-buffer with no validation errors, and each target holds what the contract says.
+ */
+async function checkScenes() {
+  console.log('examples/scenes:');
+  const p = await openPage(`http://127.0.0.1:${PORT}/scenes/?manual&view=grid`);
+  const list = await p.T('window.__p.scenes()');
+  if (!list.assets.length) console.log('  (no assets downloaded: asset scenes skipped; `pnpm assets` fetches them)');
+  for (const id of [...list.procedural, ...list.assets]) {
+    const before = results.logs.length;
+    const info = await p.T(`window.__p.load(${JSON.stringify(id)})`);
+    await p.T('window.__p.step(2)');
+    const s = await p.T('window.__p.stats()');
+    const procedural = list.procedural.includes(id);
+    const lum = (t) => (t.mean[0] + t.mean[1] + t.mean[2]) / 3;
+    const fails = [];
+    if (!(s.checks.geometry > 0.05)) fails.push(`depth: geometry covers ${(s.checks.geometry * 100).toFixed(1)}%`);
+    if (!(s.normalRoughness.nonzero > 0.05)) fails.push('normal empty');
+    if (!(s.checks.badNormals < 0.01)) fails.push(`normals not unit on ${(s.checks.badNormals * 100).toFixed(2)}%`);
+    if (!(s.normalRoughness.max[3] > 0)) fails.push('roughness all zero');
+    if (procedural && !(s.albedoMetalness.max[3] > 0)) fails.push('metalness all zero');
+    if (!(s.albedoMetalness.nonzero > 0.05)) fails.push('albedo empty');
+    if (!(s.sceneColor.nonzero > 0.05 && lum(s.sceneColor) > 1e-3)) fails.push('scene colour empty');
+    if (s.lit && !(lum(s.lit) > 1e-3)) fails.push('lit empty');
+    for (const [k, t] of Object.entries(s)) if (t.nan) fails.push(`${k}: ${t.nan} NaN`);
+    // static frame: no motion anywhere (up to float noise in the reprojection, ~1e-7 uv)
+    const still = Math.max(...s.motion.max.map(Math.abs), ...s.motion.min.map(Math.abs));
+    if (still > 1e-5) fails.push(`motion on a still frame (max ${still.toExponential(2)})`);
+    // no specular in scene colour: mirror pixels (metal, smooth) have no diffuse, so they're black
+    if (s.checks.mirrorPixels > 0.01 && !(s.checks.mirrorSceneColor < 1e-3)) fails.push(`scene colour on mirrors ${s.checks.mirrorSceneColor.toFixed(4)} (specular leaked?)`);
+    // camera motion: nudge the camera, the whole frame moves
+    await p.T('(window.__p.nudge(0.03, 0.02, 0), true)');
+    await p.T('window.__p.step(1)');
+    const m = (await p.T('window.__p.stats()')).motion;
+    if (!(m.nonzero > s.checks.geometry * 0.5)) fails.push(`camera motion on ${(m.nonzero * 100).toFixed(1)}% of pixels`);
+    // object motion (animated scenes): camera still, advance time
+    let objectMotion = '';
+    if (info.animated) {
+      await p.T('window.__p.step(1)');
+      await p.T('(window.__p.setTime(0.5), true)');
+      await p.T('window.__p.step(1)');
+      const mo = (await p.T('window.__p.stats()')).motion;
+      objectMotion = `, object motion on ${(mo.nonzero * 100).toFixed(1)}%`;
+      if (!(mo.nonzero > 0.001)) fails.push('no object motion');
+      await p.T('(window.__p.setTime(0), window.__p.nudge(-0.03, -0.02, 0), true)');
+    } else {
+      await p.T('(window.__p.nudge(-0.03, -0.02, 0), true)');
+    }
+    const shot = await p.T('window.__p.shot()');
+    savePng(`scenes-${id}.png`, shot);
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    if (errs.length) fails.push(errs.slice(0, 2).join(' | '));
+    const detail = `geometry ${(s.checks.geometry * 100).toFixed(0)}%, mirrors ${(s.checks.mirrorPixels * 100).toFixed(1)}% (scene ${s.checks.mirrorSceneColor.toFixed(4)} vs lit ${s.checks.mirrorLit?.toFixed(3) ?? '-'}), camera motion ${(m.nonzero * 100).toFixed(0)}%${objectMotion}`;
+    check(`scene ${id}: every target filled per the contract`, fails.length === 0, fails.length ? fails.join('; ') : detail);
+  }
+  return [p];
+}
+
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, 300_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -127,50 +189,56 @@ async function main() {
   }
   const pages = [];
   try {
-    console.log('examples/probes:');
-    const p = await openPage(`http://127.0.0.1:${PORT}/probes/`);
-    pages.push(p);
-    await p.T(FREEZE);
-    const info = await p.T('({ revision: window.__p.THREE.REVISION, probes: window.__p.probes.bakedProbes.length, lookup: window.__p.params.lookup })');
-    check('probes baked', info.probes === 3, JSON.stringify(info));
-    const shots = {};
-    for (const lookup of ['warp', 'none', 'hw']) {
-      await p.T(`(window.__p.setLookup('${lookup}'), window.__p.capture(), true)`);
-      shots[lookup] = await p.T('window.__p.shot()');
-      savePng(`probes-${lookup}.png`, shots[lookup]);
-    }
-    const stats = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots.warp)}, ${JSON.stringify(shots.hw)})`);
-    check('image is lit', stats.lum > 10, `mean luminance ${stats.lum.toFixed(1)}`);
-    check("'warp' lookup matches the hardware cube sampler", stats.mean < 1, `mean ${stats.mean.toFixed(3)}, max ${stats.max} / 255`);
-    await p.T("window.__p.setLookup('warp')");
+    if (runs('probes')) {
+      console.log('examples/probes:');
+      const p = await openPage(`http://127.0.0.1:${PORT}/probes/`);
+      pages.push(p);
+      await p.T(FREEZE);
+      const info = await p.T('({ revision: window.__p.THREE.REVISION, probes: window.__p.probes.bakedProbes.length, lookup: window.__p.params.lookup })');
+      check('probes baked', info.probes === 3, JSON.stringify(info));
+      const shots = {};
+      for (const lookup of ['warp', 'none', 'hw']) {
+        await p.T(`(window.__p.setLookup('${lookup}'), window.__p.capture(), true)`);
+        shots[lookup] = await p.T('window.__p.shot()');
+        savePng(`probes-${lookup}.png`, shots[lookup]);
+      }
+      const stats = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots.warp)}, ${JSON.stringify(shots.hw)})`);
+      check('image is lit', stats.lum > 10, `mean luminance ${stats.lum.toFixed(1)}`);
+      check("'warp' lookup matches the hardware cube sampler", stats.mean < 1, `mean ${stats.mean.toFixed(3)}, max ${stats.max} / 255`);
+      await p.T("window.__p.setLookup('warp')");
 
-    // BC6H encoder smoke check: the hardware-decoded result must be close to the source. Loose
-    // bounds that only an encoding bug (garbage blocks) would break; numbers go to the console.
-    console.log('examples/bc6h:');
-    const b = await openPage(`http://127.0.0.1:${PORT}/bc6h/`);
-    pages.push(b);
-    const bc = await b.T('window.__p.runAll()');
-    check('texture-compression-bc available', bc.supported !== false);
-    for (const [k, m] of Object.entries(bc.errors ?? {})) {
-      check(`bc6h ${k} decodes close to the source`, m.log2Rmse < 0.3 && m.psnr > 30,
-        `log2 RMSE ${m.log2Rmse.toFixed(4)}, log2 max ${m.log2Max.toFixed(3)}, PSNR ${m.psnr.toFixed(2)} dB, per mip ${m.perMipLog2Rmse.map((x) => x.toFixed(3)).join(' ')}`);
+      if (compareUrl) {
+        console.log(`compare with ${compareUrl}:`);
+        const o = await openPage(compareUrl);
+        pages.push(o);
+        await o.T(FREEZE);
+        await o.T("(window.__p.setLookup('warp'), window.__p.capture(), true)");
+        await p.T('(window.__p.capture(), true)');
+        const a = await p.T('window.__p.shot()');
+        const b = await o.T('window.__p.shot()');
+        savePng('probes-compare.png', b);
+        const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
+        check('same image as the other build', d.max <= 2, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
+      }
     }
-    for (const [k, t] of Object.entries(bc.timings ?? {})) console.log(`  encode ${k}: GPU ${t.gpuMs?.toFixed(3) ?? 'n/a'} ms, wall ${t.wallMs.toFixed(3)} ms`);
-    savePng('bc6h.png', await b.T('window.__p.shot()'));
 
-    if (compareUrl) {
-      console.log(`compare with ${compareUrl}:`);
-      const o = await openPage(compareUrl);
-      pages.push(o);
-      await o.T(FREEZE);
-      await o.T("(window.__p.setLookup('warp'), window.__p.capture(), true)");
-      await p.T('(window.__p.capture(), true)');
-      const a = await p.T('window.__p.shot()');
-      const b = await o.T('window.__p.shot()');
-      savePng('probes-compare.png', b);
-      const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
-      check('same image as the other build', d.max <= 2, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
+    if (runs('bc6h')) {
+      // BC6H encoder smoke check: the hardware-decoded result must be close to the source. Loose
+      // bounds that only an encoding bug (garbage blocks) would break; numbers go to the console.
+      console.log('examples/bc6h:');
+      const b = await openPage(`http://127.0.0.1:${PORT}/bc6h/`);
+      pages.push(b);
+      const bc = await b.T('window.__p.runAll()');
+      check('texture-compression-bc available', bc.supported !== false);
+      for (const [k, m] of Object.entries(bc.errors ?? {})) {
+        check(`bc6h ${k} decodes close to the source`, m.log2Rmse < 0.3 && m.psnr > 30,
+          `log2 RMSE ${m.log2Rmse.toFixed(4)}, log2 max ${m.log2Max.toFixed(3)}, PSNR ${m.psnr.toFixed(2)} dB, per mip ${m.perMipLog2Rmse.map((x) => x.toFixed(3)).join(' ')}`);
+      }
+      for (const [k, t] of Object.entries(bc.timings ?? {})) console.log(`  encode ${k}: GPU ${t.gpuMs?.toFixed(3) ?? 'n/a'} ms, wall ${t.wallMs.toFixed(3)} ms`);
+      savePng('bc6h.png', await b.T('window.__p.shot()'));
     }
+
+    if (runs('scenes')) pages.push(...(await checkScenes()));
 
     const validation = results.logs.filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
     check('no WebGPU validation errors or exceptions', validation.length === 0, validation.slice(0, 3).join(' | '));
