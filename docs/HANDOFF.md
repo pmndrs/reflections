@@ -21,7 +21,7 @@ The working state of the project: who is on what, which interfaces the workstrea
 | W1 | Phase 1 layout × format bench | code | `packages/core/src/probes/layouts/`, `packages/core/src/probes/reference.ts`, `examples/probe-bench/`, `docs/research/probe-layouts.md` | 5371 | running | |
 | W2 | BC6H GPU encoder | code | `packages/core/src/encode/` , `examples/bc6h/` | 5372 | running | |
 | W3 | SSSR core port (phase 3) | code | `packages/core/src/sssr/`, `examples/sssr-core/` | 5373 | running | |
-| W4 | Frame contract G-buffer (three) + scene kit for demos | code | `packages/three/src/frame/`, `examples/shared/`, `examples/scenes/`, `scripts/fetch-assets.mjs` | 5374 | running | |
+| W4 | Frame contract G-buffer (three) + scene kit for demos | code | `packages/three/src/frame/`, `examples/shared/`, `examples/scenes/`, `scripts/fetch-assets.mjs` | 5374 | first pass done (`ff15973`): `FrameGBuffer` fills the contract in one MRT render; 8 procedural + 7 asset scenes pass `pnpm check` | Next: a `'direct'` scene-colour variant (needs a lighting-model hook, D400); transparent objects in the guides (D404); unjittered velocity under TAA/upscaler (D405); R3's final scene list into `scripts/fetch-assets.mjs` (Bistro needs FBX→glTF, TODO row). Explainer port lights with the spot stand-in, not the area light (D406). |
 
 ## Agreed interfaces between streams
 
@@ -73,6 +73,24 @@ W3 ships a default implementation (a single `texture_cube<f32>` environment, or 
 
 W3 develops on synthetic, analytic inputs written by compute (exact depth/normal for a plane and boxes), so it never waits on W4. W4 produces the same textures from a three scene, matching SPEC's frame-contract table. The three SSSR node joins the two after both merge.
 
+W4's side, as landed:
+
+```ts
+// packages/core/src/frame/contract.ts (exported from @pmndrs/reflections/core)
+interface FrameInputs { width; height; textures: FrameTextures; conventions: FrameConventions; camera: FrameCamera; frameIndex }
+interface FrameTextures { depth; normal; roughness: { texture, channel }; metalness: { texture, channel }; albedo; motion; sceneColor; lit? } // GPUTexture handles
+interface FrameConventions { depthInverted; depthLinear; normalUnpackMul; normalUnpackAdd; roughnessIsPerceptual; motionVectorScale: [x, y]; sceneColorSpecular: 'none' | 'direct' }
+// FrameCamera: denoiser-core's FrameCamera fields (view, projection, prevView, prevProjection, jitter, near, far, position, reversedDepth) + prevViewProjection
+
+// packages/three/src/frame/FrameGBuffer.ts (exported from @pmndrs/reflections/three)
+const gbuffer = new FrameGBuffer(renderer, { lit?: boolean | 'auto', motion?: 'uv' | 'ndc', width?, height? });
+const frame: FrameInputs = gbuffer.render(scene, camera); // once per frame
+gbuffer.textures.normalRoughness; // the three textures, for TSL sampling
+```
+
+Layout from three: depth32float; normal = rgba16float world normal (mul 1, add 0) with perceptual roughness in .a; albedo = rgba8unorm base colour with metalness in .a; motion = rg16float uv-space, current − previous, `motionVectorScale` [1, 1]; sceneColor = rgba16float emissive + direct + indirect diffuse (no specular).
+
 ## Log
 
 - 2026-11-10: Phase 0 done (`622985c`). SPEC drafts 2 and 3. Workstreams R1–R3, W1–W4 started in parallel. `REFLECTIONS_PORT` added so worktrees don't collide on 5370. `DIVERGES.md` seeded with D1–D11 from the SPEC.
+- 2026-11-10: W4 first pass (`ff15973`): frame-contract types in core, `FrameGBuffer` (three MRT), scene kit (`examples/shared`), scenes viewer (`examples/scenes`), `pnpm assets`. Divergences D400–D406.
