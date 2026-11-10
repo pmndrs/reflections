@@ -147,3 +147,29 @@ export async function probeEnvDominantChecks() {
     plainVsDominant: diff(refPlain, refDominant),
   };
 }
+
+/**
+ * probeIrradiance: two computeIrradiance() calls recorded into one encoder before a submit keep
+ * their own slot parameters. Slots 0 and 1 hold constant captures c0 and c1, so their L00 is
+ * c * Y00 * 4 pi = 3.5449 c.
+ */
+export async function probeIrradianceChecks() {
+  const { device } = await newDevice();
+  const c0 = [1, 0.5, 0.25], c1 = [0.25, 0.5, 2];
+  const cubes = [c0, c1].map((c) => faceCube(device, 64, Array(6).fill(c)));
+  const set = new ProbeSet(device, { capacity: 2, sourceSize: 64, refit: true });
+  set.setVolumes([{ slot: 0, center: [0, 0, 0], halfSize: [1, 1, 1] }, { slot: 1, center: [5, 0, 0], halfSize: [1, 1, 1] }]);
+  set.update();
+  const e = device.createCommandEncoder();
+  set.capture(e, 0, cubes[0]); set.capture(e, 1, cubes[1]);
+  set.computeIrradiance(e, [0]);
+  set.computeIrradiance(e, [1]);
+  device.queue.submit([e.finish()]);
+  const t = await readBufferF32(device, set.table);
+  const L00 = (slot: number) => Array.from(t.slice((set.irradianceRow + 3 * slot) * 4, (set.irradianceRow + 3 * slot) * 4 + 3));
+  const k = 0.282095 * 4 * Math.PI;
+  const relErr = (got: number[], c: number[]) => Math.max(...got.map((g, i) => Math.abs(g - c[i] * k) / (c[i] * k)));
+  const out = { slot0: L00(0), slot1: L00(1), expected0: c0.map((x) => x * k), expected1: c1.map((x) => x * k), err0: relErr(L00(0), c0), err1: relErr(L00(1), c1) };
+  set.dispose(); cubes.forEach((c) => c.destroy()); device.destroy();
+  return out;
+}
