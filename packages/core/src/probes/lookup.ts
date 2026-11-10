@@ -22,7 +22,8 @@
 //
 // Options, each off by default:
 //   dominantDirection  Lagarde 2014's specular dominant direction, mix(N, R, s * (sqrt(s) + a)),
-//                      s = 1 - a, a = perceptual^2 (Frostbite's `roughness`), D57. Needs N.
+//                      s = 1 - a, a = perceptual^2 (Frostbite's `roughness`), D57. Needs N. The probe
+//                      volumes and the environment slot sample the same bent direction (F2).
 //   refit              idTech 8 / Lazarov 2013 normalization: each probe's radiance times
 //                      clamp(frameIrradiance(P, N) / probeIrradiance(N), 0, refitClamp), with
 //                      probeIrradiance the probe's L1 SH (table rows, ./irradiance.ts), D60.
@@ -126,7 +127,8 @@ fn pr_shIrradiance(a: vec4f, b: vec4f, c: vec4f, N: vec3f) -> vec3f {
 
 /**
  * The lookup body. `row(i)` is a WGSL expression for table row `i` (a u32 expression), `tex` and
- * `samp` the atlas and sampler expressions. In scope: P, N, R, roughness, envR (vec3f / f32),
+ * `samp` the atlas and sampler expressions. In scope: P, N, R, roughness, envRotation (mat4x4f: the
+ * environment slot is sampled along envRotation * dir, dir being R or its dominant direction),
  * frameIrr (vec3f; negative: no re-fit), withEnv (bool). Returns vec4f: with `withEnv`, (radiance with the environment
  * fallback, 1); without, (probe radiance normalized by its coverage, coverage).
  */
@@ -177,7 +179,9 @@ ${unroll === undefined ? `  for (var i = 0u; i < count; i++) {\n${volume}  }\n` 
   if (!withEnv) { return vec4f(radiance / max(coverage, 1e-6), coverage); }
   if (envSlot >= 0.0) {
     let slot = u32(envSlot);
-    var c = sampleLayout(${tex}, ${samp}, slot, pr_texDir(envR), lod).rgb;
+    // the same (possibly bent) direction as the volumes, into the environment's frame
+    let envDir = (envRotation * vec4f(dir, 0.0)).xyz;
+    var c = sampleLayout(${tex}, ${samp}, slot, pr_texDir(envDir), lod).rgb;
     if (refitOn) {
       let s = irrRow + slot * PR_IRRADIANCE_ROWS;
       let probeIrr = pr_shIrradiance(${row('s')}, ${row('s + 1u')}, ${row('s + 2u')}, N);
@@ -189,7 +193,7 @@ ${unroll === undefined ? `  for (var i = 0u; i < count; i++) {\n${volume}  }\n` 
 `;
 };
 
-const SIGNATURE = 'P: vec3f, N: vec3f, R: vec3f, roughness: f32, envR: vec3f, frameIrr: vec3f, withEnv: bool';
+const SIGNATURE = 'P: vec3f, N: vec3f, R: vec3f, roughness: f32, envRotation: mat4x4f, frameIrr: vec3f, withEnv: bool';
 
 /**
  * Module-scope WGSL for engines that own the bindings: the layout's sampling code and the shared
@@ -203,7 +207,8 @@ export function probeLookupIncludesWgsl(options: ProbeLookupOptions): string {
 /**
  * One WGSL function, `name`, that takes the bindings as parameters:
  *   fn <name>(atlas: <layout.textureType>, samp: sampler, table: ptr<storage, array<vec4f>, read>,
- *             P, N, R: vec3f, roughness: f32, envR, frameIrr: vec3f, withEnv: bool) -> vec4f
+ *             P, N, R: vec3f, roughness: f32, envRotation: mat4x4f, frameIrr: vec3f, withEnv: bool) -> vec4f
+ * (`envRotation`: world to environment-slot directions, e.g. an environment rotation; identity if none)
  * Needs {@link probeLookupIncludesWgsl} in the same module (and WGSL's unrestricted pointer
  * parameters, which Chrome has shipped since 123). Returns what {@link probeLookupWgsl}'s
  * `probeLookup` returns.
@@ -228,7 +233,7 @@ export interface ProbeLookupModuleOptions extends ProbeLookupOptions {
  * The lookup as a self-contained module snippet with its bindings in @group(group): binding+0 the
  * atlas, +1 a filtering sampler, +2 the table (`var<storage, read> array<vec4f>`). Defines:
  *
- *   fn probeLookup(P, N, R, roughness, envR, frameIrr, withEnv) -> vec4f   (the general form)
+ *   fn probeLookup(P, N, R, roughness, envRotation, frameIrr, withEnv) -> vec4f   (the general form)
  *   fn probeRadiance(P: vec3f, R: vec3f, roughness: f32) -> vec4f
  *        (probe radiance normalized by coverage, coverage); no environment
  *   fn probeRadianceWithEnvironment(P: vec3f, R: vec3f, roughness: f32) -> vec3f
@@ -252,11 +257,12 @@ export function probeLookupWgsl(options: ProbeLookupModuleOptions): string {
 ${frame}
 fn probeLookup(${SIGNATURE}) -> vec4f {${lookupBody(options, (i) => `pr_table[${i}]`, 'pr_atlas', 'pr_sampler')}}
 fn probeFrameIrradiance(P: vec3f, N: vec3f) -> vec3f { return ${frameCall}; }
+const PR_IDENTITY = mat4x4f(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
 fn probeRadianceN(P: vec3f, N: vec3f, R: vec3f, roughness: f32) -> vec4f {
-  return probeLookup(P, N, R, roughness, R, probeFrameIrradiance(P, N), false);
+  return probeLookup(P, N, R, roughness, PR_IDENTITY, probeFrameIrradiance(P, N), false);
 }
 fn probeRadianceWithEnvironmentN(P: vec3f, N: vec3f, R: vec3f, roughness: f32) -> vec3f {
-  return probeLookup(P, N, R, roughness, R, probeFrameIrradiance(P, N), true).rgb;
+  return probeLookup(P, N, R, roughness, PR_IDENTITY, probeFrameIrradiance(P, N), true).rgb;
 }
 fn probeRadiance(P: vec3f, R: vec3f, roughness: f32) -> vec4f { return probeRadianceN(P, normalize(R), R, roughness); }
 fn probeRadianceWithEnvironment(P: vec3f, R: vec3f, roughness: f32) -> vec3f { return probeRadianceWithEnvironmentN(P, normalize(R), R, roughness); }

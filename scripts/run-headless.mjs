@@ -384,6 +384,14 @@ function f2Checks(r) {
         `max diff ${gf[k].maxDiff.toExponential(2)}; [10], [14]: first frame ${gf[k].firstFrame.map((v) => v.toFixed(4)).join(' ')}, rendered ${gf[k].rendered.map((v) => v.toFixed(4)).join(' ')}`);
     }
   }
+  const pd = section('probeEnvDominant');
+  if (pd) {
+    // all three read the same cube along the same direction; 1e-3 covers the prefilter's fp16 storage
+    const f = (x) => x.toExponential(2);
+    check('probes: dominant direction bends the environment sample too (inside, fade band, outside agree)',
+      pd.insideVsDominant < 1e-3 && pd.fadeVsDominant < 1e-3 && pd.outsideVsDominant < 1e-3 && pd.plainVsDominant > 0.05,
+      `max |diff| vs the environment along the dominant direction: inside ${f(pd.insideVsDominant)}, fade ${f(pd.fadeVsDominant)}, outside ${f(pd.outsideVsDominant)}; plain R vs dominant ${f(pd.plainVsDominant)}`);
+  }
   const rh = section('rtHistory');
   if (rh) {
     check("rt on-screen reuse ignores inputs.history unless hitColor 'history'", rh.current.onScreen > 100 && rh.current.stale === 0 && rh.history.onScreen > 100 && rh.history.stale > 0.5 * rh.history.onScreen,

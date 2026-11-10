@@ -4,7 +4,10 @@
 //              textures (pass, radiance fallback, provider, hit shading) against the device's
 //              per-stage limits and throws a clear error, instead of a validation error at
 //              createPipelineLayout; a device with the limit raised builds the same pipeline.
+//  probeEnvDominant  the dominant direction bends the environment sample too (inside a volume,
+//              in its fade band and outside it agree).
 import { ProbeSet, createTracedReflections, probeRadianceFallback, type TraceProvider } from '@pmndrs/reflections/core';
+import { readBufferF32 } from './util';
 
 const C = 0x4; // GPUShaderStage.COMPUTE
 
@@ -73,4 +76,74 @@ export async function rtLimitChecks() {
   } else out.raised = { skipped: `adapter allows ${max}` };
   device.destroy();
   return out;
+}
+
+// ---- probes ---------------------------------------------------------------------------------------
+
+/** A cube (rgba16float, 6 layers) with one flat colour per face: +x, -x, +y, -y, +z, -z. */
+export const FACE_COLOURS = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [0, 1, 1], [1, 0, 1]];
+export function faceCube(device: GPUDevice, size: number, colours: number[][] = FACE_COLOURS) {
+  const t = device.createTexture({ size: [size, size, 6], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
+  const e = device.createCommandEncoder();
+  colours.forEach((c, face) => e.beginRenderPass({ colorAttachments: [{
+    view: t.createView({ dimension: '2d', baseArrayLayer: face, arrayLayerCount: 1 }), loadOp: 'clear', storeOp: 'store', clearValue: [c[0], c[1], c[2], 1],
+  }] }).end());
+  device.queue.submit([e.finish()]);
+  return t;
+}
+
+/** Runs `body` (WGSL statements writing `outv[i]`) once over a probe set's lookup module; returns `count` rgb triples. */
+async function probeEval(device: GPUDevice, set: ProbeSet, count: number, body: string) {
+  const outBuf = device.createBuffer({ size: count * 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const bgl = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: C, buffer: { type: 'storage' } }] });
+  const pipe = device.createComputePipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: [bgl, set.bindGroupLayout] }),
+    compute: { module: device.createShaderModule({ code: `${set.wgsl({ group: 1 })}
+@group(0) @binding(0) var<storage, read_write> outv: array<vec4f>;
+@compute @workgroup_size(1) fn main() {
+${body}
+}` }), entryPoint: 'main' },
+  });
+  const e = device.createCommandEncoder();
+  const p = e.beginComputePass(); p.setPipeline(pipe);
+  p.setBindGroup(0, device.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: { buffer: outBuf } }] }));
+  p.setBindGroup(1, set.bindGroup); p.dispatchWorkgroups(1); p.end();
+  device.queue.submit([e.finish()]);
+  const f = await readBufferF32(device, outBuf);
+  outBuf.destroy();
+  return Array.from({ length: count }, (_, i) => Array.from(f.slice(i * 4, i * 4 + 3)));
+}
+
+/**
+ * probeEnvDominant (the reviewer's repro): an environment and a probe holding the same cube with a
+ * different colour per face, N = +y, R = (1, 0.3, 0), r = 0.7, dominant direction on. The lookup must
+ * bend the direction the same way inside the volume, in its fade band and outside it (environment
+ * only), so all three equal the environment sampled along the dominant direction.
+ */
+export async function probeEnvDominantChecks() {
+  const { device } = await newDevice();
+  const cube = faceCube(device, 64);
+  const set = new ProbeSet(device, { capacity: 1, sourceSize: 64, dominantDirection: true });
+  const e = device.createCommandEncoder();
+  set.capture(e, 0, cube); set.captureEnvironment(e, cube);
+  device.queue.submit([e.finish()]);
+  set.setVolumes([{ slot: 0, center: [0, 0, 0], halfSize: [2, 2, 2], fade: 1, boxProjection: false }]);
+  set.update();
+  const r = 0.7, a = r * r, s = 1 - a, k = s * (Math.sqrt(s) + a);
+  const R = [1, 0.3, 0].map((x) => x / Math.hypot(1, 0.3)), N = [0, 1, 0];
+  const D = N.map((n, i) => n + (R[i] - n) * k);
+  const v = (x: number[]) => `vec3f(${x.map((c) => c.toFixed(8)).join(', ')})`;
+  const [inside, fade, outside, refDominant, refPlain] = await probeEval(device, set, 5, `
+  outv[0] = vec4f(probeRadianceWithEnvironmentN(vec3f(0.0), ${v(N)}, ${v(R)}, ${r}), 1.0);
+  outv[1] = vec4f(probeRadianceWithEnvironmentN(vec3f(1.5, 0.0, 0.0), ${v(N)}, ${v(R)}, ${r}), 1.0);
+  outv[2] = vec4f(probeRadianceWithEnvironmentN(vec3f(5.0, 0.0, 0.0), ${v(N)}, ${v(R)}, ${r}), 1.0);
+  outv[3] = vec4f(probeRadianceWithEnvironment(vec3f(5.0, 0.0, 0.0), ${v(D)}, ${r}), 1.0);
+  outv[4] = vec4f(probeRadianceWithEnvironment(vec3f(5.0, 0.0, 0.0), ${v(R)}, ${r}), 1.0);`);
+  const diff = (x: number[], y: number[]) => Math.max(...x.map((c, i) => Math.abs(c - y[i])));
+  set.dispose(); cube.destroy(); device.destroy();
+  return {
+    inside, fade, outside, refDominant, refPlain,
+    insideVsDominant: diff(inside, refDominant), fadeVsDominant: diff(fade, refDominant), outsideVsDominant: diff(outside, refDominant),
+    plainVsDominant: diff(refPlain, refDominant),
+  };
 }

@@ -103,7 +103,7 @@ set.wgsl({ group })                   // probeRadiance(P, R, r) -> vec4f (radian
                                       // probeRadianceWithEnvironment(P, R, r) -> vec3f, ...N(P, N, R, r) variants,
                                       // probeSpecularOcclusion(NdotV, ao, r) -> f32; bindings 0..2 = set.bindGroupLayout
 // engines that own their bindings: probeLookupIncludesWgsl(o) once per module + probeLookupFunctionWgsl(o, name):
-// fn name(atlas, samp, table: ptr<storage, array<vec4f>, read>, P, N, R, roughness, envR, frameIrr, withEnv) -> vec4f
+// fn name(atlas, samp, table: ptr<storage, array<vec4f>, read>, P, N, R, roughness, envRotation: mat4x4f, frameIrr, withEnv) -> vec4f   (F2: was envR; the env slot now takes the bent direction)
 // table layout: packages/core/src/probes/table.ts (packProbeTable, rows of vec4f)
 ```
 

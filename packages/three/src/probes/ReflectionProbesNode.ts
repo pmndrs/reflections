@@ -30,7 +30,7 @@
 // and the texture id is in the cache key, so every render object rebinds (D501).
 
 import * as THREE from 'three/webgpu';
-import { bool, cameraPosition, code, float, materialEnvRotation, nodeObject, normalWorld, positionWorld, reflectVector, sampler, storage, texture, vec3, vec4, wgslFn } from 'three/tsl';
+import { bool, cameraPosition, code, float, mat4, materialEnvRotation, nodeObject, normalWorld, positionWorld, reflectVector, sampler, storage, texture, vec3, vec4, wgslFn } from 'three/tsl';
 import {
   PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludesWgsl,
   probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
@@ -272,12 +272,13 @@ export class ReflectionProbesNode extends THREE.Node {
     const dominant = this.normalNode !== null;
     const normal: N = this.normalNode ?? (refit ? normalWorld : direction);
     // the environment slot is unrotated: the material's direction gets its environment rotation,
-    // an explicit direction is looked up as given
-    const envDirection: N = this.directionNode === null ? materialEnvRotation.mul(direction) : direction;
+    // an explicit direction is looked up as given; core bends the direction first (dominant
+    // direction) and rotates the bent one, so volumes and environment agree
+    const envRotation: N = this.directionNode === null ? materialEnvRotation : mat4(new THREE.Matrix4());
     const { fn } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit, count: this.volumes });
     const result: N = fn({
       atlas: this.array, samp: sampler(this.array), table: this.table.node,
-      P: vec3(position), N: vec3(normal), R: vec3(direction), roughness, envR: vec3(envDirection),
+      P: vec3(position), N: vec3(normal), R: vec3(direction), roughness, envRotation,
       frameIrr: refit ? vec3(this.frameIrradianceNode) : vec3(-1), withEnv: bool(!this.coverage),
     }).toVar();
     if (this.aoNode === null) return this.coverage ? result : result.rgb;
