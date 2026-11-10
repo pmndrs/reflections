@@ -8,6 +8,12 @@ importers:
 
   .:
     devDependencies:
+      '@babylonjs/core':
+        specifier: 9.35.0
+        version: 9.35.0
+      '@pmndrs/reflections-babylon':
+        specifier: workspace:*
+        version: link:packages/babylon
       '@pmndrs/reflections-core':
         specifier: workspace:*
         version: link:packages/core
@@ -42,6 +48,16 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7
 
+  packages/babylon:
+    dependencies:
+      '@pmndrs/reflections-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@babylonjs/core':
+        specifier: 9.35.0
+        version: 9.35.0
+
   packages/core:
     dependencies:
       downsampler:
@@ -73,6 +89,9 @@ packages:
   '@babel/helper-validator-identifier@8.0.6':
     resolution: {integrity: sha512-HYx0YmuchRxRSpnjvcNffnPS8DCauKNmnumIuHG3jnQAVewRA7kfJGwF13ayEpSZs7s4R/oBH4eppuXcAQd5JQ==}
     engines: {node: ^22.18.0 || >=24.11.0}
+
+  '@babylonjs/core@9.35.0':
+    resolution: {integrity: sha512-qY2uU4gVC1GA7vPfLtnF57bPBBuu5nGnh9efGZVWtba9naxeeH+Nkj919vEFhoBvmiDxbRXMOBKLp/wWC0YzYA==}
 
   '@dimforge/rapier3d-compat@0.12.0':
     resolution: {integrity: sha512-uekIGetywIgopfD97oDL5PfeezkFpNhwlzlaEYNOA0N6ghdsOvh/HYjSMek5Q2O1PYvRSDFcqFVJl4r4ZBwOow==}
@@ -705,6 +724,8 @@ snapshots:
 
   '@babel/helper-validator-identifier@8.0.6':
     optional: true
+
+  '@babylonjs/core@9.35.0': {}
 
   '@dimforge/rapier3d-compat@0.12.0': {}
 

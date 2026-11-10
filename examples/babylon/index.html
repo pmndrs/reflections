@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Babylon reflections</title>
+    <style>
+      :root { color-scheme: dark; --dn-border: #333; }
+      body { margin: 0; padding: 16px; background: #111; color: #ddd; font: 14px/1.45 system-ui, sans-serif; }
+      .dn-status { font-size: .8rem; white-space: pre-wrap; color: #9a9; }
+      .dn-page { max-width: 1020px; }
+      code { background: #0006; padding: 0 .3em; border-radius: 4px; }
+      canvas { width: 960px; max-width: 100%; aspect-ratio: 16 / 9; background: #000; border: 1px solid var(--dn-border); border-radius: 8px; display: block; touch-action: none; }
+      #controls { max-width: 960px; display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; font-size: .85rem; margin: .6rem 0; }
+      #controls label { display: inline-flex; align-items: center; gap: .35rem; }
+    </style>
+  </head>
+  <body>
+    <div class="dn-page">
+      <header>
+        <h1>Reflections on Babylon.js (WebGPUEngine)</h1>
+        <p>
+          The mirrorWall scene rebuilt in Babylon. A frame graph renders colour (PBR, specular IBL stripped), depth, world normal,
+          reflectivity and linear velocity; <code>FrameGraphReflectionsTask</code> runs the core screen-space tracer on Babylon's
+          device with a core <code>ProbeSet</code> (one probe + the environment slot, captured by Babylon cube renders) as the
+          radiance fallback; <code>FrameGraphReflectionsCompositeTask</code> adds <code>radiance &times; Babylon's split-sum weight</code>.
+          URL: <code>?view=</code>, <code>?ssr=0</code>, <code>?probes=0</code>, <code>?variant=workgroup</code>, <code>?manual</code>.
+        </p>
+      </header>
+      <canvas id="view" width="960" height="540"></canvas>
+      <div id="controls"></div>
+      <pre id="status" class="dn-status">starting...</pre>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

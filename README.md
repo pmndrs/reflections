@@ -30,6 +30,7 @@ The probes are this library's: an engine-agnostic core (GGX prefilter, cube-arra
 |---|---|
 | `@pmndrs/reflections` / `/three` | three.js adapter: probes, TSL nodes |
 | `@pmndrs/reflections/core` | engine-agnostic WebGPU: the probe prefilter (more per the spec) |
+| `@pmndrs/reflections/babylon` | Babylon.js WebGPUEngine adapter (experimental): core SSR + probe set, frame-graph tasks (`examples/babylon`) |
 
 ## Examples
 
