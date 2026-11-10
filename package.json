@@ -87,6 +87,7 @@
     "@pmndrs/reflections-three": "workspace:*",
     "@types/three": "^0.187.0",
     "@webgpu/types": "^0.1.71",
+    "meshoptimizer": "^1.3.0",
     "pixi.js": "8.22.0",
     "rollup": "^4.62.2",
     "rollup-plugin-dts": "^6.2.1",

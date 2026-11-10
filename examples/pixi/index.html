@@ -2,36 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="refresh" content="0; url=../pixi3d/arcade/" />
     <link rel="icon" href="data:," />
-    <title>Pixi reflections</title>
-    <style>
-      :root { color-scheme: dark; --dn-border: #333; }
-      body { margin: 0; padding: 16px; background: #0b0a10; color: #ddd; font: 14px/1.45 system-ui, sans-serif; }
-      .dn-status { font-size: .8rem; white-space: pre-wrap; color: #a9c; }
-      .dn-page { max-width: 1020px; }
-      code { background: #0006; padding: 0 .3em; border-radius: 4px; }
-      #stage canvas { width: 960px; max-width: 100%; aspect-ratio: 16 / 9; background: #000; border: 1px solid var(--dn-border); border-radius: 8px; display: block; touch-action: none; }
-      #controls { max-width: 960px; display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; font-size: .85rem; margin: .6rem 0; }
-      #controls label { display: inline-flex; align-items: center; gap: .35rem; }
-    </style>
+    <title>Pixi reflections (moved)</title>
   </head>
-  <body>
-    <div class="dn-page">
-      <header>
-        <h1>Reflections on pixi.js v8 (WebGPURenderer)</h1>
-        <p>
-          A neon arcade. The signs are pixi <code>Text</code>, <code>Graphics</code> and sprites rendered into <code>RenderTexture</code>s
-          every frame; the adapter's 3-D layer lights them as emissive panels on a tiled floor (pixi has no G-buffer of its own).
-          Core's screen-space tracer runs on pixi's device with a core <code>ProbeSet</code> (one probe + the sky) as the fallback, and a
-          pixi <code>Filter</code> composites <code>lit + split-sum &times; radiance</code>. The inset is a second sprite with its own filter.
-          Drag to orbit. URL: <code>?view=</code>, <code>?ssr=0</code>, <code>?probes=0</code>, <code>?variant=workgroup</code>, <code>?manual</code>.
-        </p>
-      </header>
-      <div id="stage"></div>
-      <div id="controls"></div>
-      <pre id="status" class="dn-status">starting...</pre>
-    </div>
-    <script type="module" src="./src/main.ts"></script>
+  <body style="background:#0b0a10;color:#ddd;font:14px system-ui,sans-serif;padding:16px">
+    The pixi example moved to <a href="../pixi3d/arcade/">pixi3d/arcade</a>: it is built with pixi-3d now.
   </body>
 </html>

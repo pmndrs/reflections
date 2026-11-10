@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>pixi-3d reflections</title>
+    <style>
+      :root { color-scheme: dark; --dn-border: #333; }
+      body { margin: 0; padding: 16px; background: #0b0a10; color: #ddd; font: 14px/1.45 system-ui, sans-serif; }
+      .dn-status { font-size: .8rem; white-space: pre-wrap; color: #a9c; }
+      .dn-page { max-width: 1020px; }
+      code { background: #0006; padding: 0 .3em; border-radius: 4px; }
+      pre { background: #0006; padding: .6em .8em; border-radius: 6px; }
+      #stage canvas { width: 960px; max-width: 100%; aspect-ratio: 16 / 9; background: #000; border: 1px solid var(--dn-border); border-radius: 8px; display: block; touch-action: none; }
+      #controls { max-width: 960px; display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; font-size: .85rem; margin: .6rem 0; }
+      #controls label { display: inline-flex; align-items: center; gap: .35rem; }
+      #badge { max-width: 760px; padding: 12px 16px; margin-bottom: 12px; border: 1px solid #534; border-radius: 8px; background: #160f1c; }
+      #badge:empty { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="dn-page">
+      <header>
+        <h1>Reflections on pixi-3d</h1>
+        <p>
+          A neon arcade built with pixi-3d (<code>@pixi/3d</code>, closed beta) on pixi.js v8's WebGPURenderer. The signs are pixi
+          <code>Text</code> and <code>Graphics</code> rendered into <code>RenderTexture</code>s every frame and shown as the emissive maps of
+          3-D planes. pixi-3d draws the scene, its depth and its motion vectors; one extra pass draws normals and material values;
+          <code>@pmndrs/reflections/pixi</code> runs core's screen-space tracer on pixi's device, with a probe captured by pixi-3d cameras and
+          the sky as the fallback, and a pixi <code>Filter</code> composites the result. Drag to orbit.
+          URL: <code>?view=</code>, <code>?ssr=0</code>, <code>?probes=0</code>, <code>?denoise=0</code>, <code>?variant=workgroup</code>, <code>?manual</code>.
+        </p>
+      </header>
+      <div id="badge"></div>
+      <div id="stage"></div>
+      <div id="controls"></div>
+      <pre id="status" class="dn-status">starting...</pre>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

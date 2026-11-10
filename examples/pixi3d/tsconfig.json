@@ -1,0 +1,17 @@
+{
+  // The root typecheck skips the pixi-3d examples (CI has no beta). With the beta unpacked into
+  // vendor/ (README.md): pnpm exec tsc -p examples/pixi3d
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "paths": {
+      "@pmndrs/reflections": ["src/index.ts"],
+      "@pmndrs/reflections/core": ["src/core.ts"],
+      "@pmndrs/reflections/pixi": ["src/pixi.ts"],
+      "@pixi/3d": ["examples/pixi3d/vendor/dist/index.d.ts"],
+      "@pixi/3d/extras": ["examples/pixi3d/vendor/dist/extras/index.d.ts"]
+    }
+  },
+  "include": ["arcade", "shared", "unavailable.ts", "../shared/denoiser.ts", "../shared/denoiser-ffx.d.ts", "../../packages/pixi/src", "../../packages/core/src"],
+  "exclude": ["vendor"]
+}

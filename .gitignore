@@ -7,3 +7,5 @@ out/
 .DS_Store
 examples/assets/
 .claude/worktrees/
+# pixi-3d closed beta: unpack its release tarball here (examples/pixi3d/README.md). Never commit it.
+examples/pixi3d/vendor/

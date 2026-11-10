@@ -4,22 +4,22 @@
 //
 //   final = lit + amount * (F0 * A + B) * radiance        (geometry pixels; the sky passes through)
 //
-// `lit` is the G-buffer's colour (no indirect specular), `radiance` core's lerp(probes / environment,
+// `lit` is the view's colour (pixi-3d with REFLECTIONS_SCENE_COLOR_BIT: no environment specular), `radiance` core's lerp(probes / environment,
 // SSR hit, confidence) (./ScreenSpaceReflections.ts), F0 = mix(0.04, albedo, metalness), and (A, B)
-// the split-sum environment BRDF. pixi has no PBR of its own and core exports no DFG term, so the
-// adapter uses Karis' analytic fit (D2004). The result is exposed, tone-mapped (ACES fit) and
+// the split-sum environment BRDF. Core exports no DFG term and pixi-3d's BRDF table isn't reachable
+// from a Filter, so the adapter uses Karis' analytic fit (D2004). The result is exposed, tone-mapped (ACES fit) and
 // sRGB-encoded for pixi's 8-bit canvas: the filter is the view's "present" step.
 //
-// The filter samples the G-buffer by the position inside the filtered object's bounds (the
+// The filter samples the frame by the position inside the filtered object's bounds (the
 // vertex attribute pixi feeds every filter), not by its input texture: pixi renders a filter's input
 // into an 8-bit texture, which would clip the HDR colour. So the object must be an unrotated
-// rectangle showing the whole view (a Sprite of `view.texture`, scaled freely), D2005.
+// rectangle showing the whole view (a Sprite of the view's colour target, scaled freely), D2005.
 import { Filter, GpuProgram, type Texture } from 'pixi.js';
 
 /** Debug views, by index. */
 export const REFLECTION_VIEWS = [
   'final', // lit + weight x radiance
-  'lit', // the G-buffer colour (no indirect specular)
+  'lit', // the view's colour (no environment specular)
   'reflection', // weight x radiance: what the composite adds
   'radiance', // core's reflected radiance (SSR hit / probes / environment)
   'confidence', // SSR hit confidence

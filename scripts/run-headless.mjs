@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi | probe-core | probe-bench | ssr-bench | showcase)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
@@ -901,21 +901,31 @@ async function babylonChecks(pages) {
 }
 
 /**
- * examples/pixi (W18, SPEC phase 6): a neon arcade on pixi.js v8's WebGPURenderer through
- * @pmndrs/reflections/pixi (adapter-owned G-buffer layer, core SSR + probes on pixi's device, the
- * composite as a pixi Filter). Smoke: renders, no validation errors, finite outputs, rays traced; the
- * glossy floor tiles reflect the signs (confident SSR); the adapter's cube captures sample as world
- * directions under core's plain cube lookup; the motion texture reprojects with motionVectorScale
- * [1, 1]. Screenshots of the final image (denoised when the sibling Denoiser repo is there, and raw),
- * SSR off, probes off and the debug views.
+ * examples/pixi3d/arcade (W19, SPEC phase 6): a neon arcade built with pixi-3d (`@pixi/3d`, closed
+ * beta) through @pmndrs/reflections/pixi (the frame contract from a View3D's outputs, core SSR + probes
+ * on pixi's device, the composite as a pixi Filter). Without the beta in examples/pixi3d/vendor/ the
+ * page is a setup notice, and the check asserts that the notice renders. With it: renders, no
+ * validation errors, finite outputs, rays traced; the glossy floor reflects the signs (confident SSR);
+ * the G-buffer carries the material values; the contract's camera reprojects onto pixi-3d's own
+ * pixels and its normals agree with the depth; the probe captures sample as world directions; the
+ * motion texture reprojects with motionVectorScale [1, 1]. Screenshots of the final image (denoised
+ * when the sibling Denoiser repo is there, and raw), SSR off, probes off and the debug views.
  */
-async function pixiChecks(pages) {
-  console.log('examples/pixi:');
+async function pixi3dChecks(pages) {
+  console.log('examples/pixi3d/arcade:');
+  const hasBeta = fs.existsSync(path.join(ROOT, 'examples/pixi3d/vendor/package.json'));
+  if (!hasBeta) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/pixi3d/arcade/`);
+    pages.push(p);
+    const notice = await p.T("({ flag: !!window.__p.pixi3dUnavailable, text: document.getElementById('badge')?.textContent ?? '' })");
+    check('pixi3d: no beta in examples/pixi3d/vendor/, the setup notice renders', notice.flag && /closed beta/.test(notice.text), notice.text.slice(0, 80));
+    return;
+  }
   for (const variant of ['auto', 'workgroup']) {
     const before = results.logs.length;
-    const p = await openPage(`http://127.0.0.1:${PORT}/pixi/?manual${variant === 'workgroup' ? '&variant=workgroup' : ''}`);
+    const p = await openPage(`http://127.0.0.1:${PORT}/pixi3d/arcade/?manual${variant === 'workgroup' ? '&variant=workgroup' : ''}`);
     pages.push(p);
-    await p.T('window.__p.step(2)');
+    await p.T('window.__p.step(3)');
     const st = await p.T('window.__p.stats()');
     const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
     const fails = [];
@@ -923,20 +933,24 @@ async function pixiChecks(pages) {
     if (!(st.rays > 0)) fails.push('no rays');
     if (st.gpuErrors) fails.push(`${st.gpuErrors} GPU errors`);
     if (errs.length) fails.push(errs.slice(0, 2).join(' | '));
-    const tag = `pixi (${st.variant})`;
+    const tag = `pixi3d (${st.variant})`;
     check(`${tag}: renders, no validation errors, finite outputs`, fails.length === 0,
       fails.length ? fails.join('; ') : `${st.rays} rays, ${st.geometryPx} geometry px, mean confidence ${st.meanConfidence.toFixed(3)}`);
     check(`${tag}: glossy floor reflects the signs (confident SSR)`, st.glossyFloor > 1000 && st.glossyConfident > 0.2,
       `${st.glossyFloor} glossy floor px, ${(st.glossyConfident * 100).toFixed(1)}% with confidence >= 0.9`);
     if (variant === 'auto') {
+      check('pixi3d: the G-buffer carries the material values (mirror sphere, gold torus)', st.mirrorPx > 200 && st.goldPx > 200, `${st.mirrorPx} mirror px, ${st.goldPx} gold px`);
+      const cc = await p.T('window.__p.cameraCheck()');
+      check("pixi3d: the contract's camera lands on pixi-3d's pixels; G-buffer normals agree with the depth", cc.meanPixelError < 0.05 && cc.meanNormalDot > 0.95,
+        `${cc.pixels} px, mean reprojection error ${cc.meanPixelError.toFixed(4)} px; ${cc.normals} px, mean N·N(depth) ${cc.meanNormalDot.toFixed(4)}`);
       const o = await p.T('window.__p.orientation()');
-      check('pixi: adapter cube captures sample as world directions', o.ok,
+      check('pixi3d: probe captures (six pixi-3d cameras) sample as world directions', o.ok,
         o.ok ? `${o.rows.length} directions` : o.rows.filter((r) => !r.ok).slice(0, 4).map((r) => `${r.dir.join(',')}: got ${r.got.join('')} want ${r.expect.join('')}`).join('; '));
       const mc = await p.T('window.__p.motionCheck()');
       const err = Object.fromEntries(mc.rows.map((r) => [r.scale, r.meanError]));
-      check('pixi: motion reprojects with motionVectorScale [1, 1]', mc.best === '1,1' && err['1,1'] < 0.5 * err['0,0'],
+      check('pixi3d: motion reprojects with motionVectorScale [1, 1]', mc.best === '1,1' && err['1,1'] < 0.5 * err['0,0'],
         `${mc.pixels} px; mean colour error ${mc.rows.map((r) => `[${r.scale}] ${r.meanError.toFixed(4)}`).join(', ')}`);
-      const shot = async (name) => savePng(`pixi-${name}.png`, await p.T('window.__p.shot()'));
+      const shot = async (name) => savePng(`pixi3d-${name}.png`, await p.T('window.__p.shot()'));
       await shot('final');
       const denoiser = await p.T('window.__p.denoiserName');
       console.log(`  denoiser: ${denoiser ?? 'none (no sibling Denoiser repo): raw signal'}`);
@@ -948,13 +962,13 @@ async function pixiChecks(pages) {
       await p.T('window.__p.setSSR(true)');
       await shot('probes-off');
       await p.T('window.__p.setProbes(true)');
-      for (const v of ['lit', 'reflection', 'radiance', 'confidence', 'normal', 'roughness', 'motion']) {
+      for (const v of ['lit', 'reflection', 'radiance', 'confidence', 'normal', 'roughness', 'metalness', 'albedo', 'motion']) {
         await p.T(`window.__p.setView(${JSON.stringify(v)})`);
         await shot(`view-${v}`);
       }
       await p.T("window.__p.setView('final')");
       const t = await p.T('window.__p.time(20)').catch(() => null);
-      if (t) console.log(`  pixi tracer GPU ms (960x540, loop stopped): ${Object.entries(t).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+      if (t) console.log(`  pixi3d tracer GPU ms (960x540, loop stopped): ${Object.entries(t).map(([k, v]) => `${k} ${v}`).join(', ')}`);
     }
   }
 }
@@ -1124,7 +1138,7 @@ async function main() {
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (runs('babylon')) await babylonChecks(pages);
     if (runs('ssr-rt-bvh')) await ssrRtBvhChecks(pages);
-    if (runs('pixi')) await pixiChecks(pages);
+    if (runs('pixi3d')) await pixi3dChecks(pages);
     if (ssrBenchFull) await ssrBench();
     else if (runs('ssr-bench')) await ssrBenchSmoke(pages);
     if (runs('showcase')) await showcaseChecks(pages);
