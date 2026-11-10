@@ -478,6 +478,7 @@ async function main() {
     }
     hitErr = hitErr.sort((a, b) => a - b);
     const objects = kit!.id === 'mirrorWall' ? stripeStats(depth, nr, am, sc, rad, conf, invVP, eye) : null;
+    const facing = kit!.id === 'facingMirrors' ? mirrorInMirror(depth, nr, am, rad, conf, invVP, eye) : null;
     return {
       scene: kit!.id, variant: ssr.variant, rays: counter[1], tiles: counter[3], misses: missCounter[1],
       geometry: geo / (W * H), meanConfidence: geo ? confSum / geo : 0, nonFinite,
@@ -489,7 +490,45 @@ async function main() {
         behindPixels: behindPx, streakFraction: behindPx ? behindConfident / behindPx : NaN,
       } : null,
       objects,
+      facing,
     };
+  }
+
+  /**
+   * facingMirrors: pixels of the left mirror (normal +x) whose exact reflection ray reaches the
+   * right mirror (plane x = 1.79, its 7.5 x 2.4 rectangle) with no object in between (raycast). The
+   * hit colour there (radiance / confidence, confident px only) is a mirror's own colour: black with
+   * this frame's specular-free scene colour, the right mirror's reflection with last frame's colour.
+   * `black` = fraction of confident px with hit luminance < 0.02; `meanLum` over confident px.
+   */
+  function mirrorInMirror(depth: Float32Array, nr: Float32Array, am: Float32Array, rad: Float32Array, conf: Float32Array,
+    invVP: THREE.Matrix4, eye: THREE.Vector3) {
+    const blockers: THREE.Object3D[] = [];
+    kit!.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh && (o as THREE.Mesh).geometry.type !== 'PlaneGeometry') blockers.push(o); });
+    const ray = new THREE.Raycaster();
+    ray.near = 1e-3;
+    const P = new THREE.Vector3(), d = new THREE.Vector3();
+    let px = 0, confident = 0, black = 0, lumSum = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (depth[i] >= 1 || depth[i] <= 0) continue;
+      if (!(am[i * 4 + 3] > 0.99 && nr[i * 4 + 3] < 0.03 && nr[i * 4] > 0.99)) continue;
+      P.set(((x + 0.5) / W) * 2 - 1, 1 - ((y + 0.5) / H) * 2, depth[i]).applyMatrix4(invVP);
+      d.copy(P).sub(eye).normalize(); d.x = -d.x;
+      if (d.x <= 1e-4) continue;
+      const t = (1.79 - P.x) / d.x;
+      const hy = P.y + d.y * t, hz = P.z + d.z * t;
+      if (Math.abs(hy - 1.45) > 1.15 || Math.abs(hz + 0.25) > 3.7) continue;
+      ray.set(P, d); ray.far = t - 1e-2;
+      if (ray.intersectObjects(blockers, false).length) continue;
+      px++;
+      if (conf[i] < 0.5) continue;
+      confident++;
+      const l = (rad[i * 4] + rad[i * 4 + 1] + rad[i * 4 + 2]) / 3 / conf[i];
+      lumSum += l;
+      if (l < 0.02) black++;
+    }
+    return { pixels: px, confident: px ? confident / px : NaN, black: confident ? black / confident : NaN, meanLum: confident ? lumSum / confident : NaN };
   }
 
   /**

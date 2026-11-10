@@ -297,6 +297,22 @@ async function ssrChecks(pages) {
           await p.T("window.__p.setView('grid')");
         }
       }
+      if (id === 'facingMirrors' && variant === 'auto') {
+        // W9 (D69 / D1002): a mirror seen in a mirror. Hit colour from this frame's specular-free
+        // scene colour is black; last frame's composite ('final') shows the reflection, a bounce per frame.
+        await p.T("window.__p.setView('final')");
+        const f = {};
+        for (const m of ['current', 'lit', 'final']) {
+          await p.T(`window.__p.setHitColor('${m}')`);
+          await p.T('window.__p.step(6)');
+          f[m] = (await p.T('window.__p.stats()')).facing;
+          savePng(`ssr-facingMirrors-${m}.png`, await p.T('window.__p.shot()'));
+        }
+        await p.T("(window.__p.setHitColor('current'), window.__p.setView('grid'))");
+        const fm = (k) => `${k}: ${(f[k].black * 100).toFixed(1)}% black, mean lum ${f[k].meanLum.toFixed(3)}`;
+        check(`${tag}: mirror seen in a mirror is not black with last frame's colour`, f.current.pixels > 1000 && f.current.black > 0.9 && f.final.black < 0.1 && f.lit.black < 0.1,
+          `${f.current.pixels} left-mirror px reflect the right mirror (${(f.current.confident * 100).toFixed(1)}% confident); ${fm('current')}; ${fm('lit')}; ${fm('final')}`);
+      }
       if (id === 'offscreen') {
         await p.T("window.__p.setPose('mirror')");
         await p.T('window.__p.step(2)');
