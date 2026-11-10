@@ -1,0 +1,22 @@
+{
+  "name": "@pmndrs/reflections-pixi",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PixiJS v8 WebGPURenderer adapter for @pmndrs/reflections (experimental): an adapter-owned 3-D G-buffer layer (pixi has none), the core screen-space tracer and probe set on pixi's device, and the composite as a pixi Filter. Bundled into the published package; never published on its own.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@pmndrs/reflections-core": "workspace:*"
+  },
+  "peerDependencies": {
+    "pixi.js": ">=8.22.0 <9"
+  },
+  "devDependencies": {
+    "pixi.js": "8.22.0"
+  }
+}

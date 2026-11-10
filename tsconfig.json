@@ -19,7 +19,8 @@
       "@pmndrs/reflections": ["src/index.ts"],
       "@pmndrs/reflections/three": ["src/three.ts"],
       "@pmndrs/reflections/core": ["src/core.ts"],
-      "@pmndrs/reflections/babylon": ["src/babylon.ts"]
+      "@pmndrs/reflections/babylon": ["src/babylon.ts"],
+      "@pmndrs/reflections/pixi": ["src/pixi.ts"]
     }
   },
   "include": ["src", "packages/*/src", "examples", "test"],

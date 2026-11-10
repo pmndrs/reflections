@@ -18,11 +18,12 @@ export default defineConfig({
         three: resolve(__dirname, 'src/three.ts'),
         core: resolve(__dirname, 'src/core.ts'),
         babylon: resolve(__dirname, 'src/babylon.ts'),
+        pixi: resolve(__dirname, 'src/pixi.ts'),
       },
       formats: ['es'],
     },
     rollupOptions: {
-      external: [/^three(\/|$)/, /^three-mesh-bvh(\/|$)/, /^@babylonjs\/core(\/|$)/],
+      external: [/^three(\/|$)/, /^three-mesh-bvh(\/|$)/, /^@babylonjs\/core(\/|$)/, /^pixi\.js(\/|$)/],
       output: { chunkFileNames: 'chunks/reflections-[hash].js' },
     },
   },
