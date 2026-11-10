@@ -29,3 +29,9 @@ export {
 
 // Trace seam + ray-traced reflections over the SSSR miss list (SPEC "Trace seam", section 4).
 export * from './trace';
+
+// Denoise seam (SPEC "Denoise seam"): any denoiser-core-shaped TemporalDenoiser<SpecularInputs>, fed from the frame contract.
+export {
+  createReflectionDenoiseSeam,
+  type ReflectionDenoiseSeam, type ReflectionDenoiseSeamOptions, type TemporalDenoiser, type SpecularInputs, type DenoiseGuides, type DenoiseCamera,
+} from './denoise/seam';

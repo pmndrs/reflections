@@ -19,6 +19,11 @@
 // specular (scene colour without it, D400), and there is no denoiser here (rule 7), so glossy SSR
 // is one noisy sample per quad.
 //
+// Phase 5 (HybridReflections, ./HybridReflections.ts): `specular` above is also the signal the
+// denoise seam takes (FFX SSSR's lerp(fallback, hit, confidence)), with Lagarde's specular
+// occlusion from an optional AO input on the probe part; where the denoiser ran, the composite
+// uses its output instead: final = lit + weight x (denoised - probeEnv).
+//
 // With the ray-traced pass on (ScreenSpaceReflectionsPass `trace`), traced hits arrive here as
 // confidence 1 and their shaded radiance, and traced misses / capped rays as confidence 0 (or the
 // screen-space value), so the same formula composes them: no RT-specific branch.
@@ -48,6 +53,19 @@ export interface ScreenSpaceCompositeOptions {
   lit?: N;
   /** Screen uv to composite at. Default `uv()` (a full-screen pass). */
   uv?: N;
+  /**
+   * Ambient occlusion in [0, 1] (1 = open) for Lagarde's specular occlusion on the probe /
+   * environment part (SSR and traced hits carry their own occlusion, D66): a texture (sampled at
+   * the composite uv, .r) or a function of the uv returning a float node. None: no occlusion.
+   */
+  ao?: THREE.Texture | ((uv: N) => N) | null;
+  /**
+   * The denoised specular radiance (rgba16float, render size), e.g. `HybridReflections.denoised`.
+   * Used where `denoise` is 1; the raw signal elsewhere.
+   */
+  denoised?: THREE.Texture | null;
+  /** Float node or uniform: 1 = composite `denoised`, 0 = the raw signal. Default a uniform(0) (returned as `denoise`). */
+  denoise?: N;
 }
 
 /** The composite and the terms it is built from, as TSL nodes (all linear HDR). */
@@ -60,8 +78,23 @@ export interface ScreenSpaceComposite {
   weight: N;
   /** Probe / environment radiance along the reflection (what three's term is assumed to be). */
   probeSpecular: N;
-  /** mix(probeSpecular, ssr hit, confidence). */
+  /** What is composited: the denoised signal where `denoise` is 1, else `signal`. */
   specular: N;
+  /**
+   * The raw specular signal the denoiser takes (FFX SSSR's `lerp(fallback, hit, confidence)`):
+   * ssr + (1 - confidence) x specularOcclusion x probeSpecular. rgb; 0 on the background.
+   */
+  signal: N;
+  /** The denoised radiance as sampled (rgb; the raw signal when no `denoised` texture was given). */
+  denoised: N;
+  /** 1 = composite the denoised radiance (a uniform unless `options.denoise` was given). */
+  denoise: N;
+  /** Lagarde's specular occlusion from `ao` (1 without it). */
+  specularOcclusion: N;
+  /** Local probe coverage in [0, 1] (0 without probes): the probe vs environment split of `probeSpecular`. */
+  coverage: N;
+  /** Perceptual roughness from the G-buffer. */
+  roughness: N;
   confidence: N;
   /** SSR radiance (confidence x hit). */
   ssr: N;
@@ -108,21 +141,35 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
     ? uniform(options.environmentIntensity ?? 1) : options.environmentIntensity;
   const environment: N = options.environment ? (pmremTexture as N)(options.environment, R, roughness).rgb : vec3(0);
   let probeSpecular: N = environment;
+  let coverage: N = float(0);
   if (options.probes) {
     const local: N = sampleReflectionProbesLocal(options.probes, P, R, roughness).toVar();
     probeSpecular = mix(environment, local.rgb, local.a);
+    coverage = local.a;
   }
   probeSpecular = probeSpecular.mul(intensity).toVar();
 
+  // Lagarde 2014 computeSpecOcclusion, a = perceptual^2 (same as core's probeSpecularOcclusion, D66)
+  let specularOcclusion: N = float(1);
+  if (options.ao) {
+    const ao: N = typeof options.ao === 'function' ? float(options.ao(at)) : texture(options.ao, at).x;
+    const a: N = roughness.mul(roughness);
+    specularOcclusion = dotNV.add(ao).max(0).pow(a.mul(-16).sub(1).exp2()).sub(1).add(ao).clamp(0, 1).toVar();
+  }
+
+  // final = lit + amount x weight x (specular - probeSpecular): three's own IBL term swapped for ours
   const amount: N = uniform(1);
   const ssrRadiance: N = texture(ssr.radiance, at).rgb;
-  const confidence: N = texture(ssr.confidence, at).x.mul(amount).toVar();
-  const ssrTerm: N = ssrRadiance.mul(amount);
-  const specular: N = ssrTerm.add(confidence.oneMinus().mul(probeSpecular));
-  const delta: N = weight.mul(ssrTerm.sub(confidence.mul(probeSpecular)));
+  const confidence: N = texture(ssr.confidence, at).x.toVar();
+  const signal: N = geometry.select(ssrRadiance.add(confidence.oneMinus().mul(specularOcclusion).mul(probeSpecular)), vec3(0)).toVar();
+  const denoise: N = options.denoise ?? uniform(0);
+  const denoised: N = options.denoised ? texture(options.denoised, at).rgb : signal;
+  const specular: N = options.denoised ? mix(signal, denoised, float(denoise).clamp(0, 1)).toVar() : signal;
+  const delta: N = weight.mul(specular.sub(probeSpecular)).mul(amount);
   const final: N = vec4(geometry.select(lit.add(delta).max(0), lit), 1);
   return {
-    final, lit, weight, probeSpecular, specular, confidence, ssr: ssrRadiance, geometry, amount,
+    final, lit, weight, probeSpecular, specular, signal, denoised, denoise, specularOcclusion, coverage, roughness: float(nr.w),
+    confidence, ssr: ssrRadiance, geometry, amount,
     hitDistance: texture(ssr.hitDistance, at).x,
     source: texture(ssr.source, at).x,
   };
