@@ -45,7 +45,8 @@ const WGSL = /* wgsl */ `
 override ENCODE_P2: bool = false;
 const HALF_MAX: f32 = 65504.0;
 
-struct Params { offset: u32, rowStride: u32, blocksX: u32, blocksY: u32 }
+// One chunk of a mip: blocksY block rows from row0, layers from layer0 (id.z counts from it).
+struct Params { offset: u32, rowStride: u32, blocksX: u32, blocksY: u32, row0: u32, layer0: u32 }
 @group(0) @binding(0) var src: texture_2d_array<f32>;
 @group(0) @binding(1) var<storage, read_write> blocks: array<vec4<u32>>;
 @group(0) @binding(2) var<uniform> P: Params;
@@ -469,10 +470,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   // Texel i of the block is (i % 4, i / 4). Reads clamp to the mip, so mips under 4 px repeat
   // their edge texels into the padding.
   let lim = vec2i(textureDimensions(src)) - 1;
-  let base = vec2i(id.xy) * 4;
+  let base = vec2i(i32(id.x), i32(P.row0 + id.y)) * 4;
   for (var i = 0; i < 16; i++) {
     let p = min(base + vec2i(i & 3, i >> 2), lim);
-    let t = textureLoad(src, p, id.z, 0).rgb;
+    let t = textureLoad(src, p, P.layer0 + id.z, 0).rgb;
     texels[i] = clamp(select(t, vec3f(0.0), t != t), vec3f(0.0), vec3f(HALF_MAX));
   }
   var block = vec4u(0u);
@@ -492,29 +493,65 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 
 const align = (n: number, a: number) => Math.ceil(n / a) * a;
 
-/** Per-mip layout of the block buffer: copyBufferToTexture needs bytesPerRow % 256 == 0. */
-function mipLayout(width: number, height: number, mips: number, layers: number) {
-  const out: { blocksX: number; blocksY: number; bytesPerRow: number; offset: number; w: number; h: number }[] = [];
-  let offset = 0;
+/** One dispatch + copy: `rows` block rows from `row0` of `layers` layers from `layer0`, of one mip. */
+interface Chunk { mip: number; layer0: number; layers: number; row0: number; rows: number; blocksX: number; bytesPerRow: number; bytes: number; offset: number; slot: number }
+
+/**
+ * Split every mip into chunks whose blocks fit in `cap` bytes (whole layers when one fits, else
+ * rows of one layer), then pack them into batches of at most `cap` bytes. Each batch is one compute
+ * pass writing the scratch buffer, followed by its copies; each chunk binds only its own range.
+ * copyBufferToTexture needs bytesPerRow % 256 == 0, so every offset stays 256-aligned.
+ */
+function plan(width: number, height: number, mips: number, layers: number, cap: number) {
+  const chunks: Chunk[] = [];
   for (let m = 0; m < mips; m++) {
-    const mw = Math.max(1, width >> m), mh = Math.max(1, height >> m);
-    const blocksX = Math.ceil(mw / 4), blocksY = Math.ceil(mh / 4);
-    const bytesPerRow = align(blocksX * 16, 256);
-    out.push({ blocksX, blocksY, bytesPerRow, offset, w: blocksX * 4, h: blocksY * 4 });
-    offset = align(offset + bytesPerRow * blocksY * layers, 256);
+    const blocksX = Math.ceil(Math.max(1, width >> m) / 4), blocksY = Math.ceil(Math.max(1, height >> m) / 4);
+    const bytesPerRow = align(blocksX * 16, 256), layerBytes = bytesPerRow * blocksY;
+    if (bytesPerRow > cap) throw new Error(`BC6H encode: one block row (${bytesPerRow} B) exceeds the scratch cap (${cap} B)`);
+    const add = (layer0: number, n: number, row0: number, rows: number) =>
+      chunks.push({ mip: m, layer0, layers: n, row0, rows, blocksX, bytesPerRow, bytes: bytesPerRow * rows * n, offset: 0, slot: chunks.length });
+    if (layerBytes <= cap) {
+      const per = Math.floor(cap / layerBytes);
+      for (let l = 0; l < layers; l += per) add(l, Math.min(per, layers - l), 0, blocksY);
+    } else {
+      const per = Math.floor(cap / bytesPerRow);
+      for (let l = 0; l < layers; l++) for (let r = 0; r < blocksY; r += per) add(l, 1, r, Math.min(per, blocksY - r));
+    }
   }
-  return { mips: out, size: offset };
+  const batches: Chunk[][] = [];
+  let used = Infinity, scratchBytes = 0;
+  for (const c of chunks) {
+    if (used + c.bytes > cap) { batches.push([]); used = 0; }
+    c.offset = used;
+    used += c.bytes;
+    scratchBytes = Math.max(scratchBytes, used);
+    batches[batches.length - 1].push(c);
+  }
+  return { chunks, batches, scratchBytes };
+}
+
+/** Options for {@link createBC6HEncoder}. */
+export interface BC6HEncoderOptions {
+  /**
+   * Upper bound on the block scratch buffer, in bytes. Default and ceiling: the device's
+   * `maxStorageBufferBindingSize` and `maxBufferSize`. Encodes with more blocks run in chunks.
+   */
+  maxScratchBytes?: number;
 }
 
 /**
  * Create a GPU BC6H encoder on `device`. Throws unless the device was created with the
  * `texture-compression-bc` feature. Sources must be rgba16float (or any float-sampled format) 2D or
- * 2D-array/cube textures with TEXTURE_BINDING usage and mip 0 a multiple of 4 px.
+ * 2D-array/cube textures with TEXTURE_BINDING usage and mip 0 a multiple of 4 px. Works within the
+ * default limits at any size the device can hold: blocks go through a scratch buffer no bigger
+ * than one storage binding, in as many chunks as it takes.
  */
-export function createBC6HEncoder(device: GPUDevice): BC6HEncoder {
+export function createBC6HEncoder(device: GPUDevice, options: BC6HEncoderOptions = {}): BC6HEncoder {
   if (!device.features.has('texture-compression-bc')) {
     throw new Error("createBC6HEncoder: the device lacks the 'texture-compression-bc' feature (request it in requestDevice({ requiredFeatures })).");
   }
+  const lim = device.limits;
+  const cap = Math.floor(Math.min(options.maxScratchBytes ?? Infinity, lim.maxStorageBufferBindingSize, lim.maxBufferSize) / 256) * 256;
   const module = device.createShaderModule({ label: 'bc6h encode', code: WGSL });
   const layout = device.createBindGroupLayout({
     label: 'bc6h encode',
@@ -537,47 +574,68 @@ export function createBC6HEncoder(device: GPUDevice): BC6HEncoder {
     }
     return p;
   };
-  // Shared scratch for blocks. Reusing it across encodes recorded into one command encoder is safe:
-  // WebGPU orders each pass's writes before the following copy and the next pass. When it grows,
-  // the old buffer is dropped (not destroyed) in case an unsubmitted encoder still references it.
+  // Shared scratch for blocks. Reusing it across chunks and encodes recorded into one command
+  // encoder is safe: WebGPU orders each pass's writes before the following copy and the next pass.
+  // When it grows, the old buffer is dropped (not destroyed) in case an unsubmitted encoder still
+  // references it.
   let scratch: GPUBuffer | null = null;
+  // Plans and their params (one 256-byte uniform slot per chunk) per source shape. Params depend
+  // only on the shape and are written once, so encodes recorded into one encoder can share them.
+  type Plan = ReturnType<typeof plan> & { params: GPUBuffer };
+  const plans = new Map<string, Plan>();
+  const planFor = (src: GPUTexture): Plan => {
+    const key = `${src.width}x${src.height}x${src.depthOrArrayLayers}x${src.mipLevelCount}`;
+    let p = plans.get(key);
+    if (!p) {
+      const pl = plan(src.width, src.height, src.mipLevelCount, src.depthOrArrayLayers, cap);
+      const params = device.createBuffer({ label: 'bc6h params', size: 256 * pl.chunks.length, usage: GPUBufferUsage.UNIFORM, mappedAtCreation: true });
+      const pu = new Uint32Array(params.getMappedRange());
+      for (const c of pl.chunks) pu.set([0, c.bytesPerRow / 16, c.blocksX, c.rows, c.row0, c.layer0], c.slot * 64);
+      params.unmap();
+      if (plans.size >= 16) plans.delete(plans.keys().next().value!); // dropped, not destroyed: may be in flight
+      p = { ...pl, params };
+      plans.set(key, p);
+    }
+    return p;
+  };
 
   function encodeInto(cmd: GPUCommandEncoder, src: GPUTexture, dst: GPUTexture, opts: BC6HEncodeOptions = {}) {
     if (dst.format !== 'bc6h-rgb-ufloat') throw new Error(`BC6H encodeInto: dst format is ${dst.format}, expected bc6h-rgb-ufloat`);
     if (dst.width !== src.width || dst.height !== src.height || dst.depthOrArrayLayers < src.depthOrArrayLayers || dst.mipLevelCount < src.mipLevelCount) {
       throw new Error('BC6H encodeInto: dst must match src in size and have at least its layers and mips');
     }
-    const layers = src.depthOrArrayLayers, mips = src.mipLevelCount;
-    const L = mipLayout(src.width, src.height, mips, layers);
-    if (!scratch || scratch.size < L.size) {
-      scratch = device.createBuffer({ label: 'bc6h blocks', size: L.size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    const layers = src.depthOrArrayLayers;
+    const P = planFor(src);
+    if (!scratch || scratch.size < P.scratchBytes) {
+      scratch = device.createBuffer({ label: 'bc6h blocks', size: P.scratchBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
     }
-    const params = device.createBuffer({ label: 'bc6h params', size: 256 * mips, usage: GPUBufferUsage.UNIFORM, mappedAtCreation: true });
-    const pu = new Uint32Array(params.getMappedRange());
-    L.mips.forEach((m, i) => pu.set([m.offset / 16, m.bytesPerRow / 16, m.blocksX, m.blocksY], i * 64));
-    params.unmap();
-
-    const pass = cmd.beginComputePass({ label: 'bc6h encode' });
-    pass.setPipeline(pipelineFor(opts.quality ?? 'fast'));
-    L.mips.forEach((m, i) => {
-      pass.setBindGroup(0, device.createBindGroup({
-        layout,
-        entries: [
-          { binding: 0, resource: src.createView({ dimension: '2d-array', baseMipLevel: i, mipLevelCount: 1, baseArrayLayer: 0, arrayLayerCount: layers }) },
-          { binding: 1, resource: { buffer: scratch! } },
-          { binding: 2, resource: { buffer: params, offset: i * 256, size: 16 } },
-        ],
-      }));
-      pass.dispatchWorkgroups(Math.ceil(m.blocksX / 8), Math.ceil(m.blocksY / 8), layers);
-    });
-    pass.end();
-    L.mips.forEach((m, i) => {
-      cmd.copyBufferToTexture(
-        { buffer: scratch!, offset: m.offset, bytesPerRow: m.bytesPerRow, rowsPerImage: m.blocksY },
-        { texture: dst, mipLevel: i },
-        { width: m.w, height: m.h, depthOrArrayLayers: layers },
-      );
-    });
+    const buf = scratch;
+    const views = Array.from({ length: src.mipLevelCount }, (_, i) =>
+      src.createView({ dimension: '2d-array', baseMipLevel: i, mipLevelCount: 1, baseArrayLayer: 0, arrayLayerCount: layers }));
+    const pipeline = pipelineFor(opts.quality ?? 'fast');
+    for (const batch of P.batches) {
+      const pass = cmd.beginComputePass({ label: 'bc6h encode' });
+      pass.setPipeline(pipeline);
+      for (const c of batch) {
+        pass.setBindGroup(0, device.createBindGroup({
+          layout,
+          entries: [
+            { binding: 0, resource: views[c.mip] },
+            { binding: 1, resource: { buffer: buf, offset: c.offset, size: c.bytes } },
+            { binding: 2, resource: { buffer: P.params, offset: c.slot * 256, size: 32 } },
+          ],
+        }));
+        pass.dispatchWorkgroups(Math.ceil(c.blocksX / 8), Math.ceil(c.rows / 8), c.layers);
+      }
+      pass.end();
+      for (const c of batch) {
+        cmd.copyBufferToTexture(
+          { buffer: buf, offset: c.offset, bytesPerRow: c.bytesPerRow, rowsPerImage: c.rows },
+          { texture: dst, mipLevel: c.mip, origin: { x: 0, y: c.row0 * 4, z: c.layer0 } },
+          { width: c.blocksX * 4, height: c.rows * 4, depthOrArrayLayers: c.layers },
+        );
+      }
+    }
   }
 
   return {
@@ -596,6 +654,10 @@ export function createBC6HEncoder(device: GPUDevice): BC6HEncoder {
       return dst;
     },
     encodeInto,
-    destroy() { scratch?.destroy(); scratch = null; pipelines.clear(); },
+    destroy() {
+      scratch?.destroy(); scratch = null;
+      for (const p of plans.values()) p.params.destroy();
+      plans.clear(); pipelines.clear();
+    },
   };
 }
