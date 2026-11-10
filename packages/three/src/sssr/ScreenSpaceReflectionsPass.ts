@@ -119,11 +119,14 @@ export class ScreenSpaceReflectionsPass {
    * render size), e.g. a render target the app draws the composite's `final` into after each frame,
    * so a mirror seen in a mirror shows its own reflection (one bounce deeper per frame). Null
    * (default): the G-buffer's `lit` target of the previous frame (three's lighting with its
-   * specular IBL, without our SSR).
+   * specular IBL, without our SSR). The first 'history' frame, the frame after `resetHistory()` and
+   * the frame after a change of `hitColor` or of this texture use this frame's scene colour instead.
    */
   historySource: THREE.Texture | null = null;
   private history: GPUTexture | null = null;
   private historyValid = false;
+  /** What last frame's history came from (null: hitColor 'current'); a change invalidates it. */
+  private historyKey: THREE.Texture | 'lit' | null = null;
   private readonly ownsGBuffer: boolean;
   private readonly options: ScreenSpaceReflectionsPassOptions;
   private core: CoreTracer | null = null;
@@ -202,8 +205,14 @@ export class ScreenSpaceReflectionsPass {
     const source = wantHistory ? (this.historySource ? this.gpu(this.historySource) : frame.textures.lit) : undefined;
     if (wantHistory && !source) throw new Error("ScreenSpaceReflectionsPass: hitColor 'history' needs historySource or the G-buffer's lit target");
     const history = source ? this.historyTexture(source.format, frame.width, frame.height) : undefined;
-    if (source && this.historySource) { cmd.copyTextureToTexture({ texture: source }, { texture: history! }, size); this.historyValid = true; }
+    // Valid only if the previous frame ran in the same mode from the same source and nothing reset
+    // it. The app texture is valid from the frame after the first one (the app draws it after each
+    // frame); the copy below never makes the frame that does it valid.
+    const key = !wantHistory ? null : this.historySource ?? 'lit';
+    if (key !== this.historyKey) this.historyValid = false;
+    this.historyKey = key;
     const useHistory = !!history && this.historyValid;
+    if (source && this.historySource) cmd.copyTextureToTexture({ texture: source }, { texture: history! }, size);
     const inputs = screenSpaceInputsFromFrame(frame, core, { history: useHistory ? history : undefined });
     const out = core.dispatch(cmd, inputs, {
       frameIndex: frame.frameIndex, ...this.settings, hitColor: useHistory ? 'history' : 'current', fallbackColor: [0, 0, 0],
@@ -219,7 +228,9 @@ export class ScreenSpaceReflectionsPass {
       this.sourceDirty = false;
     }
     // after both traces read it: this frame's lit image becomes next frame's history
-    if (source && !this.historySource) { cmd.copyTextureToTexture({ texture: source }, { texture: history! }, size); this.historyValid = true; }
+    if (source && !this.historySource) cmd.copyTextureToTexture({ texture: source }, { texture: history! }, size);
+    // next frame's history: the lit copy above, or the app texture drawn after this frame
+    this.historyValid = !!source;
     cmd.copyTextureToTexture({ texture: out.radiance }, { texture: this.gpu(this.radiance) }, size);
     cmd.copyTextureToTexture({ texture: out.hitDistance }, { texture: this.gpu(this.hitDistance) }, size);
     cmd.copyTextureToTexture({ texture: out.confidence }, { texture: this.gpu(this.confidence) }, size);

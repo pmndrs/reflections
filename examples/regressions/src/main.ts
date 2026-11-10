@@ -16,6 +16,12 @@ import { createBC6HEncoder } from '@pmndrs/reflections/core';
 import { FrameGBuffer, getDevice } from '@pmndrs/reflections/three';
 // @ts-ignore vite raw import
 import bc6hSrc from '../../../packages/core/src/encode/bc6h.ts?raw';
+import { ssrHistoryChecks } from './ssr';
+
+/** Stream F2's sections (SSR / RT and probe-core review), by name. */
+const F2: Record<string, () => Promise<unknown>> = {
+  ssrHistory: ssrHistoryChecks,
+};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -492,9 +498,14 @@ async function bc6hChecks() {
 const results: Record<string, unknown> = {};
 (window as unknown as { __p: unknown }).__p = {
   results,
-  async run(which = ['gbuffer', 'bc6h']) {
+  async run(which = ['gbuffer', 'bc6h', ...Object.keys(F2)]) {
     if (which.includes('gbuffer')) results.gbuffer = await gbufferChecks();
     if (which.includes('bc6h')) results.bc6h = await bc6hChecks();
+    // F2 sections report a thrown error instead of failing the whole page
+    for (const [name, fn] of Object.entries(F2)) {
+      if (!which.includes(name)) continue;
+      try { results[name] = await fn(); } catch (e) { results[name] = { error: String((e as Error)?.stack ?? e) }; }
+    }
     status.textContent = JSON.stringify(results, null, 1);
     return results;
   },

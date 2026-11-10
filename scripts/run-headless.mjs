@@ -331,12 +331,38 @@ async function ssrChecks(pages) {
   console.log(`  GPU ms ${t.size.join('x')} through the three adapter (${t.variant}, mirrorWall, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
 }
 
+/** examples/regressions, stream F2 (SSR / RT and probe-core review). Each check failed before its fix. */
+function f2Checks(r) {
+  const section = (name) => {
+    const s = r[name];
+    if (s === undefined) return null;
+    if (s.error) { check(`${name}: section ran`, false, s.error.split('\n').slice(0, 3).join(' | ')); return null; }
+    return s;
+  };
+  const h = section('ssrHistory');
+  if (h) {
+    const f = (x) => `${x.stale}/${x.hits} stale, ${x.current} current`;
+    check("ssr hitColor 'history': first frame with an app historySource reads no stale history", h.appFirstFrame.hits > 100 && h.appFirstFrame.stale === 0, f(h.appFirstFrame));
+    check("ssr hitColor 'history': resetHistory() with an app historySource reads no stale history",
+      h.appSecondFrame.stale > 0.5 * h.appSecondFrame.hits && h.appAfterReset.hits > 100 && h.appAfterReset.stale === 0,
+      `second frame (valid history) ${f(h.appSecondFrame)}; after reset ${f(h.appAfterReset)}`);
+    check("ssr hitColor 'history' -> 'current' -> 'history' reads no stale lit history",
+      h.litWhileStale.stale > 0.5 * h.litWhileStale.hits && h.litCurrent.stale === 0 && h.litBackToHistory.hits > 100 && h.litBackToHistory.stale === 0,
+      `while stale ${f(h.litWhileStale)}; current ${f(h.litCurrent)}; back to history ${f(h.litBackToHistory)}`);
+    check('ssrHistory: no WebGPU errors', h.gpuErrors.length === 0, h.gpuErrors.slice(0, 2).join(' | '));
+  }
+}
+
 /** examples/regressions: GPU repros of review bugs (stream F1). Each check failed before its fix. */
 async function regressionChecks(pages) {
   console.log('examples/regressions:');
   const p = await openPage(`http://127.0.0.1:${PORT}/regressions/`);
   pages.push(p);
-  const r = await p.T('window.__p.run()');
+  // `--sections ssrHistory,rtTiles` runs only those page sections (default: all)
+  const sections = args.includes('--sections') ? args[args.indexOf('--sections') + 1].split(',') : null;
+  const r = await p.T(sections ? `window.__p.run(${JSON.stringify(sections)})` : 'window.__p.run()');
+  f2Checks(r);
+  if (sections && !sections.includes('gbuffer')) return;
   const g = r.gbuffer, e = (x) => Number(x).toExponential(2);
   check('gbuffer: static scene with instanced, skinned, batched meshes has no motion', g.staticScene.max <= 1e-5,
     `max ${e(g.staticScene.max)}, per column (plain, instanced, skinned, batched) ${g.staticScene.perColumn.map(e).join(' ')}`);
