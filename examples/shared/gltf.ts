@@ -31,6 +31,30 @@ export async function loadGLTF(url: string): Promise<THREE.Group> {
   return gltf.scene;
 }
 
+/**
+ * World bounds of a model from its vertices. `Box3.setFromObject(model)` without `precise` boxes each
+ * mesh's local bounding box after its transform, which over-reaches for rotated parts: CarConcept's
+ * wheel nodes are rotated, their boxed corners reach 0.15 m below the tyres, and a car stood on that
+ * box floats over the floor (W17).
+ */
+export function modelBounds(model: THREE.Object3D): THREE.Box3 {
+  model.updateMatrixWorld(true);
+  return new THREE.Box3().setFromObject(model, true);
+}
+
+/** Scales `model` so its longest side is `size` (if given), then centres it in x/z with its lowest vertex on y = 0. */
+export function standOnFloor(model: THREE.Object3D, size?: number): THREE.Box3 {
+  let box = modelBounds(model);
+  if (size) {
+    const s = box.getSize(new THREE.Vector3());
+    model.scale.multiplyScalar(size / Math.max(s.x, s.y, s.z));
+    box = modelBounds(model);
+  }
+  const c = box.getCenter(new THREE.Vector3());
+  model.position.x -= c.x; model.position.z -= c.z; model.position.y -= box.min.y;
+  return modelBounds(model);
+}
+
 export interface MirrorFloorOptions extends SceneOptions {
   /** Longest side of the model after scaling, in metres (default: keep the model's size). */
   size?: number;
@@ -53,17 +77,7 @@ export function onMirrorFloor(model: THREE.Object3D, opts: MirrorFloorOptions = 
   scene.environment = gradientEnvironment(new THREE.Vector3(0.4, 0.7, 0.6));
   scene.environmentIntensity = 0.6;
   if (opts.rotateY) model.rotation.y = opts.rotateY;
-  model.updateMatrixWorld(true);
-  let box = new THREE.Box3().setFromObject(model);
-  const size = box.getSize(new THREE.Vector3());
-  if (opts.size) model.scale.multiplyScalar(opts.size / Math.max(size.x, size.y, size.z));
-  model.updateMatrixWorld(true);
-  box = new THREE.Box3().setFromObject(model);
-  const c = box.getCenter(new THREE.Vector3());
-  model.position.x -= c.x; model.position.z -= c.z; model.position.y -= box.min.y;
-  model.updateMatrixWorld(true);
-  box = new THREE.Box3().setFromObject(model);
-  const s = box.getSize(new THREE.Vector3());
+  const s = standOnFloor(model, opts.size).getSize(new THREE.Vector3());
   const r = Math.max(s.x, s.y, s.z);
   scene.add(model);
   floor(scene, (opts.metalness ?? 1) > 0 ? mirror(opts.roughness ?? 0.02, 0xdddddd) : std(0x202022, opts.roughness ?? 0.05), r * 12);

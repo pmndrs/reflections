@@ -6,7 +6,7 @@
 //   floor is rough stone, so `floor.setPolished(true)` swaps in a polished copy of that material.
 import * as THREE from 'three/webgpu';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
-import { assetUrl, loadGLTF, type CameraView, type ProbeVolume, type Vec3 } from '../../shared';
+import { assetUrl, loadGLTF, standOnFloor, type CameraView, type ProbeVolume, type Vec3 } from '../../shared';
 
 export type FloorKind = 'mirror' | 'lacquer';
 
@@ -79,17 +79,8 @@ async function stage(asset: string, file: string, o: StageOptions, aspect: numbe
   scene.backgroundIntensity = 0.35;
 
   if (o.rotateY) model.rotation.y = o.rotateY;
-  model.updateMatrixWorld(true);
-  let box = new THREE.Box3().setFromObject(model);
-  const s0 = box.getSize(new THREE.Vector3());
-  model.scale.multiplyScalar(o.size / Math.max(s0.x, s0.y, s0.z));
-  model.updateMatrixWorld(true);
-  box = new THREE.Box3().setFromObject(model);
-  const c = box.getCenter(new THREE.Vector3());
-  model.position.x -= c.x; model.position.z -= c.z; model.position.y -= box.min.y;
-  model.updateMatrixWorld(true);
-  box = new THREE.Box3().setFromObject(model);
-  const s = box.getSize(new THREE.Vector3());
+  // vertex bounds: the loose per-mesh boxes stand CarConcept 0.15 m above the floor (rotated wheels)
+  const s = standOnFloor(model, o.size).getSize(new THREE.Vector3());
   const r = Math.max(s.x, s.y, s.z);
   scene.add(model);
 
