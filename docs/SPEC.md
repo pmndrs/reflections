@@ -91,6 +91,8 @@ The resolve takes any object shaped like `denoiser-core`'s `TemporalDenoiser<Spe
 
 A trace provider is a WGSL snippet plus a bind group. The snippet provides `fn traceFirstHit(origin, dir, tMax) -> Hit`, where `Hit` holds distance, triangle id, barycentrics and a material index.
 
+As built (W8, `packages/core/src/trace/`): the provider has the shape of @pmndrs/ddgi's `WgslModule` (`code(slot)`, `entries`, `resources()`, `version`, `storageBufferCount`), so the pass places its bindings and the @pmndrs/bvh trace module wraps without changes. `Hit` also carries an optional world normal and the instance. The exact interface and what @pmndrs/bvh still lacks are in `docs/HANDOFF.md`, "Trace seam".
+
 Hit shading belongs to the resolve, not the provider. It looks up the probes at the hit point, plus whatever cheap material evaluation the engine exposes.
 
 - **Core provider: `@pmndrs/bvh`** (pmndrs/bvh, WIP; split out of webgpu-ddgi on 2026-11-10). This is ours, and it is the target.
@@ -341,7 +343,7 @@ Debug views:
 |---|---|---|
 | 0 ✅ | Repo, monorepo layout, probes + prefilter + sampling moved, probes example, headless check, this spec | Typecheck, tests, build; example pixel-identical to the source |
 | 1 ✅ | Layout bench: `octa` / `cube2d-warp` / `cube2d-none` / `cube-hw`, brute-force reference | Decided 2026-11-10 (`docs/research/probe-layouts.md`): core path → `cube-hw` (raw cube array); three stays `cube2d-warp` until TSL binds cube arrays; `octa` an option (fails at the mirror mip at equal memory); format default `rgba16float`, `rgb9e5ufloat` the half-memory option; BC6H off (2.7× p99 on the roughest mip), re-run after the anchor fix. Open: r < 0.2 lookups (D101). |
-| 2 | Probe core: layout-generic prefilter, atlas, WGSL lookup in core, three node on top, re-fit with an irradiance input | Rooms example on the core path, identical or better; lookup ms not worse |
+| 2 ✅ | Probe core: layout-generic prefilter, atlas, WGSL lookup in core, three node on top, re-fit with an irradiance input | Rooms example on the core path, identical or better; lookup ms not worse. Result: core WGSL lookup pixel-identical to the TSL node (max 0/255, rooms with grid and mirror sphere); lookup 0.127 vs 0.117-0.123 ms at 1080p (noise level); core `ProbeSet` on `cube-hw` checked in `examples/probe-core` (HANDOFF W7, D800-D806) |
 | 3 | SSSR port in core (subgroup and workgroup-memory variants) + three adapter node | Subgroup and fallback variants produce identical lists and images; no boiling on the rooms and G1; flicker and GPU ms at or below three `SSRNode` + its denoise |
 | 4 | Trace seam; `@pmndrs/bvh` provider in core (three-mesh-bvh as the three stopgap); hit shading through probes | Off-screen scenario matches the reference; rays dispatched from the miss list only, with the GPU ms scaling with the miss count; the `@pmndrs/bvh` walk agrees with three-mesh-bvh on the same rays |
 | 5 | Hybrid resolve + denoise seam; the denoiser repo's reflection pages switch to the package | Explainer and rooms pages run on `@pmndrs/reflections` with no local copies |

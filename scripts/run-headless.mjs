@@ -4,7 +4,9 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | sssr-core | ssr | probe-bench)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | ssr-rt | probe-core | probe-bench)
+//   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
+//   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
@@ -329,6 +331,123 @@ async function ssrChecks(pages) {
   console.log(`  GPU ms ${t.size.join('x')} through the three adapter (${t.variant}, mirrorWall, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
 }
 
+/** examples/regressions: GPU repros of review bugs (stream F1). Each check failed before its fix. */
+async function regressionChecks(pages) {
+  console.log('examples/regressions:');
+  const p = await openPage(`http://127.0.0.1:${PORT}/regressions/`);
+  pages.push(p);
+  const r = await p.T('window.__p.run()');
+  const g = r.gbuffer, e = (x) => Number(x).toExponential(2);
+  check('gbuffer: static scene with instanced, skinned, batched meshes has no motion', g.staticScene.max <= 1e-5,
+    `max ${e(g.staticScene.max)}, per column (plain, instanced, skinned, batched) ${g.staticScene.perColumn.map(e).join(' ')}`);
+  check('gbuffer: moving one instance moves only it', g.movedInstance.inside > 0 && g.movedInstance.outside === 0 && g.afterMove.max <= 1e-5,
+    `${g.movedInstance.inside} px inside, ${g.movedInstance.outside} outside (max ${e(g.movedInstance.outsideMax)}), next frame max ${e(g.afterMove.max)}`);
+  check('gbuffer: camera cut + resetHistory() gives no motion', g.cutReset.max === 0 && g.afterCut.max <= 1e-5,
+    `max ${e(g.cutReset.max)}, next frame ${e(g.afterCut.max)}`);
+  check('gbuffer: two render() calls in one frame = one per frame', g.twoRendersOneFrame.maxDiff < 1e-4 && g.twoRendersOneFrame.nonzero > 0 && g.twoRendersOneFrame.cameraPrevIsLastRender,
+    JSON.stringify(g.twoRendersOneFrame));
+  check('gbuffer: jittered frames with the unjittered projection have no motion', g.jitter.maxMotion <= 1e-5 && g.jitter.projectionUnjitteredAndJitteredExposed,
+    JSON.stringify(g.jitter));
+  const m = g.materials;
+  check('gbuffer: roughnessNode / metalnessNode reach the G-buffer', Math.abs(m.roughnessNode - 0.25) < 0.01 && Math.abs(m.metalnessNode - 0.75) < 0.01,
+    `roughness ${m.roughnessNode.toFixed(3)}, metalness ${m.metalnessNode.toFixed(3)}`);
+  check('gbuffer: MeshBasic env reflection stays out of scene colour', m.basicEnvSceneColor.every((v) => Math.abs(v - m.basicExpected) < 0.01),
+    `${m.basicEnvSceneColor.map((v) => v.toFixed(4)).join(' ')} (diffuse ${m.basicExpected.toFixed(4)})`);
+  check('gbuffer: logarithmicDepthBuffer rejected', g.logDepth.threw && /logarithmic/i.test(g.logDepth.message), g.logDepth.message ?? 'no error');
+  check('gbuffer: no WebGPU errors', g.gpuErrors.length === 0, g.gpuErrors.slice(0, 2).join(' | '));
+  const b = r.bc6h;
+  if (b.supported === false) { console.log('  no texture-compression-bc: bc6h regressions skipped'); return; }
+  for (const a of b.anchors) {
+    check(`bc6h ${a.name}: no anchor index overflows its slot`, a.twoSubsetAnchorOverflow === 0 && a.oneSubsetAnchorOverflow === 0,
+      `two-subset ${a.twoSubsetAnchorOverflow} of ${a.twoSubsetBlocks}, one-subset ${a.oneSubsetAnchorOverflow}; hardware log2 RMSE ${a.hardware.log2Rmse.toFixed(4)}, blocks off by > 1 stop ${a.hardware.blocksOverOneStop} of ${a.hardware.blocks}, non-finite ${a.hardware.nonFinite}`);
+  }
+  check('bc6h: capped scratch gives the same bits', b.cappedScratch.bytesDiffer === 0, `${b.cappedScratch.bytesDiffer} of ${b.cappedScratch.bytes} bytes differ`);
+  const o = b.overBindingLimit;
+  check(`bc6h: ${(o.blockBytes / 2 ** 20).toFixed(0)} MiB of blocks on default limits (binding ${(b.limits.maxStorageBufferBindingSize / 2 ** 20).toFixed(0)} MiB)`,
+    !o.validationError && !o.outOfMemory && o.newUncapturedErrors.length === 0 && o.maxRelErr < 0.02,
+    `${o.validationError ?? o.outOfMemory ?? o.newUncapturedErrors[0] ?? 'ok'}; max rel err ${o.maxRelErr.toFixed(4)}`);
+}
+
+/**
+ * examples/ssr?rt=1: the ray-traced pass over the SSSR miss list (three-mesh-bvh provider).
+ *  - the provider agrees with three's CPU raycaster on camera rays (ray oracle);
+ *  - offscreen, view 'mirror': the wall mirror shows the wall behind the camera with RT on (confidence,
+ *    traced hit distance vs the analytic mirror distance, the emissive bars), and doesn't with RT off;
+ *  - GPU ms of the trace pass grows with the miss count (same frame, miss threshold varied);
+ *  - traced rays never exceed the per-tile cap or the frame budget.
+ */
+async function ssrRtChecks(pages) {
+  console.log('examples/ssr (?rt=1):');
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1`);
+  pages.push(p);
+  const before = results.logs.length;
+  await p.T("window.__p.load('offscreen')");
+  const bvh = await p.T('window.__p.bvh');
+  const oracle = await p.T('window.__p.rtOracle(4096)');
+  check('rt provider (three-mesh-bvh port) agrees with THREE.Raycaster', oracle.agree / oracle.rays > 0.995 && oracle.gpuOnly + oracle.cpuOnly <= oracle.rays * 0.003,
+    `${oracle.agree}/${oracle.rays} agree (${oracle.bothMiss} both miss), gpu-only ${oracle.gpuOnly}, cpu-only ${oracle.cpuOnly}, p99 rel ${oracle.p99Rel.toExponential(1)}, max rel ${oracle.maxRel.toExponential(1)}; BVH ${bvh.meshes} meshes, ${bvh.triangles} tris, ${bvh.buildMs.toFixed(0)} ms`);
+  await p.T("window.__p.setPose('mirror')");
+  await p.T('window.__p.setRT(false)');
+  await p.T('window.__p.step(2)');
+  const off = await p.T('window.__p.stats()');
+  await p.T('window.__p.setRT(true)');
+  await p.T('window.__p.step(2)');
+  const on = await p.T('window.__p.stats()');
+  const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+  check('rt offscreen: renders, no validation errors, finite outputs', errs.length === 0 && on.nonFinite === 0 && on.rt && on.rt.traced > 0,
+    errs.length ? errs.slice(0, 2).join(' | ') : `${on.misses} misses -> ${JSON.stringify(on.rt)}`);
+  check('rt offscreen: the wall mirror shows the wall behind the camera with RT on, not off',
+    on.facingPanelConfidence > 0.9 && off.facingPanelConfidence < 0.1 && on.panel.hitDistanceMedianRelErr < 0.02 && on.panel.within2pc > 0.8,
+    `confidence ${off.facingPanelConfidence.toFixed(3)} -> ${on.facingPanelConfidence.toFixed(3)} over ${on.facingPanelPixels} px; traced hit distance vs analytic: median rel err ${on.panel.hitDistanceMedianRelErr.toExponential(2)}, ${(on.panel.within2pc * 100).toFixed(1)}% of ${on.panel.analyticPixels} px within 2%`);
+  check('rt offscreen: the emissive bars behind the camera appear in the mirror', on.panel.brightFraction > 0.02 && off.panel.brightFraction < 0.005,
+    `panel px with luminance > 1: ${(off.panel.brightFraction * 100).toFixed(2)}% -> ${(on.panel.brightFraction * 100).toFixed(2)}%; mean panel radiance ${off.panel.meanLuminance.toFixed(3)} -> ${on.panel.meanLuminance.toFixed(3)}`);
+  savePng('ssr-rt-offscreen-mirror-grid.png', await p.T('window.__p.shot()'));
+  await p.T("window.__p.setView('final')");
+  savePng('ssr-rt-offscreen-mirror-final.png', await p.T('window.__p.shot()'));
+  await p.T("window.__p.setView('source')");
+  savePng('ssr-rt-offscreen-mirror-source.png', await p.T('window.__p.shot()'));
+  await p.T("window.__p.setView('grid')");
+
+  // per-tile cap: a budget far below the miss count, two frames so the tile feedback settles
+  await p.T('window.__p.setTraceSettings({ maxTracedRaysPerFrame: 3000 })');
+  await p.T('window.__p.step(3)');
+  const cap = await p.T('window.__p.tileCapCheck()');
+  check('rt cap: traced rays never exceed the per-tile cap or the frame budget',
+    cap.maxPerTile <= cap.stats.tileCap && cap.traced <= 3000 && cap.capped > 0 && cap.traced === cap.stats.traced && cap.other === 0,
+    `${cap.entries} misses: ${cap.traced} traced (budget 3000), ${cap.capped} capped; tile cap ${cap.stats.tileCap} over ${cap.stats.tilesWithMisses} tiles with misses, max traced in a tile ${cap.maxPerTile}, ${cap.tilesTraced} tiles traced`);
+  await p.T('window.__p.setTraceSettings({})');
+  savePng('ssr-rt-offscreen-capped.png', await p.T('window.__p.shot()'));
+
+  // the other scenes still render with RT on; hit-shading error on traced hits the camera also sees
+  for (const id of ['mirrorWall', 'contact', 'moving']) {
+    const b = results.logs.length;
+    await p.T(`window.__p.load(${JSON.stringify(id)})`);
+    await p.T('window.__p.step(2)');
+    const st = await p.T('window.__p.stats()');
+    const e = results.logs.slice(b).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    const extra = id === 'mirrorWall' ? `; wall: ${(st.wall.confidentFraction * 100).toFixed(1)}% confident, corr ${st.wall.lumCorrelation.toFixed(3)}` : '';
+    check(`rt ${id}: renders, finite, no validation errors`, e.length === 0 && st.nonFinite === 0, e.length ? e.slice(0, 2).join(' | ') : `${st.misses} misses -> ${JSON.stringify(st.rt)}${extra}`);
+    const hs = await p.T('window.__p.hitShadingError()');
+    console.log(`  rt ${id}: hit shading vs on-screen colour over ${hs.pixels} traced hits the camera sees: mean ${hs.meanShaded.toFixed(3)} vs ${hs.meanScreen.toFixed(3)} (ratio ${hs.ratio.toFixed(3)}), mean abs rel ${hs.meanAbsRel.toFixed(3)}`);
+  }
+
+  // GPU ms vs miss count at 1080p: the same frame, misses varied with the miss-list threshold
+  const big = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1&scene=offscreen&pose=mirror`);
+  pages.push(big);
+  const rows = [];
+  for (const thr of [0, 0.3, 0.9, 1.01]) {
+    await big.T(`window.__p.setSettings({ missConfidenceThreshold: ${thr} })`);
+    const t = await big.T('window.__p.time(20)');
+    await big.T('window.__p.step(1)');
+    const st = await big.T('window.__p.traceStats()');
+    rows.push({ thr, misses: st.misses, traced: st.traced, ms: t.ms['rt trace'] ?? NaN, total: t.ms.total });
+  }
+  console.log(`  rt GPU ms at 1920x1080 (offscreen 'mirror', median of 20): ${rows.map((r) => `threshold ${r.thr}: ${r.misses} misses, trace ${r.ms?.toFixed(3)} ms (all passes ${r.total?.toFixed(3)})`).join('; ')}`);
+  const [r0, , , rN] = rows;
+  check('rt GPU ms scales with the miss count', r0.misses === 0 && rN.misses > 10000 && rN.ms > 4 * Math.max(r0.ms, 0.01) && rows.every((r, i) => i === 0 || r.misses >= rows[i - 1].misses),
+    rows.map((r) => `${r.misses}: ${r.ms?.toFixed(3)} ms`).join(', '));
+}
+
 async function main() {
   setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull ? 3_600_000 : 600_000).unref();
   let server = null;
@@ -355,6 +474,22 @@ async function main() {
       const stats = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots.warp)}, ${JSON.stringify(shots.hw)})`);
       check('image is lit', stats.lum > 10, `mean luminance ${stats.lum.toFixed(1)}`);
       check("'warp' lookup matches the hardware cube sampler", stats.mean < 1, `mean ${stats.mean.toFixed(3)}, max ${stats.max} / 255`);
+      // phase 2: the package's lookup is core WGSL; the pre-phase-2 TSL lookup lives in examples/probes/src/legacy.ts
+      for (const seam of ['warp', 'none']) {
+        await p.T(`(window.__p.setLookup('legacy-${seam}'), window.__p.capture(), true)`);
+        const legacy = await p.T('window.__p.shot()');
+        const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots[seam])}, ${JSON.stringify(legacy)})`);
+        check(`core lookup matches the pre-phase-2 TSL node ('${seam}')`, d.max <= 1, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
+      }
+      {
+        // the probe grid (every sphere box-projected in its own volume) and the mirror sphere in the doorway
+        const scene = (lookup) => p.T(`(async () => { const P = window.__p; P.setLookup('${lookup}'); P.setGrid(true, 0.05); P.setObject('Sphere', [0, 1.4, 1.2], 0); P.capture();
+          for (let i = 0; i < 3; i++) await P.shot(); const s = await P.shot(); P.setGrid(false); P.setObject('None'); return s; })()`);
+        const core = await scene('warp'), legacy = await scene('legacy-warp');
+        savePng('probes-grid-core.png', core);
+        const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(core)}, ${JSON.stringify(legacy)})`);
+        check('core lookup matches the pre-phase-2 TSL node (grid + mirror sphere)', d.max <= 1, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
+      }
       await p.T("window.__p.setLookup('warp')");
 
       // probe features (examples/probes/src/checks.ts); each restores the page's state
@@ -371,12 +506,35 @@ async function main() {
       check('coverage: alpha 0 outside every volume, 1 inside, fade between; rgb 0 outside', cov.alphaErr < 1e-4 && cov.rgbOutside === 0 && cov.lum > 0,
         `alpha ${JSON.stringify(cov.alpha)}, max err ${cov.alphaErr.toExponential(1)}`);
       check('coverage: rgb * alpha equals the vec3 form (black environment)', cov.composeErr < 1e-3, `max rel err ${cov.composeErr.toExponential(1)}`);
+      const lo = await C('lookupOptions');
+      check("lookup option normal: Lagarde's dominant direction (R at r 0, N at r 1)", lo.dom0 < 1e-4 && lo.dom1 < 1e-4 && lo.lum > 0, `max rel err ${lo.dom0.toExponential(1)}, ${lo.dom1.toExponential(1)}`);
+      check("lookup option ao: Lagarde's specular occlusion", lo.so < 1e-3, `max rel err ${lo.so.toExponential(1)}`);
+      check('lookup option frameIrradiance: re-fit by k / probe L1 irradiance, clamped', lo.refit < 2e-3 && lo.clampErr < 1e-4 && lo.lum > 0 && lo.ratios.every(Number.isFinite) && lo.slots.every((s) => s >= 0),
+        `max rel err ${lo.refit.toExponential(1)} (ratios ${lo.ratios.slice(0, 6).join(' ')} ...), clamp ${lo.clampErr.toExponential(1)}`);
+      const rf = await p.T(`(async () => { const P = window.__p; P.setGrid(true, 0.3); P.setLookup('warp'); for (let i = 0; i < 3; i++) await P.shot(); const off = await P.shot();
+        P.setRefit(true); for (let i = 0; i < 3; i++) await P.shot(); const on = await P.shot(); P.setRefit(false); P.setGrid(false); return { on, off }; })()`);
+      savePng('probes-refit-off.png', rf.off);
+      savePng('probes-refit-on.png', rf.on);
+      const rs = await p.T(`(${IMAGE_STATS})(${JSON.stringify(rf.on)}, ${JSON.stringify(rf.off)})`);
+      check('re-fit with LightProbeGrid renders and changes the image', rs.lum > 10 && rs.mean > 0.5, `lum ${rs.lum.toFixed(1)}, mean diff ${rs.mean.toFixed(2)} / 255`);
       const ck = await C('cacheKey');
       check('two probe sets of equal size keep their own programs', ck.left[0] > 200 && ck.left[2] < 50 && ck.right[2] > 200 && ck.right[0] < 50 && ck.keysDiffer,
         `left ${ck.left}, right ${ck.right}, keys differ ${ck.keysDiffer}`);
       const ts = await C('timeSlice');
-      check('time-sliced bake over 3 calls = full bake', ts.slicedVsFull.max <= 1, `max ${ts.slicedVsFull.max} / 255`);
+      // Residual under heavy GPU load from other processes (W7, HANDOFF): ~0.075 % of pixels, scattered
+      // over the point-light highlights of the grid spheres, differ between two renders of the same
+      // state (seen at max 75-81 / 255). Not the probes: tolerate up to 0.15 % of pixels. A missing or
+      // stale slice changes far more (one slice alone: tens of / 255 over the reflections; a stale
+      // shadow map: 0.26 % in one compact patch, density 0.3 in its bounding box, against 0.003 for the
+      // residual's scatter; the stress check below catches it).
+      const pixels = 960 * 540;
+      const residual = (d) => d.max <= 1 || (d.over < 0.0015 && d.box && (d.over * pixels) / ((d.box[2] - d.box[0] + 1) * (d.box[3] - d.box[1] + 1)) < 0.05);
+      check('time-sliced bake over 3 calls = full bake', residual(ts.slicedVsFull), `max ${ts.slicedVsFull.max} / 255, ${(ts.slicedVsFull.over * 100).toFixed(3)} % px`);
+      if (ts.slicedVsFull.max > 1) { console.log(`  box ${ts.slicedVsFull.box}, ${(ts.slicedVsFull.over * 100).toFixed(3)} % px`); savePng('timeslice-sliced.png', ts.slicedVsFull.a); savePng('timeslice-full.png', ts.slicedVsFull.b); }
       check('one slice alone differs from the full bake', ts.oneVsFull.max > 8, `max ${ts.oneVsFull.max} / 255`);
+      const tss = await C('timeSliceStress');
+      check('bake slices between renders of one frame: the view keeps its own shadows', tss.failures.every(residual), `max per slice ${tss.max.join(' ')} / 255`);
+      for (const f of tss.failures) { console.log(`  slice ${f.slice}: box ${f.box}, ${(f.over * 100).toFixed(3)} % px`); savePng(`slice-${f.slice}-same.png`, f.same); savePng(`slice-${f.slice}-fresh.png`, f.fresh); }
       const ev = await C('environment');
       const n = ev.counts;
       check('environment captured only when it changed', n.noEnvironment === 3 && n.added === 4 && n.unchanged === 3 && n.versionBumped === 4 && n.always === 4 && n.slicedUnchanged === 0 && n.removed === 3,
@@ -393,6 +551,27 @@ async function main() {
           console.log(`  bake, 3 probes at ${res} px: median ${t.median.toFixed(2)} ms (${t.all.map((x) => x.toFixed(2)).join(' ')})`);
         }
         await p.T('(window.__p.setResolution(128), true)');
+      }
+
+      if (args.includes('--time-lookup')) {
+        // lookup ms at 1080p, loop stopped: frame time with the probe node minus without it (no IBL),
+        // the core lookup and the pre-phase-2 TSL node alternated in one page, grid on (432 spheres)
+        const t = await openPage(`http://127.0.0.1:${PORT}/probes/?w=1920&h=1080&grid`);
+        pages.push(t);
+        await t.T(FREEZE);
+        const rows = await t.T(`(async () => {
+          const P = window.__p, out = { warp: [], 'legacy-warp': [] };
+          for (let k = 0; k < 5; k++) for (const lookup of ['legacy-warp', 'warp']) {
+            P.setLookup(lookup); P.setGrid(true, 0.08);
+            const on = await P.timeFrames(30, 7); P.setEnvNode(false); const off = await P.timeFrames(30, 7); P.setEnvNode(true);
+            out[lookup].push({ on: on.wall, off: off.wall, lookup: on.wall - off.wall });
+          }
+          return out;
+        })()`);
+        for (const [k, v] of Object.entries(rows)) {
+          const med = (a) => [...a].sort((x, y) => x - y)[a.length >> 1];
+          console.log(`  lookup ${k}: frame ${med(v.map((r) => r.on)).toFixed(3)} ms, without IBL ${med(v.map((r) => r.off)).toFixed(3)} ms, lookup ${med(v.map((r) => r.lookup)).toFixed(3)} ms (median of ${v.length}; each ${v.map((r) => r.lookup.toFixed(3)).join(' ')})`);
+        }
       }
 
       if (compareUrl) {
@@ -426,9 +605,37 @@ async function main() {
       savePng('bc6h.png', await b.T('window.__p.shot()'));
     }
 
+    if (runs('regressions')) await regressionChecks(pages);
     if (runs('scenes')) pages.push(...(await checkScenes()));
     if (runs('sssr-core')) await sssrCoreChecks(pages);
     if (runs('ssr')) await ssrChecks(pages);
+    if (runs('ssr-rt')) await ssrRtChecks(pages);
+
+    if (runs('probe-core')) {
+      // examples/probe-core: the phase 2 probe core on a bare device (layouts x formats, CPU weights,
+      // re-fit, specular occlusion, the SSSR radiance-fallback seam)
+      console.log('examples/probe-core:');
+      const pc = await openPage(`http://127.0.0.1:${PORT}/probe-core/`);
+      pages.push(pc);
+      const r = await pc.T('window.__p.run()');
+      const L = r.layouts;
+      check('probe core: coverage matches the CPU volume weights', L.coverageErr < 1e-5 && L.inside > 0 && L.outside > 0 && L.fade > 0 && L.composeErr === 0,
+        `max err ${L.coverageErr.toExponential(2)}; ${L.inside} inside, ${L.fade} in a fade, ${L.outside} outside`);
+      for (const l of L.layouts) {
+        const name = `${l.layout}${l.size ? '@' + l.size : ''} ${l.format}${l.lodMapping ? ' lod ' + l.lodMapping : ''}`;
+        // same captures, same plan: only layout / format error (phase 1: mean <= 1, octa's mirror mip p99 ~20)
+        check(`probe core: ${name} agrees with cube-hw rgba16float`, l.full.mean < 2 && Number.isFinite(l.full.max), `mean ${l.full.mean.toFixed(3)}, p99 ${l.full.p99.toFixed(2)}, max ${l.full.max.toFixed(1)} / 255`);
+      }
+      check('probe core: a constant capture looks up as that constant', r.refit.constErr < 2e-3, `max rel err ${r.refit.constErr.toExponential(2)}`);
+      check('probe core: re-fit by 2x the probe L1 irradiance doubles the lookup', r.refit.refitErr < 2e-2, `max rel err ${r.refit.refitErr.toExponential(2)}`);
+      check("probe core: Lagarde's specular occlusion", r.refit.soErr < 1e-4, `max err ${r.refit.soErr.toExponential(2)}`);
+      check('sssr probe fallback: constant probes = constant fallback (to one f16 step)', r.sssr.constantVsProbes === 0, `${r.sssr.constantVsProbes} px differ`);
+      check('sssr probe fallback: structured probes reach the fallback pixels', r.sssr.structuredVsConstant > r.sssr.pixels * 0.05, `${r.sssr.structuredVsConstant} of ${r.sssr.pixels} px`);
+      const rt = r.sssr.rt;
+      check('rt probe fallback (misses + hit shading): constant probes = constant fallback', rt.stats && rt.stats.hits > 0 && rt.stats.tracedMisses > 0 && rt.constantVsProbes === 0,
+        `${rt.constantVsProbes} px differ; ${rt.stats?.hits} hits, ${rt.stats?.tracedMisses} traced misses, trace changed ${rt.changedByTrace} px`);
+      check('rt probe fallback: structured probes reach the traced frame', rt.structuredVsConstant > r.sssr.pixels * 0.05 && rt.changedByTrace > 0, `${rt.structuredVsConstant} of ${r.sssr.pixels} px`);
+    }
 
     if (runs('probe-bench')) {
       // examples/probe-bench: smoke run (or the full bench with --probe-bench). Not a numbers gate:
@@ -441,6 +648,11 @@ async function main() {
         console.log('console:\n  ' + [...new Set(results.logs)].slice(0, 12).join('\n  '));
         throw e;
       });
+      if (args.includes('--low-roughness')) {
+        // D101 experiment: lookups between roughness mips, r187 lod mapping vs 'alpha' (blend linear in r^2)
+        await pb.cdp.evalJs('window.__p.lowRoughness().then((r) => JSON.stringify(r))');
+        console.log((await pb.cdp.evalJs('window.__p.log', false)).replace(/^/gm, '    '));
+      }
       if (process.env.BENCH_LOG || probeBenchFull) console.log((await pb.cdp.evalJs('window.__p.log', false)).replace(/^/gm, '    '));
       if (probeBenchFull) {
         fs.mkdirSync(OUT, { recursive: true });

@@ -9,11 +9,19 @@
 //   texture(ssr.radiance), texture(ssr.confidence), texture(ssr.hitDistance)  // in any TSL graph
 //
 // See ./composite.ts for the hybrid composite (SSR -> probes by coverage -> environment).
+//
+// Ray-traced fallback (SPEC section 4; off unless `trace` is given, D51): core's
+// `createTracedReflections` runs right after the tracer in the same encoder, over its miss list,
+// through a TraceProvider (../trace/MeshBVHTraceProvider.ts for three-mesh-bvh). Traced hits
+// overwrite radiance / hit distance / confidence (1) before the copies, so the composite and the
+// denoise seam see one signal; `source` says which pixels the traced pass touched.
 import * as THREE from 'three/webgpu';
 import { uniform } from 'three/tsl';
 import {
-  createScreenSpaceReflections, screenSpaceInputsFromFrame,
-  type FrameInputs, type ScreenSpaceReflections as CoreTracer, type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant,
+  createScreenSpaceReflections, createTracedReflections, environmentHitShading, screenSpaceInputsFromFrame,
+  type EnvironmentHitShading, type EnvironmentMapping, type FrameInputs, type HitLights, type ScreenSpaceReflections as CoreTracer,
+  type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant, type TraceProvider, type TracedReflections,
+  type TracedReflectionsSettings, type TracedReflectionsStats,
 } from '@pmndrs/reflections-core';
 import { FrameGBuffer, getDevice, getGPUTexture, type FrameGBufferOptions } from '../frame/FrameGBuffer';
 
@@ -31,12 +39,33 @@ export interface ScreenSpaceReflectionsPassOptions {
    * workgroup-memory variant. Default true.
    */
   subgroups?: boolean;
-  /** Allocate core's miss list (for a ray-traced pass or the miss debug view). Default false. */
+  /** Allocate core's miss list (for a ray-traced pass or the miss debug view). Default false; `trace` implies it. */
   missList?: boolean;
   /** Per-pass GPU timestamps (`readTimings()`); needs 'timestamp-query'. Default false. */
   timestamps?: boolean;
   /** Tracer settings (perceptual `roughnessThreshold`, default 0.447). `fallbackColor` is forced to black, see `radiance`. */
   settings?: ScreenSpaceReflectionsSettings;
+  /** Trace rays for the screen-space misses. Off unless given (D51). */
+  trace?: ScreenSpaceTraceOptions;
+}
+
+export interface ScreenSpaceTraceOptions {
+  /** The BVH walk, e.g. `await MeshBVHTraceProvider.fromObjects(pass.device, meshes)`. */
+  provider: TraceProvider;
+  /**
+   * Environment the hit shading lights hits with (an equirect 2-D texture or a CubeTexture).
+   * Default: the scene's `environment` at `render()`; black if none.
+   */
+  environment?: THREE.Texture | null;
+  /** Default: the scene's `environmentIntensity` at `render()` (1 if `trace()` is called directly). */
+  environmentIntensity?: number;
+  /**
+   * Light traced hits with the scene's visible directional and hemisphere lights too (Lambert, no
+   * shadows; up to 4 + 2), gathered at `render()`. Default true.
+   */
+  lights?: boolean;
+  /** Ray budget, length cap, origin offset, on-screen reuse. */
+  settings?: TracedReflectionsSettings;
 }
 
 const make = (name: string, w: number, h: number, type: THREE.TextureDataType, format: THREE.AnyPixelFormat) => {
@@ -51,8 +80,8 @@ const make = (name: string, w: number, h: number, type: THREE.TextureDataType, f
 
 /**
  * Screen-space reflections on any three scene. Each `render()` renders the G-buffer, traces on the
- * renderer's device, and copies the results into {@link radiance}, {@link hitDistance} and
- * {@link confidence}.
+ * renderer's device (plus rays for the misses with `trace`), and copies the results into
+ * {@link radiance}, {@link hitDistance} and {@link confidence}.
  */
 export class ScreenSpaceReflectionsPass {
   readonly renderer: THREE.WebGPURenderer;
@@ -62,13 +91,23 @@ export class ScreenSpaceReflectionsPass {
   /**
    * rgba16float. rgb: confidence x hit radiance (the tracer's fallback is black, so a miss is 0 and
    * the composite adds its own probe / environment term for `1 - confidence`); w: world ray length.
-   * Rough pixels (above the threshold) and the background are 0.
+   * Rough pixels (above the threshold) and the background are 0. Traced hits: the shaded hit.
    */
   readonly radiance: THREE.StorageTexture;
   /** r32float: world hit distance, 0 where nothing was hit (the denoiser seam's convention). */
   readonly hitDistance: THREE.StorageTexture;
-  /** r32float: hit confidence in [0, 1]; 0 for misses, rough pixels and the background. */
+  /** r32float: hit confidence in [0, 1]; 0 for misses, rough pixels and the background; 1 where a traced ray hit. */
   readonly confidence: THREE.StorageTexture;
+  /**
+   * r32float: what the ray-traced pass did per pixel (core `RT_SOURCE`): 0 untouched, 1 traced
+   * hit, 2 traced miss, 3 capped (kept the screen-space result), 4 traced hit shaded from the
+   * on-screen colour. All 0 without `trace` or with `rayTracing` off.
+   */
+  readonly source: THREE.StorageTexture;
+  /** Trace rays for the misses (only does something with `options.trace`). */
+  rayTracing: boolean;
+  /** Ray-traced pass settings, read every frame. */
+  traceSettings: TracedReflectionsSettings;
   /** Camera of the last `render()`, for composites that rebuild world positions from depth. */
   readonly uniforms = {
     projectionInverse: uniform(new THREE.Matrix4()),
@@ -88,10 +127,21 @@ export class ScreenSpaceReflectionsPass {
   private readonly ownsGBuffer: boolean;
   private readonly options: ScreenSpaceReflectionsPassOptions;
   private core: CoreTracer | null = null;
+  private rt: TracedReflections | null = null;
+  private hitShading: EnvironmentHitShading | null = null;
+  private hitGroup: GPUBindGroup | null = null;
+  private hitGroupFor: GPUTexture | null = null;
+  private sceneEnvironment: THREE.Texture | null = null;
+  private sceneEnvironmentIntensity = 1;
+  private sceneLights: HitLights = {};
+  private blackEnvironment: THREE.DataTexture | null = null;
+  private sourceDirty = false;
+  private traceOptions: ScreenSpaceTraceOptions | null;
 
   constructor(renderer: THREE.WebGPURenderer, options: ScreenSpaceReflectionsPassOptions = {}) {
     this.renderer = renderer;
     this.options = options;
+    this.traceOptions = options.trace ? { ...options.trace } : null;
     this.ownsGBuffer = !options.gbuffer;
     this.gbuffer = options.gbuffer ?? new FrameGBuffer(renderer, { lit: 'auto', ...options.gbufferOptions });
     this.settings = { ...options.settings };
@@ -99,16 +149,41 @@ export class ScreenSpaceReflectionsPass {
     this.radiance = make('ssr radiance', w, h, THREE.HalfFloatType, THREE.RGBAFormat);
     this.hitDistance = make('ssr hit distance', w, h, THREE.FloatType, THREE.RedFormat);
     this.confidence = make('ssr confidence', w, h, THREE.FloatType, THREE.RedFormat);
+    this.source = make('ssr rt source', w, h, THREE.FloatType, THREE.RedFormat);
+    this.rayTracing = !!options.trace;
+    this.traceSettings = { ...options.trace?.settings };
   }
 
   /** The core tracer (lists, counters, pyramid, miss list); recreated on resize, null before the first frame. */
   get tracer(): CoreTracer | null { return this.core; }
+  /** The core ray-traced pass (null without `trace`, or before the first frame). */
+  get traced(): TracedReflections | null { return this.rt; }
   get device(): GPUDevice { return getDevice(this.renderer); }
   /** 'subgroups' or 'workgroup' once the first frame ran. */
   get variant(): ScreenSpaceVariant | null { return this.core?.variant ?? null; }
 
+  /** Debug counts of the last traced frame (rays traced, capped, hits, misses). Null without `trace`. */
+  readTraceStats(): Promise<TracedReflectionsStats | null> { return this.rt ? this.rt.readStats() : Promise.resolve(null); }
+
+  /**
+   * Attach, swap (new scene) or detach (null) the trace provider; keeps the other `trace` options.
+   * Rebuilds the traced pass on the next frame. Attaching turns `rayTracing` on.
+   */
+  setTraceProvider(provider: TraceProvider | null) {
+    this.rt?.destroy();
+    this.rt = null;
+    if (!provider) { this.traceOptions = null; this.rayTracing = false; return; }
+    this.traceOptions = { ...this.traceOptions, provider };
+    this.rayTracing = true;
+    // the tracer needs its miss list: recreate it on the next frame if it was made without one
+    if (this.core && !this.core.outputs.missList) { this.core.destroy(); this.core = null; }
+  }
+
   /** Render the G-buffer and trace. Returns the frame's contract inputs. */
   render(scene: THREE.Scene, camera: THREE.Camera, opts: { jitter?: readonly [number, number] } = {}): FrameInputs {
+    this.sceneEnvironment = scene.environment;
+    this.sceneEnvironmentIntensity = scene.environmentIntensity ?? 1;
+    if (this.traceOptions && this.traceOptions.lights !== false) this.sceneLights = ScreenSpaceReflectionsPass.gatherLights(scene);
     const frame = this.gbuffer.render(scene, camera, opts);
     this.trace(frame, camera);
     return frame;
@@ -133,6 +208,17 @@ export class ScreenSpaceReflectionsPass {
     const out = core.dispatch(cmd, inputs, {
       frameIndex: frame.frameIndex, ...this.settings, hitColor: useHistory ? 'history' : 'current', fallbackColor: [0, 0, 0],
     });
+    if (this.rt && this.rayTracing) {
+      // traced misses take black like the tracer's fallback: the composite adds probes /
+      // environment for 1 - confidence, exactly the term three's lit image already has
+      this.rt.dispatch(cmd, { tracer: core, inputs, hitShadingBindGroup: this.hitShadingGroup() }, { ...this.traceSettings, fallbackColor: [0, 0, 0] });
+      cmd.copyTextureToTexture({ texture: this.rt.source }, { texture: this.gpu(this.source) }, size);
+      this.sourceDirty = true;
+    } else if (this.sourceDirty) {
+      cmd.beginRenderPass({ colorAttachments: [{ view: this.gpu(this.source).createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end();
+      this.sourceDirty = false;
+    }
+    // after both traces read it: this frame's lit image becomes next frame's history
     if (source && !this.historySource) { cmd.copyTextureToTexture({ texture: source }, { texture: history! }, size); this.historyValid = true; }
     cmd.copyTextureToTexture({ texture: out.radiance }, { texture: this.gpu(this.radiance) }, size);
     cmd.copyTextureToTexture({ texture: out.hitDistance }, { texture: this.gpu(this.hitDistance) }, size);
@@ -158,8 +244,16 @@ export class ScreenSpaceReflectionsPass {
     }));
   }
 
-  /** With `timestamps`: ms per core pass for the last traced frame (+ 'total'). */
-  readTimings() { return this.core?.readTimings() ?? Promise.resolve(new Map<string, number>()); }
+  /** With `timestamps`: ms per core pass for the last traced frame ('rt begin', 'rt trace' with `trace`; 'total' sums all). */
+  async readTimings(): Promise<ReadonlyMap<string, number>> {
+    const t = new Map(await (this.core?.readTimings() ?? Promise.resolve(new Map<string, number>())));
+    if (this.rt && this.rayTracing) {
+      const r = await this.rt.readTimings();
+      for (const [k, v] of r) if (k !== 'total') t.set(k, v);
+      if (t.has('total') && r.has('total')) t.set('total', t.get('total')! + r.get('total')!);
+    }
+    return t;
+  }
 
   private gpu(t: THREE.Texture): GPUTexture {
     // allocated lazily (and again after a resize disposed it)
@@ -167,17 +261,86 @@ export class ScreenSpaceReflectionsPass {
     return getGPUTexture(this.renderer, t);
   }
 
+  private environmentTexture(): THREE.Texture {
+    const env = this.traceOptions?.environment !== undefined ? this.traceOptions.environment : this.sceneEnvironment;
+    if (env) return env;
+    if (!this.blackEnvironment) {
+      this.blackEnvironment = new THREE.DataTexture(new Float32Array(4), 1, 1, THREE.RGBAFormat, THREE.FloatType);
+      this.blackEnvironment.needsUpdate = true;
+    }
+    return this.blackEnvironment;
+  }
+
+  /** Visible directional and hemisphere lights as the hit shading takes them (colour x intensity, world directions). */
+  static gatherLights(scene: THREE.Scene): HitLights {
+    const lights: Required<HitLights> = { directional: [], hemisphere: [] };
+    const a = new THREE.Vector3(), b = new THREE.Vector3();
+    const rgb = (c: THREE.Color, k: number) => [c.r * k, c.g * k, c.b * k] as [number, number, number];
+    scene.traverseVisible((o) => {
+      const l = o as THREE.DirectionalLight & THREE.HemisphereLight;
+      if (l.isDirectionalLight) {
+        l.updateMatrixWorld();
+        l.target.updateMatrixWorld();
+        a.setFromMatrixPosition(l.matrixWorld).sub(b.setFromMatrixPosition(l.target.matrixWorld)).normalize();
+        lights.directional.push({ direction: [a.x, a.y, a.z], color: rgb(l.color, l.intensity) });
+      } else if (l.isHemisphereLight) {
+        l.updateMatrixWorld();
+        a.setFromMatrixPosition(l.matrixWorld).normalize();
+        lights.hemisphere.push({ up: [a.x, a.y, a.z], sky: rgb(l.color, l.intensity), ground: rgb(l.groundColor, l.intensity) });
+      }
+    });
+    return lights;
+  }
+
+  private static mappingOf(t: THREE.Texture): EnvironmentMapping {
+    return (t as THREE.CubeTexture).isCubeTexture ? 'cube' : 'equirect';
+  }
+
+  private hitShadingGroup(): GPUBindGroup {
+    const gpu = this.gpu(this.environmentTexture());
+    if (!this.hitGroup || this.hitGroupFor !== gpu) {
+      const view = this.hitShading!.mapping === 'cube' ? gpu.createView({ dimension: 'cube' }) : gpu.createView({ dimension: '2d', baseMipLevel: 0, mipLevelCount: 1 });
+      this.hitGroup = this.hitShading!.createBindGroup(view);
+      this.hitGroupFor = gpu;
+    }
+    this.hitShading!.setLighting(this.traceOptions?.environmentIntensity ?? this.sceneEnvironmentIntensity, this.traceOptions?.lights === false ? {} : this.sceneLights);
+    return this.hitGroup;
+  }
+
+  private createTraced(w: number, h: number) {
+    const trace = this.traceOptions!;
+    this.rt = createTracedReflections(this.device, {
+      width: w, height: h, provider: trace.provider, hitShading: this.hitShading!, timestamps: this.options.timestamps ?? false,
+    });
+  }
+
   private ensure(w: number, h: number, inverted: boolean) {
+    const trace = this.traceOptions;
+    if (trace) {
+      // the hit shading is compiled into the trace pipeline: a cube <-> equirect switch rebuilds it
+      const mapping = ScreenSpaceReflectionsPass.mappingOf(this.environmentTexture());
+      if (this.hitShading?.mapping !== mapping) {
+        this.rt?.destroy(); this.rt = null;
+        this.hitShading?.destroy();
+        this.hitShading = environmentHitShading(this.device, mapping);
+        this.hitGroup = null; this.hitGroupFor = null;
+      }
+    }
     const c = this.core;
-    if (c && c.width === w && c.height === h && c.depthInverted === inverted) return;
+    if (c && c.width === w && c.height === h && c.depthInverted === inverted) {
+      if (trace && !this.rt) this.createTraced(w, h);
+      return;
+    }
     c?.destroy();
+    this.rt?.destroy(); this.rt = null;
     const device = this.device;
     const sub = (this.options.subgroups ?? true) && device.features.has('subgroups' as GPUFeatureName);
     this.core = createScreenSpaceReflections(device, {
       width: w, height: h, depthInverted: inverted, variant: sub ? 'subgroups' : 'workgroup',
-      missList: this.options.missList ?? false, timestamps: this.options.timestamps ?? false,
+      missList: (this.options.missList ?? false) || !!this.options.trace || !!trace, timestamps: this.options.timestamps ?? false,
     });
-    for (const t of [this.radiance, this.hitDistance, this.confidence]) (t as unknown as { setSize(w: number, h: number): void }).setSize(w, h);
+    if (trace) this.createTraced(w, h);
+    for (const t of [this.radiance, this.hitDistance, this.confidence, this.source]) (t as unknown as { setSize(w: number, h: number): void }).setSize(w, h);
   }
 
   dispose() {
@@ -185,7 +348,11 @@ export class ScreenSpaceReflectionsPass {
     this.core = null;
     this.history?.destroy();
     this.history = null;
-    for (const t of [this.radiance, this.hitDistance, this.confidence]) t.dispose();
+    this.rt?.destroy();
+    this.rt = null;
+    this.hitShading?.destroy();
+    this.blackEnvironment?.dispose();
+    for (const t of [this.radiance, this.hitDistance, this.confidence, this.source]) t.dispose();
     if (this.ownsGBuffer) this.gbuffer.dispose();
   }
 }

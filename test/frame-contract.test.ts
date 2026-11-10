@@ -28,4 +28,18 @@ describe('frame contract', () => {
     const f2 = h.update({ ...base, view: translate(0, 0, -5), projection: scale(3) });
     expect(Array.from(f2.prevView)).toEqual(translate(0, 0, -5));
   });
+
+  it('FrameCameraHistory keeps the unjittered projection as history, the jittered one beside it', () => {
+    const h = new FrameCameraHistory();
+    const base = { near: 0.1, far: 100, position: [0, 0, 0] as const, view: translate(0, 0, -1) };
+    expect(h.hasPrevious).toBe(false);
+    const f0 = h.update({ ...base, projection: scale(3), projectionJittered: translate(0.25, 0, 0) });
+    expect(h.hasPrevious).toBe(true);
+    expect(Array.from(f0.projectionJittered!)).toEqual(translate(0.25, 0, 0));
+    const f1 = h.update({ ...base, projection: scale(3) });
+    expect(Array.from(f1.prevProjection)).toEqual(scale(3));
+    expect(Array.from(f1.projectionJittered!)).toEqual(scale(3)); // no jitter given: same as projection
+    h.reset();
+    expect(h.hasPrevious).toBe(false);
+  });
 });
