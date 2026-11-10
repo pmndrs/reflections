@@ -22,7 +22,7 @@ scene.environmentNode = reflectionProbes(probes); // every physical material pic
 const radiance = sampleReflectionProbes(probes, positionWorld, direction, roughness);
 ```
 
-This is the API of three.js [#35046](https://github.com/mrdoob/three.js/pull/35046) (Ben Houston), running on r186, which can't bind cube arrays. It adds `sampleReflectionProbes`, `originOffset`, `bake({ environment: false })` and `seamFix`.
+This is the API of three.js [#35046](https://github.com/mrdoob/three.js/pull/35046) (Ben Houston), running on r187 (the floor), which can't bind cube arrays yet. It adds `sampleReflectionProbes`, `originOffset`, `bake({ environment: false })` and `seamFix`.
 
 ## Packages
 

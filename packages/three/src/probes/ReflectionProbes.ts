@@ -1,4 +1,4 @@
-// Box-projected reflection probes for three r186 (WebGPU), a stand-in for three.js PR #35046.
+// Box-projected reflection probes for three r187+ (WebGPU), a stand-in for three.js PR #35046.
 //
 // Same API and method as Ben Houston's ReflectionProbes (examples/jsm/lighting/ReflectionProbes.js
 // in that PR): `ReflectionProbe` volumes (influence box, optional projection box, blend distance)
@@ -7,13 +7,14 @@
 // `scene.environmentNode`, so every physical material picks the probes up with its own roughness,
 // normal and clearcoat.
 //
-// What r186 forces to differ (see ReflectionProbesNode.ts for the lookup side):
-//   - r186 can't bind `texture_cube_array` (three #35045 / #35053 came after it), so the cubes live
+// What three (r187, the floor) forces to differ (see ReflectionProbesNode.ts for the lookup side):
+//   - three can't bind `texture_cube_array` yet (#35045 was reverted; #35053 is open), so the cubes live
 //     in a 2D array texture, layer = probe * 6 + face, mip = roughness level. Same layers and mips
 //     as #35046's CubeArrayTexture (with 'warp', texel centres differ); the node picks face and uv
 //     itself instead of the sampler.
-//   - r186's PMREMGenerator writes the old CubeUV atlas, not r187's cube mips, so the prefilter is
-//     our own compute pass with r187's algorithm (core: probes/prefilter.ts).
+//   - r187's PMREMGenerator writes cube mips, but per probe into its own render target and in render
+//     passes; the prefilter is our own compute pass with r187's algorithm, writing straight into the
+//     array layers (core: probes/prefilter.ts).
 //   - `seamFix` (new): a manual face lookup has no seamless cube filtering. 'none' clamps at face
 //     edges: measured against the hardware cube sampler on the same bake, the probe radiance is off
 //     by up to 5-14 % (p99 4-6 %) in half-texel bands along the edges at roughness >= 0.5 (faces

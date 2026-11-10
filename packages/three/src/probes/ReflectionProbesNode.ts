@@ -1,5 +1,5 @@
 // Environment radiance from a baked ReflectionProbes set: per-pixel volume weights, box projection,
-// and the cube lookup done by hand on a 2D array (three r186 can't bind cube arrays).
+// and the cube lookup done by hand on a 2D array (three r187 can't bind cube arrays).
 //
 // Port of ReflectionProbesNode.js from three.js PR #35046 (Ben Houston). Same weights, priority,
 // projection, roughness-to-mip mapping (maxLod * r * (2 - r)) and capture behaviour. The one

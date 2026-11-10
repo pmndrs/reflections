@@ -1,4 +1,4 @@
-// examples/probes: Ben Houston's reflection probes (three.js PR #35046) on three r186.
+// examples/probes: Ben Houston's reflection probes (three.js PR #35046) on three r187.
 //
 // A port of three's webgpu_reflection_probes.html from that PR (same two rooms, lights, probes,
 // test grid and camera), running @pmndrs/reflections/three instead of the PR's
@@ -179,8 +179,9 @@ async function main() {
       for (const c of hwCubes) c.dispose();
       hwCubes = Array.from({ length: slots }, () => {
         const c = new THREE.CubeRenderTarget(size, { type: THREE.HalfFloatType, generateMipmaps: false, depthBuffer: false, minFilter: THREE.LinearMipmapLinearFilter });
-        // a cube texture lists its mips past level 0
-        for (let lod = 1; lod < mips; lod++) c.texture.mipmaps.push({ width: size >> lod, height: size >> lod } as never);
+        // r187: a render target's cube texture lists every level in `mipmaps`, base included
+        // (Textures.js only adds the base level for non-render-target cube textures)
+        for (let lod = 0; lod < mips; lod++) c.texture.mipmaps.push({ width: size >> lod, height: size >> lod } as never);
         renderer.initRenderTarget(c);
         return c;
       });

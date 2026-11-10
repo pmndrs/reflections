@@ -1,4 +1,4 @@
-// GGX prefilter for reflection probes, in raw WebGPU compute (three r186 has no compute path for it).
+// GGX prefilter for reflection probes, in raw WebGPU compute (three r187's PMREMGenerator renders per target; this writes array layers in compute).
 //
 // Turns one captured cube (three's CubeCamera target, mip 0 only) into the roughness mip chain of
 // three r187's cube PMREM and writes it into six layers of a 2D array texture: mip `lod` holds
