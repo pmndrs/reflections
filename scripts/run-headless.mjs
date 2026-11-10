@@ -612,7 +612,7 @@ async function ssrRtChecks(pages) {
  * examples/ssr-bench (phase 3 gate, docs/research/ssr-gate.md). The smoke (section `ssr-bench`):
  * every method renders on mirrorWall with finite output and no validation error; not a numbers gate.
  */
-const SSR_BENCH_METHODS = ['ours', 'ours-accum', 'three-blur', 'three-stoch', 'three-denoise'];
+const SSR_BENCH_METHODS = ['ours', 'ours-accum', 'ours-denoise', 'three-blur', 'three-stoch', 'three-denoise'];
 async function ssrBenchSmoke(pages) {
   console.log('examples/ssr-bench (smoke):');
   const url = (m) => `http://127.0.0.1:${PORT}/ssr-bench/?scene=mirrorWall&method=${m}`;
@@ -629,6 +629,9 @@ async function ssrBenchSmoke(pages) {
 async function ssrBench() {
   const scenes = args.includes('--ssr-scenes') ? args[args.indexOf('--ssr-scenes') + 1].split(',') : ['rooms', 'explainer', 'mirrorWall', 'roughnessRamp'];
   const timingOnly = args.includes('--ssr-timing-only'); // repeat the 1080p timing without the metrics
+  // --ssr-methods ours,ours-denoise,three-denoise: only these methods (and their pipelines' baselines)
+  const methods = args.includes('--ssr-methods') ? args[args.indexOf('--ssr-methods') + 1].split(',') : SSR_BENCH_METHODS;
+  const baseOf = (m) => (m.startsWith('ours') ? 'ours' : m === 'three-blur' ? 'three-blur' : 'three-stoch');
   const out = { started: new Date().toISOString(), scenes: {}, timing: [] };
   const file = path.join(OUT, timingOnly ? 'ssr-bench-timing.json' : 'ssr-bench.json');
   const save = () => { fs.mkdirSync(OUT, { recursive: true }); fs.writeFileSync(file, JSON.stringify(out, null, 1)); };
@@ -644,7 +647,7 @@ async function ssrBench() {
         console.log(`  ${scene} reference:`, JSON.stringify(res.reference));
         savePng(`ssr-bench-${scene}-reference.png`, await page.T('window.__p.shot()'));
         save();
-        for (const m of SSR_BENCH_METHODS) {
+        for (const m of methods) {
           await page.navigate(url(m));
           res.methods[m] = await page.T('window.__p.measure()');
           const r = res.methods[m];
@@ -654,7 +657,7 @@ async function ssrBench() {
         }
       }
       // GPU ms at 1920x1080, loop stopped: each method, and each pipeline's own G-buffer + lit baseline
-      const runsT = [...SSR_BENCH_METHODS.map((m) => [m, '']), ['ours', '&base=1'], ['three-blur', '&base=1'], ['three-stoch', '&base=1']];
+      const runsT = [...methods.map((m) => [m, '']), ...[...new Set(methods.map(baseOf))].map((b) => [b, '&base=1'])];
       for (const [m, extra] of runsT) {
         await page.navigate(url(m, `${extra}&w=1920&h=1080`));
         const t = await page.T('window.__p.time(30)');
