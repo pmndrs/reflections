@@ -324,6 +324,12 @@ export class ReflectionProbes extends THREE.Object3D {
         else node.needsUpdate = true;
       }
     }
+    // The captures above were lit through the previous array (materials sample it until the bake
+    // ends), whose environment slot still holds the old environment: when both changed, capture
+    // the probes once more, now through this array (F2).
+    if (previous !== null && captureEnvironment && captured.length > 0) {
+      this.bake(renderer, scene, { ...options, probes: captured, environment: environmentOption === false ? false : true });
+    }
   }
 
   /** L1 SH of every slot into `irradiance` (core ProbeIrradiance on three's 2D-array atlas, x mirrored). */

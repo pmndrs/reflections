@@ -414,6 +414,15 @@ function f2Checks(r) {
       pz.atDocumented.ok && !pz.half.ok && pz.half.error.includes(String(pz.documented)) && !pz.s32.ok && pz.s32.error.includes('64') && pz.s64.ok,
       `${pz.documented}: ${d(pz.atDocumented)}; ${pz.documented / 2}: ${d(pz.half)}; 32: ${d(pz.s32)}; 64: ${d(pz.s64)}`);
   }
+  const pr = section('probeRebake');
+  if (pr) {
+    const f = (x) => x.map((v) => v.toFixed(3)).join(' ');
+    // blue / red of the wall a probe captured: red room (A) before, blue room (B) after
+    const ratio = (x) => x[2] / Math.max(x[0], 1e-6);
+    check('probes: a bake that changes layout and environment lights its captures with the new environment',
+      ratio(pr.before) < 0.05 && ratio(pr.after) > 20 && ratio(pr.settled) > 20 && Math.abs(pr.after[2] - pr.settled[2]) <= 0.02 * pr.settled[2],
+      `wall seen by probe a (rgb): env A ${f(pr.before)}; after env B + new probe ${f(pr.after)}; next bake ${f(pr.settled)}`);
+  }
   const rh = section('rtHistory');
   if (rh) {
     check("rt on-screen reuse ignores inputs.history unless hitColor 'history'", rh.current.onScreen > 100 && rh.current.stale === 0 && rh.history.onScreen > 100 && rh.history.stale > 0.5 * rh.history.onScreen,

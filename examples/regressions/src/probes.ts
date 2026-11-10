@@ -51,6 +51,65 @@ async function scaledProbe(renderer: THREE.WebGPURenderer, scale: [number, numbe
   return { scene, probes, centre };
 }
 
+/** A constant-colour equirect environment. */
+function flatEnvironment(r: number, g: number, b: number) {
+  const t = new THREE.DataTexture(new Float32Array([r, g, b, 1, r, g, b, 1]), 2, 1, THREE.RGBAFormat, THREE.FloatType);
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  t.needsUpdate = true;
+  return t;
+}
+
+/**
+ * probeRebake: a bake that changes both the atlas layout (a probe added) and the environment lights
+ * its captures with the new environment. The probes sit in a white diffuse room lit only by
+ * `reflectionProbes()` (scene.environmentNode), so a capture sees the walls lit by whatever
+ * environment slot the node samples while capturing. Environment A is red, B blue.
+ */
+export async function probeRebakeChecks() {
+  const { reflectionProbes } = await import('@pmndrs/reflections/three');
+  const renderer = await newRenderer();
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0, 0, 0);
+  scene.add(new THREE.Mesh(new THREE.BoxGeometry(10, 10, 10), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, side: THREE.BackSide })));
+  const probes = new ReflectionProbes();
+  const a = new ReflectionProbe(4, 4, 4);
+  a.position.set(-2, 0, 0);
+  probes.add(a);
+  scene.add(probes);
+  const envA = flatEnvironment(1, 0, 0), envB = flatEnvironment(0, 0, 1);
+  scene.environment = envA;
+  probes.bake(renderer, scene, { resolution: 64 });
+  scene.environmentNode = reflectionProbes(probes) as never;
+  const P = a.getWorldPosition(new THREE.Vector3());
+  // what probe a captured: the wall at +x, lit by the environment slot
+  const wall = async () => {
+    const target = new THREE.RenderTarget(1, 1, { type: THREE.FloatType, depthBuffer: false });
+    const material = new THREE.MeshBasicNodeMaterial();
+    material.colorNode = vec4(sampleReflectionProbesLocal(probes, vec3(P.x, P.y, P.z), vec3(1, 0, 0), float(0.5)).rgb, 1);
+    renderer.setRenderTarget(target);
+    new THREE.QuadMesh(material).render(renderer);
+    renderer.setRenderTarget(null);
+    const px = Array.from(await renderer.readRenderTargetPixelsAsync(target, 0, 0, 1, 1) as Float32Array).slice(0, 3);
+    target.dispose(); material.dispose();
+    return px;
+  };
+  // the room lit by A: rebake once so the captures see A in the environment slot
+  probes.bake(renderer, scene, { resolution: 64 });
+  const before = await wall();
+  // environment B and a second probe (new layout) in one bake
+  scene.environment = envB;
+  const b = new ReflectionProbe(4, 4, 4);
+  b.position.set(2.5, 0, 0);
+  probes.add(b);
+  probes.bake(renderer, scene, { resolution: 64 });
+  const after = await wall();
+  // reference: the same bake again (layout and environment unchanged now)
+  probes.bake(renderer, scene, { resolution: 64 });
+  const settled = await wall();
+  probes.dispose(); envA.dispose(); envB.dispose(); renderer.dispose();
+  return { before, after, settled };
+}
+
 export async function probeScaleChecks() {
   const renderer = await newRenderer();
   const out: Record<string, unknown> = {};
