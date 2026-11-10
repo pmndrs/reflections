@@ -50,7 +50,7 @@
 //   perceptualRoughness)`, a WGSL snippet with its own @group(1) bindings.
 
 /** Byte size of the uniform block (struct Params below). */
-export const PARAMS_SIZE = 512;
+export const PARAMS_SIZE = 528;
 
 export const PARAMS_WGSL = /* wgsl */ `
 struct Params {
@@ -82,7 +82,12 @@ struct Params {
   missListCapacity: u32,
   missConfidenceThreshold: f32,
   missRoughnessThreshold: f32,
-  _pad0: u32,
+  thicknessRoughnessFactor: f32,
+  thicknessLengthFactor: f32,
+  hitColorFromHistory: u32,
+  _pad1: u32,
+  motionVectorScale: vec2f,
+  _pad2: vec2u,
 };
 @group(0) @binding(0) var<uniform> P: Params;
 `;
@@ -386,6 +391,8 @@ ${commonWgsl(inverted)}
 @group(0) @binding(10) var o_confidence: texture_storage_2d<r32float, write>;
 ${missList ? `@group(0) @binding(11) var<storage, read_write> missList: array<vec2u>;
 @group(0) @binding(12) var<storage, read_write> missCounter: array<atomic<u32>, 4>;` : ''}
+@group(0) @binding(13) var t_history: texture_2d<f32>;
+@group(0) @binding(14) var t_motion: texture_2d<f32>;
 ${fallbackWgsl}
 
 const M_PI: f32 = 3.14159265358979;
@@ -410,6 +417,18 @@ fn loadWorldSpaceNormal(p: vec2i) -> vec3f {
 fn loadInputColor(p: vec2i) -> vec3f {
   if (any(p < vec2i(0)) || any(p >= vec2i(textureDimensions(t_color)))) { return vec3f(0.0); }
   return textureLoad(t_color, p, 0).xyz;
+}
+// Hit colour from last frame (D69, the hybrid sample's g_lit_scene_history): reproject the hit
+// through this frame's motion (uv-space current - previous, times motionVectorScale) and load the
+// previous frame's colour there (nearest texel; D1002). Off screen last frame: this frame's colour.
+fn loadHitColor(hit_uv: vec2f) -> vec3f {
+  let size = vec2f(P.renderSize);
+  let p = vec2i(size * hit_uv);
+  if (P.hitColorFromHistory == 0u) { return loadInputColor(p); }
+  let pc = clamp(p, vec2i(0), vec2i(P.renderSize) - 1);
+  let prev_uv = hit_uv - textureLoad(t_motion, pc, 0).xy * P.motionVectorScale;
+  if (any(prev_uv < vec2f(0.0)) || any(prev_uv >= vec2f(1.0))) { return loadInputColor(p); }
+  return textureLoad(t_history, vec2i(prev_uv * vec2f(textureDimensions(t_history))), 0).xyz;
 }
 fn sampleRandomVector2D(p: vec2u) -> vec2f { return textureLoad(t_blue_noise, vec2i(p % 128u), 0).xy; }
 
@@ -620,11 +639,13 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   let world_space_origin = screenSpaceToWorldSpace((*r).origin_ss);
   let world_space_hit = screenSpaceToWorldSpace(hit);
   let world_space_ray = world_space_hit - world_space_origin;
-  var confidence = 0.0;
-  if (valid_hit) { confidence = validateHit(hit, (*r).uv, world_space_ray, screen_size, P.depthBufferThickness, (*r).march.most_detailed_mip); }
   let world_ray_length = max(0.0, length(world_space_ray));
+  // Thickness: a constant plus the hybrid sample's roughness and ray-length terms (D42, D1001).
+  let thickness = P.depthBufferThickness + (*r).roughness * P.thicknessRoughnessFactor + world_ray_length * P.thicknessLengthFactor;
+  var confidence = 0.0;
+  if (valid_hit) { confidence = validateHit(hit, (*r).uv, world_space_ray, screen_size, thickness, (*r).march.most_detailed_mip); }
   var reflection_radiance = vec3f(0.0);
-  if (confidence > 0.0) { reflection_radiance = loadInputColor(vec2i(screen_size * hit.xy)); }
+  if (confidence > 0.0) { reflection_radiance = loadHitColor(hit.xy); }
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
   let environment_lookup = sampleRadianceFallback(world_space_origin, world_space_reflected_direction, 0.0);
   reflection_radiance = mix(environment_lookup, reflection_radiance, confidence);

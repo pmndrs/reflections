@@ -22,6 +22,13 @@ const q = new URLSearchParams(location.search);
 const W = Number(q.get('w') ?? 960), H = Number(q.get('h') ?? 540);
 const manual = q.has('manual');
 const useProbes = q.get('probes') !== '0';
+/**
+ * Hit colour (D69): 'current' = this frame's scene colour without specular (FFX, default); 'lit' =
+ * last frame's G-buffer lit target (three's lighting incl. its probe/env specular); 'final' = last
+ * frame's composite (SSR included), so reflections of reflections deepen one bounce per frame.
+ */
+type HitColorMode = 'current' | 'lit' | 'final';
+const HIT_MODES: HitColorMode[] = ['current', 'lit', 'final'];
 
 const VIEWS = ['final', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'probeSpecular', 'grid'] as const;
 type View = (typeof VIEWS)[number];
@@ -179,6 +186,21 @@ async function main() {
   const pipeline = new THREE.RenderPipeline(renderer);
   pipeline.outputColorTransform = false;
   let composite: ReturnType<typeof screenSpaceComposite> | null = null;
+  // last frame's composite (linear HDR) for hitColor 'final'
+  const historyRT = new THREE.RenderTarget(W, H, { type: THREE.HalfFloatType, depthBuffer: false });
+  historyRT.texture.name = 'ssr example final history';
+  const historyMaterial = new THREE.MeshBasicNodeMaterial();
+  historyMaterial.toneMapped = false;
+  const historyQuad = new THREE.QuadMesh(historyMaterial);
+  let hitMode: HitColorMode = (q.get('hit') as HitColorMode) ?? 'current';
+  function setHitColor(m: HitColorMode) {
+    if (!HIT_MODES.includes(m)) throw new Error(`hit colour ${m}?`);
+    hitMode = m;
+    ssr.settings.hitColor = m === 'current' ? 'current' : 'history';
+    ssr.historySource = m === 'final' ? historyRT.texture : null;
+    ssr.resetHistory();
+  }
+  setHitColor(hitMode);
   function buildDisplay() {
     // one composite, sampled at the full-screen uv or at a grid cell's local uv
     const gridUV = uv().mul(3);
@@ -212,6 +234,10 @@ async function main() {
     const local = gridUV.fract();
     grid = local.x.lessThan(0.004).or(local.y.lessThan(0.006)).select(vec3(0.15), grid);
     pipeline.outputNode = vec4(uGrid.equal(1).select(grid, full) as N, 1);
+    historyMaterial.colorNode = screenSpaceComposite(ssr, {
+      probes: useProbes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity,
+    }).final;
+    historyMaterial.needsUpdate = true;
     pipeline.needsUpdate = true;
   }
 
@@ -249,6 +275,7 @@ async function main() {
       kit.scene.environmentNode = reflectionProbes(probes) as N;
     }
     ssr.gbuffer.resetHistory();
+    ssr.resetHistory();
     buildDisplay();
     refreshUI();
     return { id: kit.id, views: Object.keys(kit.views), probes: probes?.bakedProbes.length ?? 0, animated: !!kit.update };
@@ -270,6 +297,12 @@ async function main() {
     ssr.render(kit.scene, kit.camera);
     updateMask();
     pipeline.render();
+    if (hitMode === 'final') {
+      const prev = renderer.getRenderTarget();
+      renderer.setRenderTarget(historyRT);
+      historyQuad.render(renderer);
+      renderer.setRenderTarget(prev);
+    }
   }
 
   let looping = false;
@@ -300,6 +333,11 @@ async function main() {
   const ssrBox = document.createElement('input'); ssrBox.type = 'checkbox'; ssrBox.checked = true;
   ssrBox.onchange = () => { composite!.amount.value = ssrBox.checked ? 1 : 0; if (!looping) frame(); };
   row('SSR', ssrBox);
+  const hitSel = document.createElement('select');
+  for (const m of HIT_MODES) hitSel.append(new Option(m, m));
+  hitSel.value = hitMode;
+  hitSel.onchange = () => { setHitColor(hitSel.value as HitColorMode); refreshUI(); if (!looping) frame(); };
+  row('Hit colour', hitSel);
   const pauseBox = document.createElement('input'); pauseBox.type = 'checkbox'; pauseBox.onchange = () => { paused = pauseBox.checked; };
   row('Pause', pauseBox);
   function refreshUI() {
@@ -309,7 +347,7 @@ async function main() {
     if (kit!.views[pose]) poseSel.value = pose;
     status.textContent = [
       `three r${THREE.REVISION} | ${kit!.title} | ${W}x${H}${manual ? ' | manual (loop stopped)' : ''}`,
-      `variant ${ssr.variant ?? '(first frame pending)'} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
+      `variant ${ssr.variant ?? '(first frame pending)'} | hit colour ${hitMode} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
       `specular IBL term: ${probes ? `${probes.bakedProbes.length} probe(s) by coverage, then scene.environment` : 'scene.environment'}`,
     ].join('\n');
   }
@@ -335,6 +373,7 @@ async function main() {
       setPose, setView: (v: View) => setView(v),
       setSSR(on: boolean) { composite!.amount.value = on ? 1 : 0; },
       setSettings(s: N) { Object.assign(ssr.settings, s); },
+      setHitColor: (m: HitColorMode) => setHitColor(m),
       stop: stopLoop, start: startLoop,
       async step(n = 1) { for (let i = 0; i < n; i++) frame(); await idle(); },
       async shot() { frame(); const url = canvas.toDataURL('image/png'); await idle(); return url; },
@@ -383,7 +422,7 @@ async function main() {
     let geo = 0, confSum = 0, nonFinite = 0;
     let panel = 0, panelConf = 0, floorPx = 0, floorConf = 0;
     const pairs: [number, number][] = [];
-    let wallPx = 0, wallConfident = 0, hitErr: number[] = [];
+    let wallPx = 0, wallConfident = 0, hitErr: number[] = [], behindPx = 0, behindConfident = 0;
     const P = new THREE.Vector3(), Q = new THREE.Vector3(), d = new THREE.Vector3(), s = new THREE.Vector3();
     // everything but the floor and the wall can sit between a floor point and its wall reflection
     const blockers: THREE.Object3D[] = [];
@@ -412,10 +451,16 @@ async function main() {
       const sx = Math.floor((s.x * 0.5 + 0.5) * W), sy = Math.floor((0.5 - s.y * 0.5) * H);
       if (sx < 0 || sy < 0 || sx >= W || sy >= H) continue;
       const j = sy * W + sx;
-      if (Math.abs(depth[j] - s.z) > 2e-4) continue; // the wall point is hidden (posts, objects)
       occluder.set(P, d);
       occluder.far = tw - 1e-3;
       if (occluder.intersectObjects(blockers, false).length) continue; // the reflected ray meets an object before the wall
+      if (Math.abs(depth[j] - s.z) > 2e-4) {
+        // The wall point is hidden from the camera (posts, objects) and the ray passes behind them:
+        // screen space can't know the answer. A confident hit here is a streak (thickness too large).
+        behindPx++;
+        if (conf[i] >= 0.5) behindConfident++;
+        continue;
+      }
       wallPx++;
       if (conf[i] < 0.9) continue;
       wallConfident++;
@@ -441,6 +486,7 @@ async function main() {
       wall: kit!.id === 'mirrorWall' ? {
         pixels: wallPx, confidentFraction: wallPx ? wallConfident / wallPx : 0, lumCorrelation: corr, meanAbsRelative: meanAbs,
         hitDistanceMedianRelErr: hitErr.length ? hitErr[hitErr.length >> 1] : NaN,
+        behindPixels: behindPx, streakFraction: behindPx ? behindConfident / behindPx : NaN,
       } : null,
       objects,
     };
