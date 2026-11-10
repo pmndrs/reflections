@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | scenes)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes)
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
 import { spawn } from 'node:child_process';
@@ -220,6 +220,22 @@ async function main() {
         const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
         check('same image as the other build', d.max <= 2, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
       }
+    }
+
+    if (runs('bc6h')) {
+      // BC6H encoder smoke check: the hardware-decoded result must be close to the source. Loose
+      // bounds that only an encoding bug (garbage blocks) would break; numbers go to the console.
+      console.log('examples/bc6h:');
+      const b = await openPage(`http://127.0.0.1:${PORT}/bc6h/`);
+      pages.push(b);
+      const bc = await b.T('window.__p.runAll()');
+      check('texture-compression-bc available', bc.supported !== false);
+      for (const [k, m] of Object.entries(bc.errors ?? {})) {
+        check(`bc6h ${k} decodes close to the source`, m.log2Rmse < 0.3 && m.psnr > 30,
+          `log2 RMSE ${m.log2Rmse.toFixed(4)}, log2 max ${m.log2Max.toFixed(3)}, PSNR ${m.psnr.toFixed(2)} dB, per mip ${m.perMipLog2Rmse.map((x) => x.toFixed(3)).join(' ')}`);
+      }
+      for (const [k, t] of Object.entries(bc.timings ?? {})) console.log(`  encode ${k}: GPU ${t.gpuMs?.toFixed(3) ?? 'n/a'} ms, wall ${t.wallMs.toFixed(3)} ms`);
+      savePng('bc6h.png', await b.T('window.__p.shot()'));
     }
 
     if (runs('scenes')) pages.push(...(await checkScenes()));
