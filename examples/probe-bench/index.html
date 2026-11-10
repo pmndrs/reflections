@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Probe layout bench</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; padding: 16px; background: #111; color: #ddd; font: 14px/1.45 system-ui, sans-serif; }
+      a { color: #8cf; }
+      code { background: #0006; padding: 0 .3em; border-radius: 4px; }
+      pre { font-size: .8rem; white-space: pre-wrap; color: #9a9; overflow-x: auto; }
+      .page { max-width: 1100px; }
+      canvas { max-width: 100%; image-rendering: pixelated; border: 1px solid #333; border-radius: 6px; }
+      button { font: inherit; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Probe layout × format bench</h1>
+      <p>
+        Phase 1 of <code>docs/SPEC.md</code>: <code>cube2d-warp</code>, <code>cube2d-none</code>, <code>cube-hw</code> and
+        <code>octa</code> probes, each in <code>rgba16float</code>, <code>rg11b10ufloat</code>, <code>rgb9e5ufloat</code> and
+        BC6H, against a brute-force GGX reference on a procedural HDR environment. Raw WebGPU, core only.
+        <code>?smoke</code> runs a small configuration; <code>?run</code> runs the full bench on load. Results in
+        <code>docs/research/probe-layouts.md</code>.
+      </p>
+      <p><button id="go">Run full bench</button> <button id="smoke">Run smoke</button></p>
+      <canvas id="preview" width="512" height="256"></canvas>
+      <pre id="status">starting...</pre>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

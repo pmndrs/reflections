@@ -4,7 +4,8 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | sssr-core | probe-bench)
+//   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
 import { spawn } from 'node:child_process';
@@ -19,6 +20,7 @@ const PORT = Number(process.env.REFLECTIONS_PORT ?? 5370); // set per worktree s
 const OUT = process.env.OUT ?? path.join(ROOT, 'out');
 const args = process.argv.slice(2);
 const compareUrl = args.includes('--compare') ? args[args.indexOf('--compare') + 1] : null;
+const probeBenchFull = args.includes('--probe-bench');
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
 const runs = (section) => !only || only === section;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -234,7 +236,7 @@ async function checkScenes() {
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -332,6 +334,28 @@ async function main() {
 
     if (runs('scenes')) pages.push(...(await checkScenes()));
     if (runs('sssr-core')) await sssrCoreChecks(pages);
+
+    if (runs('probe-bench')) {
+      // examples/probe-bench: smoke run (or the full bench with --probe-bench). Not a numbers gate:
+      // it must run without validation errors, and the generic prefilter must match ProbePrefilter.
+      console.log(`examples/probe-bench${probeBenchFull ? ' (full)' : ' (smoke)'}:`);
+      const pb = await openPage(`http://127.0.0.1:${PORT}/probe-bench/`);
+      pages.push(pb);
+      const bench = await pb.cdp.evalJs(`window.__p.run(${probeBenchFull ? '' : '{ smoke: true }'}).then((r) => JSON.stringify(r))`).then(JSON.parse).catch(async (e) => {
+        console.log((await pb.cdp.evalJs('window.__p.log', false).catch(() => '')).replace(/^/gm, '    '));
+        console.log('console:\n  ' + [...new Set(results.logs)].slice(0, 12).join('\n  '));
+        throw e;
+      });
+      if (process.env.BENCH_LOG || probeBenchFull) console.log((await pb.cdp.evalJs('window.__p.log', false)).replace(/^/gm, '    '));
+      if (probeBenchFull) {
+        fs.mkdirSync(OUT, { recursive: true });
+        fs.writeFileSync(path.join(OUT, 'probe-bench.json'), JSON.stringify(bench, null, 1));
+        console.log('  saved', path.relative(process.cwd(), path.join(OUT, 'probe-bench.json')), `(${bench.seconds.toFixed(0)} s)`);
+      }
+      check('probe bench ran every layout', new Set(bench.error.map((e) => e.layout)).size === 4 && bench.lookup.length > 0, `${bench.error.length} error rows, ${bench.lookup.length} lookup rows`);
+      check('layout prefilter is bit-identical to ProbePrefilter (cube2d)', bench.parity.every((p) => p.differing === 0), bench.parity.map((p) => `${p.layout}@${p.source}: ${p.differing}`).join(', '));
+      check('probe bench errors are finite', bench.error.every((e) => Number.isFinite(e.all.mean) && Number.isFinite(e.all.max)));
+    }
 
     const validation = results.logs.filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
     check('no WebGPU validation errors or exceptions', validation.length === 0, validation.slice(0, 3).join(' | '));

@@ -16,7 +16,8 @@ Copyright (c) 2015 Krzysztof Narkowicz, dual-licensed public domain / MIT (used 
     The full MIT notice is reproduced in that file's header.
 
 @pmndrs/sky 0.6.0 (https://github.com/pmndrs/sky), Copyright (c) Dennis Smolek, MIT.
-  - packages/core/src/probes/prefilter.ts: WGSL kernels vendored from src/sky/pmrem/kernels.ts.
+  - packages/core/src/probes/prefilter.ts and probes/layouts/prefilter.ts: WGSL kernels vendored
+    from src/sky/pmrem/kernels.ts.
 
 FidelityFX SDK v1.1.4 (https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK),
 Copyright (C) 2024 Advanced Micro Devices, Inc., MIT.
