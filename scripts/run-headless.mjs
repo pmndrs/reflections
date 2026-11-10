@@ -144,6 +144,20 @@ async function main() {
     check("'warp' lookup matches the hardware cube sampler", stats.mean < 1, `mean ${stats.mean.toFixed(3)}, max ${stats.max} / 255`);
     await p.T("window.__p.setLookup('warp')");
 
+    // BC6H encoder smoke check: the hardware-decoded result must be close to the source. Loose
+    // bounds that only an encoding bug (garbage blocks) would break; numbers go to the console.
+    console.log('examples/bc6h:');
+    const b = await openPage(`http://127.0.0.1:${PORT}/bc6h/`);
+    pages.push(b);
+    const bc = await b.T('window.__p.runAll()');
+    check('texture-compression-bc available', bc.supported !== false);
+    for (const [k, m] of Object.entries(bc.errors ?? {})) {
+      check(`bc6h ${k} decodes close to the source`, m.log2Rmse < 0.3 && m.psnr > 30,
+        `log2 RMSE ${m.log2Rmse.toFixed(4)}, log2 max ${m.log2Max.toFixed(3)}, PSNR ${m.psnr.toFixed(2)} dB`);
+    }
+    for (const [k, t] of Object.entries(bc.timings ?? {})) console.log(`  encode ${k}: GPU ${t.gpuMs?.toFixed(3) ?? 'n/a'} ms, wall ${t.wallMs.toFixed(3)} ms`);
+    savePng('bc6h.png', await b.T('window.__p.shot()'));
+
     if (compareUrl) {
       console.log(`compare with ${compareUrl}:`);
       const o = await openPage(compareUrl);
