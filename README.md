@@ -22,7 +22,7 @@ scene.environmentNode = reflectionProbes(probes); // every physical material pic
 const radiance = sampleReflectionProbes(probes, positionWorld, direction, roughness);
 ```
 
-This is the API of three.js [#35046](https://github.com/mrdoob/three.js/pull/35046) (Ben Houston), running on r187 (the floor), which can't bind cube arrays yet. It adds `sampleReflectionProbes`, `originOffset`, `bake({ environment: false })` and `seamFix`.
+The probes are this library's: an engine-agnostic core (GGX prefilter, cube-array / 2D-array / octahedral layouts, a WGSL lookup with box projection and blending) under a three adapter. The adapter keeps the API of Ben Houston's three.js [#35046](https://github.com/mrdoob/three.js/pull/35046); the two were built side by side and have traded ideas and fixes the whole way, so code moves between them. On three r187 (the floor), which can't bind cube arrays yet, the adapter stores the cubes in a 2D array. Extensions over #35046: `sampleReflectionProbes`, `reflectionProbesLocal`, `originOffset`, live/time-sliced `bake`, `bake({ environment: false })`, `seamFix`, and irradiance re-fit.
 
 ## Packages
 
@@ -30,6 +30,16 @@ This is the API of three.js [#35046](https://github.com/mrdoob/three.js/pull/350
 |---|---|
 | `@pmndrs/reflections` / `/three` | three.js adapter: probes, TSL nodes |
 | `@pmndrs/reflections/core` | engine-agnostic WebGPU: the probe prefilter (more per the spec) |
+
+## Examples
+
+```bash
+pnpm install
+pnpm assets      # Khronos sample models + two Poly Haven HDRIs into examples/assets/ (not committed)
+pnpm examples    # then open http://127.0.0.1:5370/showcase/
+```
+
+[`examples/showcase`](examples/showcase/) is the one to open first. Pick a scene (a car concept, a toy car and a chess set on a mirror floor in a studio HDRI, or Sponza with its rough floor swapped for a polished one) and switch the sources on and off: reflection probes (baked per scene, one box per room or region), screen-space reflections, the ray-traced fallback (three-mesh-bvh, built on first use) and the denoiser (denoiser/ffx, when the sibling `Denoiser` repo is checked out). "Off" shows the scene without image-based reflections. The debug views show which source filled each pixel, the screen-space confidence and the raw-versus-denoised split; the panel reads GPU ms per pass. Every other page is listed in [`examples/index.html`](examples/index.html).
 
 ## Develop
 
