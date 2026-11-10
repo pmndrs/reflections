@@ -7,6 +7,18 @@ export { createProbeLayout, probeBytes, bytesPerTexel, octaGutter, type ProbeLay
 export { LayoutPrefilter } from './probes/layouts/prefilter';
 export { ProbeFormatWriter, type ProbeFormat, type BC6HEncoderLike } from './probes/layouts/formats';
 export { GGXReference, lobeTexels, referenceModeFor, type ReferenceMode } from './probes/reference';
+// Probe core (phase 2): the atlas + volume table + WGSL lookup, the radiance-fallback seam, re-fit irradiance.
+export { ProbeSet, type ProbeSetOptions, type ProbeSetFormat } from './probes/set';
+export {
+  probeLookupWgsl, probeLookupIncludesWgsl, probeLookupFunctionWgsl, lodWgsl,
+  type ProbeLookupOptions, type ProbeLookupModuleOptions, type ProbeLodMapping,
+} from './probes/lookup';
+export {
+  packProbeTable, sortProbeVolumes, probeTableRows, probeIrradianceRow, PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, PROBE_IRRADIANCE_ROWS,
+  type ProbeVolume, type ProbeTableHeader,
+} from './probes/table';
+export { ProbeIrradiance, type ProbeIrradianceOptions } from './probes/irradiance';
+export { probeRadianceFallback, PROBE_FALLBACK_WGSL, type ProbeRadianceFallback } from './probes/fallback';
 export * from './sssr';
 
 // Frame contract: the inputs every screen-space and hybrid pass reads (SPEC "Frame contract").

@@ -41,7 +41,7 @@
 // environment fallback (docs/DIVERGES.md D20).
 
 import * as THREE from 'three/webgpu';
-import { ProbePrefilter, maxLodFor } from '@pmndrs/reflections-core';
+import { PROBE_IRRADIANCE_ROWS, ProbeIrradiance, ProbePrefilter, createProbeLayout, maxLodFor } from '@pmndrs/reflections-core';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Renderer = THREE.WebGPURenderer & { backend: any };
@@ -116,6 +116,11 @@ export interface BakeOptions {
    * bake changes the layout (resolution, seam fix, or the set or order of probes).
    */
   probes?: ReflectionProbe[];
+  /**
+   * Compute each slot's L1 SH irradiance from its capture after the bake (core ProbeIrradiance), for
+   * the re-fit (`frameIrradiance` lookup option). One small dispatch per slot. Default true.
+   */
+  irradiance?: boolean;
 }
 
 export type SeamFix = 'warp' | 'none';
@@ -139,11 +144,18 @@ export class ReflectionProbes extends THREE.Object3D {
   bakedSeamFix: SeamFix = 'warp';
   /** Whether a bake is in progress. Probes then contribute only the environment. */
   capturing = false;
+  /** Upper bound of the re-fit ratio frameIrradiance / probeIrradiance (lookups with `frameIrradiance`). */
+  refitClamp = 4;
+  /** L1 SH radiance coefficients per slot (3 vec4 rows each, core's table layout), from the last bake; null before. */
+  irradiance: GPUBuffer | null = null;
+  /** Bumped when `irradiance` is recomputed. */
+  irradianceVersion = 0;
 
   private renderTarget: THREE.RenderTarget | null = null;
   private cubeTarget: THREE.CubeRenderTarget | null = null;
   private cubeCamera: THREE.CubeCamera | null = null;
   private prefilter: ProbePrefilter | null = null;
+  private irradianceFilter: ProbeIrradiance | null = null;
   private readonly environment = new THREE.Scene();
   /** The environment the fallback slot holds (null: black), and its versions when captured. */
   private environmentTexture: THREE.Texture | null = null;
@@ -184,6 +196,13 @@ export class ReflectionProbes extends THREE.Object3D {
     const maxLod = maxLodFor(resolution);
     const depth = (probes.length + 1) * 6;
     const warp = this.seamFix === 'warp';
+    const device0: GPUDevice = r.backend.device;
+    // 6 layers per slot: the default limit (256 layers) holds 41 probes plus the environment
+    if (depth > device0.limits.maxTextureArrayLayers) {
+      throw new Error(`ReflectionProbes: ${probes.length} probes need ${depth} array layers (6 per probe + 6 for the environment), `
+        + `but this device allows ${device0.limits.maxTextureArrayLayers}. Create the renderer with a larger limit `
+        + `(new WebGPURenderer({ requiredLimits: { maxTextureArrayLayers: adapter.limits.maxTextureArrayLayers } })) or use fewer probes per set.`);
+    }
 
     let renderTarget = this.renderTarget;
     let previous: THREE.RenderTarget | null = null;
@@ -273,6 +292,8 @@ export class ReflectionProbes extends THREE.Object3D {
       Object.assign(r, { autoClear, autoClearColor, autoClearDepth, autoClearStencil });
     }
 
+    if (options.irradiance !== false) this.computeIrradiance(device, target, probes.length + 1);
+
     this.environmentTexture = environmentTexture;
     this.environmentVersion = environmentTexture?.version ?? -1;
     this.environmentPMREMVersion = environmentTexture?.pmremVersion ?? -1;
@@ -293,8 +314,30 @@ export class ReflectionProbes extends THREE.Object3D {
     }
   }
 
+  /** L1 SH of every slot into `irradiance` (core ProbeIrradiance on three's 2D-array atlas, x mirrored). */
+  private computeIrradiance(device: GPUDevice, target: GPUTexture, slots: number) {
+    const layout = createProbeLayout(this.seamFix === 'warp' ? 'cube2d-warp' : 'cube2d-none', { maxLod: target.mipLevelCount - 1 });
+    if (this.irradianceFilter === null || this.irradianceFilter.layout.id !== layout.id || this.irradianceFilter.layout.mipLevelCount !== layout.mipLevelCount) {
+      this.irradianceFilter?.dispose();
+      this.irradianceFilter = new ProbeIrradiance(device, layout, { mirrorX: true });
+    }
+    const size = slots * PROBE_IRRADIANCE_ROWS * 16;
+    if (this.irradiance === null || this.irradiance.size !== size) {
+      this.irradiance?.destroy();
+      this.irradiance = device.createBuffer({ label: 'ReflectionProbes.irradiance', size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
+    }
+    const encoder = device.createCommandEncoder({ label: 'ReflectionProbes.irradiance' });
+    this.irradianceFilter.encode(encoder, target.createView({ dimension: '2d-array' }), this.irradiance, 0, Array.from({ length: slots }, (_, i) => i));
+    device.queue.submit([encoder.finish()]);
+    this.irradianceVersion++;
+  }
+
   /** Frees the GPU resources allocated by this instance. */
   dispose() {
+    this.irradianceFilter?.dispose();
+    this.irradiance?.destroy();
+    this.irradianceFilter = null;
+    this.irradiance = null;
     this.renderTarget?.dispose();
     this.cubeTarget?.dispose();
     this.prefilter?.dispose();

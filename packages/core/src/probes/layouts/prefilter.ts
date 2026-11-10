@@ -13,7 +13,7 @@
 // then is copied into a slot of the target. Other storage formats pack from that scratch
 // (./formats).
 
-import { lodToRoughness } from '../prefilter';
+import { lodToRoughness } from '../lod';
 import type { ProbeLayout } from './types';
 
 const INTEGRATION_SIZE = 16;

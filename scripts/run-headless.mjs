@@ -5,6 +5,7 @@
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | sssr-core | probe-bench)
+//   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
@@ -261,6 +262,22 @@ async function main() {
       const stats = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots.warp)}, ${JSON.stringify(shots.hw)})`);
       check('image is lit', stats.lum > 10, `mean luminance ${stats.lum.toFixed(1)}`);
       check("'warp' lookup matches the hardware cube sampler", stats.mean < 1, `mean ${stats.mean.toFixed(3)}, max ${stats.max} / 255`);
+      // phase 2: the package's lookup is core WGSL; the pre-phase-2 TSL lookup lives in examples/probes/src/legacy.ts
+      for (const seam of ['warp', 'none']) {
+        await p.T(`(window.__p.setLookup('legacy-${seam}'), window.__p.capture(), true)`);
+        const legacy = await p.T('window.__p.shot()');
+        const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots[seam])}, ${JSON.stringify(legacy)})`);
+        check(`core lookup matches the pre-phase-2 TSL node ('${seam}')`, d.max <= 1, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
+      }
+      {
+        // the probe grid (every sphere box-projected in its own volume) and the mirror sphere in the doorway
+        const scene = (lookup) => p.T(`(async () => { const P = window.__p; P.setLookup('${lookup}'); P.setGrid(true, 0.05); P.setObject('Sphere', [0, 1.4, 1.2], 0); P.capture();
+          for (let i = 0; i < 3; i++) await P.shot(); const s = await P.shot(); P.setGrid(false); P.setObject('None'); return s; })()`);
+        const core = await scene('warp'), legacy = await scene('legacy-warp');
+        savePng('probes-grid-core.png', core);
+        const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(core)}, ${JSON.stringify(legacy)})`);
+        check('core lookup matches the pre-phase-2 TSL node (grid + mirror sphere)', d.max <= 1, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
+      }
       await p.T("window.__p.setLookup('warp')");
 
       // probe features (examples/probes/src/checks.ts); each restores the page's state
@@ -299,6 +316,27 @@ async function main() {
           console.log(`  bake, 3 probes at ${res} px: median ${t.median.toFixed(2)} ms (${t.all.map((x) => x.toFixed(2)).join(' ')})`);
         }
         await p.T('(window.__p.setResolution(128), true)');
+      }
+
+      if (args.includes('--time-lookup')) {
+        // lookup ms at 1080p, loop stopped: frame time with the probe node minus without it (no IBL),
+        // the core lookup and the pre-phase-2 TSL node alternated in one page, grid on (432 spheres)
+        const t = await openPage(`http://127.0.0.1:${PORT}/probes/?w=1920&h=1080&grid`);
+        pages.push(t);
+        await t.T(FREEZE);
+        const rows = await t.T(`(async () => {
+          const P = window.__p, out = { warp: [], 'legacy-warp': [] };
+          for (let k = 0; k < 5; k++) for (const lookup of ['legacy-warp', 'warp']) {
+            P.setLookup(lookup); P.setGrid(true, 0.08);
+            const on = await P.timeFrames(30, 7); P.setEnvNode(false); const off = await P.timeFrames(30, 7); P.setEnvNode(true);
+            out[lookup].push({ on: on.wall, off: off.wall, lookup: on.wall - off.wall });
+          }
+          return out;
+        })()`);
+        for (const [k, v] of Object.entries(rows)) {
+          const med = (a) => [...a].sort((x, y) => x - y)[a.length >> 1];
+          console.log(`  lookup ${k}: frame ${med(v.map((r) => r.on)).toFixed(3)} ms, without IBL ${med(v.map((r) => r.off)).toFixed(3)} ms, lookup ${med(v.map((r) => r.lookup)).toFixed(3)} ms (median of ${v.length}; each ${v.map((r) => r.lookup.toFixed(3)).join(' ')})`);
+        }
       }
 
       if (compareUrl) {
