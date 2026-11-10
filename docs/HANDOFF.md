@@ -9,6 +9,7 @@ The working state of the project: who is on what, which interfaces the workstrea
 - **Diverging from a source is fine. Hiding it isn't.** Every knowing difference from FFX, idTech, three, Lagarde, etc. goes in `docs/DIVERGES.md`.
 - **Commit after every run** (CLAUDE.md rule 4): what was tried, numbers, verdict, failures included. Explicit paths, never `git add -A`.
 - **Stay in your lane.** Each stream owns the paths in its row. Touching a shared file (`packages/*/src/index.ts`, `src/*.ts`, `package.json`, `scripts/run-headless.mjs`) is allowed but keep the edit to adding your exports or your check, so merges stay trivial.
+- **Stopping a server:** kill by port (`lsof -ti tcp:<your port> | xargs kill`), never `pkill -f vite`. A pattern kill takes down every other worktree's server too.
 - **Ports.** Each worktree runs its examples server on its own port: `REFLECTIONS_PORT=<port> pnpm examples` / `REFLECTIONS_PORT=<port> pnpm check`. The main checkout keeps 5370; 5310 belongs to another project.
 
 ## Workstreams (started 2026-11-10)
@@ -98,6 +99,8 @@ Layout from three: depth32float; normal = rgba16float world normal (mul 1, add 0
 ## Log
 
 - 2026-11-10: W4 first pass (`ff15973`): frame-contract types in core, `FrameGBuffer` (three MRT), scene kit (`examples/shared`), scenes viewer (`examples/scenes`), `pnpm assets`. Divergences D400–D406.
+- 2026-11-10: W5 merged (probe parity: shadow reuse 538→238 draws, projectionOffset, `reflectionProbesLocal()` coverage node, time-sliced bake, env recapture on change, world-space helper; fixed static-mesh uniform staleness D500 and destroyed-texture binding D501). Main check 42 PASS.
+- 2026-11-10: SSSR review (Opus, read-only). Confirmed bug: 1-D indirect args overflow above 65,535 workgroups, so 4K mirror-heavy frames silently skip intersect (→ W6). Miss-count drift between runs is expected (atomic order × occupancy exit; deterministic at occupancy 0). Blue-noise tables match FFX exactly. **Cross-repo items for the denoise seam:** the denoiser reads none of our lists (full-screen dispatch); its `finalVariance` is private, so variance-guided tracing has no source; it hard-codes NDC-delta motion while our contract defaults to uv-space (D401), so the adapter must convert or the denoiser must take `motionVectorScale`.
 - 2026-11-10: W3 merged (SSSR core: pyramid, classify ×2 variants, FFX blue noise, intersect, miss list). Main check: variant parity exact at occupancy 0 (lists + images), mirror hit 81.9%, reverse-Z equal; 1080p ~1.0–1.2 ms. Opus reviews started on SSSR and on BC6H + G-buffer (read-only). W6 opened: three SSR adapter + first composite; roughnessThreshold becomes perceptual (D43).
 - 2026-11-10: W4 merged (G-buffer + scene kit + viewer + `pnpm assets`). Main `pnpm check`: 17 PASS, all 8 procedural scenes fill every target, scene colour is 0 on mirrors (no specular leak). Open: one console 404 during the scenes check (unidentified resource; likely the skipped asset probe or a favicon).
 - 2026-11-10: three floor raised to r187 (maintainer's call). `pnpm check` all green after one fix (cube render-target mip count in examples/probes).
