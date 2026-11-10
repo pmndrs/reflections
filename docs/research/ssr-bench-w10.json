@@ -1,0 +1,859 @@
+{
+ "started": "2026-11-10T09:54:29.367Z",
+ "scenes": {
+  "rooms": {
+   "methods": {
+    "ours": {
+     "method": "ours",
+     "scene": "rooms",
+     "still": {
+      "pixels": 145594,
+      "frames": 32,
+      "bias": -0.002238141221034134,
+      "rmse": 0.00991870204774547,
+      "stdMean": 0.0028762673924776026,
+      "stdP99": 0.018127716598135155,
+      "meanAbsDelta": 0.0031425607992290262
+     },
+     "orbit": {
+      "pixels": 107219,
+      "frames": 32,
+      "bias": -0.0023879507906171154,
+      "rmse": 0.011386753516885057,
+      "stdMean": 0.005326373797658404,
+      "stdP99": 0.02095192709594884,
+      "meanAbsDelta": 0.003739489640787347
+     },
+     "orbitDeg": 0.3,
+     "info": {},
+     "gpuErrors": 0
+    },
+    "ours-denoise": {
+     "method": "ours-denoise",
+     "scene": "rooms",
+     "still": {
+      "pixels": 145594,
+      "frames": 32,
+      "bias": -0.0023339301169000076,
+      "rmse": 0.008112170391943856,
+      "stdMean": 0.00007052809024863895,
+      "stdP99": 0.00040184518454350565,
+      "meanAbsDelta": 0.0000429271199267514
+     },
+     "orbit": {
+      "pixels": 107219,
+      "frames": 32,
+      "bias": -0.002606331110996328,
+      "rmse": 0.01057965435240174,
+      "stdMean": 0.0037600706935645707,
+      "stdP99": 0.022312487148332387,
+      "meanAbsDelta": 0.0009959645084489852
+     },
+     "orbitDeg": 0.3,
+     "info": {
+      "denoiser": "ffx-reflections",
+      "roughnessThreshold": "0.447^2 alpha",
+      "seam": "HybridReflections (signal = ssr + (1 - c) probe/env)"
+     },
+     "gpuErrors": 0
+    },
+    "three-denoise": {
+     "method": "three-denoise",
+     "scene": "rooms",
+     "still": {
+      "pixels": 145594,
+      "frames": 32,
+      "bias": -0.014893570332494282,
+      "rmse": 0.02870005036127761,
+      "stdMean": 0.0010979977404172291,
+      "stdP99": 0.003732683765646093,
+      "meanAbsDelta": 0.00113622348425033
+     },
+     "orbit": {
+      "pixels": 107219,
+      "frames": 32,
+      "bias": -0.016913959016586246,
+      "rmse": 0.03405069689563876,
+      "stdMean": 0.005657336123091434,
+      "stdP99": 0.042544431070236546,
+      "meanAbsDelta": 0.001782883559601659
+     },
+     "orbitDeg": 0.3,
+     "info": {
+      "example": "webgpu_postprocessing_ssr_denoise",
+      "quality": 0.25,
+      "stepExponent": 3,
+      "maxDistance": 10,
+      "thickness": 0.1,
+      "maxLuminance": 35,
+      "screenEdgeFadeBlack": true,
+      "environmentIntensity": 1,
+      "envMisses": false,
+      "envSpecularInLighting": "off (example patch)",
+      "traa": "omitted",
+      "grading": "omitted",
+      "denoise": {
+       "temporalReproject": {
+        "maxFrames": 16,
+        "clampIntensity": 0.25,
+        "flickerSuppression": 1,
+        "hitPointReprojection": true
+       },
+       "recurrentDenoise": {
+        "lumaPhi": 0.75,
+        "depthPhi": 20,
+        "normalPhi": 0.3,
+        "roughnessPhi": 100,
+        "radius": 1.5,
+        "alphaPhi": 5,
+        "strength": 0.725,
+        "adapt": 0.5,
+        "smoothDisocclusions": true,
+        "flickerSuppression": 1,
+        "adaptiveTrust": 1
+       }
+      }
+     },
+     "gpuErrors": 0
+    }
+   },
+   "reference": {
+    "glossyPixels": 145594,
+    "nonFinite": 0,
+    "stillSpp": 1024,
+    "orbitSpp": 256,
+    "orbitFrames": 32,
+    "orbitDeg": 0.3,
+    "noiseStill": 0.00019697840504816143,
+    "noiseOrbit": 0.00039395681009632286,
+    "seconds": {
+     "still": 0.9034000000059604,
+     "total": 4.663800000011921
+    },
+    "info": {
+     "provider": {
+      "meshes": 28,
+      "triangles": 7208
+     }
+    }
+   }
+  },
+  "explainer": {
+   "methods": {
+    "ours": {
+     "method": "ours",
+     "scene": "explainer",
+     "still": {
+      "pixels": 254512,
+      "frames": 32,
+      "bias": -0.005342807260750825,
+      "rmse": 0.0320852171164432,
+      "stdMean": 0.005330968512526164,
+      "stdP99": 0.056019204552493436,
+      "meanAbsDelta": 0.005535617474370906
+     },
+     "orbit": {
+      "pixels": 224358,
+      "frames": 32,
+      "bias": -0.004859451612961146,
+      "rmse": 0.029513561649513673,
+      "stdMean": 0.009280538379196382,
+      "stdP99": 0.12644532049240897,
+      "meanAbsDelta": 0.006261965065215605
+     },
+     "orbitDeg": 0.3,
+     "info": {},
+     "gpuErrors": 0
+    },
+    "ours-denoise": {
+     "method": "ours-denoise",
+     "scene": "explainer",
+     "still": {
+      "pixels": 254512,
+      "frames": 32,
+      "bias": -0.005980162330591456,
+      "rmse": 0.026829544607539568,
+      "stdMean": 0.00011851258744958997,
+      "stdP99": 0.0013599084564971898,
+      "meanAbsDelta": 0.00006354031833711175
+     },
+     "orbit": {
+      "pixels": 224358,
+      "frames": 32,
+      "bias": -0.004539847916212894,
+      "rmse": 0.027860514943720466,
+      "stdMean": 0.007721340630786503,
+      "stdP99": 0.1129879345294538,
+      "meanAbsDelta": 0.0028008324364754574
+     },
+     "orbitDeg": 0.3,
+     "info": {
+      "denoiser": "ffx-reflections",
+      "roughnessThreshold": "0.447^2 alpha",
+      "seam": "HybridReflections (signal = ssr + (1 - c) probe/env)"
+     },
+     "gpuErrors": 0
+    },
+    "three-denoise": {
+     "method": "three-denoise",
+     "scene": "explainer",
+     "still": {
+      "pixels": 254512,
+      "frames": 32,
+      "bias": -0.009880498554862054,
+      "rmse": 0.051291063514008084,
+      "stdMean": 0.00033630431587685847,
+      "stdP99": 0.0023307642468697047,
+      "meanAbsDelta": 0.00020460861336951634
+     },
+     "orbit": {
+      "pixels": 224358,
+      "frames": 32,
+      "bias": -0.010329504431706315,
+      "rmse": 0.05305221049986955,
+      "stdMean": 0.012146265330579184,
+      "stdP99": 0.13348691927372955,
+      "meanAbsDelta": 0.0030176466130578516
+     },
+     "orbitDeg": 0.3,
+     "info": {
+      "example": "webgpu_postprocessing_ssr_denoise",
+      "quality": 0.25,
+      "stepExponent": 3,
+      "maxDistance": 10,
+      "thickness": 0.1,
+      "maxLuminance": 35,
+      "screenEdgeFadeBlack": true,
+      "environmentIntensity": 0.28,
+      "envMisses": true,
+      "envSpecularInLighting": "off (example patch)",
+      "traa": "omitted",
+      "grading": "omitted",
+      "denoise": {
+       "temporalReproject": {
+        "maxFrames": 16,
+        "clampIntensity": 0.25,
+        "flickerSuppression": 1,
+        "hitPointReprojection": true
+       },
+       "recurrentDenoise": {
+        "lumaPhi": 0.75,
+        "depthPhi": 20,
+        "normalPhi": 0.3,
+        "roughnessPhi": 100,
+        "radius": 1.5,
+        "alphaPhi": 5,
+        "strength": 0.725,
+        "adapt": 0.5,
+        "smoothDisocclusions": true,
+        "flickerSuppression": 1,
+        "adaptiveTrust": 1
+       }
+      }
+     },
+     "gpuErrors": 0
+    }
+   },
+   "reference": {
+    "glossyPixels": 254512,
+    "nonFinite": 0,
+    "stillSpp": 1024,
+    "orbitSpp": 256,
+    "orbitFrames": 32,
+    "orbitDeg": 0.3,
+    "noiseStill": 0.000301630024462053,
+    "noiseOrbit": 0.000603260048924106,
+    "seconds": {
+     "still": 1.109,
+     "total": 6.62890000000596
+    },
+    "info": {
+     "provider": {
+      "meshes": 51,
+      "triangles": 26440
+     }
+    }
+   }
+  },
+  "mirrorWall": {
+   "methods": {
+    "ours": {
+     "method": "ours",
+     "scene": "mirrorWall",
+     "still": {
+      "pixels": 201526,
+      "frames": 32,
+      "bias": -0.004770122676283327,
+      "rmse": 0.01684157736338743,
+      "stdMean": 0.00038088124938320085,
+      "stdP99": 0.014246981543745386,
+      "meanAbsDelta": 0.0001730020045644788
+     },
+     "orbit": {
+      "pixels": 196422,
+      "frames": 32,
+      "bias": -0.00454092101105822,
+      "rmse": 0.016607221801760448,
+      "stdMean": 0.005985011885673146,
+      "stdP99": 0.05559523704014271,
+      "meanAbsDelta": 0.0020201882704590896
+     },
+     "orbitDeg": 0.3,
+     "info": {},
+     "gpuErrors": 0
+    },
+    "ours-denoise": {
+     "method": "ours-denoise",
+     "scene": "mirrorWall",
+     "still": {
+      "pixels": 201526,
+      "frames": 32,
+      "bias": -0.0049541837917654215,
+      "rmse": 0.01640521653178996,
+      "stdMean": 0.00003696589585531269,
+      "stdP99": 0.00113364227523888,
+      "meanAbsDelta": 0.000007329159618069554
+     },
+     "orbit": {
+      "pixels": 196422,
+      "frames": 32,
+      "bias": -0.0037432242648826135,
+      "rmse": 0.017392550891874584,
+      "stdMean": 0.007625538924848704,
+      "stdP99": 0.055724805249255265,
+      "meanAbsDelta": 0.0023197520689174737
+     },
+     "orbitDeg": 0.3,
+     "info": {
+      "denoiser": "ffx-reflections",
+      "roughnessThreshold": "0.447^2 alpha",
+      "seam": "HybridReflections (signal = ssr + (1 - c) probe/env)"
+     },
+     "gpuErrors": 0
+    },
+    "three-denoise": {
+     "method": "three-denoise",
+     "scene": "mirrorWall",
+     "still": {
+      "pixels": 201526,
+      "frames": 32,
+      "bias": -0.0550162382938679,
+      "rmse": 0.091786247765056,
+      "stdMean": 0.001012553723220172,
+      "stdP99": 0.004702960322950993,
+      "meanAbsDelta": 0.00045052587963438016
+     },
+     "orbit": {
+      "pixels": 196422,
+      "frames": 32,
+      "bias": -0.05573367934019883,
+      "rmse": 0.0932514374887967,
+      "stdMean": 0.015954303889893502,
+      "stdP99": 0.0913525170311745,
+      "meanAbsDelta": 0.0028351882854904197
+     },
+     "orbitDeg": 0.3,
+     "info": {
+      "example": "webgpu_postprocessing_ssr_denoise",
+      "quality": 0.25,
+      "stepExponent": 3,
+      "maxDistance": 10,
+      "thickness": 0.1,
+      "maxLuminance": 35,
+      "screenEdgeFadeBlack": false,
+      "environmentIntensity": 0.3,
+      "envMisses": true,
+      "envSpecularInLighting": "off (example patch)",
+      "traa": "omitted",
+      "grading": "omitted",
+      "denoise": {
+       "temporalReproject": {
+        "maxFrames": 16,
+        "clampIntensity": 0.25,
+        "flickerSuppression": 1,
+        "hitPointReprojection": true
+       },
+       "recurrentDenoise": {
+        "lumaPhi": 0.75,
+        "depthPhi": 20,
+        "normalPhi": 0.3,
+        "roughnessPhi": 100,
+        "radius": 1.5,
+        "alphaPhi": 5,
+        "strength": 0.725,
+        "adapt": 0.5,
+        "smoothDisocclusions": true,
+        "flickerSuppression": 1,
+        "adaptiveTrust": 1
+       }
+      }
+     },
+     "gpuErrors": 0
+    }
+   },
+   "reference": {
+    "glossyPixels": 201526,
+    "nonFinite": 0,
+    "stillSpp": 1024,
+    "orbitSpp": 256,
+    "orbitFrames": 32,
+    "orbitDeg": 0.3,
+    "noiseStill": 0.000029908631474361952,
+    "noiseOrbit": 0.000059817262948723905,
+    "seconds": {
+     "still": 0.2908999999910593,
+     "total": 2.6643999999910593
+    },
+    "info": {
+     "provider": {
+      "meshes": 7,
+      "triangles": 2248
+     }
+    }
+   }
+  },
+  "roughnessRamp": {
+   "methods": {
+    "ours": {
+     "method": "ours",
+     "scene": "roughnessRamp",
+     "still": {
+      "pixels": 55266,
+      "frames": 32,
+      "bias": -0.007535734961064018,
+      "rmse": 0.03893257200824282,
+      "stdMean": 0.023233248475036727,
+      "stdP99": 0.06729747351782268,
+      "meanAbsDelta": 0.0279834814020793
+     },
+     "orbit": {
+      "pixels": 27231,
+      "frames": 32,
+      "bias": -0.006223367794724247,
+      "rmse": 0.03308691882704065,
+      "stdMean": 0.020979730380327046,
+      "stdP99": 0.06719710578600566,
+      "meanAbsDelta": 0.02282904986583571
+     },
+     "orbitDeg": 0.3,
+     "info": {},
+     "gpuErrors": 0
+    },
+    "ours-denoise": {
+     "method": "ours-denoise",
+     "scene": "roughnessRamp",
+     "still": {
+      "pixels": 55266,
+      "frames": 32,
+      "bias": -0.009535769148511487,
+      "rmse": 0.021304698809535366,
+      "stdMean": 0.00043868766630198797,
+      "stdP99": 0.0020499150584592668,
+      "meanAbsDelta": 0.0002756937802144995
+     },
+     "orbit": {
+      "pixels": 27231,
+      "frames": 32,
+      "bias": -0.009311952157865587,
+      "rmse": 0.022396734769638018,
+      "stdMean": 0.0070588297115200364,
+      "stdP99": 0.07061451700871202,
+      "meanAbsDelta": 0.002793692195720947
+     },
+     "orbitDeg": 0.3,
+     "info": {
+      "denoiser": "ffx-reflections",
+      "roughnessThreshold": "0.447^2 alpha",
+      "seam": "HybridReflections (signal = ssr + (1 - c) probe/env)"
+     },
+     "gpuErrors": 0
+    },
+    "three-denoise": {
+     "method": "three-denoise",
+     "scene": "roughnessRamp",
+     "still": {
+      "pixels": 55266,
+      "frames": 32,
+      "bias": -0.020485552000591403,
+      "rmse": 0.046436271615670995,
+      "stdMean": 0.0005455615712451085,
+      "stdP99": 0.002558194072072592,
+      "meanAbsDelta": 0.00033789338534011303
+     },
+     "orbit": {
+      "pixels": 27231,
+      "frames": 32,
+      "bias": -0.010896773058548994,
+      "rmse": 0.03812627901738356,
+      "stdMean": 0.009713538920685421,
+      "stdP99": 0.07917639933997737,
+      "meanAbsDelta": 0.002891995553113308
+     },
+     "orbitDeg": 0.3,
+     "info": {
+      "example": "webgpu_postprocessing_ssr_denoise",
+      "quality": 0.25,
+      "stepExponent": 3,
+      "maxDistance": 10,
+      "thickness": 0.1,
+      "maxLuminance": 35,
+      "screenEdgeFadeBlack": false,
+      "environmentIntensity": 0.5,
+      "envMisses": true,
+      "envSpecularInLighting": "off (example patch)",
+      "traa": "omitted",
+      "grading": "omitted",
+      "denoise": {
+       "temporalReproject": {
+        "maxFrames": 16,
+        "clampIntensity": 0.25,
+        "flickerSuppression": 1,
+        "hitPointReprojection": true
+       },
+       "recurrentDenoise": {
+        "lumaPhi": 0.75,
+        "depthPhi": 20,
+        "normalPhi": 0.3,
+        "roughnessPhi": 100,
+        "radius": 1.5,
+        "alphaPhi": 5,
+        "strength": 0.725,
+        "adapt": 0.5,
+        "smoothDisocclusions": true,
+        "flickerSuppression": 1,
+        "adaptiveTrust": 1
+       }
+      }
+     },
+     "gpuErrors": 0
+    }
+   },
+   "reference": {
+    "glossyPixels": 55266,
+    "nonFinite": 0,
+    "stillSpp": 1024,
+    "orbitSpp": 256,
+    "orbitFrames": 32,
+    "orbitDeg": 0.3,
+    "noiseStill": 0.0017970602955628093,
+    "noiseOrbit": 0.0035941205911256186,
+    "seconds": {
+     "still": 0.5703999999910593,
+     "total": 3.8452999999970197
+    },
+    "info": {
+     "provider": {
+      "meshes": 38,
+      "triangles": 4030
+     }
+    }
+   }
+  }
+ },
+ "timing": [
+  {
+   "method": "ours",
+   "base": false,
+   "scene": "rooms",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 2.303337,
+   "gpuMin": 2.008201,
+   "gpuP90": 2.657133,
+   "cpuMs": 0.7999999970197678
+  },
+  {
+   "method": "ours-denoise",
+   "base": false,
+   "scene": "rooms",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 3.554075,
+   "gpuMin": 3.252527,
+   "gpuP90": 4.042943,
+   "cpuMs": 0.9000000059604645
+  },
+  {
+   "method": "three-denoise",
+   "base": false,
+   "scene": "rooms",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 6.3645,
+   "gpuMin": 5.926805,
+   "gpuP90": 6.986721,
+   "cpuMs": 0.8999999910593033
+  },
+  {
+   "method": "ours",
+   "base": true,
+   "scene": "rooms",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.574279,
+   "gpuMin": 1.401248,
+   "gpuP90": 1.93155,
+   "cpuMs": 0.7000000029802322
+  },
+  {
+   "method": "three-stoch",
+   "base": true,
+   "scene": "rooms",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.65794,
+   "gpuMin": 1.306878,
+   "gpuP90": 1.882677,
+   "cpuMs": 0.7999999970197678
+  },
+  {
+   "method": "ours",
+   "base": false,
+   "scene": "explainer",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.981413,
+   "gpuMin": 1.697026,
+   "gpuP90": 2.468069,
+   "cpuMs": 0.5999999940395355
+  },
+  {
+   "method": "ours-denoise",
+   "base": false,
+   "scene": "explainer",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 3.362349,
+   "gpuMin": 3.144849,
+   "gpuP90": 3.828932,
+   "cpuMs": 0.7000000029802322
+  },
+  {
+   "method": "three-denoise",
+   "base": false,
+   "scene": "explainer",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 4.355943,
+   "gpuMin": 4.10052,
+   "gpuP90": 4.989653,
+   "cpuMs": 0.699999988079071
+  },
+  {
+   "method": "ours",
+   "base": true,
+   "scene": "explainer",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.043347,
+   "gpuMin": 0.836952,
+   "gpuP90": 1.222994,
+   "cpuMs": 0.5999999940395355
+  },
+  {
+   "method": "three-stoch",
+   "base": true,
+   "scene": "explainer",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.30986,
+   "gpuMin": 0.984062,
+   "gpuP90": 2.2628,
+   "cpuMs": 0.5
+  },
+  {
+   "method": "ours",
+   "base": false,
+   "scene": "mirrorWall",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.595037,
+   "gpuMin": 1.507214,
+   "gpuP90": 2.049364,
+   "cpuMs": 0.4000000059604645
+  },
+  {
+   "method": "ours-denoise",
+   "base": false,
+   "scene": "mirrorWall",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 2.97339,
+   "gpuMin": 2.838117,
+   "gpuP90": 3.544701,
+   "cpuMs": 0.5
+  },
+  {
+   "method": "three-denoise",
+   "base": false,
+   "scene": "mirrorWall",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 2.859367,
+   "gpuMin": 2.656008,
+   "gpuP90": 3.245094,
+   "cpuMs": 0.5
+  },
+  {
+   "method": "ours",
+   "base": true,
+   "scene": "mirrorWall",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 0.521445,
+   "gpuMin": 0.474574,
+   "gpuP90": 0.712633,
+   "cpuMs": 0.20000000298023224
+  },
+  {
+   "method": "three-stoch",
+   "base": true,
+   "scene": "mirrorWall",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 0.56069,
+   "gpuMin": 0.500821,
+   "gpuP90": 0.791998,
+   "cpuMs": 0.20000000298023224
+  },
+  {
+   "method": "ours",
+   "base": false,
+   "scene": "roughnessRamp",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.47051,
+   "gpuMin": 1.238118,
+   "gpuP90": 1.74398,
+   "cpuMs": 0.4000000059604645
+  },
+  {
+   "method": "ours-denoise",
+   "base": false,
+   "scene": "roughnessRamp",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 2.372746,
+   "gpuMin": 2.212639,
+   "gpuP90": 2.80795,
+   "cpuMs": 0.5999999940395355
+  },
+  {
+   "method": "three-denoise",
+   "base": false,
+   "scene": "roughnessRamp",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 4.108541,
+   "gpuMin": 3.811934,
+   "gpuP90": 4.726169,
+   "cpuMs": 0.5999999940395355
+  },
+  {
+   "method": "ours",
+   "base": true,
+   "scene": "roughnessRamp",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 0.732337,
+   "gpuMin": 0.663637,
+   "gpuP90": 0.875157,
+   "cpuMs": 0.29999999701976776
+  },
+  {
+   "method": "three-stoch",
+   "base": true,
+   "scene": "roughnessRamp",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 0.917943,
+   "gpuMin": 0.711215,
+   "gpuP90": 1.289153,
+   "cpuMs": 0.29999999701976776
+  }
+ ],
+ "device": {
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36"
+ },
+ "finished": "2026-11-10T09:55:13.456Z"
+}

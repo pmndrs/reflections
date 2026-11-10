@@ -21,6 +21,6 @@ pnpm typecheck && pnpm test && pnpm build
 4. Commit after every run (experiment, measurement, build-out) with a message that gives what was tried, the numbers and the verdict, failures included. Stage explicit paths, never `git add -A`.
 5. Push only when asked. Never publish to npm or push `v*` tags unless the maintainer asks.
 6. The public API carries no AMD product marks. Attribution goes in `NOTICE` and in file headers.
-7. Build features first; measure at gates. Time-box anything that fights you (~30 min), log it in `docs/HANDOFF.md`, move on. **If a human can't see the problem in the demo and phases are still unbuilt, don't chase it**: no root-causing sub-pixel flakes, no rewriting checks for robustness, no new micro checks. Log it in one line and keep building. Checks are smoke tests until the gates.
+7. Build features first; measure at gates. Investigate or measure only when a **decision** needs it or something is **broken** (wrong output a user would see, a crash, a silent no-op). Everything else (sub-pixel flakes, perf tuning, quality polish, check robustness) goes in one line in the **Fine-tune backlog** in `docs/HANDOFF.md` for the fine-tune pass once the phases are built and running. Time-box blockers (~30 min), log them, move on.
 8. Every knowing divergence from a source goes in `docs/DIVERGES.md`.
 9. Denoising belongs in the `denoiser` repo. This repo talks to it through the denoise seam (SPEC, "Frame contract").

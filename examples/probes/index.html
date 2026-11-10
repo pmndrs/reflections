@@ -20,11 +20,13 @@
   <body>
     <div class="dn-page">
       <header class="dn-head">
-        <h1>Reflection probes on three r186</h1>
+        <h1>Reflection probes</h1>
         <p class="dn-lede">
-          Ben Houston's box-projected reflection probes (<a href="https://github.com/mrdoob/three.js/pull/35046">three.js #35046</a>),
-          running on three r186 until that lands: same API and scene as the PR's example, with the cubes kept in a 2D array texture
-          and looked up by hand, because r186 can't bind cube arrays.
+          Box-projected, GGX-prefiltered reflection probes from <code>@pmndrs/reflections</code>, live-captured as the scene changes:
+          the torus knot spins and the left room's light cycles colour, and every reflection follows. The probe core (prefilter,
+          layouts, the WGSL lookup) is engine-agnostic. The three adapter keeps the API of Ben Houston's
+          <a href="https://github.com/mrdoob/three.js/pull/35046">three.js #35046</a>; the two projects grew up together and have
+          traded ideas and fixes throughout. On three r187 the cubes live in a 2D array with edge-centred texels until three can bind cube arrays.
         </p>
       </header>
       <canvas id="view" width="960" height="540"></canvas>

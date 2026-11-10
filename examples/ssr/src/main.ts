@@ -10,15 +10,20 @@
 // `?rt=1` attaches a ray-traced fallback for the misses (three-mesh-bvh behind core's trace seam,
 // MeshBVHTraceProvider), rebuilt per scene and refitted per frame for animated scenes.
 //
+// `?denoise=1|0` (default on when a denoiser is available): the hybrid resolve (HybridReflections)
+// hands the specular signal to denoiser/ffx's FfxReflectionDenoiser through the denoise seam. The
+// denoiser comes from the sibling Denoiser repo's source (examples/vite.config.ts) when present.
+//
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `ssr`).
 import * as THREE from 'three/webgpu';
 import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes, screenSpaceComposite,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes,
 } from '@pmndrs/reflections/three';
 import { HIT_WGSL } from '@pmndrs/reflections/core';
 import { SCENES, type KitScene } from '../../shared';
+import { createReflectionDenoiser, denoiserAvailable, denoiserSource } from '../../shared/denoiser';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -34,10 +39,11 @@ const useProbes = q.get('probes') !== '0';
 type HitColorMode = 'current' | 'lit' | 'final';
 const HIT_MODES: HitColorMode[] = ['current', 'lit', 'final'];
 const useRT = q.get('rt') === '1';
+const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
 
-const VIEWS = ['final', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'probeSpecular', 'source', 'grid'] as const;
+const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'source', 'rtSource', 'grid'] as const;
 type View = (typeof VIEWS)[number];
-const GRID: View[] = ['final', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', useRT ? 'source' : 'probeSpecular'];
+const GRID: View[] = ['final', 'raw', 'noSSR', 'confidence', 'hitDistance', 'misses', 'specular', 'signal', useRT ? 'rtSource' : 'source'];
 
 // ---- GPU readback ------------------------------------------------------------------------------
 function halfToFloat(h: number) {
@@ -135,6 +141,10 @@ async function main() {
     subgroups: q.get('variant') !== 'workgroup',
   });
   const device = ssr.device;
+  // hybrid resolve + denoise seam (phase 5)
+  const denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, q.has('timing')) : null;
+  const hybrid = new HybridReflections(ssr, { denoiser });
+  hybrid.denoise = wantDenoise && !!denoiser;
   const gpuErrors: string[] = [];
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });
   // With the loop stopped, three renders each shadow map once per camera per frame: advance it ourselves.
@@ -191,7 +201,7 @@ async function main() {
   const tone = (c: N) => (renderOutput(c, THREE.ACESFilmicToneMapping, THREE.SRGBColorSpace) as N).rgb;
   const pipeline = new THREE.RenderPipeline(renderer);
   pipeline.outputColorTransform = false;
-  let composite: ReturnType<typeof screenSpaceComposite> | null = null;
+  let composite: ReturnType<HybridReflections['composite']> | null = null;
   // last frame's composite (linear HDR) for hitColor 'final'
   const historyRT = new THREE.RenderTarget(W, H, { type: THREE.HalfFloatType, depthBuffer: false });
   historyRT.texture.name = 'ssr example final history';
@@ -212,14 +222,20 @@ async function main() {
     const gridUV = uv().mul(3);
     const cell = gridUV.floor();
     const at = uGrid.equal(1).select(gridUV.fract(), uv());
-    const c = composite = screenSpaceComposite(ssr, {
-      probes: useProbes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity, uv: at,
-    });
+    Object.assign(hybrid.options, { probes: useProbes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity });
+    hybrid.rebuild();
+    const c = composite = hybrid.composite({ uv: at });
+    // the raw (undenoised) composite from the same terms, for 'raw' and 'split'
+    const rawFinal = c.geometry.select(c.lit.add(c.weight.mul(c.signal.sub(c.probeSpecular)).mul(c.amount)).max(0), c.lit);
     const mask = texture(maskTex, at);
     const dim = tone(c.lit).mul(0.35);
     const viewColor = (v: View): N => {
       switch (v) {
         case 'final': return tone(c.final.rgb);
+        case 'raw': return tone(rawFinal);
+        // left raw, right denoised (the final composite), a thin line between
+        case 'split': return at.x.sub(0.5).abs().lessThan(0.001).select(vec3(1), at.x.lessThan(0.5).select(tone(rawFinal), tone(c.final.rgb)));
+        case 'signal': return tone(c.signal);
         case 'noSSR': return tone(c.lit);
         case 'ssr': return tone(c.ssr);
         case 'specular': return tone(c.specular);
@@ -229,8 +245,10 @@ async function main() {
         // traced = green, quad copy = yellow-green, neither = dimmed lit image
         case 'rays': return mask.r.greaterThan(0.5).select(vec3(0.1, 0.9, 0.2), mask.g.greaterThan(0.5).select(vec3(0.6, 0.8, 0.1), dim));
         case 'misses': return mask.b.greaterThan(0.5).select(vec3(1, 0.15, 0.1), mask.r.greaterThan(0.5).select(vec3(0.1, 0.35, 0.15), dim));
-        // source per pixel: SSR hit / traced hit / traced hit from the screen / traced miss / capped / probe
-        case 'source': {
+        // hybrid source per pixel: SSR green, traced blue, probe orange, environment magenta, rough (probe/env, untraced) grey
+        case 'source': return HybridReflections.sourceColor(c, hybrid.roughnessThreshold);
+        // RT pass codes: SSR hit / traced hit / traced hit from the screen / traced miss / capped / probe
+        case 'rtSource': {
           const src = c.source.add(0.5).floor();
           const probe = c.geometry.select(vec3(0.22).add(dim.mul(0.4)), vec3(0));
           const ssrHit = c.confidence.greaterThanEqual(0.9).select(vec3(0.15, 0.85, 0.25), probe);
@@ -248,9 +266,7 @@ async function main() {
     const local = gridUV.fract();
     grid = local.x.lessThan(0.004).or(local.y.lessThan(0.006)).select(vec3(0.15), grid);
     pipeline.outputNode = vec4(uGrid.equal(1).select(grid, full) as N, 1);
-    historyMaterial.colorNode = screenSpaceComposite(ssr, {
-      probes: useProbes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity,
-    }).final;
+    historyMaterial.colorNode = hybrid.composite().final;
     historyMaterial.needsUpdate = true;
     pipeline.needsUpdate = true;
   }
@@ -304,6 +320,7 @@ async function main() {
     ssr.gbuffer.resetHistory();
     ssr.resetHistory();
     buildDisplay();
+    hybrid.resetHistory();
     refreshUI();
     return { id: kit.id, views: Object.keys(kit.views), probes: probes?.bakedProbes.length ?? 0, animated: !!kit.update };
   }
@@ -323,6 +340,7 @@ async function main() {
     kit.camera.aspect = W / H; kit.camera.updateProjectionMatrix(); kit.camera.updateMatrixWorld();
     if (provider && kit.update) { kit.scene.updateMatrixWorld(); provider.refit(); }
     ssr.render(kit.scene, kit.camera);
+    hybrid.update();
     updateMask();
     pipeline.render();
     if (hitMode === 'final') {
@@ -371,6 +389,9 @@ async function main() {
     rtBox.onchange = () => { ssr.rayTracing = rtBox.checked; refreshUI(); if (!looping) frame(); };
     row('Ray-traced misses', rtBox);
   }
+  const denoiseBox = document.createElement('input'); denoiseBox.type = 'checkbox'; denoiseBox.checked = hybrid.denoise; denoiseBox.disabled = !denoiser;
+  denoiseBox.onchange = () => { hybrid.denoise = denoiseBox.checked; refreshUI(); if (!looping) frame(); };
+  row(denoiser ? 'Denoise (FFX)' : 'Denoise (no denoiser found)', denoiseBox);
   const pauseBox = document.createElement('input'); pauseBox.type = 'checkbox'; pauseBox.onchange = () => { paused = pauseBox.checked; };
   row('Pause', pauseBox);
   function refreshUI() {
@@ -382,6 +403,7 @@ async function main() {
       `three r${THREE.REVISION} | ${kit!.title} | ${W}x${H}${manual ? ' | manual (loop stopped)' : ''}`,
       `variant ${ssr.variant ?? '(first frame pending)'} | hit colour ${hitMode} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
       `specular IBL term: ${probes ? `${probes.bakedProbes.length} probe(s) by coverage, then scene.environment` : 'scene.environment'}`,
+      `denoise: ${denoiser ? `${hybrid.denoise ? 'on' : 'off'} (${denoiser.name}, from ${denoiserSource})` : 'unavailable (no sibling Denoiser repo; raw signal)'}`,
       useRT ? `ray-traced misses: ${ssr.rayTracing ? 'on' : 'off'} (three-mesh-bvh${bvhInfo ? `, ${bvhInfo.meshes} meshes, ${bvhInfo.triangles} triangles, built in ${bvhInfo.buildMs.toFixed(0)} ms` : ''})` : 'ray-traced misses: off (?rt=1)',
     ].join('\n');
   }
@@ -409,6 +431,8 @@ async function main() {
       setSettings(s: N) { Object.assign(ssr.settings, s); },
       setHitColor: (m: HitColorMode) => setHitColor(m),
       setRT(on: boolean) { ssr.rayTracing = on; },
+      hybrid, get denoiserName() { return denoiser?.name ?? null; },
+      setDenoise(on: boolean) { hybrid.denoise = on && !!denoiser; denoiseBox.checked = hybrid.denoise; },
       setTraceSettings(s: N) { ssr.traceSettings = { ...s }; },
       traceStats: () => ssr.readTraceStats(),
       get bvh() { return bvhInfo; },

@@ -1,4 +1,4 @@
-import { resolve } from 'path';
+import { dirname, resolve } from 'path';
 import { readdirSync, existsSync } from 'fs';
 import { defineConfig } from 'vite';
 
@@ -11,14 +11,37 @@ const pages = Object.fromEntries(
     .map((d) => [d.name, resolve(root, d.name, 'index.html')]),
 );
 
+// The denoiser (an optional peer, never a dependency) is resolved from the sibling `Denoiser` repo's
+// source when one sits next to this repo or next to any parent folder (worktrees sit deeper), or at
+// $DENOISER_REPO. Otherwise `@pmndrs/denoiser-ffx` resolves to a stub and the pages run undenoised.
+function findDenoiser(): string | null {
+  const entry = (repo: string) => resolve(repo, 'packages/denoiser-ffx/src/index.ts');
+  const env = process.env.DENOISER_REPO;
+  if (env) return existsSync(entry(env)) ? resolve(env) : null;
+  for (let dir = resolve(root, '..'); dirname(dir) !== dir; dir = dirname(dir)) {
+    const repo = resolve(dirname(dir), 'Denoiser');
+    if (existsSync(entry(repo))) return repo;
+  }
+  return null;
+}
+const denoiserRepo = findDenoiser();
+
 export default defineConfig({
   root,
-  server: { port: Number(process.env.REFLECTIONS_PORT ?? 5370), strictPort: true, host: '127.0.0.1' },
+  server: {
+    port: Number(process.env.REFLECTIONS_PORT ?? 5370), strictPort: true, host: '127.0.0.1',
+    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : [])] },
+  },
+  define: { __DENOISER_SOURCE__: JSON.stringify(denoiserRepo ?? '') },
   resolve: {
     alias: [
       { find: /^@pmndrs\/reflections\/three$/, replacement: resolve(root, '../src/three.ts') },
       { find: /^@pmndrs\/reflections\/core$/, replacement: resolve(root, '../src/core.ts') },
       { find: /^@pmndrs\/reflections$/, replacement: resolve(root, '../src/index.ts') },
+      {
+        find: /^@pmndrs\/denoiser-ffx$/,
+        replacement: denoiserRepo ? resolve(denoiserRepo, 'packages/denoiser-ffx/src/index.ts') : resolve(root, 'shared/denoiser-missing.ts'),
+      },
     ],
   },
   build: { outDir: resolve(root, 'dist'), emptyOutDir: true, rollupOptions: { input: pages } },
