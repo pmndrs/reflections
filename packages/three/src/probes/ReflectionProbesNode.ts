@@ -30,12 +30,12 @@
 // and the texture id is in the cache key, so every render object rebinds (D501).
 
 import * as THREE from 'three/webgpu';
-import { bool, cameraPosition, code, float, materialEnvRotation, nodeObject, normalWorld, positionWorld, reflectVector, sampler, storage, texture, vec3, vec4, wgslFn } from 'three/tsl';
+import { bool, cameraPosition, code, float, mat4, materialEnvRotation, nodeObject, normalWorld, positionWorld, reflectVector, sampler, storage, texture, vec3, vec4, wgslFn } from 'three/tsl';
 import {
   PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludesWgsl,
   probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
 } from '@pmndrs/reflections-core';
-import { probeOrigin, type ReflectionProbes } from './ReflectionProbes';
+import { probeOrigin, probeWorldScale, type ReflectionProbes } from './ReflectionProbes';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any; // TSL's node typings are too strict for hand-written shader maths
@@ -124,7 +124,7 @@ function volumeList(probes: ReflectionProbes): ProbeVolume[] {
   return probes.bakedProbes.map((probe, slot) => {
     probe.getWorldPosition(_p);
     probeOrigin(probe, _o);
-    probe.getWorldScale(_s);
+    probeWorldScale(probe, _s);
     const half = probe.influenceSize.clone().multiply(_s).multiplyScalar(0.5);
     const projection = (probe.projectionSize ?? probe.influenceSize).clone().multiply(_s);
     const offset = probe.projectionOffset.clone().multiply(_s);
@@ -272,12 +272,13 @@ export class ReflectionProbesNode extends THREE.Node {
     const dominant = this.normalNode !== null;
     const normal: N = this.normalNode ?? (refit ? normalWorld : direction);
     // the environment slot is unrotated: the material's direction gets its environment rotation,
-    // an explicit direction is looked up as given
-    const envDirection: N = this.directionNode === null ? materialEnvRotation.mul(direction) : direction;
+    // an explicit direction is looked up as given; core bends the direction first (dominant
+    // direction) and rotates the bent one, so volumes and environment agree
+    const envRotation: N = this.directionNode === null ? materialEnvRotation : mat4(new THREE.Matrix4());
     const { fn } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit, count: this.volumes });
     const result: N = fn({
       atlas: this.array, samp: sampler(this.array), table: this.table.node,
-      P: vec3(position), N: vec3(normal), R: vec3(direction), roughness, envR: vec3(envDirection),
+      P: vec3(position), N: vec3(normal), R: vec3(direction), roughness, envRotation,
       frameIrr: refit ? vec3(this.frameIrradianceNode) : vec3(-1), withEnv: bool(!this.coverage),
     }).toVar();
     if (this.aoNode === null) return this.coverage ? result : result.rgb;

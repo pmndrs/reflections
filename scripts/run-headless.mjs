@@ -76,12 +76,19 @@ const savePng = (name, dataUrl) => {
 
 /** Open `url` in a fresh headless Chrome; resolves once `window.__p` exists. */
 async function openPage(url) {
-  const port = 9300 + Math.floor(Math.random() * 500);
+  // Port 0: Chrome picks a free port and writes it to DevToolsActivePort. A random fixed port could
+  // collide with another worktree's Chrome, and then this run drove that run's page (F2).
+  const userDataDir = path.join(os.tmpdir(), `reflections-${Date.now()}-${process.pid}-${Math.floor(Math.random() * 1e9)}`);
   const chrome = spawn(CHROME, [
     '--headless=new', '--no-sandbox', '--use-angle=metal', '--enable-unsafe-webgpu',
-    '--enable-features=Vulkan', '--window-size=1100,900', `--remote-debugging-port=${port}`,
-    `--user-data-dir=${path.join(os.tmpdir(), `reflections-${Date.now()}-${port}`)}`, url,
+    '--enable-features=Vulkan', '--window-size=1100,900', '--remote-debugging-port=0',
+    `--user-data-dir=${userDataDir}`, url,
   ], { stdio: 'ignore' });
+  let port = null;
+  for (const deadline = Date.now() + 30_000; port === null && Date.now() < deadline; await sleep(100)) {
+    try { port = Number(fs.readFileSync(path.join(userDataDir, 'DevToolsActivePort'), 'utf8').split('\n')[0]) || null; } catch { /* not written yet */ }
+  }
+  if (port === null) throw new Error(`Chrome did not report a DevTools port (${userDataDir})`);
   const targets = await httpJson(`http://127.0.0.1:${port}/json`);
   const tab = targets.find((t) => t.type === 'page' && t.webSocketDebuggerUrl);
   const ws = new WebSocket(tab.webSocketDebuggerUrl);
@@ -331,12 +338,126 @@ async function ssrChecks(pages) {
   console.log(`  GPU ms ${t.size.join('x')} through the three adapter (${t.variant}, mirrorWall, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
 }
 
+/** examples/regressions, stream F2 (SSR / RT and probe-core review). Each check failed before its fix. */
+function f2Checks(r) {
+  const section = (name) => {
+    const s = r[name];
+    if (s === undefined) return null;
+    if (s.error) { check(`${name}: section ran`, false, s.error.split('\n').slice(0, 3).join(' | ')); return null; }
+    return s;
+  };
+  const h = section('ssrHistory');
+  if (h) {
+    const f = (x) => `${x.stale}/${x.hits} stale, ${x.current} current`;
+    check("ssr hitColor 'history': first frame with an app historySource reads no stale history", h.appFirstFrame.hits > 100 && h.appFirstFrame.stale === 0, f(h.appFirstFrame));
+    check("ssr hitColor 'history': resetHistory() with an app historySource reads no stale history",
+      h.appSecondFrame.stale > 0.5 * h.appSecondFrame.hits && h.appAfterReset.hits > 100 && h.appAfterReset.stale === 0,
+      `second frame (valid history) ${f(h.appSecondFrame)}; after reset ${f(h.appAfterReset)}`);
+    check("ssr hitColor 'history' -> 'current' -> 'history' reads no stale lit history",
+      h.litWhileStale.stale > 0.5 * h.litWhileStale.hits && h.litCurrent.stale === 0 && h.litBackToHistory.hits > 100 && h.litBackToHistory.stale === 0,
+      `while stale ${f(h.litWhileStale)}; current ${f(h.litCurrent)}; back to history ${f(h.litBackToHistory)}`);
+    check('ssrHistory: no WebGPU errors', h.gpuErrors.length === 0, h.gpuErrors.slice(0, 2).join(' | '));
+  }
+  const t = section('rtTiles');
+  if (t) {
+    // yardstick: independent uniform selection at p = budget / tiles; a fair scheme is at most 4 sd
+    // above it in tiles never traced and tiles traced every frame (one-sided: fairer is fine)
+    const bound = (e) => e.mean + 4 * e.sd;
+    const frameSd = Math.sqrt(t.tilesSeen * t.p * (1 - t.p));
+    check(`rt tile cap: budget ${t.budget} over ${t.tilesSeen} tiles is spread fairly over ${t.frames} frames`,
+      t.tilesSeen > 500 && t.never <= bound(t.expectNever) && t.every <= bound(t.expectEvery),
+      `tiles traced in k of ${t.frames} frames ${JSON.stringify(t.hist)}; never ${t.never} (uniform ${t.expectNever.mean.toFixed(1)} +- ${t.expectNever.sd.toFixed(1)}, bound ${bound(t.expectNever).toFixed(1)}), every frame ${t.every} (uniform ${t.expectEvery.mean.toFixed(1)} +- ${t.expectEvery.sd.toFixed(1)}, bound ${bound(t.expectEvery).toFixed(1)})`);
+    check('rt tile cap: the frame budget holds and is used', t.traced.every((x) => x <= t.budget && x >= t.budget - 4 * frameSd),
+      `traced per frame ${t.traced.join(' ')} (budget ${t.budget}, floor ${(t.budget - 4 * frameSd).toFixed(0)}), tile caps ${t.tileCaps.join(' ')}`);
+    check('rtTiles: no WebGPU errors', t.gpuErrors.length === 0, t.gpuErrors.slice(0, 2).join(' | '));
+  }
+  const l = section('rtLimits');
+  if (l) {
+    const d = (a) => a.skipped ?? `${a.threw ? `threw "${a.threw.slice(0, 160)}"` : 'built'}${a.validationError ? `; validation error "${a.validationError.slice(0, 120)}"` : ''}`;
+    check(`rt limits: 5-buffer provider + probe fallback throws a clear error (default ${l.limits.maxStorageBuffersPerShaderStage} storage buffers)`,
+      !!l.fiveBuffersAndProbes.threw && /maxStorageBuffersPerShaderStage/.test(l.fiveBuffersAndProbes.threw) && /requiredLimits/.test(l.fiveBuffersAndProbes.threw) && !l.fiveBuffersAndProbes.validationError,
+      d(l.fiveBuffersAndProbes));
+    check(`rt limits: a storage texture in the provider throws a clear error (default ${l.limits.maxStorageTexturesPerShaderStage} storage textures)`,
+      !!l.oneStorageTexture.threw && /maxStorageTexturesPerShaderStage/.test(l.oneStorageTexture.threw) && !l.oneStorageTexture.validationError,
+      d(l.oneStorageTexture));
+    check('rt limits: 4-buffer provider + probe fallback (8) and a raised limit (9) build without errors',
+      !l.fourBuffersAndProbes.threw && !l.fourBuffersAndProbes.validationError && (l.raised.skipped !== undefined || (!l.raised.threw && !l.raised.validationError)),
+      `4 + probes: ${d(l.fourBuffersAndProbes)}; raised: ${d(l.raised)}`);
+  }
+  const gf = section('gbufferFirstFrame');
+  if (gf) {
+    for (const k of ['forward', 'reversed']) {
+      check(`gbuffer: the first frame's projection is the one three renders with (${k} depth)`, gf[k].maxDiff < 1e-6,
+        `max diff ${gf[k].maxDiff.toExponential(2)}; [10], [14]: first frame ${gf[k].firstFrame.map((v) => v.toFixed(4)).join(' ')}, rendered ${gf[k].rendered.map((v) => v.toFixed(4)).join(' ')}`);
+    }
+  }
+  const pd = section('probeEnvDominant');
+  if (pd) {
+    // all three read the same cube along the same direction; 1e-3 covers the prefilter's fp16 storage
+    const f = (x) => x.toExponential(2);
+    check('probes: dominant direction bends the environment sample too (inside, fade band, outside agree)',
+      pd.insideVsDominant < 1e-3 && pd.fadeVsDominant < 1e-3 && pd.outsideVsDominant < 1e-3 && pd.plainVsDominant > 0.05,
+      `max |diff| vs the environment along the dominant direction: inside ${f(pd.insideVsDominant)}, fade ${f(pd.fadeVsDominant)}, outside ${f(pd.outsideVsDominant)}; plain R vs dominant ${f(pd.plainVsDominant)}`);
+  }
+  const pi = section('probeIrradiance');
+  if (pi) {
+    // 16384 directions over a constant capture: the estimate is exact up to fp16 storage (< 1e-3)
+    const f = (x) => x.map((v) => v.toFixed(4)).join(' ');
+    check('probes: two computeIrradiance() calls in one encoder keep their own slots', pi.err0 < 0.01 && pi.err1 < 0.01,
+      `slot 0 L00 ${f(pi.slot0)} (expected ${f(pi.expected0)}, rel err ${pi.err0.toExponential(2)}); slot 1 ${f(pi.slot1)} (expected ${f(pi.expected1)}, rel err ${pi.err1.toExponential(2)})`);
+  }
+  const ps = section('probeScale');
+  if (ps) {
+    const m = ps.mirrored, z = ps.zeroScale;
+    check('probes: a mirrored parent keeps a positive volume (scale -2, 1, 1)', m.centre > 0.999 && m.inside > 0.999 && m.outside < 1e-6,
+      `coverage at the centre ${m.centre.toFixed(3)}, 1.5 along x ${m.inside.toFixed(3)}, 2.5 along x ${m.outside.toFixed(3)}`);
+    check('probes: a zero-scale parent gives a zero (disabled) volume', z.centre < 1e-6 && z.near < 1e-6,
+      `coverage at the centre ${z.centre.toFixed(3)}, 0.3 off ${z.near.toFixed(3)}`);
+  }
+  const pz = section('probeSourceSize');
+  if (pz) {
+    const d = (x) => x.ok ? 'ok' : `"${x.error}"`;
+    check(`probes: the documented minimum sourceSize (${pz.documented}) works; below it the error names the minimum`,
+      pz.atDocumented.ok && !pz.half.ok && pz.half.error.includes(String(pz.documented)) && !pz.s32.ok && pz.s32.error.includes('64') && pz.s64.ok,
+      `${pz.documented}: ${d(pz.atDocumented)}; ${pz.documented / 2}: ${d(pz.half)}; 32: ${d(pz.s32)}; 64: ${d(pz.s64)}`);
+  }
+  const pr = section('probeRebake');
+  if (pr) {
+    const f = (x) => x.map((v) => v.toFixed(3)).join(' ');
+    // blue / red of the wall a probe captured: red room (A) before, blue room (B) after
+    const ratio = (x) => x[2] / Math.max(x[0], 1e-6);
+    check('probes: a bake that changes layout and environment lights its captures with the new environment',
+      ratio(pr.before) < 0.05 && ratio(pr.after) > 20 && ratio(pr.settled) > 20 && Math.abs(pr.after[2] - pr.settled[2]) <= 0.02 * pr.settled[2],
+      `wall seen by probe a (rgb): env A ${f(pr.before)}; after env B + new probe ${f(pr.after)}; next bake ${f(pr.settled)}`);
+  }
+  const rh = section('rtHistory');
+  if (rh) {
+    check("rt on-screen reuse ignores inputs.history unless hitColor 'history'", rh.current.onScreen > 100 && rh.current.stale === 0 && rh.history.onScreen > 100 && rh.history.stale > 0.5 * rh.history.onScreen,
+      `current: ${rh.current.stale}/${rh.current.onScreen} on-screen hits from history; 'history': ${rh.history.stale}/${rh.history.onScreen}`);
+    check("rt hitColor 'history' rejects a wrong-size or missing history like the tracer",
+      !!rh.wrongSize.threw && /history/.test(rh.wrongSize.threw) && !rh.wrongSize.validationError && !!rh.missing.threw && !rh.missing.validationError,
+      `wrong size: ${rh.wrongSize.threw ?? 'no error'}${rh.wrongSize.validationError ? ` (validation: ${rh.wrongSize.validationError.slice(0, 80)})` : ''}; missing: ${rh.missing.threw ?? 'no error'}`);
+    check('rtHistory: no WebGPU errors', rh.gpuErrors.length === 0, rh.gpuErrors.slice(0, 2).join(' | '));
+  }
+  const rs = section('rtStats');
+  if (rs) {
+    check('rt readStats() reports the last dispatched frame while an earlier read is pending',
+      rs.a.onScreenHits > 0 && rs.b.onScreenHits === 0 && rs.c.onScreenHits > 0,
+      `on-screen hits: A (reuse on) ${rs.a.onScreenHits}, B (reuse off, read while A's was pending) ${rs.b.onScreenHits}, C (reuse on) ${rs.c.onScreenHits}`);
+    check('rtStats: no WebGPU errors', rs.gpuErrors.length === 0, rs.gpuErrors.slice(0, 2).join(' | '));
+  }
+}
+
 /** examples/regressions: GPU repros of review bugs (stream F1). Each check failed before its fix. */
 async function regressionChecks(pages) {
   console.log('examples/regressions:');
   const p = await openPage(`http://127.0.0.1:${PORT}/regressions/`);
   pages.push(p);
-  const r = await p.T('window.__p.run()');
+  // `--sections ssrHistory,rtTiles` runs only those page sections (default: all)
+  const sections = args.includes('--sections') ? args[args.indexOf('--sections') + 1].split(',') : null;
+  const r = await p.T(sections ? `window.__p.run(${JSON.stringify(sections)})` : 'window.__p.run()');
+  f2Checks(r);
+  if (sections && !sections.includes('gbuffer')) return;
   const g = r.gbuffer, e = (x) => Number(x).toExponential(2);
   check('gbuffer: static scene with instanced, skinned, batched meshes has no motion', g.staticScene.max <= 1e-5,
     `max ${e(g.staticScene.max)}, per column (plain, instanced, skinned, batched) ${g.staticScene.perColumn.map(e).join(' ')}`);

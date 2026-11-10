@@ -4,7 +4,7 @@
 // (sampleReflectionProbes, originOffset, bake({ environment, probes }), seamFix).
 // reflectionProbesLocal / sampleReflectionProbesLocal: #35046 head's vec4 (radiance, coverage) form.
 export {
-  ReflectionProbe, ReflectionProbes, probeOrigin, type BakeOptions, type SeamFix,
+  ReflectionProbe, ReflectionProbes, probeOrigin, probeWorldScale, type BakeOptions, type SeamFix,
 } from './probes/ReflectionProbes';
 export {
   ReflectionProbesNode, reflectionProbes, reflectionProbesLocal, sampleReflectionProbes, sampleReflectionProbesLocal,

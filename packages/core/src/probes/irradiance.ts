@@ -69,7 +69,6 @@ export class ProbeIrradiance {
   private readonly pipe: GPUComputePipeline;
   private readonly samples: number;
   private readonly sampler: GPUSampler;
-  private readonly uniforms: GPUBuffer[] = [];
 
   constructor(device: GPUDevice, layout: ProbeLayout, options: ProbeIrradianceOptions = {}) {
     this.device = device;
@@ -85,28 +84,33 @@ export class ProbeIrradiance {
   /** Mip read by default: maxLod - 2 (or 0). */
   defaultLod() { return Math.max(0, this.layout.mipLevelCount - 3); }
 
-  /** Records the integration of `slots` of `atlas` into `table`. */
+  /**
+   * Records the integration of `slots` of `atlas` into `table`. Each call gets its own parameter
+   * buffer, filled at creation (not by queue.writeBuffer, which would run before the submit and
+   * let a later call in the same encoder overwrite it). It is left to the garbage collector: the
+   * command buffer keeps it alive until it ran.
+   */
   encode(encoder: GPUCommandEncoder, atlas: GPUTextureView, table: GPUBuffer, irradianceRow: number, slots: readonly number[], lod = this.defaultLod()) {
+    if (slots.length === 0) return;
+    const stride = Math.max(32, this.device.limits.minUniformBufferOffsetAlignment);
+    const params = this.device.createBuffer({ label: 'ProbeIrradiance.params', size: stride * slots.length, usage: GPUBufferUsage.UNIFORM, mappedAtCreation: true });
+    const mapped = params.getMappedRange();
+    slots.forEach((slot, k) => {
+      new Uint32Array(mapped, k * stride, 3).set([slot, irradianceRow, this.samples]);
+      new Float32Array(mapped, k * stride + 16, 1).set([lod]);
+    });
+    params.unmap();
     const pass = encoder.beginComputePass({ label: 'ProbeIrradiance' });
     pass.setPipeline(this.pipe);
-    slots.forEach((slot, k) => {
-      // one small uniform per slot (a bake records several slots before submitting)
-      const u = (this.uniforms[k] ??= this.device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }));
-      const data = new ArrayBuffer(32);
-      new Uint32Array(data, 0, 3).set([slot, irradianceRow, this.samples]);
-      new Float32Array(data, 16, 1).set([lod]);
-      this.device.queue.writeBuffer(u, 0, data);
+    slots.forEach((_, k) => {
       pass.setBindGroup(0, this.device.createBindGroup({
         layout: this.pipe.getBindGroupLayout(0),
-        entries: [{ binding: 0, resource: atlas }, { binding: 1, resource: this.sampler }, { binding: 2, resource: { buffer: table } }, { binding: 3, resource: { buffer: u } }],
+        entries: [{ binding: 0, resource: atlas }, { binding: 1, resource: this.sampler }, { binding: 2, resource: { buffer: table } }, { binding: 3, resource: { buffer: params, offset: k * stride, size: 32 } }],
       }));
       pass.dispatchWorkgroups(1);
     });
     pass.end();
   }
 
-  dispose() {
-    for (const u of this.uniforms) u.destroy();
-    this.uniforms.length = 0;
-  }
+  dispose() {}
 }

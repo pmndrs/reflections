@@ -31,7 +31,7 @@ export interface ProbeSetOptions {
   layout?: ProbeLayoutId;
   /** Default 'rgba16float'. */
   format?: ProbeSetFormat;
-  /** Capture face size, a power of two >= 32. Default 128. */
+  /** Capture face size, a power of two >= 64. Default 128. */
   sourceSize?: number;
   /** Atlas size (mip 0 face, or octa side). Default `sourceSize`. */
   size?: number;

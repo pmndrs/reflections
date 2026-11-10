@@ -34,9 +34,10 @@ export interface TracedReflectionsSettings {
   /** Rays per frame at most (D9). Entries past it keep intersect's fallback. Default unlimited. */
   maxTracedRaysPerFrame?: number;
   /**
-   * Rays per 8x8 tile at most (1..64). The tile cap each frame is min(this, ceil(max rays per frame /
-   * tiles with misses last frame)), so a capped frame spreads its budget over the screen (D9, D56).
-   * Default 64 (no tile cap beyond the frame budget's share).
+   * Rays per 8x8 tile at most (1..64). Each frame every tile may trace min(this, floor(max rays per
+   * frame / tiles with misses last frame)) rays, and a rotating fraction of the tiles one more (the
+   * remainder of that division), so a capped frame spreads its budget over the screen and over time
+   * (D9, D56, D1100). Default 64 (no tile cap beyond the frame budget's share).
    */
   maxRaysPerTile?: number;
   /** Ray length cap at roughness 0 (world units); the cap is this x exp(-falloff x alpha). Default 100 (FFX hybrid sample). */
@@ -47,6 +48,12 @@ export interface TracedReflectionsSettings {
   normalOffset?: number;
   /** A hit the camera sees this frame takes the scene colour there (D55). Default true. */
   reuseOnScreenHits?: boolean;
+  /**
+   * Where an on-screen hit takes its colour, as the SSSR tracer's `hitColor`: 'current' (default)
+   * = `inputs.color`; 'history' = `inputs.history` reprojected through `inputs.motion` (D1002).
+   * Pass the tracer's setting so both sources agree.
+   */
+  hitColor?: 'current' | 'history';
   /** Relative view-distance tolerance for that test. Default 0.02. */
   onScreenDepthTolerance?: number;
   /** The fallback's `P.iblFactor`. Default 1. */
@@ -81,7 +88,9 @@ export interface TracedReflectionsStats {
   onScreenHits: number;
   /** 8x8 tiles with at least one miss. */
   tilesWithMisses: number;
-  /** The per-tile cap this frame ran with. */
+  /** Which dispatch these counts come from (1 = the first). */
+  frame: number;
+  /** The most rays a tile could trace this frame (the floor share, + 1 for the tiles that got the remainder). */
   tileCap: number;
 }
 
@@ -100,7 +109,10 @@ export interface TracedReflections {
   readonly tilesX: number;
   readonly tilesY: number;
   dispatch(cmd: GPUCommandEncoder, frame: TracedReflectionsDispatch, settings?: TracedReflectionsSettings): void;
-  /** Counts of the last dispatched frame (call after submitting). */
+  /**
+   * Counts of the last frame dispatched before this call (call after submitting it), also while an
+   * earlier read is pending. `frame` says which dispatch they are from.
+   */
   readStats(): Promise<TracedReflectionsStats>;
   /** With `timestamps`: ms per pass ('rt begin', 'rt trace', 'total') for the last frame. */
   readTimings(): Promise<ReadonlyMap<string, number>>;
@@ -112,6 +124,29 @@ const tex = (binding: number): GPUBindGroupLayoutEntry => ({ binding, visibility
 const sto = (binding: number, format: GPUTextureFormat): GPUBindGroupLayoutEntry => ({ binding, visibility: C, storageTexture: { access: 'write-only', format } });
 const buf = (binding: number, type: GPUBufferBindingType): GPUBindGroupLayoutEntry => ({ binding, visibility: C, buffer: { type } });
 
+/** The trace pass's own bindings in group 0 (binding 7 is read-write, 5 and 6 read-only; 8-11 write-only). */
+const OWN_STORAGE_BUFFERS = 3, OWN_STORAGE_TEXTURES = 4;
+
+/**
+ * Counts every group of the trace pipeline (0 the pass, 1 the radiance fallback, 2 the provider, 3
+ * the hit shading) against the device's per-stage limits, so a combination that doesn't fit fails
+ * here with what to change, not as a validation error at createPipelineLayout.
+ */
+function checkStageLimits(device: GPUDevice, provider: TraceProvider, fallback: RadianceFallback, shading: HitShading) {
+  const providerTextures = provider.entries.filter((e) => e.storageTexture !== undefined).length;
+  const rows: [string, keyof GPUSupportedLimits, number[]][] = [
+    ['storage buffers', 'maxStorageBuffersPerShaderStage', [OWN_STORAGE_BUFFERS, fallback.storageBufferCount ?? 0, provider.storageBufferCount, shading.storageBufferCount ?? 0]],
+    ['storage textures', 'maxStorageTexturesPerShaderStage', [OWN_STORAGE_TEXTURES, fallback.storageTextureCount ?? 0, providerTextures, shading.storageTextureCount ?? 0]],
+  ];
+  for (const [what, limit, [own, fb, pr, hs]] of rows) {
+    const total = own + fb + pr + hs, max = device.limits[limit] as number;
+    if (total <= max) continue;
+    throw new Error(`rt: the trace pipeline binds ${total} ${what} in the compute stage (pass ${own}, radiance fallback ${fb}, provider '${provider.name}' ${pr}, hit shading ${hs}); `
+      + `the device allows ${max} (${limit}). Request more at requestDevice ({ requiredLimits: { ${limit}: adapter.limits.${limit} } }; `
+      + `three: new WebGPURenderer({ requiredLimits: { ${limit}: ${total} } })), or use a provider / fallback that binds fewer.`);
+  }
+}
+
 export function createTracedReflections(device: GPUDevice, options: TracedReflectionsOptions): TracedReflections {
   const { width: W, height: H, provider } = options;
   const fallback = options.radianceFallback ?? constantRadianceFallback();
@@ -119,11 +154,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   const tilesX = Math.ceil(W / 8), tilesY = Math.ceil(H / 8);
   const timer = options.timestamps && PassTimer.supported(device) ? new PassTimer(device, 4) : undefined;
 
-  const ownStorageBuffers = 3;
-  const maxSB = device.limits.maxStorageBuffersPerShaderStage;
-  if (ownStorageBuffers + provider.storageBufferCount > maxSB) {
-    throw new Error(`rt: the pass binds ${ownStorageBuffers} storage buffers and provider '${provider.name}' ${provider.storageBufferCount}; the device allows ${maxSB} per stage`);
-  }
+  checkStageLimits(device, provider, fallback, shading);
 
   const source = device.createTexture({
     label: 'rt source', size: [W, H], format: 'r32float',
@@ -132,7 +163,13 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   const stateBytes = (RT_STATE_HEADER + tilesX * tilesY) * 4;
   const state = device.createBuffer({ label: 'rt state', size: stateBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
   const params = device.createBuffer({ label: 'rt params', size: RT_PARAMS_SIZE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-  const statsRead = device.createBuffer({ label: 'rt stats readback', size: RT_STATE_HEADER * 4 + 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  // Stats readback: each dispatch copies into a slot that isn't being mapped (a mapped buffer can't
+  // be a copy target), so a read never returns an older frame because an earlier read was pending.
+  interface StatsSlot { buffer: GPUBuffer; frame: number; reading: Promise<TracedReflectionsStats> | null }
+  const statsSlots: StatsSlot[] = [];
+  const MAX_STATS_SLOTS = 4;
+  let latestStats: StatsSlot | null = null;
+  let dispatches = 0;
 
   // ---- pipelines
   const beginBgl = device.createBindGroupLayout({ label: 'rt begin', entries: [buf(0, 'uniform'), buf(1, 'storage')] });
@@ -181,7 +218,6 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   };
 
   let afterSubmit: (() => void) | undefined;
-  let reading: Promise<TracedReflectionsStats> | null = null;
 
   function writeParams(frame: TracedReflectionsDispatch, s: TracedReflectionsSettings) {
     const cam = frame.inputs.camera;
@@ -209,7 +245,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     f[52] = fc[0]; f[53] = fc[1]; f[54] = fc[2]; f[55] = 1;
     const mvs = frame.inputs.motionVectorScale ?? [1, 1];
     f[56] = mvs[0]; f[57] = mvs[1];
-    u[58] = frame.inputs.history && frame.inputs.motion ? 1 : 0;
+    u[58] = (s.hitColor ?? 'current') === 'history' ? 1 : 0;
     device.queue.writeBuffer(params, 0, data);
   }
 
@@ -220,6 +256,10 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     if (!out.missList || !out.missCounter || !out.missArgs) throw new Error('rt: the SSSR tracer was created without `missList: true`');
     if (fallback.layout && !frame.fallbackBindGroup) throw new Error('rt: the radiance fallback needs fallbackBindGroup');
     if (shading.layout && !frame.hitShadingBindGroup) throw new Error('rt: the hit shading needs hitShadingBindGroup');
+    // the same checks as the SSSR tracer's for hitColor 'history'
+    const useHistory = (settings.hitColor ?? 'current') === 'history';
+    if (useHistory && (!inputs.history || !inputs.motion)) throw new Error("rt: hitColor 'history' needs inputs.history and inputs.motion");
+    if (useHistory && (inputs.history!.width !== W || inputs.history!.height !== H)) throw new Error(`rt: history is ${inputs.history!.width}x${inputs.history!.height}, expected ${W}x${H}`);
     writeParams(frame, settings);
     const traceGroup = device.createBindGroup({
       label: 'rt trace', layout: traceBgl,
@@ -236,9 +276,9 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
         { binding: 9, resource: out.hitDistance.createView() },
         { binding: 10, resource: out.confidence.createView() },
         { binding: 11, resource: source.createView() },
-        // the SSSR tracer's last-frame colour, when it was given one (hitColor 'history', D1002)
-        { binding: 12, resource: (inputs.history && inputs.motion ? inputs.history : noHistory).createView() },
-        { binding: 13, resource: (inputs.history && inputs.motion ? inputs.motion : noHistory).createView() },
+        // last frame's colour with hitColor 'history' (D1002)
+        { binding: 12, resource: (useHistory ? inputs.history! : noHistory).createView() },
+        { binding: 13, resource: (useHistory ? inputs.motion! : noHistory).createView() },
       ],
     });
     timer?.begin();
@@ -255,9 +295,17 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     p.setBindGroup(3, frame.hitShadingBindGroup ?? emptyGroup);
     p.dispatchWorkgroupsIndirect(out.missArgs, 0);
     p.end();
-    if (!reading) { // a mapped buffer can't be a copy target; skip the debug copy while a read is pending
-      cmd.copyBufferToBuffer(state, 0, statsRead, 0, RT_STATE_HEADER * 4);
-      cmd.copyBufferToBuffer(out.missCounter, 0, statsRead, RT_STATE_HEADER * 4, 16);
+    dispatches++;
+    let slot = statsSlots.find((x) => x.reading === null);
+    if (!slot && statsSlots.length < MAX_STATS_SLOTS) {
+      slot = { buffer: device.createBuffer({ label: 'rt stats readback', size: RT_STATE_HEADER * 4 + 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), frame: 0, reading: null };
+      statsSlots.push(slot);
+    }
+    if (slot) { // all slots mapping (4 reads pending): this frame's counts are skipped
+      cmd.copyBufferToBuffer(state, 0, slot.buffer, 0, RT_STATE_HEADER * 4);
+      cmd.copyBufferToBuffer(out.missCounter, 0, slot.buffer, RT_STATE_HEADER * 4, 16);
+      slot.frame = dispatches;
+      latestStats = slot;
     }
     afterSubmit = timer?.end(cmd);
   }
@@ -265,16 +313,19 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   return {
     device, width: W, height: H, provider, source, state, tilesX, tilesY, dispatch,
     readStats() {
-      // one mapping at a time; a second caller waits for the first
-      reading ??= statsRead.mapAsync(GPUMapMode.READ).then(() => {
-        const s = new Uint32Array(statsRead.getMappedRange().slice(0));
-        statsRead.unmap();
+      const slot = latestStats;
+      if (!slot) return Promise.resolve({ misses: 0, traced: 0, capped: 0, hits: 0, tracedMisses: 0, onScreenHits: 0, tilesWithMisses: 0, tileCap: 0, frame: 0 });
+      // one mapping per slot; a second caller for the same frame waits for the first
+      slot.reading ??= slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
+        const s = new Uint32Array(slot.buffer.getMappedRange().slice(0));
+        slot.buffer.unmap();
         return {
           misses: s[RT_STATE_HEADER + 1], traced: s[RT_STATE.traced], capped: s[RT_STATE.capped], hits: s[RT_STATE.hits],
           tracedMisses: s[RT_STATE.misses], onScreenHits: s[RT_STATE.onScreen], tilesWithMisses: s[RT_STATE.tilesWithMisses], tileCap: s[RT_STATE.tileCap],
+          frame: slot.frame,
         };
-      }).finally(() => { reading = null; });
-      return reading;
+      }).finally(() => { slot.reading = null; });
+      return slot.reading;
     },
     async readTimings() {
       if (!timer) return new Map();
@@ -284,7 +335,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
       return timer.timings;
     },
     destroy() {
-      source.destroy(); state.destroy(); params.destroy(); statsRead.destroy(); noHistory.destroy();
+      source.destroy(); state.destroy(); params.destroy(); for (const x of statsSlots) x.buffer.destroy(); noHistory.destroy();
       timer?.destroy();
     },
   };

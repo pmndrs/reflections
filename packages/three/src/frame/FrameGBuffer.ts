@@ -201,6 +201,15 @@ export class FrameGBuffer {
       const size = r.getDrawingBufferSize(new THREE.Vector2());
       this.setSize(size.x, size.y);
     }
+    // three moves a camera to its clip space (WebGPU z in [0, 1]) and to reversed depth inside
+    // render(), then updates the projection; do it first, or the first frame of a camera three
+    // hasn't rendered yet carries WebGL's projection (F2)
+    const c = camera as THREE.Camera & { reversedDepth?: boolean; updateProjectionMatrix?: () => void };
+    if (c.coordinateSystem !== r.coordinateSystem || (r.reversedDepthBuffer === true && c.reversedDepth !== true)) {
+      const sync = (r as N)._updateCamera;
+      if (typeof sync === 'function') sync.call(r, camera, false);
+      else { c.coordinateSystem = r.coordinateSystem; c.updateProjectionMatrix?.(); }
+    }
     camera.updateMatrixWorld();
     const p = camera.matrixWorld.elements;
     const cam = camera as THREE.PerspectiveCamera;

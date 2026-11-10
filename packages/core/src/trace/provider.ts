@@ -113,6 +113,10 @@ export interface HitShading {
   wgsl: string;
   /** Layout of `@group(3)`; omit when the snippet has no bindings. */
   layout?: GPUBindGroupLayout;
+  /** Storage buffers in `layout`, counted against the device's per-stage limit. Default 0. */
+  storageBufferCount?: number;
+  /** Storage textures in `layout`, likewise. Default 0. */
+  storageTextureCount?: number;
 }
 
 /**

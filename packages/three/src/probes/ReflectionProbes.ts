@@ -52,8 +52,11 @@ const _clear = new THREE.Color();
 
 /**
  * A local reflection volume. Add it to a {@link ReflectionProbes} container. The volumes are
- * axis-aligned boxes centred on the probe; they follow its world position and scale, rotation is
- * ignored.
+ * world-axis-aligned boxes centred on the probe; they follow its world position and scale
+ * ({@link probeWorldScale}). Rotation is ignored, the probe's own and its parents': the boxes stay
+ * aligned with the world axes. Each size (x, y, z) is scaled by the world length of the probe's
+ * local axis of the same name, so a probe turned 90 degrees under a non-uniformly scaled parent
+ * gets that parent's scale along the axis it now points at, not along the world axis it lies on.
  */
 export class ReflectionProbe extends THREE.Object3D {
   readonly isReflectionProbe = true;
@@ -321,6 +324,12 @@ export class ReflectionProbes extends THREE.Object3D {
         else node.needsUpdate = true;
       }
     }
+    // The captures above were lit through the previous array (materials sample it until the bake
+    // ends), whose environment slot still holds the old environment: when both changed, capture
+    // the probes once more, now through this array (F2).
+    if (previous !== null && captureEnvironment && captured.length > 0) {
+      this.bake(renderer, scene, { ...options, probes: captured, environment: environmentOption === false ? false : true });
+    }
   }
 
   /** L1 SH of every slot into `irradiance` (core ProbeIrradiance on three's 2D-array atlas, x mirrored). */
@@ -366,13 +375,26 @@ function clearSlot(device: GPUDevice, texture: GPUTexture, slot: number) {
   device.queue.submit([encoder.finish()]);
 }
 
+/**
+ * The scale a probe's volumes and offsets take from its world matrix: the length of each world
+ * basis axis, so a mirrored parent (negative determinant) gives positive sizes; (0, 0, 0) when the
+ * matrix is singular (a zero-scale parent), which disables the probe. three's getWorldScale gives a
+ * negative x for the first and (1, 1, 1) for the second (Matrix4.decompose).
+ */
+export function probeWorldScale(object: THREE.Object3D, target: THREE.Vector3) {
+  object.updateWorldMatrix(true, false);
+  const m = object.matrixWorld, e = m.elements;
+  if (m.determinant() === 0) return target.set(0, 0, 0);
+  return target.set(Math.hypot(e[0], e[1], e[2]), Math.hypot(e[4], e[5], e[6]), Math.hypot(e[8], e[9], e[10]));
+}
+
 /** World-space capture point of a probe: its position plus its scaled `originOffset`. */
 export function probeOrigin(probe: ReflectionProbe, target: THREE.Vector3) {
-  probe.getWorldScale(_size).multiply(probe.originOffset);
+  probeWorldScale(probe, _size).multiply(probe.originOffset);
   return probe.getWorldPosition(target).add(_size);
 }
 
 function volume(probe: ReflectionProbe) {
-  probe.getWorldScale(_size).multiply(probe.influenceSize);
+  probeWorldScale(probe, _size).multiply(probe.influenceSize);
   return _size.x * _size.y * _size.z;
 }
