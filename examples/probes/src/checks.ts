@@ -164,6 +164,85 @@ export function makeChecks(p: Page) {
     },
 
     /**
+     * Phase 2 lookup options on explicit lookups, at points deep inside one room's probe:
+     * `normal` (Lagarde's dominant direction: R at roughness 0, N at roughness 1), `ao` (Lagarde's
+     * specular occlusion, against the CPU formula), `frameIrradiance` (the re-fit: the ratio to the
+     * plain lookup is clamp(k / E(N), 0, refitClamp), E from the bake's L1 SH, read back).
+     */
+    async lookupOptions() {
+      const points = [[-5, 2, 1], [-3, 1.5, -1], [4, 2, 1], [5, 3, -1]];
+      const dirs = [[0.3, -0.2, -1], [-1, 0.4, 0.2], [0.2, 0.9, 0.3], [0.7, -0.6, 0.4]].map((d) => new THREE.Vector3(...d).normalize().toArray());
+      const normals = [[0, 1, 0], [1, 0.2, 0], [0, 0.3, -1], [-0.5, 0.5, 0.7]].map((d) => new THREE.Vector3(...d).normalize().toArray());
+      const views = [[0, 0.6, 1], [0.8, 0.2, 0.3], [0.1, 0.5, -1], [-1, 0.2, 0.4]].map((d) => new THREE.Vector3(...d).normalize().toArray());
+      const aos = [0.2, 0.5, 0.8, 0.35];
+      const n = points.length, K = 1;
+      // one input and one output array (a compute stage binds at most 8 storage buffers)
+      const input = instancedArray(new Float32Array(points.flatMap((q, i) => [...q, aos[i], ...dirs[i], 0, ...normals[i], 0, ...views[i], 0])) as never, 'vec4') as N;
+      const output = instancedArray(n * 7, 'vec4') as N;
+      const kernel = Fn(() => {
+        const at = (k: number) => input.element(instanceIndex.mul(4).add(k));
+        const P = at(0).xyz.toVar(), ao = at(0).w.toVar(), R = at(1).xyz.toVar(), Nn = at(2).xyz.toVar(), V = at(3).xyz.toVar();
+        const look = (dir: N, r: number, o: object = {}) => sampleReflectionProbesLocal(p.probes, P, dir, r, o);
+        const put = (k: number, v: N) => output.element(instanceIndex.mul(7).add(k)).assign(v);
+        put(0, look(R, 0));
+        put(1, look(R, 0, { normal: Nn }));
+        put(2, look(Nn, 1));
+        put(3, look(R, 1, { normal: Nn }));
+        put(4, look(R, 0, { normal: Nn, view: V, ao }));
+        put(5, look(R, 0, { normal: Nn, frameIrradiance: vec3(K) }));
+        put(6, look(R, 0, { normal: Nn, frameIrradiance: vec3(1e6) }));
+      })().compute(n) as N;
+      // a frame first, so the set's table holds the bake's irradiance
+      await p.shot();
+      await renderer.computeAsync(kernel);
+      await renderer.computeAsync(kernel);
+      const all = new Float32Array(await renderer.getArrayBufferAsync(output.value));
+      const O = Array.from({ length: 7 }, (_, k) => {
+        const o = new Float32Array(n * 4);
+        for (let i = 0; i < n; i++) o.set(all.subarray((i * 7 + k) * 4, (i * 7 + k) * 4 + 4), i * 4);
+        return o;
+      });
+      // the bake's L1 SH per slot
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const device: GPUDevice = (renderer.backend as any).device;
+      const src = p.probes.irradiance!;
+      const rb = device.createBuffer({ size: src.size, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+      const enc = device.createCommandEncoder(); enc.copyBufferToBuffer(src, 0, rb, 0, src.size); device.queue.submit([enc.finish()]);
+      await rb.mapAsync(GPUMapMode.READ);
+      const sh = new Float32Array(rb.getMappedRange().slice(0)); rb.destroy();
+      const slotAt = (q: number[]) => p.probes.bakedProbes.findIndex((probe) => {
+        const c = probe.position, h = probe.influenceSize;
+        return [0, 1, 2].every((k) => Math.abs(q[k] - c.getComponent(k)) < h.getComponent(k) / 2 - probe.blendDistance);
+      });
+      const rel = (a: number, b: number) => Math.abs(a - b) / Math.max(1e-4, Math.abs(b));
+      let dom0 = 0, dom1 = 0, so = 0, refit = 0, clampErr = 0;
+      const ratios: number[] = [];
+      for (let i = 0; i < n; i++) {
+        const nn = normals[i], vv = views[i];
+        const NdotV = Math.min(1, Math.max(0, nn[0] * vv[0] + nn[1] * vv[1] + nn[2] * vv[2]));
+        const soRef = Math.min(1, Math.max(0, Math.pow(NdotV + aos[i], 0.5) - 1 + aos[i]));
+        const s = slotAt(points[i]) * 12;
+        const E = [0, 1, 2].map((c) => {
+          const L00 = sh[s + c], L1m1 = [sh[s + 3], sh[s + 4], sh[s + 5]][c], L10 = [sh[s + 6], sh[s + 7], sh[s + 8]][c], L11 = [sh[s + 9], sh[s + 10], sh[s + 11]][c];
+          return Math.max(0, 0.886227 * L00 + 1.023327 * (L1m1 * nn[1] + L10 * nn[2] + L11 * nn[0]));
+        });
+        for (let c = 0; c < 3; c++) {
+          const plain = O[0][i * 4 + c];
+          dom0 = Math.max(dom0, rel(O[1][i * 4 + c], plain));
+          dom1 = Math.max(dom1, rel(O[3][i * 4 + c], O[2][i * 4 + c]));
+          so = Math.max(so, rel(O[4][i * 4 + c], plain * soRef));
+          const expect = Math.min(p.probes.refitClamp, Math.max(0, K / Math.max(E[c], 1e-4)));
+          ratios.push(+(O[5][i * 4 + c] / plain).toFixed(3));
+          refit = Math.max(refit, rel(O[5][i * 4 + c], plain * expect));
+          clampErr = Math.max(clampErr, rel(O[6][i * 4 + c], plain * p.probes.refitClamp));
+        }
+      }
+      // guard: a shader that failed to compile leaves zeros, which every relative error above passes
+      const lum = O[0].reduce((a, x, i) => a + ((i & 3) === 3 ? 0 : x), 0);
+      return { dom0, dom1, so, refit, clampErr, ratios, lum, slots: points.map(slotAt) };
+    },
+
+    /**
      * Cache key: two probe sets of equal size (one red capture, one blue), each sampled by its own
      * material. If they shared a compiled program, both quads would show the first set.
      */

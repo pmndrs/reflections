@@ -402,6 +402,17 @@ async function main() {
       check('coverage: alpha 0 outside every volume, 1 inside, fade between; rgb 0 outside', cov.alphaErr < 1e-4 && cov.rgbOutside === 0 && cov.lum > 0,
         `alpha ${JSON.stringify(cov.alpha)}, max err ${cov.alphaErr.toExponential(1)}`);
       check('coverage: rgb * alpha equals the vec3 form (black environment)', cov.composeErr < 1e-3, `max rel err ${cov.composeErr.toExponential(1)}`);
+      const lo = await C('lookupOptions');
+      check("lookup option normal: Lagarde's dominant direction (R at r 0, N at r 1)", lo.dom0 < 1e-4 && lo.dom1 < 1e-4 && lo.lum > 0, `max rel err ${lo.dom0.toExponential(1)}, ${lo.dom1.toExponential(1)}`);
+      check("lookup option ao: Lagarde's specular occlusion", lo.so < 1e-3, `max rel err ${lo.so.toExponential(1)}`);
+      check('lookup option frameIrradiance: re-fit by k / probe L1 irradiance, clamped', lo.refit < 2e-3 && lo.clampErr < 1e-4 && lo.lum > 0 && lo.ratios.every(Number.isFinite) && lo.slots.every((s) => s >= 0),
+        `max rel err ${lo.refit.toExponential(1)} (ratios ${lo.ratios.slice(0, 6).join(' ')} ...), clamp ${lo.clampErr.toExponential(1)}`);
+      const rf = await p.T(`(async () => { const P = window.__p; P.setGrid(true, 0.3); P.setLookup('warp'); for (let i = 0; i < 3; i++) await P.shot(); const off = await P.shot();
+        P.setRefit(true); for (let i = 0; i < 3; i++) await P.shot(); const on = await P.shot(); P.setRefit(false); P.setGrid(false); return { on, off }; })()`);
+      savePng('probes-refit-off.png', rf.off);
+      savePng('probes-refit-on.png', rf.on);
+      const rs = await p.T(`(${IMAGE_STATS})(${JSON.stringify(rf.on)}, ${JSON.stringify(rf.off)})`);
+      check('re-fit with LightProbeGrid renders and changes the image', rs.lum > 10 && rs.mean > 0.5, `lum ${rs.lum.toFixed(1)}, mean diff ${rs.mean.toFixed(2)} / 255`);
       const ck = await C('cacheKey');
       check('two probe sets of equal size keep their own programs', ck.left[0] > 200 && ck.left[2] < 50 && ck.right[2] > 200 && ck.right[0] < 50 && ck.keysDiffer,
         `left ${ck.left}, right ${ck.right}, keys differ ${ck.keysDiffer}`);

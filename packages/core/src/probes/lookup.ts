@@ -63,14 +63,16 @@ export function lodWgsl(mapping: ProbeLodMapping = 'r187') {
   }
 }
 
-/** Helpers every flavour shares (no bindings). Names are prefixed `pr_`. */
+/**
+ * Helpers every flavour shares (no bindings). Names are prefixed `pr_`. They depend only on the layout,
+ * `mirrorX` and `lodMapping`, so lookups with different dominant-direction / re-fit / count options
+ * can share one include in a shader module.
+ */
 const helpersWgsl = (o: ProbeLookupOptions) => /* wgsl */ `
 const PR_HEADER_ROWS: u32 = ${PROBE_HEADER_ROWS}u;
 const PR_ROWS_PER_VOLUME: u32 = ${PROBE_ROWS_PER_VOLUME}u;
 const PR_IRRADIANCE_ROWS: u32 = ${PROBE_IRRADIANCE_ROWS}u;
 const PR_MIRROR_X: bool = ${o.mirrorX === true};
-const PR_DOMINANT_DIRECTION: bool = ${o.dominantDirection === true};
-const PR_REFIT: bool = ${o.refit === true};
 fn pr_lod(roughness: f32, maxLod: f32) -> f32 {
   let r = clamp(roughness, 0.0, 1.0);
   return ${lodWgsl(o.lodMapping)};
@@ -112,7 +114,8 @@ fn pr_shIrradiance(a: vec4f, b: vec4f, c: vec4f, N: vec3f) -> vec3f {
  * frameIrr (vec3f; negative: no re-fit), withEnv (bool). Returns vec4f: with `withEnv`, (radiance with the environment
  * fallback, 1); without, (probe radiance normalized by its coverage, coverage).
  */
-const lookupBody = (row: (i: string) => string, tex: string, samp: string, unroll?: number) => {
+const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: string, samp: string) => {
+  const unroll = o.count;
   const volume = /* wgsl */ `    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
     let r0 = ${row('b')};
     let r1 = ${row('b + 1u')};
@@ -149,9 +152,9 @@ const lookupBody = (row: (i: string) => string, tex: string, samp: string, unrol
   let irr = ${row('1u')};
   let irrRow = u32(irr.x);
   // a negative frameIrr switches the re-fit off (no provider)
-  let refitOn = PR_REFIT && all(frameIrr >= vec3f(0.0));
+  let refitOn = ${o.refit === true} && all(frameIrr >= vec3f(0.0));
   var dir = R;
-  if (PR_DOMINANT_DIRECTION) { dir = pr_dominantDirection(N, R, roughness); }
+  if (${o.dominantDirection === true}) { dir = pr_dominantDirection(N, R, roughness); }
   var radiance = vec3f(0.0);
   var remaining = enabled;
 ${unroll === undefined ? `  for (var i = 0u; i < count; i++) {\n${volume}  }\n` : Array.from({ length: unroll }, (_, k) => `  {\n    let i = ${k}u;\n${volume}  }\n`).join('')}  let coverage = enabled - remaining;
@@ -190,7 +193,7 @@ export function probeLookupIncludesWgsl(options: ProbeLookupOptions): string {
  * `probeLookup` returns.
  */
 export function probeLookupFunctionWgsl(options: ProbeLookupOptions, name = 'probeLookup'): string {
-  return `fn ${name}(atlas: ${options.layout.textureType}, samp: sampler, table: ptr<storage, array<vec4f>, read>, ${SIGNATURE}) -> vec4f {${lookupBody((i) => `(*table)[${i}]`, 'atlas', 'samp', options.count)}}\n`;
+  return `fn ${name}(atlas: ${options.layout.textureType}, samp: sampler, table: ptr<storage, array<vec4f>, read>, ${SIGNATURE}) -> vec4f {${lookupBody(options, (i) => `(*table)[${i}]`, 'atlas', 'samp')}}\n`;
 }
 
 export interface ProbeLookupModuleOptions extends ProbeLookupOptions {
@@ -231,7 +234,7 @@ export function probeLookupWgsl(options: ProbeLookupModuleOptions): string {
 @group(${g}) @binding(${b + 1}) var pr_sampler: sampler;
 @group(${g}) @binding(${b + 2}) var<storage, read> pr_table: array<vec4f>;
 ${frame}
-fn probeLookup(${SIGNATURE}) -> vec4f {${lookupBody((i) => `pr_table[${i}]`, 'pr_atlas', 'pr_sampler', options.count)}}
+fn probeLookup(${SIGNATURE}) -> vec4f {${lookupBody(options, (i) => `pr_table[${i}]`, 'pr_atlas', 'pr_sampler')}}
 fn probeFrameIrradiance(P: vec3f, N: vec3f) -> vec3f { return ${frameCall}; }
 fn probeRadianceN(P: vec3f, N: vec3f, R: vec3f, roughness: f32) -> vec4f {
   return probeLookup(P, N, R, roughness, R, probeFrameIrradiance(P, N), false);

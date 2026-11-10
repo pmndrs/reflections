@@ -23,8 +23,8 @@
 // Extra lookup options (each off by default, see ProbeLookupOptions): the shading `normal` (Lagarde's
 // dominant direction), `ao` (Lagarde's specular occlusion), `frameIrradiance` (the re-fit).
 //
-// The volume table is a storage buffer that this node writes with queue.writeBuffer before every
-// render (updateBefore), not a uniform in a per-object group: r186/r187 re-upload per-object uniforms
+// The volume table is a storage buffer (one per probe set, shared by its nodes) written with
+// queue.writeBuffer before every render (updateBefore), not a uniform in a per-object group: r186/r187 re-upload per-object uniforms
 // only for render objects they see change, so probe moves and `boxProjection` would never reach
 // static meshes (D500). A bake that replaces the texture bumps the node (see ReflectionProbes.bake),
 // and the texture id is in the cache key, so every render object rebinds (D501).
@@ -83,16 +83,90 @@ export interface ProbeLookupOptions {
 
 // One wgslFn and include per lookup variant, shared by every node and material: three emits a
 // CodeNode once per shader only when it is the same node instance.
+// The includes depend only on the layout (and mirrorX, always true here); the function on the rest.
+const _includes = new Map<string, N>();
 const _lookups = new Map<string, { fn: N; includes: N }>();
 function lookupFor(options: CoreLookupOptions): { fn: N; includes: N } {
-  const key = `${options.layout.id}:${options.layout.mipLevelCount}:${options.dominantDirection === true}:${options.refit === true}:${options.count ?? -1}`;
+  // keyed by the code itself: layouts whose WGSL doesn't depend on maxLod share one include
+  const source = probeLookupIncludesWgsl({ layout: options.layout, mirrorX: true });
+  let includes = _includes.get(source);
+  if (!includes) _includes.set(source, (includes = code(source) as N));
+  const layoutKey = `${options.layout.id}:${options.layout.mipLevelCount}`;
+  const key = `${layoutKey}:${options.dominantDirection === true}:${options.refit === true}:${options.count ?? -1}`;
   let entry = _lookups.get(key);
   if (!entry) {
-    const includes = code(probeLookupIncludesWgsl(options)) as N;
-    entry = { fn: wgslFn(probeLookupFunctionWgsl(options, 'probesLookup'), [includes]) as N, includes };
+    entry = { fn: wgslFn(probeLookupFunctionWgsl({ ...options, mirrorX: true }, 'probesLookup'), [includes]) as N, includes };
     _lookups.set(key, entry);
   }
   return entry;
+}
+
+/**
+ * One volume table per probe set, shared by every node that samples it (a material, a composite with
+ * several lookups): one storage binding per set, one upload per render.
+ */
+interface SetTable { attribute: THREE.StorageBufferAttribute; node: N; rows: number; renderId: number; irradianceVersion: number; packed: Float32Array<ArrayBuffer> }
+const _tables = new WeakMap<ReflectionProbes, SetTable>();
+function tableFor(probes: ReflectionProbes): SetTable {
+  const count = probes.bakedProbes.length;
+  const rows = probeTableRows(count, count + 1);
+  let t = _tables.get(probes);
+  if (t === undefined || t.rows !== rows) {
+    const attribute = new THREE.StorageBufferAttribute(new Float32Array(rows * 4), 4);
+    t = { attribute, node: storage(attribute, 'vec4', rows).toReadOnly(), rows, renderId: -1, irradianceVersion: -1, packed: new Float32Array((PROBE_HEADER_ROWS + count * PROBE_ROWS_PER_VOLUME) * 4) };
+    _tables.set(probes, t);
+  }
+  return t;
+}
+
+/** The volumes of the last bake, in lookup order (smallest first), as core's table wants them. */
+function volumeList(probes: ReflectionProbes): ProbeVolume[] {
+  return probes.bakedProbes.map((probe, slot) => {
+    probe.getWorldPosition(_p);
+    probeOrigin(probe, _o);
+    probe.getWorldScale(_s);
+    const half = probe.influenceSize.clone().multiply(_s).multiplyScalar(0.5);
+    const projection = (probe.projectionSize ?? probe.influenceSize).clone().multiply(_s);
+    const offset = probe.projectionOffset.clone().multiply(_s);
+    return {
+      slot, center: [_p.x, _p.y, _p.z], halfSize: [half.x, half.y, half.z], fade: probe.blendDistance,
+      projectionSize: [projection.x, projection.y, projection.z], projectionOffset: [offset.x, offset.y, offset.z],
+      origin: [_o.x, _o.y, _o.z], boxProjection: probes.boxProjection,
+    };
+  });
+}
+
+/**
+ * Packs the set's table (core packProbeTable) and uploads it with queue.writeBuffer, once per render
+ * (`renderId`, -1: always); copies the bake's L1 SH into the irradiance rows when it changed.
+ */
+function writeTable(probes: ReflectionProbes, t: SetTable, renderer: THREE.WebGPURenderer, renderId: number) {
+  if (renderId !== -1 && t.renderId === renderId) return;
+  t.renderId = renderId;
+  const count = probes.bakedProbes.length;
+  // captures see only the environment, so baking doesn't feed back into itself
+  t.packed = packProbeTable({
+    maxLod: probes.texture!.mipmaps.length - 1, enabled: !probes.capturing, environmentSlot: count,
+    irradianceRow: probeIrradianceRow(count), refitClamp: probes.refitClamp,
+  }, volumeList(probes), t.packed);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const backend = renderer.backend as any;
+  const buffer: GPUBuffer | undefined = backend.get(t.attribute).buffer;
+  if (buffer === undefined) {
+    // not created yet: three uploads the array when it first binds the table
+    (t.attribute.array as Float32Array).set(t.packed);
+    return;
+  }
+  const device: GPUDevice = backend.device;
+  device.queue.writeBuffer(buffer, 0, t.packed);
+  const irradiance = probes.irradiance;
+  if (irradiance !== null && probes.irradianceVersion !== t.irradianceVersion) {
+    const offset = probeIrradianceRow(count) * 16;
+    const encoder = device.createCommandEncoder({ label: 'ReflectionProbes.table.irradiance' });
+    encoder.copyBufferToBuffer(irradiance, 0, buffer, offset, Math.min(irradiance.size, buffer.size - offset));
+    device.queue.submit([encoder.finish()]);
+    t.irradianceVersion = probes.irradianceVersion;
+  }
 }
 
 /** The atlas layout three's bake writes (a 2D array; the seam fix picks the variant). */
@@ -137,13 +211,10 @@ export class ReflectionProbesNode extends THREE.Node {
   readonly frameIrradianceNode: N = null;
   /** Whether the output is `vec4( radiance, coverage )` without environment fallback. */
   readonly coverage: boolean;
-  private table: THREE.StorageBufferAttribute | null = null;
-  private tableNode: N = null;
+  private table: SetTable | null = null;
   private renderer: THREE.WebGPURenderer | null = null;
   private volumes = 0;
   private seamFix = 'warp';
-  private irradianceVersion = -1;
-  private packed: Float32Array<ArrayBuffer> = new Float32Array(0);
 
   constructor(probes: ReflectionProbes, options: ProbeLookupOptions | null = null) {
     super(options?.coverage === true ? 'vec4' : 'vec3');
@@ -173,59 +244,15 @@ export class ReflectionProbesNode extends THREE.Node {
     return THREE.NodeUtils.hash(super.customCacheKey(), probes.bakedProbes.length, probes.bakedSeamFix === 'warp' ? 1 : 0, probes.texture?.id ?? 0);
   }
 
-  /** The volumes of the last bake, in lookup order (smallest first), as core's table wants them. */
-  private volumeList(): ProbeVolume[] {
+  updateBefore(frame?: { renderId: number }): undefined {
     const probes = this.probes;
-    return probes.bakedProbes.map((probe, slot) => {
-      probe.getWorldPosition(_p);
-      probeOrigin(probe, _o);
-      probe.getWorldScale(_s);
-      const half = probe.influenceSize.clone().multiply(_s).multiplyScalar(0.5);
-      const projection = (probe.projectionSize ?? probe.influenceSize).clone().multiply(_s);
-      const offset = probe.projectionOffset.clone().multiply(_s);
-      return {
-        slot, center: [_p.x, _p.y, _p.z], halfSize: [half.x, half.y, half.z], fade: probe.blendDistance,
-        projectionSize: [projection.x, projection.y, projection.z], projectionOffset: [offset.x, offset.y, offset.z],
-        origin: [_o.x, _o.y, _o.z], boxProjection: probes.boxProjection,
-      };
-    });
-  }
-
-  updateBefore(): undefined {
-    const probes = this.probes;
-    const tex = probes.texture!;
     // a bake that changes the layout disposes the previous texture, so switch even before a recompile
-    this.array.value = tex;
+    this.array.value = probes.texture!;
     if (probes.bakedProbes.length !== this.volumes || probes.bakedSeamFix !== this.seamFix) {
       this.needsUpdate = true;
       return;
     }
-    const renderer = this.renderer;
-    const table = this.table;
-    if (renderer === null || table === null) return;
-    // captures see only the environment, so baking doesn't feed back into itself
-    this.packed = packProbeTable({
-      maxLod: tex.mipmaps.length - 1, enabled: !probes.capturing, environmentSlot: probes.bakedProbes.length,
-      irradianceRow: probeIrradianceRow(this.volumes), refitClamp: probes.refitClamp,
-    }, this.volumeList(), this.packed.length ? this.packed : undefined);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const backend = renderer.backend as any;
-    const buffer: GPUBuffer | undefined = backend.get(table).buffer;
-    if (buffer === undefined) {
-      // not created yet: three uploads the array when it first binds the table
-      (table.array as Float32Array).set(this.packed);
-      return;
-    }
-    const device: GPUDevice = backend.device;
-    device.queue.writeBuffer(buffer, 0, this.packed);
-    // the probes' L1 SH, computed at bake (ReflectionProbes.irradiance), into the irradiance rows
-    const irradiance = probes.irradiance;
-    if (irradiance !== null && probes.irradianceVersion !== this.irradianceVersion) {
-      const encoder = device.createCommandEncoder({ label: 'ReflectionProbesNode.irradiance' });
-      encoder.copyBufferToBuffer(irradiance, 0, buffer, probeIrradianceRow(this.volumes) * 16, Math.min(irradiance.size, buffer.size - probeIrradianceRow(this.volumes) * 16));
-      device.queue.submit([encoder.finish()]);
-      this.irradianceVersion = probes.irradianceVersion;
-    }
+    if (this.renderer !== null && this.table !== null) writeTable(probes, this.table, this.renderer, frame?.renderId ?? -1);
   }
 
   setup(builder: N) {
@@ -233,13 +260,7 @@ export class ReflectionProbesNode extends THREE.Node {
     this.renderer = builder.renderer;
     this.seamFix = probes.bakedSeamFix;
     this.volumes = probes.bakedProbes.length;
-    const rows = probeTableRows(this.volumes, this.volumes + 1);
-    if (this.table === null || this.table.count !== rows) {
-      this.table = new THREE.StorageBufferAttribute(new Float32Array(rows * 4), 4);
-      this.tableNode = storage(this.table, 'vec4', rows).toReadOnly();
-      this.irradianceVersion = -1;
-    }
-    this.packed = new Float32Array((PROBE_HEADER_ROWS + this.volumes * PROBE_ROWS_PER_VOLUME) * 4);
+    this.table = tableFor(probes);
     this.updateBefore();
 
     // missing inputs come from the material: its fragment, reflection vector and roughness
@@ -255,7 +276,7 @@ export class ReflectionProbesNode extends THREE.Node {
     const envDirection: N = this.directionNode === null ? materialEnvRotation.mul(direction) : direction;
     const { fn } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit, count: this.volumes });
     const result: N = fn({
-      atlas: this.array, samp: sampler(this.array), table: this.tableNode,
+      atlas: this.array, samp: sampler(this.array), table: this.table.node,
       P: vec3(position), N: vec3(normal), R: vec3(direction), roughness, envR: vec3(envDirection),
       frameIrr: refit ? vec3(this.frameIrradianceNode) : vec3(-1), withEnv: bool(!this.coverage),
     }).toVar();

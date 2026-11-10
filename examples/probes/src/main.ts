@@ -11,7 +11,9 @@
 // `window.__p` drives the page headlessly (poses, roughness, bake and frame timing, screenshots).
 
 import * as THREE from 'three/webgpu';
-import { cubeTexture } from 'three/tsl';
+import { cubeTexture, normalWorld, positionWorld } from 'three/tsl';
+import { LightProbeGrid } from 'three/addons/lighting/LightProbeGrid.js';
+import { lightProbeGridIrradiance } from 'three/addons/tsl/lighting/LightProbeGridNode.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, reflectionProbes, type SeamFix,
@@ -30,7 +32,7 @@ type Lookup = SeamFix | 'hw' | 'legacy-warp' | 'legacy-none';
 const params = {
   lookup: (q.get('lookup') ?? 'warp') as Lookup, resolution: Number(q.get('res') ?? 128),
   showProbes: false, showGrid: q.has('grid'), gridResolution: 6, gridSize: 0.12,
-  boxProjection: true, dynamicObject: (q.get('obj') ?? 'Sphere') as 'None' | 'Sphere', pause: q.has('pause'), liveCapture: false,
+  boxProjection: true, refit: q.has('refit'), dynamicObject: (q.get('obj') ?? 'Sphere') as 'None' | 'Sphere', pause: q.has('pause'), liveCapture: false,
 };
 
 /**
@@ -216,12 +218,29 @@ async function main() {
     if (params.lookup === 'hw') copyToCubes();
   }
 
+  // Re-fit (SPEC "Probe re-fit"): the frame's irradiance from three r187's LightProbeGrid (L2 SH, 9 x 4 x 5
+  // probes over both rooms). The grid is baked but not added to the scene, so it lights nothing itself;
+  // it only re-fits the probe lookup (which on the material path is also the diffuse irradiance).
+  let lightGrid: LightProbeGrid | null = null;
+  function frameIrradiance(): N {
+    if (lightGrid === null) {
+      lightGrid = new LightProbeGrid(16, 5, 8, 9, 4, 5);
+      lightGrid.position.set(0, 2.5, 0);
+      lightGrid.updateMatrixWorld(true);
+      probesHelper.visible = false;
+      lightGrid.bake(renderer, scene, { cubemapSize: 16, near: 0.05, far: 30 });
+      probesHelper.visible = params.showProbes;
+    }
+    return lightProbeGridIrradiance(lightGrid, positionWorld, normalWorld);
+  }
+
   let node: N = null;
   function install() {
     probes.seamFix = params.lookup.endsWith('warp') ? 'warp' : 'none';
     capture();
     node = params.lookup === 'hw' ? new HardwareCubeNode(probes, hwCubes.map((c) => c.texture))
-      : params.lookup.startsWith('legacy') ? new LegacyProbesNode(probes) : reflectionProbes(probes);
+      : params.lookup.startsWith('legacy') ? new LegacyProbesNode(probes)
+        : reflectionProbes(probes, params.refit ? { frameIrradiance: frameIrradiance() } : {});
     scene.environmentNode = node;
   }
   install();
@@ -247,6 +266,7 @@ async function main() {
   select('Capture resolution', ['64', '128', '256', '512'], String(params.resolution), (v) => { params.resolution = Number(v); install(); });
   check('Live capture', params.liveCapture, (v) => { params.liveCapture = v; });
   check('Box projection', params.boxProjection, (v) => { probes.boxProjection = v; });
+  check('Re-fit (LightProbeGrid)', params.refit, (v) => { params.refit = v; install(); });
   select('Object', ['None', 'Sphere'], params.dynamicObject, (v) => { params.dynamicObject = v as 'None' | 'Sphere'; dynamicObject.visible = v !== 'None'; });
   check('Pause', params.pause, (v) => { params.pause = v; });
   slider('Object roughness', dynamicMaterial.roughness, (v) => { dynamicMaterial.roughness = v; });
@@ -275,6 +295,7 @@ async function main() {
       stop() { renderer.setAnimationLoop(null); },
       start() { renderer.setAnimationLoop(animate); },
       setLookup(v: Lookup) { params.lookup = v; install(); },
+      setRefit(on: boolean, clamp?: number) { params.refit = on; if (clamp !== undefined) probes.refitClamp = clamp; install(); },
       setResolution(v: number) { params.resolution = v; install(); },
       setPose(p: { pos: number[]; target: number[]; fov?: number }) {
         camera.position.fromArray(p.pos); controls.target.fromArray(p.target);
