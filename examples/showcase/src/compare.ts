@@ -15,7 +15,9 @@
 // then run each method from reset for `warmup` frames and read `frames` more. Per method, over the
 // masked pixels, in display units (8-bit sRGB after AgX, 0-255): MAD = mean |frame - reference|
 // (noise included), bias = |temporal mean - reference| (noise averaged out), and the per-pixel
-// temporal std of luma (boiling), mean and p99.
+// temporal std of luma (boiling), mean and p99. Then, with no reference, "orbit": the mean
+// |second temporal difference| of luma over the mask during a slow orbit (0.05 deg/frame), i.e.
+// flicker in motion; 'probes only' (no noise) gives the floor that moving edges leave.
 //
 // URL: ?scene=<id> ?pose=<name> ?left=<method> ?right=<method> ?split=0.5 ?w=960&h=540 ?freeze ?manual
 // Experiment overrides (not product defaults): ?spq=1|2|4 ?tsf=<FFX temporalStabilityFactor>
@@ -204,12 +206,48 @@ async function main() {
   const sctx = scratch.getContext('2d', { willReadFrequently: true })!;
   const read = (c: HTMLCanvasElement) => { sctx.clearRect(0, 0, W, H); sctx.drawImage(c, 0, 0); return sctx.getImageData(0, 0, W, H).data; };
 
-  interface Row { method: MethodId; mad: number; bias: number; stdMean: number; stdP99: number; frames: number; warmup: number; info: Record<string, unknown> }
-  interface Measure { scene: string; pose: string; size: [number, number]; referenceSamples: number; glossyPixels: number; units: string; rows: Row[]; seconds: number }
+  interface Row { method: MethodId; mad: number; bias: number; stdMean: number; stdP99: number; orbit: number | null; frames: number; warmup: number; info: Record<string, unknown> }
+  interface Measure { scene: string; pose: string; size: [number, number]; referenceSamples: number; glossyPixels: number; units: string; orbitDegPerFrame: number; rows: Row[]; seconds: number }
   let lastMeasure: Measure | null = null;
 
-  async function measure(opts: { samples?: number; warmup?: number; frames?: number; methods?: MethodId[] } = {}): Promise<Measure> {
+  /**
+   * Orbit flicker, reference-free: during a slow orbit about the target (`orbitDeg` per frame), the
+   * mean over the glossy mask of |l_t - (l_t-1 + l_t+1) / 2| (luma, 0-255). Smooth image motion
+   * cancels to first order in the second temporal difference; frame-to-frame noise doesn't. Edges
+   * moving across pixels leave a floor common to every method ('probes only' shows it: no noise).
+   */
+  async function orbitFlicker(m: CompareMethod, mask: number[], orbitDeg: number, frames: number) {
+    const pos = camera.position.clone(), quat = camera.quaternion.clone(), target = controls.target.clone();
+    const up = new THREE.Vector3(0, 1, 0), off = pos.clone().sub(target);
+    const at = (k: number) => {
+      camera.position.copy(target).add(off.clone().applyAxisAngle(up, (k * orbitDeg * Math.PI) / 180));
+      camera.lookAt(target); camera.updateMatrixWorld();
+    };
+    const n = mask.length, warm = 16;
+    let a: Float32Array | null = null, b: Float32Array | null = null, sum = 0, count = 0;
+    try {
+      for (let f = 0; f < warm + frames; f++) {
+        at(f);
+        m.frame(camera);
+        if (f >= warm) {
+          const d = read(m.canvas);
+          const l = new Float32Array(n);
+          for (let k = 0; k < n; k++) { const o = mask[k] * 4; l[k] = 0.2126 * d[o] + 0.7152 * d[o + 1] + 0.0722 * d[o + 2]; }
+          if (a && b) { for (let k = 0; k < n; k++) sum += Math.abs(b[k] - (a[k] + l[k]) / 2); count += n; }
+          a = b; b = l;
+        }
+        await m.idle();
+        if (f % 8 === 0) await nextFrame();
+      }
+    } finally {
+      camera.position.copy(pos); camera.quaternion.copy(quat); camera.updateMatrixWorld();
+    }
+    return count ? sum / count : 0;
+  }
+
+  async function measure(opts: { samples?: number; warmup?: number; frames?: number; methods?: MethodId[]; orbitDeg?: number; orbitFrames?: number } = {}): Promise<Measure> {
     const samples = opts.samples ?? Number(sampIn.value), warmup = opts.warmup ?? Number(warmIn.value), K = opts.frames ?? Number(framesIn.value);
+    const orbitDeg = opts.orbitDeg ?? 0.05, orbitFrames = opts.orbitFrames ?? 32;
     const methods = (opts.methods ?? METHOD_IDS.filter((id) => id !== 'pathtraced' && measureBoxes.get(id)?.checked)).filter(available);
     if (!pathTracerAvailable) throw new Error('measure needs the path tracer');
     const t0 = performance.now();
@@ -227,6 +265,7 @@ async function main() {
       }
       const ref = new Uint8ClampedArray(read(pt.canvas));
       const refSamples = pt.samples?.() ?? 0;
+      if (!sides.includes('pathtraced')) drop('pathtraced'); // GPU memory for the methods (Sponza)
       // glossy mask from our G-buffer
       const oursId = (METHOD_IDS.find((id) => id.startsWith('ours') && live.has(id)) ?? 'ours-raw') as MethodId;
       const ours = await get(oursId);
@@ -268,13 +307,14 @@ async function main() {
           stdSum += std[k];
         }
         const sorted = Array.from(std).sort((a, b) => a - b);
-        rows.push({ method: id, mad: absTotal / (n * K), bias: bias / n, stdMean: stdSum / n, stdP99: sorted[Math.floor(n * 0.99)] ?? 0, frames: K, warmup, info: m.info() });
+        let orbit: number | null = null;
+        if (orbitFrames > 0) { say(`${METHOD_SHORT[id]}: orbit`); orbit = await orbitFlicker(m, mask, orbitDeg, orbitFrames); }
+        rows.push({ method: id, mad: absTotal / (n * K), bias: bias / n, stdMean: stdSum / n, stdP99: sorted[Math.floor(n * 0.99)] ?? 0, orbit, frames: K, warmup, info: m.info() });
         if (!sides.includes(id) && id !== oursId) drop(id);
         say(table(rows, refSamples, n));
       }
       if (!sides.includes(oursId)) drop(oursId);
-      if (!sides.includes('pathtraced')) drop('pathtraced');
-      lastMeasure = { scene: entry.id, pose, size: [W, H], referenceSamples: refSamples, glossyPixels: mask.length, units: '8-bit display (sRGB after AgX), 0-255', rows, seconds: (performance.now() - t0) / 1000 };
+      lastMeasure = { scene: entry.id, pose, size: [W, H], referenceSamples: refSamples, glossyPixels: mask.length, units: '8-bit display (sRGB after AgX), 0-255', orbitDegPerFrame: orbitDeg, rows, seconds: (performance.now() - t0) / 1000 };
       say(table(rows, refSamples, mask.length));
       return lastMeasure;
     } finally {
@@ -282,9 +322,9 @@ async function main() {
     }
   }
   function table(rows: Row[], refSamples: number, n: number) {
-    const head = `vs path traced (${refSamples} spp), ${n.toLocaleString()} glossy px\n8-bit display units (0-255), still camera\n\n${'method'.padEnd(20)}${'MAD'.padStart(6)}${'bias'.padStart(6)}${'std'.padStart(6)}${'p99'.padStart(6)}\n`;
-    return head + rows.map((r) => `${METHOD_SHORT[r.method].padEnd(20)}${r.mad.toFixed(2).padStart(6)}${r.bias.toFixed(2).padStart(6)}${r.stdMean.toFixed(2).padStart(6)}${r.stdP99.toFixed(1).padStart(6)}`).join('\n') +
-      '\n\nMAD: mean |frame - ref| (noise incl.)\nbias: |temporal mean - ref|\nstd: per-pixel temporal std of luma';
+    const head = `vs path traced (${refSamples} spp), ${n.toLocaleString()} glossy px\n8-bit display units (0-255), still camera\n\n${'method'.padEnd(20)}${'MAD'.padStart(6)}${'bias'.padStart(6)}${'std'.padStart(6)}${'p99'.padStart(6)}${'orbit'.padStart(6)}\n`;
+    return head + rows.map((r) => `${METHOD_SHORT[r.method].padEnd(20)}${r.mad.toFixed(2).padStart(6)}${r.bias.toFixed(2).padStart(6)}${r.stdMean.toFixed(2).padStart(6)}${r.stdP99.toFixed(1).padStart(6)}${(r.orbit ?? NaN).toFixed(2).padStart(6)}`).join('\n') +
+      '\n\nMAD: mean |frame - ref| (noise incl.)\nbias: |temporal mean - ref|\nstd: per-pixel temporal std of luma\norbit: |2nd temporal difference| of luma\n  in a 0.05 deg/frame orbit (no reference)';
   }
 
   // ---- UI ----------------------------------------------------------------------------------------------

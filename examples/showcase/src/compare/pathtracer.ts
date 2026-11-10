@@ -5,7 +5,7 @@
 // (three's WebGL AgX, applied by the path tracer's output quad).
 //
 // Unbiased settings for a reference: filterGlossyFactor 0 (the default), MIS on, 8 bounces,
-// one tile per sample. Known differences from the raster methods, not errors: the directional light's
+// 3x3 tiles per sample. Known differences from the raster methods, not errors: the directional light's
 // shadow is a hard ray-traced shadow (the raster methods use PCF), and the blurred studio backdrop is
 // blurred by a cone jitter instead of a PMREM mip (backdrop pixels only, never reflective ones).
 import * as T from 'three';
@@ -53,7 +53,9 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
   const pt: N = new WebGLPathTracer(renderer);
   pt.renderDelay = 0; pt.fadeDuration = 0; pt.minSamples = 1; pt.maxSamples = Infinity;
   pt.dynamicLowRes = false; pt.rasterizeScene = false; pt.renderScale = 1;
-  pt.tiles.set(1, 1);
+  // tiles keep each GL draw short (a full-frame Sponza sample is long enough to trip the GPU watchdog)
+  const tiles = Number(params.get('ptTiles') ?? 3);
+  pt.tiles.set(tiles, tiles);
   pt.bounces = Number(params.get('ptBounces') ?? 8);
   pt.filterGlossyFactor = 0;
   pt.multipleImportanceSampling = true;
@@ -72,7 +74,7 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
         last.copy(camera.matrixWorld); lastP.copy(camera.projectionMatrix);
         pt.updateCamera();
       }
-      // as many samples as fit in the frame budget (each renderSample is one full-frame sample)
+      // as many tiles as fit in the frame budget (each renderSample renders one tile)
       const t = performance.now();
       do { pt.renderSample(); } while (performance.now() - t < budgetMs && !pt.isCompiling);
     },
@@ -83,6 +85,7 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
     status: () => `${Math.floor(pt.samples)} samples${pt.isCompiling ? ' (compiling)' : ''}`,
     info: () => ({ bounces: pt.bounces, filterGlossyFactor: 0, mis: true, clearcoatDropped, sceneBuildMs: Math.round(buildMs) }),
     gpuErrors: () => [],
-    dispose() { pt.dispose(); renderer.dispose(); renderer.forceContextLoss(); },
+    // (the local checkout's dispose() reads an `_albedoNormalPass` it never creates: guarded)
+    dispose() { try { pt.dispose(); } catch { /* see above */ } renderer.dispose(); renderer.forceContextLoss(); },
   };
 }
