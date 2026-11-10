@@ -340,7 +340,7 @@ Debug views:
 | Phase | What | Gate |
 |---|---|---|
 | 0 ✅ | Repo, monorepo layout, probes + prefilter + sampling moved, probes example, headless check, this spec | Typecheck, tests, build; example pixel-identical to the source |
-| 1 | Layout bench: `octa` / `cube2d-warp` / `cube2d-none` / `cube-hw`, brute-force reference | The decision above, written up in `docs/research/probe-layouts.md` |
+| 1 ✅ | Layout bench: `octa` / `cube2d-warp` / `cube2d-none` / `cube-hw`, brute-force reference | Decided 2026-11-10 (`docs/research/probe-layouts.md`): core path → `cube-hw` (raw cube array); three stays `cube2d-warp` until TSL binds cube arrays; `octa` an option (fails at the mirror mip at equal memory); format default `rgba16float`, `rgb9e5ufloat` the half-memory option; BC6H off (2.7× p99 on the roughest mip), re-run after the anchor fix. Open: r < 0.2 lookups (D101). |
 | 2 | Probe core: layout-generic prefilter, atlas, WGSL lookup in core, three node on top, re-fit with an irradiance input | Rooms example on the core path, identical or better; lookup ms not worse |
 | 3 | SSSR port in core (subgroup and workgroup-memory variants) + three adapter node | Subgroup and fallback variants produce identical lists and images; no boiling on the rooms and G1; flicker and GPU ms at or below three `SSRNode` + its denoise |
 | 4 | Trace seam; `@pmndrs/bvh` provider in core (three-mesh-bvh as the three stopgap); hit shading through probes | Off-screen scenario matches the reference; rays dispatched from the miss list only, with the GPU ms scaling with the miss count; the `@pmndrs/bvh` walk agrees with three-mesh-bvh on the same rays |
