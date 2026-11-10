@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Screen-space reflections</title>
+    <style>
+      :root { color-scheme: dark; --dn-border: #333; }
+      body { margin: 0; padding: 16px; background: #111; color: #ddd; font: 14px/1.45 system-ui, sans-serif; }
+      .dn-status { font-size: .8rem; white-space: pre-wrap; color: #9a9; }
+      .dn-page { max-width: 1020px; }
+      code { background: #0006; padding: 0 .3em; border-radius: 4px; }
+      canvas { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; border: 1px solid var(--dn-border); border-radius: 8px; display: block; touch-action: none; }
+      #controls { max-width: 960px; display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; font-size: .85rem; margin: .6rem 0; }
+      #controls label { display: inline-flex; align-items: center; gap: .35rem; }
+    </style>
+  </head>
+  <body>
+    <div class="dn-page">
+      <header>
+        <h1>Screen-space reflections on the scene kit</h1>
+        <p>
+          <code>ScreenSpaceReflectionsPass</code> renders the frame-contract G-buffer, then runs the core tracer on three's device;
+          <code>screenSpaceComposite</code> takes three's lit image and replaces its specular IBL with
+          <code>mix(probes or environment, SSR, confidence) &times; DFG</code>. No denoiser: glossy SSR is one sample per quad.
+          URL: <code>?scene=</code>, <code>?view=</code>, <code>?pose=</code>, <code>?probes=0</code>, <code>?variant=workgroup</code>, <code>?manual</code>.
+        </p>
+      </header>
+      <canvas id="view" width="960" height="540"></canvas>
+      <div id="controls"></div>
+      <pre id="status" class="dn-status">starting...</pre>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

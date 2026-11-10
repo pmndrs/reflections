@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | sssr-core | probe-bench)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | probe-bench)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
 //
@@ -132,7 +132,11 @@ async function sssrCoreChecks(pages) {
   console.log('  stats', JSON.stringify(st));
   check('sssr: rays traced, denoiser tiles listed', st.rays > 0 && st.tiles > 0, `${st.rays} rays, ${st.tiles} tiles, ${st.misses} misses`);
   check('sssr: sane hit fraction on the mirror floor', st.mirrorHitFraction > 0.5 && st.mirrorHitFraction < 1, `${(st.mirrorHitFraction * 100).toFixed(1)}% of ${st.mirrorPixels} px`);
-  check('sssr: no ray above the roughness threshold', st.maxTracedRoughness < 0.2, `max traced alpha ${st.maxTracedRoughness.toFixed(4)}`);
+  // roughnessThreshold is perceptual (D43): the tracer squares it, so every traced pixel has alpha below
+  // threshold^2 and every untraced ramp pixel is at or above it (both sides, so a missing or doubled square fails).
+  check('sssr: no ray above the roughness threshold (perceptual, squared at the pass)',
+    st.maxTracedRoughness < st.thresholdAlpha && st.minUntracedRampRoughness >= st.thresholdAlpha && Math.abs(st.thresholdAlpha - 0.2) < 1e-3,
+    `max traced alpha ${st.maxTracedRoughness.toFixed(4)} < ${st.thresholdAlpha.toFixed(4)} <= min untraced ramp alpha ${st.minUntracedRampRoughness.toFixed(4)}`);
   check('sssr: roughness ramp partly traced', st.rampTracedFraction > 0.2 && st.rampTracedFraction < 0.9, `${(st.rampTracedFraction * 100).toFixed(1)}%`);
   savePng('sssr-core-grid.png', await s.T('window.__p.shot()'));
   const hasSubgroups = await s.T('window.__p.hasSubgroups');
@@ -147,6 +151,11 @@ async function sssrCoreChecks(pages) {
         r.radianceDiffPixels === 0 && r.hitDiffPixels === 0 && r.roughnessDiffPixels === 0 && r.pyramidDiffTexels === 0 && r.blueNoiseDiff === 0,
         `differing px: radiance ${r.radianceDiffPixels}, hit ${r.hitDiffPixels}, roughness ${r.roughnessDiffPixels}, pyramid ${r.pyramidDiffTexels}`);
     }
+    // Miss counts are exact only at occupancy 0: with the occupancy exit, which rays share a subgroup
+    // depends on atomic append order, so the count varies run to run (as in FFX).
+    const m1 = await s.T('window.__p.parity({ minTraversalOccupancy: 0 })');
+    const m2 = await s.T('window.__p.parity({ minTraversalOccupancy: 0 })');
+    check('sssr: miss count deterministic at occupancy 0', m1.misses[0] === m2.misses[0] && m1.misses[1] === m2.misses[1], `${m1.misses.join(', ')} then ${m2.misses.join(', ')}`);
     // Default occupancy (4) counts per subgroup vs per workgroup, so images may differ (D3xx); lists must not.
     const r = await s.T('window.__p.parity({})');
     check('sssr parity (default occupancy): lists', r.rayListSame && r.tileListSame && r.tileFlagsSame, `rays ${r.rays}`);
@@ -170,6 +179,14 @@ async function sssrCoreChecks(pages) {
   check('sssr cube-environment fallback: same rays and hits', se.rays === st.rays && Math.abs(se.mirrorHitFraction - st.mirrorHitFraction) < 1e-3,
     `rays ${se.rays}, hit ${(se.mirrorHitFraction * 100).toFixed(1)}%`);
   savePng('sssr-core-env.png', await env.T('window.__p.shot()'));
+  // 4K, every surface a mirror: more than 65535 x 64 rays, so the intersect args must be 2-D
+  // (D601). A 1-D dispatch over the limit is skipped without a validation error: radiance stays 0.
+  const uhd = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?w=3840&h=2160&allmirror`);
+  pages.push(uhd);
+  const su = await uhd.T('window.__p.stats()');
+  check('sssr 3840x2160 all-mirror: intersect runs past 65535 x 64 rays', su.rays > 65535 * 64 && su.mirrorHitFraction > 0.5 && su.tiles > 65535,
+    `${su.rays} rays, ${su.tiles} tiles, mirror floor hit ${(su.mirrorHitFraction * 100).toFixed(1)}%`);
+  uhd.close();
   // GPU ms at 1080p, informational (loop stopped: frames are submitted one at a time).
   const big = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?w=1920&h=1080`);
   pages.push(big);
@@ -234,6 +251,97 @@ async function checkScenes() {
     check(`scene ${id}: every target filled per the contract`, fails.length === 0, fails.length ? fails.join('; ') : detail);
   }
   return [p];
+}
+
+/**
+ * examples/ssr: the three adapter (ScreenSpaceReflectionsPass + screenSpaceComposite) on every
+ * procedural scene: no validation errors, finite outputs, rays traced. mirrorWall: the mirror floor
+ * shows the wall (SSR hit colour vs the analytic planar reflection). offscreen: the wall mirror,
+ * which reflects what is behind the camera, has low confidence. Both variants; GPU ms at 1080p.
+ */
+async function ssrChecks(pages) {
+  console.log('examples/ssr:');
+  for (const variant of ['auto', 'workgroup']) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid${variant === 'workgroup' ? '&variant=workgroup' : ''}`);
+    pages.push(p);
+    const ids = await p.T('window.__p.scenes()');
+    for (const id of variant === 'auto' ? ids : ['mirrorWall', 'offscreen']) {
+      const before = results.logs.length;
+      const info = await p.T(`window.__p.load(${JSON.stringify(id)})`);
+      await p.T('window.__p.step(2)');
+      const st = await p.T('window.__p.stats()');
+      const fails = [];
+      if (st.nonFinite) fails.push(`${st.nonFinite} non-finite px`);
+      if (!(st.rays > 0)) fails.push('no rays');
+      const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+      if (errs.length) fails.push(errs.slice(0, 2).join(' | '));
+      const tag = `ssr ${id} (${st.variant})`;
+      check(`${tag}: renders, no validation errors, finite outputs`, fails.length === 0,
+        fails.length ? fails.join('; ') : `${info.probes} probe(s), ${st.rays} rays, ${st.misses} misses, mean confidence ${st.meanConfidence.toFixed(3)} on geometry, mirror floor ${st.mirrorFloorConfidence.toFixed(3)}`);
+      if (id === 'mirrorWall') {
+        const w = st.wall;
+        check(`${tag}: mirror floor shows the wall`, w.confidentFraction > 0.6 && w.lumCorrelation > 0.8 && w.hitDistanceMedianRelErr < 0.05,
+          `${w.pixels} floor px reflect a visible wall point; ${(w.confidentFraction * 100).toFixed(1)}% with confidence >= 0.9; luminance correlation ${w.lumCorrelation.toFixed(3)}, mean abs rel diff ${w.meanAbsRelative.toFixed(3)}; hit distance median rel err ${w.hitDistanceMedianRelErr.toFixed(4)}`);
+        if (variant === 'auto') {
+          savePng('ssr-mirrorWall-grid.png', await p.T('window.__p.shot()'));
+          await p.T("window.__p.setView('final')");
+          savePng('ssr-mirrorWall-final.png', await p.T('window.__p.shot()'));
+          await p.T("window.__p.setView('noSSR')");
+          savePng('ssr-mirrorWall-noSSR.png', await p.T('window.__p.shot()'));
+          await p.T("window.__p.setView('grid')");
+        }
+      }
+      if (id === 'offscreen') {
+        await p.T("window.__p.setPose('mirror')");
+        await p.T('window.__p.step(2)');
+        const sm = await p.T('window.__p.stats()');
+        check(`${tag}: low confidence where the reflection comes from behind the camera`, sm.facingPanelPixels > 1000 && sm.facingPanelConfidence < 0.1,
+          `wall mirror (${sm.facingPanelPixels} px, view 'mirror'): mean confidence ${sm.facingPanelConfidence.toFixed(4)}; floor reflecting above the frame (default view): ${st.mirrorFloorConfidence.toFixed(3)}`);
+        if (variant === 'auto') savePng('ssr-offscreen-mirror-grid.png', await p.T('window.__p.shot()'));
+      } else if (variant === 'auto' && id !== 'mirrorWall') savePng(`ssr-${id}-grid.png`, await p.T('window.__p.shot()'));
+    }
+  }
+  const big = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080`);
+  pages.push(big);
+  const t = await big.T('window.__p.time(30)');
+  console.log(`  GPU ms ${t.size.join('x')} through the three adapter (${t.variant}, mirrorWall, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
+}
+
+/** examples/regressions: GPU repros of review bugs (stream F1). Each check failed before its fix. */
+async function regressionChecks(pages) {
+  console.log('examples/regressions:');
+  const p = await openPage(`http://127.0.0.1:${PORT}/regressions/`);
+  pages.push(p);
+  const r = await p.T('window.__p.run()');
+  const g = r.gbuffer, e = (x) => Number(x).toExponential(2);
+  check('gbuffer: static scene with instanced, skinned, batched meshes has no motion', g.staticScene.max <= 1e-5,
+    `max ${e(g.staticScene.max)}, per column (plain, instanced, skinned, batched) ${g.staticScene.perColumn.map(e).join(' ')}`);
+  check('gbuffer: moving one instance moves only it', g.movedInstance.inside > 0 && g.movedInstance.outside === 0 && g.afterMove.max <= 1e-5,
+    `${g.movedInstance.inside} px inside, ${g.movedInstance.outside} outside (max ${e(g.movedInstance.outsideMax)}), next frame max ${e(g.afterMove.max)}`);
+  check('gbuffer: camera cut + resetHistory() gives no motion', g.cutReset.max === 0 && g.afterCut.max <= 1e-5,
+    `max ${e(g.cutReset.max)}, next frame ${e(g.afterCut.max)}`);
+  check('gbuffer: two render() calls in one frame = one per frame', g.twoRendersOneFrame.maxDiff < 1e-4 && g.twoRendersOneFrame.nonzero > 0 && g.twoRendersOneFrame.cameraPrevIsLastRender,
+    JSON.stringify(g.twoRendersOneFrame));
+  check('gbuffer: jittered frames with the unjittered projection have no motion', g.jitter.maxMotion <= 1e-5 && g.jitter.projectionUnjitteredAndJitteredExposed,
+    JSON.stringify(g.jitter));
+  const m = g.materials;
+  check('gbuffer: roughnessNode / metalnessNode reach the G-buffer', Math.abs(m.roughnessNode - 0.25) < 0.01 && Math.abs(m.metalnessNode - 0.75) < 0.01,
+    `roughness ${m.roughnessNode.toFixed(3)}, metalness ${m.metalnessNode.toFixed(3)}`);
+  check('gbuffer: MeshBasic env reflection stays out of scene colour', m.basicEnvSceneColor.every((v) => Math.abs(v - m.basicExpected) < 0.01),
+    `${m.basicEnvSceneColor.map((v) => v.toFixed(4)).join(' ')} (diffuse ${m.basicExpected.toFixed(4)})`);
+  check('gbuffer: logarithmicDepthBuffer rejected', g.logDepth.threw && /logarithmic/i.test(g.logDepth.message), g.logDepth.message ?? 'no error');
+  check('gbuffer: no WebGPU errors', g.gpuErrors.length === 0, g.gpuErrors.slice(0, 2).join(' | '));
+  const b = r.bc6h;
+  if (b.supported === false) { console.log('  no texture-compression-bc: bc6h regressions skipped'); return; }
+  for (const a of b.anchors) {
+    check(`bc6h ${a.name}: no anchor index overflows its slot`, a.twoSubsetAnchorOverflow === 0 && a.oneSubsetAnchorOverflow === 0,
+      `two-subset ${a.twoSubsetAnchorOverflow} of ${a.twoSubsetBlocks}, one-subset ${a.oneSubsetAnchorOverflow}; hardware log2 RMSE ${a.hardware.log2Rmse.toFixed(4)}, blocks off by > 1 stop ${a.hardware.blocksOverOneStop} of ${a.hardware.blocks}, non-finite ${a.hardware.nonFinite}`);
+  }
+  check('bc6h: capped scratch gives the same bits', b.cappedScratch.bytesDiffer === 0, `${b.cappedScratch.bytesDiffer} of ${b.cappedScratch.bytes} bytes differ`);
+  const o = b.overBindingLimit;
+  check(`bc6h: ${(o.blockBytes / 2 ** 20).toFixed(0)} MiB of blocks on default limits (binding ${(b.limits.maxStorageBufferBindingSize / 2 ** 20).toFixed(0)} MiB)`,
+    !o.validationError && !o.outOfMemory && o.newUncapturedErrors.length === 0 && o.maxRelErr < 0.02,
+    `${o.validationError ?? o.outOfMemory ?? o.newUncapturedErrors[0] ?? 'ok'}; max rel err ${o.maxRelErr.toFixed(4)}`);
 }
 
 async function main() {
@@ -370,8 +478,10 @@ async function main() {
       savePng('bc6h.png', await b.T('window.__p.shot()'));
     }
 
+    if (runs('regressions')) await regressionChecks(pages);
     if (runs('scenes')) pages.push(...(await checkScenes()));
     if (runs('sssr-core')) await sssrCoreChecks(pages);
+    if (runs('ssr')) await ssrChecks(pages);
 
     if (runs('probe-bench')) {
       // examples/probe-bench: smoke run (or the full bench with --probe-bench). Not a numbers gate:

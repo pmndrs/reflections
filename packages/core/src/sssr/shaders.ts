@@ -165,6 +165,7 @@ ${commonWgsl(inverted)}
 @group(0) @binding(9) var o_radiance: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(10) var o_hit: texture_storage_2d<r32float, write>;
 @group(0) @binding(11) var o_roughness: texture_storage_2d<r32float, write>;
+@group(0) @binding(12) var o_confidence: texture_storage_2d<r32float, write>;
 ${fallbackWgsl}
 
 var<workgroup> g_TileCount: atomic<u32>;
@@ -273,6 +274,7 @@ ${sg ? `
   if (on_screen) {
     textureStore(o_radiance, dispatch_thread_id, intersection_output);
     textureStore(o_hit, dispatch_thread_id, vec4f(0.0));
+    textureStore(o_confidence, dispatch_thread_id, vec4f(0.0)); // port addition: intersect overwrites traced pixels
     // Extract only the roughness channel so later passes load one value.
     textureStore(o_roughness, dispatch_thread_id, vec4f(roughness));
   }
@@ -315,33 +317,50 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
 // ---------------------------------------------------------------------------------------------
 // Indirect arguments (ffx_sssr_prepare_indirect_args.h). One thread.
 // args[0..2]: intersect (64 rays per group); args[3..5]: denoiser (one group per tile).
+// Port change: 2-D groups, x = min(n, 65535), y = ceil(n / x); a consumer indexes its group as
+// wg.y * nwg.x + wg.x and bounds-checks against the count. FFX's 1-D form exceeds WebGPU's
+// 65535-per-dimension limit at 4K (more than 4.19M rays or 65535 tiles), and an indirect dispatch
+// over the limit is silently skipped, not a validation error (DIVERGES D601).
+const ARGS_2D_WGSL = /* wgsl */ `
+fn groups2d(n: u32) -> vec3u {
+  if (n == 0u) { return vec3u(0u, 1u, 1u); }
+  let x = min(n, 65535u);
+  return vec3u(x, (n + x - 1u) / x, 1u);
+}
+`;
 
-export const INDIRECT_ARGS_WGSL = /* wgsl */ `
+export const INDIRECT_ARGS_WGSL = /* wgsl */ `${ARGS_2D_WGSL}
 @group(0) @binding(0) var<storage, read_write> rayCounter: array<u32, 4>;
 @group(0) @binding(1) var<storage, read_write> args: array<u32, 6>;
 @compute @workgroup_size(1)
 fn main() {
   let ray_count = rayCounter[0];
-  args[0] = (ray_count + 63u) / 64u; args[1] = 1u; args[2] = 1u;
+  let a = groups2d((ray_count + 63u) / 64u);
+  args[0] = a.x; args[1] = a.y; args[2] = 1u;
   rayCounter[0] = 0u; rayCounter[1] = ray_count;
   let tile_count = rayCounter[2];
-  args[3] = tile_count; args[4] = 1u; args[5] = 1u;
+  let t = groups2d(tile_count);
+  args[3] = t.x; args[4] = t.y; args[5] = 1u;
   rayCounter[2] = 0u; rayCounter[3] = tile_count;
 }
 `;
 
 /** Miss-list indirect args (hybrid sample's prepare_indirect_args_hw.hlsl), run after intersect.
- *  missCounter: [0] append counter, [1] this frame's count, [2] overflow (dropped entries).
- *  args: x = ceil(count / 64), 1, 1 for the ray-traced pass. */
-export const MISS_ARGS_WGSL = /* wgsl */ `
+ *  missCounter: [0] append counter, [1] this frame's count, [2] overflow append counter, [3] dropped this frame.
+ *  args: ceil(count / 64) groups of 64 in 2-D (see groups2d) for the ray-traced pass. */
+export const missArgsWgsl = (capacity: number) => /* wgsl */ `${ARGS_2D_WGSL}
+const P_capacity: u32 = ${capacity}u;
 @group(0) @binding(0) var<storage, read_write> missCounter: array<u32, 4>;
 @group(0) @binding(1) var<storage, read_write> args: array<u32, 3>;
 @compute @workgroup_size(1)
 fn main() {
   let count = missCounter[0];
   missCounter[0] = 0u;
-  missCounter[1] = count;
-  args[0] = (count + 63u) / 64u; args[1] = 1u; args[2] = 1u;
+  missCounter[1] = min(count, P_capacity);
+  missCounter[3] = missCounter[2];
+  missCounter[2] = 0u;
+  let a = groups2d((missCounter[1] + 63u) / 64u);
+  args[0] = a.x; args[1] = a.y; args[2] = 1u;
 }
 `;
 
@@ -363,8 +382,9 @@ ${commonWgsl(inverted)}
 @group(0) @binding(7) var<storage, read> rayCounter: array<u32, 4>;
 @group(0) @binding(8) var o_radiance: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(9) var o_hit: texture_storage_2d<r32float, write>;
-${missList ? `@group(0) @binding(10) var<storage, read_write> missList: array<vec2u>;
-@group(0) @binding(11) var<storage, read_write> missCounter: array<atomic<u32>, 4>;` : ''}
+@group(0) @binding(10) var o_confidence: texture_storage_2d<r32float, write>;
+${missList ? `@group(0) @binding(11) var<storage, read_write> missList: array<vec2u>;
+@group(0) @binding(12) var<storage, read_write> missCounter: array<atomic<u32>, 4>;` : ''}
 ${fallbackWgsl}
 
 const M_PI: f32 = 3.14159265358979;
@@ -539,13 +559,17 @@ fn octEncode(n: vec3f) -> vec2f {
   return p;
 }
 
-fn storeRadiance(packed: u32, coords: vec2u, value: vec4f, hit_distance: f32) {
+fn storePixel(c: vec2u, value: vec4f, hit_distance: f32, confidence: f32) {
+  textureStore(o_radiance, c, value);
+  textureStore(o_hit, c, vec4f(hit_distance));
+  textureStore(o_confidence, c, vec4f(confidence));
+}
+fn storeRadiance(packed: u32, coords: vec2u, value: vec4f, hit_distance: f32, confidence: f32) {
   let copy_target = coords ^ vec2u(1u);
-  textureStore(o_radiance, coords, value);
-  textureStore(o_hit, coords, vec4f(hit_distance));
-  if (((packed >> 29u) & 1u) != 0u) { let c = vec2u(copy_target.x, coords.y); textureStore(o_radiance, c, value); textureStore(o_hit, c, vec4f(hit_distance)); }
-  if (((packed >> 30u) & 1u) != 0u) { let c = vec2u(coords.x, copy_target.y); textureStore(o_radiance, c, value); textureStore(o_hit, c, vec4f(hit_distance)); }
-  if (((packed >> 31u) & 1u) != 0u) { textureStore(o_radiance, copy_target, value); textureStore(o_hit, copy_target, vec4f(hit_distance)); }
+  storePixel(coords, value, hit_distance, confidence);
+  if (((packed >> 29u) & 1u) != 0u) { storePixel(vec2u(copy_target.x, coords.y), value, hit_distance, confidence); }
+  if (((packed >> 30u) & 1u) != 0u) { storePixel(vec2u(coords.x, copy_target.y), value, hit_distance, confidence); }
+  if (((packed >> 31u) & 1u) != 0u) { storePixel(copy_target, value, hit_distance, confidence); }
 }
 
 struct Ray {
@@ -597,7 +621,7 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
   let environment_lookup = sampleRadianceFallback(world_space_origin, world_space_reflected_direction, 0.0);
   reflection_radiance = mix(environment_lookup, reflection_radiance, confidence);
-  storeRadiance((*r).packed, (*r).coords, vec4f(reflection_radiance, world_ray_length), select(0.0, world_ray_length, confidence > 0.0));
+  storeRadiance((*r).packed, (*r).coords, vec4f(reflection_radiance, world_ray_length), select(0.0, world_ray_length, confidence > 0.0), confidence);
   // Hybrid sample: low confidence, not marched into the background, and not too rough to trace.
   return confidence < P.missConfidenceThreshold && !isBackground(hit.z) && (*r).roughness <= P.missRoughnessThreshold;
 }
@@ -608,8 +632,8 @@ fn missEntry(r: ptr<function, Ray>) -> vec2u {
 }
 
 @compute @workgroup_size(64)
-fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec3u) {
-  let ray_index = wg.x * 64u + gi;
+fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u) {
+  let ray_index = (wg.y * nwg.x + wg.x) * 64u + gi; // 2-D indirect groups (D601)
 ${sg ? `
   if (ray_index >= rayCounter[1]) { return; }
   var r = setupRay(ray_index);

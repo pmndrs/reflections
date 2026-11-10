@@ -18,3 +18,8 @@ export { AccumulateNode, clampSample, ggxLobeSample, pixelSeed } from './samplin
 // Frame contract G-buffer: one MRT render of a three scene into the core's FrameInputs.
 export { FrameGBuffer, getDevice, getGPUTexture, type FrameGBufferOptions, type FrameTargetName } from './frame/FrameGBuffer';
 export { sceneColorNoSpecular, gbufferRoughness, gbufferMetalness } from './frame/nodes';
+
+// Screen-space reflections: G-buffer + core tracer on the renderer's device, outputs as three
+// textures; first-cut hybrid composite (SSR -> probes by coverage -> environment) in TSL.
+export { ScreenSpaceReflectionsPass, type ScreenSpaceReflectionsPassOptions } from './sssr/ScreenSpaceReflectionsPass';
+export { screenSpaceComposite, type ScreenSpaceComposite, type ScreenSpaceCompositeOptions } from './sssr/composite';

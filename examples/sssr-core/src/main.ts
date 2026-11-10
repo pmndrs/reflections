@@ -4,7 +4,7 @@
 // floor; time(n) gives median GPU ms per pass with the loop stopped (there is no loop: frames render
 // on demand); shot() returns the canvas as a PNG data URL.
 import {
-  createScreenSpaceReflections, environmentRadianceFallback, screenSpaceInputsFromFrame, type FrameInputs, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs,
+  createScreenSpaceReflections, DEFAULT_ROUGHNESS_THRESHOLD, environmentRadianceFallback, screenSpaceInputsFromFrame, type FrameInputs, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs,
   type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant,
 } from '@pmndrs/reflections/core';
 import { lookAt, perspective, SCENE_WGSL } from './scene';
@@ -22,11 +22,14 @@ struct D { size: vec2u, pad: vec2u };
 @group(0) @binding(4) var<storage, read> missCounter: array<u32, 4>;
 @group(0) @binding(5) var<storage, read_write> mask: array<atomic<u32>>;
 fn px(p: vec2u) -> u32 { return p.y * U.size.x + p.x; }
-@compute @workgroup_size(64) fn clear(@builtin(global_invocation_id) id: vec3u) {
-  if (id.x < U.size.x * U.size.y) { atomicStore(&mask[id.x], 0u); }
+// 2-D grids of 64-wide groups (x <= 65535), so 4K and up stay within the dispatch limit
+fn flat(id: vec3u, nwg: vec3u) -> u32 { return id.y * nwg.x * 64u + id.x; }
+@compute @workgroup_size(64) fn clear(@builtin(global_invocation_id) id: vec3u, @builtin(num_workgroups) nwg: vec3u) {
+  let i = flat(id, nwg);
+  if (i < U.size.x * U.size.y) { atomicStore(&mask[i], 0u); }
 }
-@compute @workgroup_size(64) fn mark(@builtin(global_invocation_id) id: vec3u) {
-  let i = id.x;
+@compute @workgroup_size(64) fn mark(@builtin(global_invocation_id) id: vec3u, @builtin(num_workgroups) nwg: vec3u) {
+  let i = flat(id, nwg);
   if (i < rayCounter[1]) {
     let r = rayList[i];
     let c = vec2u(r & 32767u, (r >> 15u) & 16383u);
@@ -141,7 +144,7 @@ async function main() {
     const d = new ArrayBuffer(160), f = new Float32Array(d), u = new Uint32Array(d);
     // invViewProj via a generic inverse (the core's helper is internal; this one is local)
     f.set(invert(viewProj), 0); f.set(viewProj, 16); f.set([0, 1.7, 5.5, 1], 32);
-    u[36] = W; u[37] = H; u[38] = reverse ? 1 : 0;
+    u[36] = W; u[37] = H; u[38] = reverse ? 1 : 0; u[39] = q.has('allmirror') ? 1 : 0;
     device.queue.writeBuffer(sceneU, 0, d);
   }
   const scenePipe = device.createComputePipeline({ label: 'analytic scene', layout: 'auto', compute: { module: device.createShaderModule({ code: SCENE_WGSL }), entryPoint: 'main' } });
@@ -247,12 +250,12 @@ async function main() {
   function frame(extra: ScreenSpaceReflectionsSettings = {}) {
     const enc = device.createCommandEncoder({ label: 'sssr-core frame' });
     main.dispatch(enc, inputs, { ...settings, ...extra });
-    const n = Math.ceil((W * H) / 64);
-    let p = enc.beginComputePass(); p.setPipeline(clearPipe); p.setBindGroup(0, clearGroup); p.dispatchWorkgroups(n); p.end();
-    p = enc.beginComputePass(); p.setPipeline(markPipe); p.setBindGroup(0, markGroup); p.dispatchWorkgroups(n); p.end();
+    const n = Math.ceil((W * H) / 64), gx = Math.min(n, 65535), gy = Math.ceil(n / gx);
+    let p = enc.beginComputePass(); p.setPipeline(clearPipe); p.setBindGroup(0, clearGroup); p.dispatchWorkgroups(gx, gy); p.end();
+    p = enc.beginComputePass(); p.setPipeline(markPipe); p.setBindGroup(0, markGroup); p.dispatchWorkgroups(gx, gy); p.end();
     const vu = new ArrayBuffer(32), vf = new Float32Array(vu), vi = new Uint32Array(vu);
     vi[0] = W; vi[1] = H; vi[2] = viewIndex === 0 ? 99 : viewIndex - 1; vi[3] = Math.min(pyramidMip, main.mipCount - 1);
-    vf[4] = canvas.width; vf[5] = canvas.height; vf[6] = settings.roughnessThreshold ?? 0.2; vf[7] = reverse ? 1 : 0;
+    vf[4] = canvas.width; vf[5] = canvas.height; vf[6] = (settings.roughnessThreshold ?? DEFAULT_ROUGHNESS_THRESHOLD) ** 2; // alpha, as the tracer compares vf[7] = reverse ? 1 : 0;
     device.queue.writeBuffer(displayU, 0, vu);
     const rp = enc.beginRenderPass({ colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }] });
     rp.setPipeline(displayPipe); rp.setBindGroup(0, displayGroup); rp.draw(3); rp.end();
@@ -355,18 +358,27 @@ async function main() {
       if ((r >>> 30) & 1) traced[(y ^ 1) * W + x] = 1;
       if ((r >>> 31) & 1) traced[(y ^ 1) * W + (x ^ 1)] = 1;
     }
-    let maxRough = 0;
+    let maxRough = 0, minUntraced = Infinity;
     for (let i = 0; i < W * H; i++) {
       const id = mat[i * 4 + 3];
       if (id === 1) { mirror++; if (hit[i] > 0) mirrorHit++; }
       if (id === 2) { ramp++; if (traced[i]) rampTraced++; }
       if (traced[i]) maxRough = Math.max(maxRough, rough[i]);
+      else if (id === 2) {
+        // only the quad's base pixel (FFX's spq-1 base ray, x and y even), and only in quads that are all
+        // ramp: a glossy pixel whose base pixel is rough or another surface gets no ray to share (as in FFX)
+        const x = i % W, y = Math.floor(i / W);
+        const allRamp = x + 1 < W && y + 1 < H && mat[(i + 1) * 4 + 3] === 2 && mat[(i + W) * 4 + 3] === 2 && mat[(i + W + 1) * 4 + 3] === 2;
+        if ((x & 1) === 0 && (y & 1) === 0 && allRamp) minUntraced = Math.min(minUntraced, rough[i]);
+      }
     }
     return {
       variant: main.variant, size: [W, H], mipCount: main.mipCount, rays: A.counter[1], tiles: A.counter[3],
-      misses: A.missCounter[1], missDropped: A.missCounter[2],
+      misses: A.missCounter[1], missDropped: A.missCounter[3],
       mirrorPixels: mirror, mirrorHitFraction: mirror ? mirrorHit / mirror : 0,
       rampPixels: ramp, rampTracedFraction: ramp ? rampTraced / ramp : 0, maxTracedRoughness: maxRough,
+      /** The threshold in the tracer's units (alpha), and the smallest untraced reflective alpha above it. */
+      thresholdAlpha: (settings.roughnessThreshold ?? DEFAULT_ROUGHNESS_THRESHOLD) ** 2, minUntracedRampRoughness: minUntraced,
     };
   }
 
