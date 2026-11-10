@@ -173,3 +173,17 @@ export async function probeIrradianceChecks() {
   set.dispose(); cubes.forEach((c) => c.destroy()); device.destroy();
   return out;
 }
+
+/** probeSourceSize: the smallest sourceSize the docs promise works, and a smaller one fails saying the real minimum. */
+export async function probeSourceSizeChecks() {
+  const { device } = await newDevice();
+  const tryMake = (sourceSize: number) => {
+    try { new ProbeSet(device, { capacity: 1, sourceSize }).dispose(); return { ok: true, error: null }; } catch (e) { return { ok: false, error: String((e as Error).message) }; }
+  };
+  // the minimum the ProbeSetOptions doc states
+  const src = (await import('../../../packages/core/src/probes/set.ts?raw')).default as string;
+  const documented = Number(/Capture face size, a power of two >= (\d+)/.exec(src)?.[1] ?? NaN);
+  const out = { documented, atDocumented: tryMake(documented), half: tryMake(documented / 2), s32: tryMake(32), s64: tryMake(64) };
+  device.destroy();
+  return out;
+}

@@ -18,6 +18,8 @@ import type { ProbeLayout } from './types';
 
 const INTEGRATION_SIZE = 16;
 const INTEGRATION_LEVELS = 3;
+/** Smallest capture face: mips down to 8 px (LOD_MIN) with INTEGRATION_LEVELS of them filtered by integration. */
+export const MIN_SOURCE_SIZE = 1 << (INTEGRATION_LEVELS + 3);
 const GGX_SAMPLES = 256;
 
 const COMMON = /* wgsl */ `
@@ -201,14 +203,15 @@ export class LayoutPrefilter {
   private readonly owned: (GPUTexture | GPUBuffer)[] = [];
 
   constructor(device: GPUDevice, layout: ProbeLayout, size: number, sourceSize: number) {
-    if (!Number.isInteger(Math.log2(sourceSize)) || sourceSize < 2 * INTEGRATION_SIZE) throw new Error(`LayoutPrefilter: sourceSize must be a power of two >= ${2 * INTEGRATION_SIZE}, got ${sourceSize}.`);
+    if (!Number.isInteger(Math.log2(sourceSize)) || sourceSize < Math.max(MIN_SOURCE_SIZE, 2 * INTEGRATION_SIZE)) throw new Error(`LayoutPrefilter: sourceSize must be a power of two >= ${Math.max(MIN_SOURCE_SIZE, 2 * INTEGRATION_SIZE)}, got ${sourceSize}.`);
     this.device = device;
     this.layout = layout;
     this.size = size;
     this.sourceSize = sourceSize;
     this.maxLod = layout.mipLevelCount - 1;
     // any size that halves exactly down to the last mip (octa can sit between powers of two)
-    if (this.maxLod < INTEGRATION_LEVELS || size % (1 << this.maxLod) !== 0) throw new Error(`LayoutPrefilter: ${layout.mipLevelCount} mips need a size divisible by ${1 << this.maxLod}, got ${size}.`);
+    if (this.maxLod < INTEGRATION_LEVELS) throw new Error(`LayoutPrefilter: the layout has ${layout.mipLevelCount} mips, at least ${INTEGRATION_LEVELS + 1} are needed (sourceSize >= ${MIN_SOURCE_SIZE}).`);
+    if (size % (1 << this.maxLod) !== 0) throw new Error(`LayoutPrefilter: ${layout.mipLevelCount} mips need a size divisible by ${1 << this.maxLod}, got ${size}.`);
     const pipes = pipesFor(device, layout);
     const U = GPUTextureUsage;
     const srcMips = Math.log2(sourceSize) + 1;

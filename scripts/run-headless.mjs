@@ -407,6 +407,13 @@ function f2Checks(r) {
     check('probes: a zero-scale parent gives a zero (disabled) volume', z.centre < 1e-6 && z.near < 1e-6,
       `coverage at the centre ${z.centre.toFixed(3)}, 0.3 off ${z.near.toFixed(3)}`);
   }
+  const pz = section('probeSourceSize');
+  if (pz) {
+    const d = (x) => x.ok ? 'ok' : `"${x.error}"`;
+    check(`probes: the documented minimum sourceSize (${pz.documented}) works; below it the error names the minimum`,
+      pz.atDocumented.ok && !pz.half.ok && pz.half.error.includes(String(pz.documented)) && !pz.s32.ok && pz.s32.error.includes('64') && pz.s64.ok,
+      `${pz.documented}: ${d(pz.atDocumented)}; ${pz.documented / 2}: ${d(pz.half)}; 32: ${d(pz.s32)}; 64: ${d(pz.s64)}`);
+  }
   const rh = section('rtHistory');
   if (rh) {
     check("rt on-screen reuse ignores inputs.history unless hitColor 'history'", rh.current.onScreen > 100 && rh.current.stale === 0 && rh.history.onScreen > 100 && rh.history.stale > 0.5 * rh.history.onScreen,
