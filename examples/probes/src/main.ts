@@ -6,9 +6,10 @@
 // CubeArrayTexture build. Two rooms joined by a doorway; one probe per room plus a smaller doorway
 // probe that takes priority where they overlap. Box projection onto each room's walls.
 //
-// Extra over the original: the seam handling of the manual cube lookup ('warp' / 'none'), and a
-// diagnostic 'hw' mode that copies every probe into its own cube texture and samples those with
-// the hardware (seamless) cube sampler, i.e. what #35046's cube array gives, from the same bake.
+// Extra over the original: the probe storage ('auto' / 'cube-array': a real cube array through the
+// #35053 shim, installed at start-up unless ?shim=0; 'warp' / 'none': the 2D array with that seam
+// handling), and a diagnostic 'hw' mode that copies every probe into its own cube texture and samples
+// those with the hardware (seamless) cube sampler, from the same bake.
 // `window.__p` drives the page headlessly (poses, roughness, bake and frame timing, screenshots).
 
 import * as THREE from 'three/webgpu';
@@ -17,7 +18,8 @@ import { LightProbeGrid } from 'three/addons/lighting/LightProbeGrid.js';
 import { lightProbeGridIrradiance } from 'three/addons/tsl/lighting/LightProbeGridNode.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, reflectionProbes, reflectionsRequiredLimits, type SeamFix,
+  ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, cubeArraySupportStatus, installCubeArraySupport, reflectionProbes,
+  reflectionsRequiredLimits, uninstallCubeArraySupport, type SeamFix,
 } from '@pmndrs/reflections/three';
 import { makeChecks, type Page } from './checks';
 import { LegacyProbesNode } from './legacy';
@@ -27,11 +29,12 @@ type N = any; // TSL's node typings are too strict for hand-written shader maths
 const q = new URLSearchParams(location.search);
 const W = Number(q.get('w') ?? 960), H = Number(q.get('h') ?? 540);
 
-// warp / none: the package (core WGSL lookup); legacy-*: the pre-phase-2 TSL lookup (./legacy.ts);
-// hw: the legacy lookup on hardware cube textures
-type Lookup = SeamFix | 'hw' | 'legacy-warp' | 'legacy-none';
+// auto: the package's default storage (a cube array when the renderer binds one, else the 2D array
+// with 'warp'); cube-array: forced; warp / none: the 2D array with that seam fix (all the core WGSL
+// lookup); legacy-*: the pre-phase-2 TSL lookup (./legacy.ts); hw: the legacy lookup on hardware cube textures
+type Lookup = 'auto' | 'cube-array' | SeamFix | 'hw' | 'legacy-warp' | 'legacy-none';
 const params = {
-  lookup: (q.get('lookup') ?? 'warp') as Lookup, resolution: Number(q.get('res') ?? 128),
+  lookup: (q.get('lookup') ?? 'auto') as Lookup, resolution: Number(q.get('res') ?? 128),
   showProbes: false, showGrid: q.has('grid'), gridResolution: 6, gridSize: 0.12,
   boxProjection: true, refit: q.has('refit'), dynamicObject: (q.get('obj') ?? 'Sphere') as 'None' | 'Sphere', pause: q.has('pause'), liveCapture: !q.has('static'), animateScene: !q.has('static'),
 };
@@ -120,6 +123,8 @@ async function main() {
   await renderer.init();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const device: GPUDevice = (renderer.backend as any).device;
+  // cube arrays on stock r187: the #35053 shim, self-tested here; it reports false (and patches nothing) if it fails
+  if (q.get('shim') !== '0') await installCubeArraySupport(renderer);
 
   const controls = new OrbitControls(camera, canvas);
   controls.target.set(0, 2.5, 0);
@@ -127,7 +132,13 @@ async function main() {
 
   // one probe per room plus a smaller doorway probe, which takes priority where they overlap
   const probes = new ReflectionProbes();
-  probes.seamFix = params.lookup.endsWith('warp') ? 'warp' : 'none';
+  /** Storage and seam fix of each lookup (the legacy and hw lookups read the 2D array). */
+  function configure() {
+    const l = params.lookup;
+    probes.layout = l === 'auto' ? 'auto' : l === 'cube-array' ? 'cube-array' : 'cube2d';
+    probes.seamFix = l === 'none' || l === 'legacy-none' || l === 'hw' ? 'none' : 'warp';
+  }
+  configure();
   for (const s of [
     { position: [-4, 2.5, 0], influenceSize: [8.4, 5.4, 8.4], projectionSize: [8, 5, 8] },
     { position: [4, 2.5, 0], influenceSize: [8.4, 5.4, 8.4], projectionSize: [8, 5, 8] },
@@ -238,12 +249,19 @@ async function main() {
 
   let node: N = null;
   function install() {
-    probes.seamFix = params.lookup.endsWith('warp') ? 'warp' : 'none';
+    configure();
     capture();
     node = params.lookup === 'hw' ? new HardwareCubeNode(probes, hwCubes.map((c) => c.texture))
       : params.lookup.startsWith('legacy') ? new LegacyProbesNode(probes)
         : reflectionProbes(probes, params.refit ? { frameIrradiance: frameIrradiance() } : {});
     scene.environmentNode = node;
+    showStatus();
+  }
+  function showStatus() {
+    const s = cubeArraySupportStatus(renderer);
+    const atlas = probes.bakedLayout === 'cube-array' ? 'cube array (texture_cube_array, core layout cube-hw)' : `2D array (cube2d-${probes.bakedSeamFix})`;
+    status.textContent = `three r${THREE.REVISION}, ${probes.bakedProbes.length} probes at ${params.resolution} px, lookup: ${params.lookup}\n`
+      + `active layout: ${atlas}\ncube arrays: ${s.mode} (${s.reason})`;
   }
   install();
 
@@ -264,7 +282,7 @@ async function main() {
     const r = document.createElement('input'); r.type = 'range'; r.min = '0'; r.max = '1'; r.step = '0.01'; r.value = String(value); r.oninput = () => on(Number(r.value));
     return row(label, r);
   };
-  select('Lookup', ['warp', 'none', 'hw', 'legacy-warp', 'legacy-none'], params.lookup, (v) => { params.lookup = v as Lookup; install(); });
+  select('Lookup', ['auto', 'cube-array', 'warp', 'none', 'hw', 'legacy-warp', 'legacy-none'], params.lookup, (v) => { params.lookup = v as Lookup; install(); });
   select('Capture resolution', ['64', '128', '256', '512'], String(params.resolution), (v) => { params.resolution = Number(v); install(); });
   check('Animate scene (torus, light colour)', params.animateScene, (v) => { params.animateScene = v; if (!v) { resetScene(); if (!params.liveCapture) capture(); } });
   check('Live capture (re-bake every frame)', params.liveCapture, (v) => { params.liveCapture = v; if (!v) capture(); });
@@ -301,7 +319,6 @@ async function main() {
     renderer.render(scene, camera);
   }
   renderer.setAnimationLoop(animate);
-  status.textContent = `three r${THREE.REVISION}, ${probes.bakedProbes.length} probes at ${params.resolution} px, lookup: ${params.lookup}`;
 
   // ---- headless hooks (same shape as the harness for the PR build) --------------------------
   const median = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
@@ -315,6 +332,10 @@ async function main() {
       stop() { renderer.setAnimationLoop(null); (renderer as any)._animation.stop(); params.animateScene = params.liveCapture = false; resetScene(); capture(); },
       start() { renderer.setAnimationLoop(animate); },
       setLookup(v: Lookup) { params.lookup = v; install(); },
+      /** The cube-array shim: install (resolves to its result) or uninstall; then re-installs the lookup. */
+      async setShim(on: boolean) { const ok = on ? await installCubeArraySupport(renderer) : (uninstallCubeArraySupport(renderer), false); install(); return ok; },
+      installShim: () => installCubeArraySupport(renderer),
+      get cubeArray() { return { ...cubeArraySupportStatus(renderer), bakedLayout: probes.bakedLayout, bakedSeamFix: probes.bakedSeamFix }; },
       setRefit(on: boolean, clamp?: number) { params.refit = on; if (clamp !== undefined) probes.refitClamp = clamp; install(); },
       setResolution(v: number) { params.resolution = v; install(); },
       setPose(p: { pos: number[]; target: number[]; fov?: number }) {

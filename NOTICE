@@ -9,6 +9,11 @@ three.js (https://github.com/mrdoob/three.js), Copyright (c) 2010-2026 three.js 
   - packages/core/src/probes/prefilter.ts: implements the prefilter plan of three.js r187's
     cube PMREMGenerator.
   - packages/three/src/sampling.ts: uses three's SpecularHelpers.ggxReflectionSample.
+  - packages/three/src/compat/CubeArrayTexture.ts: CubeArrayTexture vendored from three.js pull
+    request #35053 (Ben Houston, head 398963161f), src/textures/CubeArrayTexture.js, same API.
+  - packages/three/src/compat/cubeArray.ts: a runtime port of #35053's renderer changes
+    (renderers/common/Textures.js, renderers/webgpu/utils/WebGPUTextureUtils.js and
+    WebGPUBindingUtils.js, renderers/webgpu/nodes/WGSLNodeBuilder.js) onto three r187.
 
 GPURealTimeBC6H (https://github.com/knarkowicz/GPURealTimeBC6H, commit 0416fd3),
 Copyright (c) 2015 Krzysztof Narkowicz, dual-licensed public domain / MIT (used under MIT).

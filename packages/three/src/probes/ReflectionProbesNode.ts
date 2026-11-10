@@ -6,9 +6,11 @@
 // explicit ones), packs the volume table from the ReflectionProbe objects, and binds three's textures.
 //
 // Port of ReflectionProbesNode.js from three.js PR #35046 (Ben Houston), same weights, priority,
-// projection and capture behaviour as before phase 2. The atlas is three's 2D array of 6 x N layers
-// (three r187 can't bind cube arrays, D1), so the layout is `cube2d-warp` or `cube2d-none` after
-// `probes.bakedSeamFix`; three's cube captures are x-mirrored, so the lookup mirrors x (`mirrorX`).
+// projection and capture behaviour as before phase 2. The atlas is a CubeArrayTexture (core layout
+// `cube-hw`, bound through `cubeTexture()`, W20) when `probes.bakedLayout` is 'cube-array', else
+// three's 2D array of 6 x N layers (stock r187 can't bind cube arrays, D1), layout `cube2d-warp` or
+// `cube2d-none` after `probes.bakedSeamFix`; three's cube captures are x-mirrored, so the lookup
+// mirrors x (`mirrorX`).
 //
 // Two ways in, two outputs, one lookup:
 //   reflectionProbes( probes )                     scene.environmentNode: every physical material
@@ -30,7 +32,7 @@
 // and the texture id is in the cache key, so every render object rebinds (D501).
 
 import * as THREE from 'three/webgpu';
-import { bool, cameraPosition, code, float, mat4, materialEnvRotation, nodeObject, normalWorld, positionWorld, reflectVector, sampler, storage, texture, vec3, vec4, wgslFn } from 'three/tsl';
+import { bool, cameraPosition, code, cubeTexture, float, mat4, materialEnvRotation, nodeObject, normalWorld, positionWorld, reflectVector, sampler, storage, texture, vec3, vec4, wgslFn } from 'three/tsl';
 import {
   PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludesWgsl,
   probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
@@ -169,10 +171,19 @@ function writeTable(probes: ReflectionProbes, t: SetTable, renderer: THREE.WebGP
   }
 }
 
-/** The atlas layout three's bake writes (a 2D array; the seam fix picks the variant). */
+/** The atlas layout three's bake writes (`cube-hw` for a cube array; for a 2D array the seam fix picks the variant). */
 export function probeLayoutFor(probes: ReflectionProbes): ProbeLayout {
   const tex = probes.texture!;
-  return createProbeLayout(probes.bakedSeamFix === 'warp' ? 'cube2d-warp' : 'cube2d-none', { maxLod: tex.mipmaps.length - 1 });
+  const id = probes.bakedLayout === 'cube-array' ? 'cube-hw' : probes.bakedSeamFix === 'warp' ? 'cube2d-warp' : 'cube2d-none';
+  return createProbeLayout(id, { maxLod: tex.mipmaps.length - 1 });
+}
+
+/** The texture node a lookup binds the atlas with: `cubeTexture()` for a cube array (cube-array view), else `texture()`. */
+function atlasNode(probes: ReflectionProbes): N {
+  // an explicit (unused) uv: the default, reflectVector, needs a camera, which compute shaders lack
+  const node: N = probes.bakedLayout === 'cube-array' ? cubeTexture(probes.texture as N, vec3(0, 0, 1)) : texture(probes.texture!);
+  node.mergeable = false;
+  return node;
 }
 
 /** Box-projected direction (Lagarde's BPCEM, the guarded form from #35046), core's `pr_parallax`. */
@@ -200,7 +211,7 @@ export const cubeFaceUV = (dir: N): N => {
 export class ReflectionProbesNode extends THREE.Node {
   static get type() { return 'ReflectionProbesNode'; }
   readonly probes: ReflectionProbes;
-  protected readonly array: N;
+  protected array: N;
   /** Explicit lookup inputs; null ones come from the material (environment node). */
   readonly positionNode: N = null;
   readonly directionNode: N = null;
@@ -215,6 +226,7 @@ export class ReflectionProbesNode extends THREE.Node {
   private renderer: THREE.WebGPURenderer | null = null;
   private volumes = 0;
   private seamFix = 'warp';
+  private storage = 'cube2d';
 
   constructor(probes: ReflectionProbes, options: ProbeLookupOptions | null = null) {
     super(options?.coverage === true ? 'vec4' : 'vec3');
@@ -231,8 +243,8 @@ export class ReflectionProbesNode extends THREE.Node {
       if (options.frameIrradiance != null) this.frameIrradianceNode = nodeObject(options.frameIrradiance);
     }
     this.updateBeforeType = THREE.NodeUpdateType.RENDER;
-    this.array = texture(probes.texture);
-    this.array.mergeable = false;
+    this.array = atlasNode(probes);
+    this.storage = probes.bakedLayout;
     probes.track(this);
   }
 
@@ -241,11 +253,13 @@ export class ReflectionProbesNode extends THREE.Node {
     // separate probe sets from sharing a program (#35046 6837c32abc); the texture id makes render
     // objects rebind after a bake that replaced the texture
     const probes = this.probes;
-    return THREE.NodeUtils.hash(super.customCacheKey(), probes.bakedProbes.length, probes.bakedSeamFix === 'warp' ? 1 : 0, probes.texture?.id ?? 0);
+    return THREE.NodeUtils.hash(super.customCacheKey(), probes.bakedProbes.length, probes.bakedSeamFix === 'warp' ? 1 : 0, probes.bakedLayout === 'cube-array' ? 1 : 0, probes.texture?.id ?? 0);
   }
 
   updateBefore(frame?: { renderId: number }): undefined {
     const probes = this.probes;
+    // another storage needs another texture node (and binding type): rebuild first
+    if (probes.bakedLayout !== this.storage) { this.needsUpdate = true; return; }
     // a bake that changes the layout disposes the previous texture, so switch even before a recompile
     this.array.value = probes.texture!;
     if (probes.bakedProbes.length !== this.volumes || probes.bakedSeamFix !== this.seamFix) {
@@ -258,6 +272,7 @@ export class ReflectionProbesNode extends THREE.Node {
   setup(builder: N) {
     const probes = this.probes;
     this.renderer = builder.renderer;
+    if (probes.bakedLayout !== this.storage) { this.array = atlasNode(probes); this.storage = probes.bakedLayout; }
     this.seamFix = probes.bakedSeamFix;
     this.volumes = probes.bakedProbes.length;
     this.table = tableFor(probes);

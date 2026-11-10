@@ -5,7 +5,8 @@
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi | probe-core | probe-bench | ssr-bench | showcase)
-//   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
+//   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p: core on the 2D array (warp), core on the cube array, the pre-phase-2 TSL node
+//   pnpm check -- --only probes --probes-layout cube2d   # run the probe feature checks on the 2D array (default: 'auto', a cube array through the shim)
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
 //   pnpm check -- --only ssr-bench --ssr-bench   # the phase 3 gate bench: ours vs three's SSRNode (minutes); JSON to out/ssr-bench.json
@@ -976,8 +977,10 @@ async function main() {
       await p.T(FREEZE);
       const info = await p.T('({ revision: window.__p.THREE.REVISION, probes: window.__p.probes.bakedProbes.length, lookup: window.__p.params.lookup })');
       check('probes baked', info.probes === 3, JSON.stringify(info));
+      const ca = await p.T('window.__p.cubeArray');
+      check('cube-array support installed and self-tested (W20 shim)', ca.mode === 'shim' || ca.mode === 'native', `${ca.mode}: ${ca.reason}`);
       const shots = {};
-      for (const lookup of ['warp', 'none', 'hw']) {
+      for (const lookup of ['warp', 'none', 'hw', 'cube-array', 'auto']) {
         await p.T(`(window.__p.setLookup('${lookup}'), window.__p.capture(), true)`);
         shots[lookup] = await p.T('window.__p.shot()');
         savePng(`probes-${lookup}.png`, shots[lookup]);
@@ -985,6 +988,39 @@ async function main() {
       const stats = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots.warp)}, ${JSON.stringify(shots.hw)})`);
       check('image is lit', stats.lum > 10, `mean luminance ${stats.lum.toFixed(1)}`);
       check("'warp' lookup matches the hardware cube sampler", stats.mean < 1, `mean ${stats.mean.toFixed(3)}, max ${stats.max} / 255`);
+      {
+        // W20: the cube array is what 'hw' emulates (hardware cube sampling of cube2d-none's texels)
+        const cs = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots['cube-array'])}, ${JSON.stringify(shots.hw)})`);
+        check("'cube-array' lookup matches the hardware cube sampler (closer than 'warp')", cs.max <= 1 && cs.mean <= stats.mean / 4,
+          `mean ${cs.mean.toFixed(4)}, max ${cs.max} / 255 (warp: mean ${stats.mean.toFixed(4)}, max ${stats.max})`);
+        const au = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots.auto)}, ${JSON.stringify(shots['cube-array'])})`);
+        const auLayout = await p.T("(window.__p.setLookup('auto'), window.__p.capture(), window.__p.cubeArray.bakedLayout)");
+        check("layout 'auto' bakes a cube array when the shim is active", auLayout === 'cube-array' && au.max === 0, `bakedLayout ${auLayout}, vs 'cube-array' max ${au.max} / 255`);
+        // fallback: without the shim, 'auto' is today's 2D array ('warp'), 'cube-array' throws; reversible and idempotent
+        const fb = await p.T(`(async () => {
+          const P = window.__p, R = P.renderer, b = R.backend;
+          const owners = () => [R._textures, b.textureUtils, b.bindingUtils, Object.getPrototypeOf(b.createNodeBuilder(new P.THREE.Mesh(), R))];
+          const names = [['getSize', 'getMipLevels'], ['createDefaultTexture', 'createTexture', 'updateTexture'], ['_createLayoutEntries', 'createBindGroup'], ['generateTextureLod', 'getUniformFromNode', 'getUniforms']];
+          const patched = () => owners().reduce((n, o, i) => n + names[i].filter((m) => o[m]?.cubeArrayShim === true).length, 0);
+          const before = patched();
+          await P.setShim(false);
+          const after = patched();
+          P.setLookup('auto'); P.capture();
+          const layout = P.cubeArray.bakedLayout;
+          const shot = await P.shot();
+          let forced = null;
+          try { P.setLookup('cube-array'); } catch (e) { forced = String(e.message ?? e); }
+          const a = P.installShim(), c = P.installShim();
+          const ok = await a;
+          P.setLookup('auto'); P.capture();
+          return { before, after, layout, shot, forced, same: a === c, ok, again: patched(), relayout: P.cubeArray.bakedLayout };
+        })()`);
+        const fd = await p.T(`(${IMAGE_STATS})(${JSON.stringify(fb.shot)}, ${JSON.stringify(shots.warp)})`);
+        check("without the shim, 'auto' falls back to the 2D array ('warp' image)", fb.layout === 'cube2d' && fd.max === 0, `bakedLayout ${fb.layout}, vs 'warp' max ${fd.max} / 255`);
+        check("without the shim, layout 'cube-array' throws", typeof fb.forced === 'string' && fb.forced.includes('installCubeArraySupport'), String(fb.forced).slice(0, 90));
+        check('shim is reversible and idempotent', fb.before === 10 && fb.after === 0 && fb.same && fb.ok && fb.again === 10 && fb.relayout === 'cube-array',
+          `patched methods ${fb.before} -> ${fb.after} -> ${fb.again}, same promise ${fb.same}, re-install ${fb.ok}, layout ${fb.relayout}`);
+      }
       // phase 2: the package's lookup is core WGSL; the pre-phase-2 TSL lookup lives in examples/probes/src/legacy.ts
       for (const seam of ['warp', 'none']) {
         await p.T(`(window.__p.setLookup('legacy-${seam}'), window.__p.capture(), true)`);
@@ -1001,7 +1037,12 @@ async function main() {
         const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(core)}, ${JSON.stringify(legacy)})`);
         check('core lookup matches the pre-phase-2 TSL node (grid + mirror sphere)', d.max <= 1, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
       }
-      await p.T("window.__p.setLookup('warp')");
+      // W20: the feature checks run on one storage: 'auto' (the cube array through the shim, default) or the 2D array
+      const probesLayout = args.includes('--probes-layout') ? args[args.indexOf('--probes-layout') + 1] : 'cube-array';
+      if (probesLayout === 'cube2d') await p.T("(async () => { await window.__p.setShim(false); window.__p.setLookup('warp'); return true; })()");
+      else await p.T("window.__p.setLookup('auto')");
+      const featureLayout = await p.T('window.__p.cubeArray.bakedLayout');
+      check(`probe feature checks run on the requested layout (${probesLayout})`, featureLayout === probesLayout, featureLayout);
 
       // probe features (examples/probes/src/checks.ts); each restores the page's state
       const C = (name) => p.T(`window.__p.checks.${name}()`);
@@ -1022,7 +1063,7 @@ async function main() {
       check("lookup option ao: Lagarde's specular occlusion", lo.so < 1e-3, `max rel err ${lo.so.toExponential(1)}`);
       check('lookup option frameIrradiance: re-fit by k / probe L1 irradiance, clamped', lo.refit < 2e-3 && lo.clampErr < 1e-4 && lo.lum > 0 && lo.ratios.every(Number.isFinite) && lo.slots.every((s) => s >= 0),
         `max rel err ${lo.refit.toExponential(1)} (ratios ${lo.ratios.slice(0, 6).join(' ')} ...), clamp ${lo.clampErr.toExponential(1)}`);
-      const rf = await p.T(`(async () => { const P = window.__p; P.setGrid(true, 0.3); P.setLookup('warp'); for (let i = 0; i < 3; i++) await P.shot(); const off = await P.shot();
+      const rf = await p.T(`(async () => { const P = window.__p; P.setGrid(true, 0.3); P.setLookup('${probesLayout === 'cube2d' ? 'warp' : 'auto'}'); for (let i = 0; i < 3; i++) await P.shot(); const off = await P.shot();
         P.setRefit(true); for (let i = 0; i < 3; i++) await P.shot(); const on = await P.shot(); P.setRefit(false); P.setGrid(false); return { on, off }; })()`);
       savePng('probes-refit-off.png', rf.off);
       savePng('probes-refit-on.png', rf.on);
@@ -1071,8 +1112,8 @@ async function main() {
         pages.push(t);
         await t.T(FREEZE);
         const rows = await t.T(`(async () => {
-          const P = window.__p, out = { warp: [], 'legacy-warp': [] };
-          for (let k = 0; k < 5; k++) for (const lookup of ['legacy-warp', 'warp']) {
+          const P = window.__p, out = { warp: [], 'cube-array': [], 'legacy-warp': [] };
+          for (let k = 0; k < 5; k++) for (const lookup of ['legacy-warp', 'warp', 'cube-array']) {
             P.setLookup(lookup); P.setGrid(true, 0.08);
             const on = await P.timeFrames(30, 7); P.setEnvNode(false); const off = await P.timeFrames(30, 7); P.setEnvNode(true);
             out[lookup].push({ on: on.wall, off: off.wall, lookup: on.wall - off.wall });
