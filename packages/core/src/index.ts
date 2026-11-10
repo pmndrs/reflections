@@ -7,3 +7,10 @@ export { createProbeLayout, probeBytes, bytesPerTexel, octaGutter, type ProbeLay
 export { LayoutPrefilter } from './probes/layouts/prefilter';
 export { ProbeFormatWriter, type ProbeFormat, type BC6HEncoderLike } from './probes/layouts/formats';
 export { GGXReference, lobeTexels, referenceModeFor, type ReferenceMode } from './probes/reference';
+export * from './sssr';
+
+// Frame contract: the inputs every screen-space and hybrid pass reads (SPEC "Frame contract").
+export {
+  FrameCameraHistory, mat4Multiply,
+  type Mat4, type TextureChannel, type FrameTextures, type FrameConventions, type FrameCamera, type FrameInputs,
+} from './frame/contract';

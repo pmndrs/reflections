@@ -4,6 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | sssr-core | probe-bench)
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
@@ -20,6 +21,8 @@ const OUT = process.env.OUT ?? path.join(ROOT, 'out');
 const args = process.argv.slice(2);
 const compareUrl = args.includes('--compare') ? args[args.indexOf('--compare') + 1] : null;
 const probeBenchFull = args.includes('--probe-bench');
+const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
+const runs = (section) => !only || only === section;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const results = { checks: [], logs: [] };
@@ -119,8 +122,121 @@ const IMAGE_STATS = `async (a, b) => {
   return out;
 }`;
 
+/** examples/sssr-core: subgroup vs workgroup parity, hit fraction on the mirror floor, reverse-Z, GPU ms at 1080p. */
+async function sssrCoreChecks(pages) {
+  console.log('examples/sssr-core:');
+  const s = await openPage(`http://127.0.0.1:${PORT}/sssr-core/`);
+  pages.push(s);
+  const st = await s.T('window.__p.stats()');
+  console.log('  stats', JSON.stringify(st));
+  check('sssr: rays traced, denoiser tiles listed', st.rays > 0 && st.tiles > 0, `${st.rays} rays, ${st.tiles} tiles, ${st.misses} misses`);
+  check('sssr: sane hit fraction on the mirror floor', st.mirrorHitFraction > 0.5 && st.mirrorHitFraction < 1, `${(st.mirrorHitFraction * 100).toFixed(1)}% of ${st.mirrorPixels} px`);
+  check('sssr: no ray above the roughness threshold', st.maxTracedRoughness < 0.2, `max traced alpha ${st.maxTracedRoughness.toFixed(4)}`);
+  check('sssr: roughness ramp partly traced', st.rampTracedFraction > 0.2 && st.rampTracedFraction < 0.9, `${(st.rampTracedFraction * 100).toFixed(1)}%`);
+  savePng('sssr-core-grid.png', await s.T('window.__p.shot()'));
+  const hasSubgroups = await s.T('window.__p.hasSubgroups');
+  if (!hasSubgroups) console.log('  device has no subgroups: parity skipped');
+  else {
+    for (const cfg of [{ minTraversalOccupancy: 0, samplesPerQuad: 1 }, { minTraversalOccupancy: 0, samplesPerQuad: 2 }, { minTraversalOccupancy: 0, samplesPerQuad: 4 }]) {
+      const r = await s.T(`window.__p.parity(${JSON.stringify(cfg)})`);
+      const tag = `occupancy 0, ${cfg.samplesPerQuad} spq`;
+      check(`sssr parity (${tag}): ray, tile, miss lists and tile flags`, r.rayListSame && r.tileListSame && r.missListSame && r.tileFlagsSame,
+        `rays ${r.rays}, tiles ${r.tiles}, misses ${r.misses}`);
+      check(`sssr parity (${tag}): radiance, hit distance, roughness, pyramid bit for bit`,
+        r.radianceDiffPixels === 0 && r.hitDiffPixels === 0 && r.roughnessDiffPixels === 0 && r.pyramidDiffTexels === 0 && r.blueNoiseDiff === 0,
+        `differing px: radiance ${r.radianceDiffPixels}, hit ${r.hitDiffPixels}, roughness ${r.roughnessDiffPixels}, pyramid ${r.pyramidDiffTexels}`);
+    }
+    // Default occupancy (4) counts per subgroup vs per workgroup, so images may differ (D3xx); lists must not.
+    const r = await s.T('window.__p.parity({})');
+    check('sssr parity (default occupancy): lists', r.rayListSame && r.tileListSame && r.tileFlagsSame, `rays ${r.rays}`);
+    console.log(`  default occupancy: radiance differs on ${r.radianceDiffPixels} px, misses ${r.misses.join(' vs ')} (informational)`);
+  }
+  // Reverse-Z: same scene, max-reduced pyramid; the hit fraction should match the forward-Z page closely.
+  const rz = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?reverse`);
+  pages.push(rz);
+  const sr = await rz.T('window.__p.stats()');
+  check('sssr reverse-Z: hit fraction matches forward Z', Math.abs(sr.mirrorHitFraction - st.mirrorHitFraction) < 0.02 && sr.rays === st.rays,
+    `${(sr.mirrorHitFraction * 100).toFixed(1)}% vs ${(st.mirrorHitFraction * 100).toFixed(1)}%, rays ${sr.rays} vs ${st.rays}`);
+  if (await rz.T('window.__p.hasSubgroups')) {
+    const r = await rz.T('window.__p.parity({ minTraversalOccupancy: 0 })');
+    check('sssr reverse-Z parity: lists and images', r.rayListSame && r.tileListSame && r.missListSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
+      `radiance ${r.radianceDiffPixels} px`);
+  }
+  // The radiance-fallback seam with a cube environment in @group(1).
+  const env = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?env`);
+  pages.push(env);
+  const se = await env.T('window.__p.stats()');
+  check('sssr cube-environment fallback: same rays and hits', se.rays === st.rays && Math.abs(se.mirrorHitFraction - st.mirrorHitFraction) < 1e-3,
+    `rays ${se.rays}, hit ${(se.mirrorHitFraction * 100).toFixed(1)}%`);
+  savePng('sssr-core-env.png', await env.T('window.__p.shot()'));
+  // GPU ms at 1080p, informational (loop stopped: frames are submitted one at a time).
+  const big = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?w=1920&h=1080`);
+  pages.push(big);
+  const t = await big.T('window.__p.time(30)');
+  console.log(`  GPU ms ${t.size.join('x')} (${t.variant}, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
+}
+
+/**
+ * examples/scenes: every procedural scene (and every downloaded asset scene) renders into the
+ * frame-contract G-buffer with no validation errors, and each target holds what the contract says.
+ */
+async function checkScenes() {
+  console.log('examples/scenes:');
+  const p = await openPage(`http://127.0.0.1:${PORT}/scenes/?manual&view=grid`);
+  const list = await p.T('window.__p.scenes()');
+  if (!list.assets.length) console.log('  (no assets downloaded: asset scenes skipped; `pnpm assets` fetches them)');
+  for (const id of [...list.procedural, ...list.assets]) {
+    const before = results.logs.length;
+    const info = await p.T(`window.__p.load(${JSON.stringify(id)})`);
+    await p.T('window.__p.step(2)');
+    const s = await p.T('window.__p.stats()');
+    const procedural = list.procedural.includes(id);
+    const lum = (t) => (t.mean[0] + t.mean[1] + t.mean[2]) / 3;
+    const fails = [];
+    if (!(s.checks.geometry > 0.05)) fails.push(`depth: geometry covers ${(s.checks.geometry * 100).toFixed(1)}%`);
+    if (!(s.normalRoughness.nonzero > 0.05)) fails.push('normal empty');
+    if (!(s.checks.badNormals < 0.01)) fails.push(`normals not unit on ${(s.checks.badNormals * 100).toFixed(2)}%`);
+    if (!(s.normalRoughness.max[3] > 0)) fails.push('roughness all zero');
+    if (procedural && !(s.albedoMetalness.max[3] > 0)) fails.push('metalness all zero');
+    if (!(s.albedoMetalness.nonzero > 0.05)) fails.push('albedo empty');
+    if (!(s.sceneColor.nonzero > 0.05 && lum(s.sceneColor) > 1e-3)) fails.push('scene colour empty');
+    if (s.lit && !(lum(s.lit) > 1e-3)) fails.push('lit empty');
+    for (const [k, t] of Object.entries(s)) if (t.nan) fails.push(`${k}: ${t.nan} NaN`);
+    // static frame: no motion anywhere (up to float noise in the reprojection, ~1e-7 uv)
+    const still = Math.max(...s.motion.max.map(Math.abs), ...s.motion.min.map(Math.abs));
+    if (still > 1e-5) fails.push(`motion on a still frame (max ${still.toExponential(2)})`);
+    // no specular in scene colour: mirror pixels (metal, smooth) have no diffuse, so they're black
+    if (s.checks.mirrorPixels > 0.01 && !(s.checks.mirrorSceneColor < 1e-3)) fails.push(`scene colour on mirrors ${s.checks.mirrorSceneColor.toFixed(4)} (specular leaked?)`);
+    // camera motion: nudge the camera, the whole frame moves
+    await p.T('(window.__p.nudge(0.03, 0.02, 0), true)');
+    await p.T('window.__p.step(1)');
+    const m = (await p.T('window.__p.stats()')).motion;
+    if (!(m.nonzero > s.checks.geometry * 0.5)) fails.push(`camera motion on ${(m.nonzero * 100).toFixed(1)}% of pixels`);
+    // object motion (animated scenes): camera still, advance time
+    let objectMotion = '';
+    if (info.animated) {
+      await p.T('window.__p.step(1)');
+      await p.T('(window.__p.setTime(0.5), true)');
+      await p.T('window.__p.step(1)');
+      const mo = (await p.T('window.__p.stats()')).motion;
+      objectMotion = `, object motion on ${(mo.nonzero * 100).toFixed(1)}%`;
+      if (!(mo.nonzero > 0.001)) fails.push('no object motion');
+      await p.T('(window.__p.setTime(0), window.__p.nudge(-0.03, -0.02, 0), true)');
+    } else {
+      await p.T('(window.__p.nudge(-0.03, -0.02, 0), true)');
+    }
+    const shot = await p.T('window.__p.shot()');
+    savePng(`scenes-${id}.png`, shot);
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    if (errs.length) fails.push(errs.slice(0, 2).join(' | '));
+    const detail = `geometry ${(s.checks.geometry * 100).toFixed(0)}%, mirrors ${(s.checks.mirrorPixels * 100).toFixed(1)}% (scene ${s.checks.mirrorSceneColor.toFixed(4)} vs lit ${s.checks.mirrorLit?.toFixed(3) ?? '-'}), camera motion ${(m.nonzero * 100).toFixed(0)}%${objectMotion}`;
+    check(`scene ${id}: every target filled per the contract`, fails.length === 0, fails.length ? fails.join('; ') : detail);
+  }
+  return [p];
+}
+
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull ? 3_600_000 : 300_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -129,70 +245,117 @@ async function main() {
   }
   const pages = [];
   try {
-    console.log('examples/probes:');
-    const p = await openPage(`http://127.0.0.1:${PORT}/probes/`);
-    pages.push(p);
-    await p.T(FREEZE);
-    const info = await p.T('({ revision: window.__p.THREE.REVISION, probes: window.__p.probes.bakedProbes.length, lookup: window.__p.params.lookup })');
-    check('probes baked', info.probes === 3, JSON.stringify(info));
-    const shots = {};
-    for (const lookup of ['warp', 'none', 'hw']) {
-      await p.T(`(window.__p.setLookup('${lookup}'), window.__p.capture(), true)`);
-      shots[lookup] = await p.T('window.__p.shot()');
-      savePng(`probes-${lookup}.png`, shots[lookup]);
-    }
-    const stats = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots.warp)}, ${JSON.stringify(shots.hw)})`);
-    check('image is lit', stats.lum > 10, `mean luminance ${stats.lum.toFixed(1)}`);
-    check("'warp' lookup matches the hardware cube sampler", stats.mean < 1, `mean ${stats.mean.toFixed(3)}, max ${stats.max} / 255`);
-    await p.T("window.__p.setLookup('warp')");
+    if (runs('probes')) {
+      console.log('examples/probes:');
+      const p = await openPage(`http://127.0.0.1:${PORT}/probes/`);
+      pages.push(p);
+      await p.T(FREEZE);
+      const info = await p.T('({ revision: window.__p.THREE.REVISION, probes: window.__p.probes.bakedProbes.length, lookup: window.__p.params.lookup })');
+      check('probes baked', info.probes === 3, JSON.stringify(info));
+      const shots = {};
+      for (const lookup of ['warp', 'none', 'hw']) {
+        await p.T(`(window.__p.setLookup('${lookup}'), window.__p.capture(), true)`);
+        shots[lookup] = await p.T('window.__p.shot()');
+        savePng(`probes-${lookup}.png`, shots[lookup]);
+      }
+      const stats = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots.warp)}, ${JSON.stringify(shots.hw)})`);
+      check('image is lit', stats.lum > 10, `mean luminance ${stats.lum.toFixed(1)}`);
+      check("'warp' lookup matches the hardware cube sampler", stats.mean < 1, `mean ${stats.mean.toFixed(3)}, max ${stats.max} / 255`);
+      await p.T("window.__p.setLookup('warp')");
 
-    // BC6H encoder smoke check: the hardware-decoded result must be close to the source. Loose
-    // bounds that only an encoding bug (garbage blocks) would break; numbers go to the console.
-    console.log('examples/bc6h:');
-    const b = await openPage(`http://127.0.0.1:${PORT}/bc6h/`);
-    pages.push(b);
-    const bc = await b.T('window.__p.runAll()');
-    check('texture-compression-bc available', bc.supported !== false);
-    for (const [k, m] of Object.entries(bc.errors ?? {})) {
-      check(`bc6h ${k} decodes close to the source`, m.log2Rmse < 0.3 && m.psnr > 30,
-        `log2 RMSE ${m.log2Rmse.toFixed(4)}, log2 max ${m.log2Max.toFixed(3)}, PSNR ${m.psnr.toFixed(2)} dB, per mip ${m.perMipLog2Rmse.map((x) => x.toFixed(3)).join(' ')}`);
-    }
-    for (const [k, t] of Object.entries(bc.timings ?? {})) console.log(`  encode ${k}: GPU ${t.gpuMs?.toFixed(3) ?? 'n/a'} ms, wall ${t.wallMs.toFixed(3)} ms`);
-    savePng('bc6h.png', await b.T('window.__p.shot()'));
+      // probe features (examples/probes/src/checks.ts); each restores the page's state
+      const C = (name) => p.T(`window.__p.checks.${name}()`);
+      const f = (x, d = 3) => Number(x).toFixed(d);
+      const sh = await C('shadows');
+      check('bake restores shadow autoUpdate', sh.lights === 2 && sh.autoUpdate, JSON.stringify(sh));
+      const po = await C('projectionOffset');
+      // the room's walls lie on the projection box's faces, so a few texels flip inside/outside by rounding
+      check('projectionOffset = moving the probe with the opposite originOffset', po.same.mean < 0.05 && po.same.over < 0.002,
+        `mean ${f(po.same.mean, 4)}, ${f(po.same.over * 100)} % of pixels > 2/255`);
+      check('projectionOffset changes the image', po.changed.mean > 0.2, `mean ${f(po.changed.mean)} without the offset`);
+      const cov = await C('coverage');
+      check('coverage: alpha 0 outside every volume, 1 inside, fade between; rgb 0 outside', cov.alphaErr < 1e-4 && cov.rgbOutside === 0 && cov.lum > 0,
+        `alpha ${JSON.stringify(cov.alpha)}, max err ${cov.alphaErr.toExponential(1)}`);
+      check('coverage: rgb * alpha equals the vec3 form (black environment)', cov.composeErr < 1e-3, `max rel err ${cov.composeErr.toExponential(1)}`);
+      const ck = await C('cacheKey');
+      check('two probe sets of equal size keep their own programs', ck.left[0] > 200 && ck.left[2] < 50 && ck.right[2] > 200 && ck.right[0] < 50 && ck.keysDiffer,
+        `left ${ck.left}, right ${ck.right}, keys differ ${ck.keysDiffer}`);
+      const ts = await C('timeSlice');
+      check('time-sliced bake over 3 calls = full bake', ts.slicedVsFull.max <= 1, `max ${ts.slicedVsFull.max} / 255`);
+      check('one slice alone differs from the full bake', ts.oneVsFull.max > 8, `max ${ts.oneVsFull.max} / 255`);
+      const ev = await C('environment');
+      const n = ev.counts;
+      check('environment captured only when it changed', n.noEnvironment === 3 && n.added === 4 && n.unchanged === 3 && n.versionBumped === 4 && n.always === 4 && n.slicedUnchanged === 0 && n.removed === 3,
+        JSON.stringify(n));
+      check('environment reaches the image, and removing it clears the slot', ev.litVsBefore.mean > 1 && ev.afterVsBefore.max <= 1,
+        `lit mean ${f(ev.litVsBefore.mean)}, removed max ${ev.afterVsBefore.max} / 255`);
+      const hp = await C('helper');
+      check('helper draws world-space influence and projection boxes', hp.children === 9 && hp.boxes === 6 && hp.centreErr < 1e-6, JSON.stringify(hp));
 
-    if (compareUrl) {
-      console.log(`compare with ${compareUrl}:`);
-      const o = await openPage(compareUrl);
-      pages.push(o);
-      await o.T(FREEZE);
-      await o.T("(window.__p.setLookup('warp'), window.__p.capture(), true)");
-      await p.T('(window.__p.capture(), true)');
-      const a = await p.T('window.__p.shot()');
-      const b = await o.T('window.__p.shot()');
-      savePng('probes-compare.png', b);
-      const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
-      check('same image as the other build', d.max <= 2, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
+      if (args.includes('--time-bake')) {
+        // loop stopped (FREEZE); median ms per bake, 5 bakes per submit-wait, 7 bursts
+        for (const res of [128, 256]) {
+          const t = await p.T(`window.__p.timeBake(${res})`);
+          console.log(`  bake, 3 probes at ${res} px: median ${t.median.toFixed(2)} ms (${t.all.map((x) => x.toFixed(2)).join(' ')})`);
+        }
+        await p.T('(window.__p.setResolution(128), true)');
+      }
+
+      if (compareUrl) {
+        console.log(`compare with ${compareUrl}:`);
+        const o = await openPage(compareUrl);
+        pages.push(o);
+        await o.T(FREEZE);
+        await o.T("(window.__p.setLookup('warp'), window.__p.capture(), true)");
+        await p.T('(window.__p.capture(), true)');
+        const a = await p.T('window.__p.shot()');
+        const b = await o.T('window.__p.shot()');
+        savePng('probes-compare.png', b);
+        const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
+        check('same image as the other build', d.max <= 2, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
+      }
     }
 
-    // examples/probe-bench: smoke run (or the full bench with --probe-bench). Not a numbers gate:
-    // it must run without validation errors, and the generic prefilter must match ProbePrefilter.
-    console.log(`examples/probe-bench${probeBenchFull ? ' (full)' : ' (smoke)'}:`);
-    const pb = await openPage(`http://127.0.0.1:${PORT}/probe-bench/`);
-    pages.push(pb);
-    const bench = await pb.cdp.evalJs(`window.__p.run(${probeBenchFull ? '' : '{ smoke: true }'}).then((r) => JSON.stringify(r))`).then(JSON.parse).catch(async (e) => {
-      console.log((await pb.cdp.evalJs('window.__p.log', false).catch(() => '')).replace(/^/gm, '    '));
-      console.log('console:\n  ' + [...new Set(results.logs)].slice(0, 12).join('\n  '));
-      throw e;
-    });
-    if (process.env.BENCH_LOG || probeBenchFull) console.log((await pb.cdp.evalJs('window.__p.log', false)).replace(/^/gm, '    '));
-    if (probeBenchFull) {
-      fs.mkdirSync(OUT, { recursive: true });
-      fs.writeFileSync(path.join(OUT, 'probe-bench.json'), JSON.stringify(bench, null, 1));
-      console.log('  saved', path.relative(process.cwd(), path.join(OUT, 'probe-bench.json')), `(${bench.seconds.toFixed(0)} s)`);
+    if (runs('bc6h')) {
+      // BC6H encoder smoke check: the hardware-decoded result must be close to the source. Loose
+      // bounds that only an encoding bug (garbage blocks) would break; numbers go to the console.
+      console.log('examples/bc6h:');
+      const b = await openPage(`http://127.0.0.1:${PORT}/bc6h/`);
+      pages.push(b);
+      const bc = await b.T('window.__p.runAll()');
+      check('texture-compression-bc available', bc.supported !== false);
+      for (const [k, m] of Object.entries(bc.errors ?? {})) {
+        check(`bc6h ${k} decodes close to the source`, m.log2Rmse < 0.3 && m.psnr > 30,
+          `log2 RMSE ${m.log2Rmse.toFixed(4)}, log2 max ${m.log2Max.toFixed(3)}, PSNR ${m.psnr.toFixed(2)} dB, per mip ${m.perMipLog2Rmse.map((x) => x.toFixed(3)).join(' ')}`);
+      }
+      for (const [k, t] of Object.entries(bc.timings ?? {})) console.log(`  encode ${k}: GPU ${t.gpuMs?.toFixed(3) ?? 'n/a'} ms, wall ${t.wallMs.toFixed(3)} ms`);
+      savePng('bc6h.png', await b.T('window.__p.shot()'));
     }
-    check('probe bench ran every layout', new Set(bench.error.map((e) => e.layout)).size === 4 && bench.lookup.length > 0, `${bench.error.length} error rows, ${bench.lookup.length} lookup rows`);
-    check('layout prefilter is bit-identical to ProbePrefilter (cube2d)', bench.parity.every((p) => p.differing === 0), bench.parity.map((p) => `${p.layout}@${p.source}: ${p.differing}`).join(', '));
-    check('probe bench errors are finite', bench.error.every((e) => Number.isFinite(e.all.mean) && Number.isFinite(e.all.max)));
+
+    if (runs('scenes')) pages.push(...(await checkScenes()));
+    if (runs('sssr-core')) await sssrCoreChecks(pages);
+
+    if (runs('probe-bench')) {
+      // examples/probe-bench: smoke run (or the full bench with --probe-bench). Not a numbers gate:
+      // it must run without validation errors, and the generic prefilter must match ProbePrefilter.
+      console.log(`examples/probe-bench${probeBenchFull ? ' (full)' : ' (smoke)'}:`);
+      const pb = await openPage(`http://127.0.0.1:${PORT}/probe-bench/`);
+      pages.push(pb);
+      const bench = await pb.cdp.evalJs(`window.__p.run(${probeBenchFull ? '' : '{ smoke: true }'}).then((r) => JSON.stringify(r))`).then(JSON.parse).catch(async (e) => {
+        console.log((await pb.cdp.evalJs('window.__p.log', false).catch(() => '')).replace(/^/gm, '    '));
+        console.log('console:\n  ' + [...new Set(results.logs)].slice(0, 12).join('\n  '));
+        throw e;
+      });
+      if (process.env.BENCH_LOG || probeBenchFull) console.log((await pb.cdp.evalJs('window.__p.log', false)).replace(/^/gm, '    '));
+      if (probeBenchFull) {
+        fs.mkdirSync(OUT, { recursive: true });
+        fs.writeFileSync(path.join(OUT, 'probe-bench.json'), JSON.stringify(bench, null, 1));
+        console.log('  saved', path.relative(process.cwd(), path.join(OUT, 'probe-bench.json')), `(${bench.seconds.toFixed(0)} s)`);
+      }
+      check('probe bench ran every layout', new Set(bench.error.map((e) => e.layout)).size === 4 && bench.lookup.length > 0, `${bench.error.length} error rows, ${bench.lookup.length} lookup rows`);
+      check('layout prefilter is bit-identical to ProbePrefilter (cube2d)', bench.parity.every((p) => p.differing === 0), bench.parity.map((p) => `${p.layout}@${p.source}: ${p.differing}`).join(', '));
+      check('probe bench errors are finite', bench.error.every((e) => Number.isFinite(e.all.mean) && Number.isFinite(e.all.max)));
+    }
 
     const validation = results.logs.filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
     check('no WebGPU validation errors or exceptions', validation.length === 0, validation.slice(0, 3).join(' | '));
