@@ -11,23 +11,28 @@
 // `window.__p` drives the page headlessly (poses, roughness, bake and frame timing, screenshots).
 
 import * as THREE from 'three/webgpu';
-import { cubeTexture } from 'three/tsl';
+import { cubeTexture, normalWorld, positionWorld } from 'three/tsl';
+import { LightProbeGrid } from 'three/addons/lighting/LightProbeGrid.js';
+import { lightProbeGridIrradiance } from 'three/addons/tsl/lighting/LightProbeGridNode.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ReflectionProbesNode, reflectionProbes, type SeamFix,
+  ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, reflectionProbes, type SeamFix,
 } from '@pmndrs/reflections/three';
 import { makeChecks, type Page } from './checks';
+import { LegacyProbesNode } from './legacy';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any; // TSL's node typings are too strict for hand-written shader maths
 const q = new URLSearchParams(location.search);
 const W = Number(q.get('w') ?? 960), H = Number(q.get('h') ?? 540);
 
-type Lookup = SeamFix | 'hw';
+// warp / none: the package (core WGSL lookup); legacy-*: the pre-phase-2 TSL lookup (./legacy.ts);
+// hw: the legacy lookup on hardware cube textures
+type Lookup = SeamFix | 'hw' | 'legacy-warp' | 'legacy-none';
 const params = {
   lookup: (q.get('lookup') ?? 'warp') as Lookup, resolution: Number(q.get('res') ?? 128),
   showProbes: false, showGrid: q.has('grid'), gridResolution: 6, gridSize: 0.12,
-  boxProjection: true, dynamicObject: (q.get('obj') ?? 'Sphere') as 'None' | 'Sphere', pause: q.has('pause'), liveCapture: false,
+  boxProjection: true, refit: q.has('refit'), dynamicObject: (q.get('obj') ?? 'Sphere') as 'None' | 'Sphere', pause: q.has('pause'), liveCapture: false,
 };
 
 /**
@@ -35,7 +40,7 @@ const params = {
  * into its own cube texture (all mips), so face edges are filtered seamlessly, as #35046's cube
  * array does. Needs a 'none' bake (the warp moves texel centres, which a plain cube can't undo).
  */
-class HardwareCubeNode extends ReflectionProbesNode {
+class HardwareCubeNode extends LegacyProbesNode {
   private readonly cubes: N[];
   constructor(probes: ReflectionProbes, cubes: THREE.CubeTexture[]) {
     super(probes);
@@ -117,7 +122,7 @@ async function main() {
 
   // one probe per room plus a smaller doorway probe, which takes priority where they overlap
   const probes = new ReflectionProbes();
-  probes.seamFix = params.lookup === 'warp' ? 'warp' : 'none';
+  probes.seamFix = params.lookup.endsWith('warp') ? 'warp' : 'none';
   for (const s of [
     { position: [-4, 2.5, 0], influenceSize: [8.4, 5.4, 8.4], projectionSize: [8, 5, 8] },
     { position: [4, 2.5, 0], influenceSize: [8.4, 5.4, 8.4], projectionSize: [8, 5, 8] },
@@ -213,11 +218,29 @@ async function main() {
     if (params.lookup === 'hw') copyToCubes();
   }
 
+  // Re-fit (SPEC "Probe re-fit"): the frame's irradiance from three r187's LightProbeGrid (L2 SH, 9 x 4 x 5
+  // probes over both rooms). The grid is baked but not added to the scene, so it lights nothing itself;
+  // it only re-fits the probe lookup (which on the material path is also the diffuse irradiance).
+  let lightGrid: LightProbeGrid | null = null;
+  function frameIrradiance(): N {
+    if (lightGrid === null) {
+      lightGrid = new LightProbeGrid(16, 5, 8, 9, 4, 5);
+      lightGrid.position.set(0, 2.5, 0);
+      lightGrid.updateMatrixWorld(true);
+      probesHelper.visible = false;
+      lightGrid.bake(renderer, scene, { cubemapSize: 16, near: 0.05, far: 30 });
+      probesHelper.visible = params.showProbes;
+    }
+    return lightProbeGridIrradiance(lightGrid, positionWorld, normalWorld);
+  }
+
   let node: N = null;
   function install() {
-    probes.seamFix = params.lookup === 'warp' ? 'warp' : 'none';
+    probes.seamFix = params.lookup.endsWith('warp') ? 'warp' : 'none';
     capture();
-    node = params.lookup === 'hw' ? new HardwareCubeNode(probes, hwCubes.map((c) => c.texture)) : reflectionProbes(probes);
+    node = params.lookup === 'hw' ? new HardwareCubeNode(probes, hwCubes.map((c) => c.texture))
+      : params.lookup.startsWith('legacy') ? new LegacyProbesNode(probes)
+        : reflectionProbes(probes, params.refit ? { frameIrradiance: frameIrradiance() } : {});
     scene.environmentNode = node;
   }
   install();
@@ -239,10 +262,11 @@ async function main() {
     const r = document.createElement('input'); r.type = 'range'; r.min = '0'; r.max = '1'; r.step = '0.01'; r.value = String(value); r.oninput = () => on(Number(r.value));
     return row(label, r);
   };
-  select('Lookup', ['warp', 'none', 'hw'], params.lookup, (v) => { params.lookup = v as Lookup; install(); });
+  select('Lookup', ['warp', 'none', 'hw', 'legacy-warp', 'legacy-none'], params.lookup, (v) => { params.lookup = v as Lookup; install(); });
   select('Capture resolution', ['64', '128', '256', '512'], String(params.resolution), (v) => { params.resolution = Number(v); install(); });
   check('Live capture', params.liveCapture, (v) => { params.liveCapture = v; });
   check('Box projection', params.boxProjection, (v) => { probes.boxProjection = v; });
+  check('Re-fit (LightProbeGrid)', params.refit, (v) => { params.refit = v; install(); });
   select('Object', ['None', 'Sphere'], params.dynamicObject, (v) => { params.dynamicObject = v as 'None' | 'Sphere'; dynamicObject.visible = v !== 'None'; });
   check('Pause', params.pause, (v) => { params.pause = v; });
   slider('Object roughness', dynamicMaterial.roughness, (v) => { dynamicMaterial.roughness = v; });
@@ -268,9 +292,13 @@ async function main() {
   const page = {
       THREE, scene, camera, renderer, controls, probes, probesHelper, gridMaterial, dynamicMaterial, dynamicObject, grid, params, capture,
       get node() { return node; },
-      stop() { renderer.setAnimationLoop(null); },
+      // setAnimationLoop(null) leaves three's internal rAF running, which keeps advancing the node
+      // frame at times that depend on load; stop it too, so a stopped page only advances when told
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      stop() { renderer.setAnimationLoop(null); (renderer as any)._animation.stop(); },
       start() { renderer.setAnimationLoop(animate); },
       setLookup(v: Lookup) { params.lookup = v; install(); },
+      setRefit(on: boolean, clamp?: number) { params.refit = on; if (clamp !== undefined) probes.refitClamp = clamp; install(); },
       setResolution(v: number) { params.resolution = v; install(); },
       setPose(p: { pos: number[]; target: number[]; fov?: number }) {
         camera.position.fromArray(p.pos); controls.target.fromArray(p.target);

@@ -468,6 +468,55 @@ async function run({ smoke = false, runs = 9 } = {}) {
   return results;
 }
 
+/** Lod for roughness r under a mapping (the JS twin of core's lodWgsl). */
+function lodFor(mapping: 'r187' | 'alpha', r: number, maxLod: number) {
+  const lod = maxLod * r * (2 - r);
+  if (mapping === 'r187') return lod;
+  const l = Math.min(Math.floor(lod), Math.max(maxLod - 1, 0));
+  const rl = lodToRoughness(l, maxLod), rh = lodToRoughness(l + 1, maxLod);
+  if (rh > 0.3) return lod;
+  return l + Math.min(1, Math.max(0, (r * r - rl * rl) / Math.max(rh * rh - rl * rl, 1e-6)));
+}
+
+/**
+ * D101 experiment (W7): error of lookups between the roughness mips under the r187 lod mapping and the
+ * 'alpha' mapping (same mips, blend linear in r^2), cube-hw rgba16float, 128 and 256 px captures.
+ */
+async function lowRoughness({ nDirs = 65536 } = {}) {
+  lines.length = 0;
+  const rows: unknown[] = [];
+  const dirsCpu = fibonacciDirs(nDirs);
+  const dirs = buffer(dirsCpu, U().STORAGE);
+  const rs = [0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25, 0.4, 0.7];
+  for (const N of [128, 256]) {
+    const maxLod = maxLodFor(N);
+    const src = envCube(N);
+    const layout = createProbeLayout('cube-hw', { maxLod });
+    const pf = new LayoutPrefilter(device, layout, N, N);
+    const target = makeTarget(layout, N, 1, 'rgba16float');
+    const enc = device.createCommandEncoder(); pf.encode(enc, src, target, 0); device.queue.submit([enc.finish()]);
+    const reference = new GGXReference(device, src, N);
+    const refOut = device.createBuffer({ size: nDirs * 16, usage: U().STORAGE | U().COPY_SRC });
+    const none = new Uint8Array(nDirs);
+    for (const r of rs) {
+      await reference.compute(dirs, refOut, nDirs, r);
+      const ref = new Float32Array(await readBuffer(refOut, nDirs * 16));
+      const cells: string[] = [];
+      for (const mapping of ['r187', 'alpha'] as const) {
+        const lod = lodFor(mapping, r, maxLod);
+        const st = errorStats(await lookupAll(layout, target, dirs, nDirs, lod), ref, none);
+        rows.push({ source: N, r, mapping, lod, ...st.all });
+        cells.push(`${mapping} lod ${lod.toFixed(2)}: ${st.all.mean.toFixed(2)} / ${st.all.p99.toFixed(1)}`);
+      }
+      log(`${N} px r ${r.toFixed(3)}: ${cells.join('   ')}`);
+      await nextFrame();
+    }
+    refOut.destroy(); target.destroy(); pf.dispose(); src.destroy();
+  }
+  dirs.destroy();
+  return rows;
+}
+
 // Full-screen lookup. 'coherent': directions over the whole sphere (equirect of the screen, slightly
 // jittered per pixel), roughness in diagonal bands 0 ... 1, probe chosen per screen region (1, 3
 // columns, or a 4x4 grid), so neighbouring pixels read neighbouring texels, as a real frame does.
@@ -596,7 +645,7 @@ async function main() {
     deviceInfo = await init();
     log(`device: ${JSON.stringify(deviceInfo)}`);
     preview();
-    const api = { run, get log() { return lines.join('\n'); }, get results() { return (window as unknown as { __results: unknown }).__results; }, device: deviceInfo };
+    const api = { run, lowRoughness, get log() { return lines.join('\n'); }, get results() { return (window as unknown as { __results: unknown }).__results; }, device: deviceInfo };
     (window as unknown as { __p: typeof api }).__p = api;
     document.querySelector('#go')!.addEventListener('click', () => run());
     document.querySelector('#smoke')!.addEventListener('click', () => run({ smoke: true }));

@@ -1,16 +1,14 @@
-// Environment radiance from a baked ReflectionProbes set: per-pixel volume weights, box projection,
-// and the cube lookup done by hand on a 2D array (three r187 can't bind cube arrays).
+// Environment radiance from a baked ReflectionProbes set: a thin TSL wrapper over the core probe
+// lookup (packages/core/src/probes/lookup.ts, SPEC phase 2). The lookup itself (influence weights,
+// priority, blending, box projection, roughness-to-mip mapping, environment fallback, and the
+// optional dominant direction and re-fit) is core WGSL, called through `wgslFn`; this node only
+// gathers its inputs from three (the material's fragment, reflection vector and roughness, or
+// explicit ones), packs the volume table from the ReflectionProbe objects, and binds three's textures.
 //
-// Port of ReflectionProbesNode.js from three.js PR #35046 (Ben Houston). Same weights, priority,
-// projection, roughness-to-mip mapping (maxLod * r * (2 - r)) and capture behaviour. The one
-// difference is `sampleProbe`: #35046 does `cubeArray.sample( dir ).depth( i ).level( lod )` and
-// the sampler picks the face and filters across face edges; here the node picks the face, samples
-// layer `6 i + face` of the array, and handles edges per `probes.bakedSeamFix`:
-//   'none'  one trilinear sample; the sampler's clamp-to-edge repeats each face's edge texel over
-//           the last half texel (no blend with the neighbour face).
-//   'warp'  the bake centred each face's edge texels on the edge, so neighbouring faces agree
-//           there; uv is scaled by (size - 1) / size per mip, which needs the two mips sampled
-//           separately (2 bilinear samples instead of 1 trilinear).
+// Port of ReflectionProbesNode.js from three.js PR #35046 (Ben Houston), same weights, priority,
+// projection and capture behaviour as before phase 2. The atlas is three's 2D array of 6 x N layers
+// (three r187 can't bind cube arrays, D1), so the layout is `cube2d-warp` or `cube2d-none` after
+// `probes.bakedSeamFix`; three's cube captures are x-mirrored, so the lookup mirrors x (`mirrorX`).
 //
 // Two ways in, two outputs, one lookup:
 //   reflectionProbes( probes )                     scene.environmentNode: every physical material
@@ -21,38 +19,35 @@
 //                                                  composite, a hit point (not in #35046).
 //   reflectionProbesLocal( probes ) and            the same lookups with the coverage output of
 //   sampleReflectionProbesLocal( ... )             #35046 head (77bbaaaa05): vec4( conditional probe
-//                                                  radiance, coverage ), no environment fallback. The
-//                                                  hybrid resolve composes SSR, probes and environment
-//                                                  from it.
-// All are a ReflectionProbesNode; the explicit ones get their inputs instead of reading them from
-// the material. Everything after that (influence, blending, priority, box projection) is the same
-// code; the vec3 form adds the environment slot for whatever weight is left.
+//                                                  radiance, coverage ), no environment fallback.
+// Extra lookup options (each off by default, see ProbeLookupOptions): the shading `normal` (Lagarde's
+// dominant direction), `ao` (Lagarde's specular occlusion), `frameIrradiance` (the re-fit).
 //
-// Uniforms live in three's shared `renderGroup`, not the default per-object group: r186/r187 re-upload
-// per-object uniforms only for render objects they see change, so probe moves, `boxProjection` and
-// the like never reached static meshes. A bake that replaces the texture bumps the node (see
-// ReflectionProbes.bake), and the texture id is in the cache key, so every render object rebinds.
+// The volume table is a storage buffer (one per probe set, shared by its nodes) written with
+// queue.writeBuffer before every render (updateBefore), not a uniform in a per-object group: r186/r187 re-upload per-object uniforms
+// only for render objects they see change, so probe moves and `boxProjection` would never reach
+// static meshes (D500). A bake that replaces the texture bumps the node (see ReflectionProbes.bake),
+// and the texture id is in the cache key, so every render object rebinds (D501).
 
 import * as THREE from 'three/webgpu';
-import { float, Fn, If, int, materialEnvRotation, min, mix, nodeObject, normalize, positionWorld, reflectVector, renderGroup, step, uniform, vec2, vec3, vec4, texture } from 'three/tsl';
+import { bool, cameraPosition, code, float, materialEnvRotation, nodeObject, normalWorld, positionWorld, reflectVector, sampler, storage, texture, vec3, vec4, wgslFn } from 'three/tsl';
+import {
+  PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludesWgsl,
+  probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
+} from '@pmndrs/reflections-core';
 import { probeOrigin, type ReflectionProbes } from './ReflectionProbes';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any; // TSL's node typings are too strict for hand-written shader maths
 
-const _scale = new THREE.Vector3();
-
-interface Slot { position: N; origin: N; extent: N; fade: N; projectionSize: N; projectionOffset: N }
-
-/** A uniform in the shared per-render group (see the file header). */
-const shared = (value: unknown): N => (uniform(value as never) as N).setGroup(renderGroup);
+const _p = new THREE.Vector3(), _o = new THREE.Vector3(), _s = new THREE.Vector3();
 
 /** Explicit lookup inputs (see {@link sampleReflectionProbes}); absent, the material provides them. */
 export interface ProbeLookupInputs { position: N; direction: N; roughness: N }
 
 /**
  * Options of {@link ReflectionProbesNode}: #35046's `{ position, direction, roughness }` (each
- * optional; a missing one comes from the material) plus `coverage`.
+ * optional; a missing one comes from the material) plus `coverage` and the phase 2 lookup options.
  */
 export interface ProbeLookupOptions {
   position?: N;
@@ -63,39 +58,137 @@ export interface ProbeLookupOptions {
    * #35046 head, instead of `vec3` radiance with the environment for the uncovered rest. Default false.
    */
   coverage?: boolean;
+  /**
+   * World shading normal. Given, the lookup bends the direction to Lagarde's specular dominant
+   * direction, `mix( N, R, s * ( sqrt( s ) + a ) )`, s = 1 - a, a = roughness² (D57). Leave it out on
+   * the material path: three already bends its reflection vector toward the normal by roughness⁴.
+   */
+  normal?: N;
+  /**
+   * Ambient occlusion in [0, 1]: scales the result (rgb only for the coverage form) by Lagarde's
+   * specular occlusion `saturate( pow( NdotV + ao, exp2( -16 a - 1 ) ) - 1 + ao )` (D66). Needs `view`
+   * on explicit lookups (the material path uses the camera). Default none.
+   */
+  ao?: N;
+  /** World direction from the surface to the eye, for `ao` on explicit lookups. Default: from the camera. */
+  view?: N;
+  /**
+   * The frame's irradiance at the surface (a vec3 node, e.g. from three's LightProbeGrid): re-fits
+   * each probe's radiance by `clamp( frameIrradiance / probeIrradiance( N ), 0, probes.refitClamp )`,
+   * with probeIrradiance the probe's L1 SH from its own capture (SPEC "Probe re-fit"). Needs the
+   * probes baked with `irradiance: true` (the default). Uses `normal`, or the material's normal.
+   */
+  frameIrradiance?: N;
+}
+
+// One wgslFn and include per lookup variant, shared by every node and material: three emits a
+// CodeNode once per shader only when it is the same node instance.
+// The includes depend only on the layout (and mirrorX, always true here); the function on the rest.
+const _includes = new Map<string, N>();
+const _lookups = new Map<string, { fn: N; includes: N }>();
+function lookupFor(options: CoreLookupOptions): { fn: N; includes: N } {
+  // keyed by the code itself: layouts whose WGSL doesn't depend on maxLod share one include
+  const source = probeLookupIncludesWgsl({ layout: options.layout, mirrorX: true });
+  let includes = _includes.get(source);
+  if (!includes) _includes.set(source, (includes = code(source) as N));
+  const layoutKey = `${options.layout.id}:${options.layout.mipLevelCount}`;
+  const key = `${layoutKey}:${options.dominantDirection === true}:${options.refit === true}:${options.count ?? -1}`;
+  let entry = _lookups.get(key);
+  if (!entry) {
+    entry = { fn: wgslFn(probeLookupFunctionWgsl({ ...options, mirrorX: true }, 'probesLookup'), [includes]) as N, includes };
+    _lookups.set(key, entry);
+  }
+  return entry;
 }
 
 /**
- * Box-projected direction (Lagarde's BPCEM, the guarded form from #35046): where the ray from `P`
- * along `dir` leaves the projection box (size `boxSize`, centre `boxPos`), as a direction from the
- * capture point `origin` (the box centre in #35046).
+ * One volume table per probe set, shared by every node that samples it (a material, a composite with
+ * several lookups): one storage binding per set, one upload per render.
  */
-export const parallaxCorrect = /* @__PURE__ */ Fn(([P, dir, boxSize, boxPos, origin]: N[]) => {
-  const d = normalize(dir).toVar();
-  // +1 / -1 per axis. (r186 TSL turns a bvec3 select into `if ( all( c ) )`, so no vector select here.)
-  const side = step(0, d).mul(2).sub(1).toVar();
-  // keep axis-aligned directions away from zero so the distances stay finite
-  const safe = side.mul(d.abs().max(1e-6));
-  const dist = side.mul(boxSize.mul(0.5)).add(boxPos).sub(P).div(safe).toVar();
-  return P.add(d.mul(min(dist.x, dist.y, dist.z))).sub(origin);
-}) as N;
+interface SetTable { attribute: THREE.StorageBufferAttribute; node: N; rows: number; renderId: number; irradianceVersion: number; packed: Float32Array<ArrayBuffer> }
+const _tables = new WeakMap<ReflectionProbes, SetTable>();
+function tableFor(probes: ReflectionProbes): SetTable {
+  const count = probes.bakedProbes.length;
+  const rows = probeTableRows(count, count + 1);
+  let t = _tables.get(probes);
+  if (t === undefined || t.rows !== rows) {
+    const attribute = new THREE.StorageBufferAttribute(new Float32Array(rows * 4), 4);
+    t = { attribute, node: storage(attribute, 'vec4', rows).toReadOnly(), rows, renderId: -1, irradianceVersion: -1, packed: new Float32Array((PROBE_HEADER_ROWS + count * PROBE_ROWS_PER_VOLUME) * 4) };
+    _tables.set(probes, t);
+  }
+  return t;
+}
+
+/** The volumes of the last bake, in lookup order (smallest first), as core's table wants them. */
+function volumeList(probes: ReflectionProbes): ProbeVolume[] {
+  return probes.bakedProbes.map((probe, slot) => {
+    probe.getWorldPosition(_p);
+    probeOrigin(probe, _o);
+    probe.getWorldScale(_s);
+    const half = probe.influenceSize.clone().multiply(_s).multiplyScalar(0.5);
+    const projection = (probe.projectionSize ?? probe.influenceSize).clone().multiply(_s);
+    const offset = probe.projectionOffset.clone().multiply(_s);
+    return {
+      slot, center: [_p.x, _p.y, _p.z], halfSize: [half.x, half.y, half.z], fade: probe.blendDistance,
+      projectionSize: [projection.x, projection.y, projection.z], projectionOffset: [offset.x, offset.y, offset.z],
+      origin: [_o.x, _o.y, _o.z], boxProjection: probes.boxProjection,
+    };
+  });
+}
+
+/**
+ * Packs the set's table (core packProbeTable) and uploads it with queue.writeBuffer, once per render
+ * (`renderId`, -1: always); copies the bake's L1 SH into the irradiance rows when it changed.
+ */
+function writeTable(probes: ReflectionProbes, t: SetTable, renderer: THREE.WebGPURenderer, renderId: number) {
+  if (renderId !== -1 && t.renderId === renderId) return;
+  t.renderId = renderId;
+  const count = probes.bakedProbes.length;
+  // captures see only the environment, so baking doesn't feed back into itself
+  t.packed = packProbeTable({
+    maxLod: probes.texture!.mipmaps.length - 1, enabled: !probes.capturing, environmentSlot: count,
+    irradianceRow: probeIrradianceRow(count), refitClamp: probes.refitClamp,
+  }, volumeList(probes), t.packed);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const backend = renderer.backend as any;
+  const buffer: GPUBuffer | undefined = backend.get(t.attribute).buffer;
+  if (buffer === undefined) {
+    // not created yet: three uploads the array when it first binds the table
+    (t.attribute.array as Float32Array).set(t.packed);
+    return;
+  }
+  const device: GPUDevice = backend.device;
+  device.queue.writeBuffer(buffer, 0, t.packed);
+  const irradiance = probes.irradiance;
+  if (irradiance !== null && probes.irradianceVersion !== t.irradianceVersion) {
+    const offset = probeIrradianceRow(count) * 16;
+    const encoder = device.createCommandEncoder({ label: 'ReflectionProbes.table.irradiance' });
+    encoder.copyBufferToBuffer(irradiance, 0, buffer, offset, Math.min(irradiance.size, buffer.size - offset));
+    device.queue.submit([encoder.finish()]);
+    t.irradianceVersion = probes.irradianceVersion;
+  }
+}
+
+/** The atlas layout three's bake writes (a 2D array; the seam fix picks the variant). */
+export function probeLayoutFor(probes: ReflectionProbes): ProbeLayout {
+  const tex = probes.texture!;
+  return createProbeLayout(probes.bakedSeamFix === 'warp' ? 'cube2d-warp' : 'cube2d-none', { maxLod: tex.mipmaps.length - 1 });
+}
+
+/** Box-projected direction (Lagarde's BPCEM, the guarded form from #35046), core's `pr_parallax`. */
+export const parallaxCorrect = (P: N, dir: N, boxSize: N, boxPos: N, origin: N): N => {
+  const { includes } = lookupFor({ layout: createProbeLayout('cube2d-warp', { maxLod: 4 }) });
+  return (wgslFn('fn probesParallax(P: vec3f, dir: vec3f, boxSize: vec3f, boxPos: vec3f, origin: vec3f) -> vec3f { return pr_parallax(P, dir, boxSize, boxPos, origin); }', [includes]) as N)({ P, dir, boxSize, boxPos, origin });
+};
 
 /**
  * Cube face and face uv of a direction, by WebGPU's cube face rules, in three's cube convention
- * (x mirrored, as CubeTextureNode samples). Returns vec3( u, v, face ).
+ * (x mirrored, as CubeTextureNode samples): vec3( u, v, face ). Core's `pl_cubeFaceUV`.
  */
-export const cubeFaceUV = /* @__PURE__ */ Fn(([dir]: N[]) => {
-  const h = vec3(dir.x.negate(), dir.y, dir.z).toVar();
-  const a = h.abs().toVar();
-  const xMajor = a.x.greaterThanEqual(a.y).and(a.x.greaterThanEqual(a.z));
-  const yMajor = xMajor.not().and(a.y.greaterThanEqual(a.z));
-  const ma = xMajor.select(a.x, yMajor.select(a.y, a.z));
-  const face = xMajor.select(h.x.lessThan(0).select(1, 0), yMajor.select(h.y.lessThan(0).select(3, 2), h.z.lessThan(0).select(5, 4)));
-  const sc = xMajor.select(h.x.lessThan(0).select(h.z, h.z.negate()), yMajor.select(h.x, h.z.lessThan(0).select(h.x.negate(), h.x)));
-  const tc = xMajor.select(h.y.negate(), yMajor.select(h.y.lessThan(0).select(h.z.negate(), h.z), h.y.negate()));
-  const uv = vec2(sc, tc).div(ma).mul(0.5).add(0.5);
-  return vec3(uv, float(face));
-}) as N;
+export const cubeFaceUV = (dir: N): N => {
+  const { includes } = lookupFor({ layout: createProbeLayout('cube2d-warp', { maxLod: 4 }) });
+  return (wgslFn('fn probesCubeFaceUV(dir: vec3f) -> vec3f { return pl_cubeFaceUV(vec3f(-dir.x, dir.y, dir.z)); }', [includes]) as N)({ dir });
+};
 
 /**
  * Radiance from a baked {@link ReflectionProbes} set. Without inputs it is an environment node:
@@ -108,18 +201,20 @@ export class ReflectionProbesNode extends THREE.Node {
   static get type() { return 'ReflectionProbesNode'; }
   readonly probes: ReflectionProbes;
   protected readonly array: N;
-  protected readonly maxLod = shared(0);
-  protected readonly size = shared(128);
-  private readonly local = shared(1);
-  private readonly boxProjection = shared(1);
-  private slots: Slot[] = [];
-  private seamFix = 'warp';
   /** Explicit lookup inputs; null ones come from the material (environment node). */
   readonly positionNode: N = null;
   readonly directionNode: N = null;
   readonly roughnessNode: N = null;
+  readonly normalNode: N = null;
+  readonly aoNode: N = null;
+  readonly viewNode: N = null;
+  readonly frameIrradianceNode: N = null;
   /** Whether the output is `vec4( radiance, coverage )` without environment fallback. */
   readonly coverage: boolean;
+  private table: SetTable | null = null;
+  private renderer: THREE.WebGPURenderer | null = null;
+  private volumes = 0;
+  private seamFix = 'warp';
 
   constructor(probes: ReflectionProbes, options: ProbeLookupOptions | null = null) {
     super(options?.coverage === true ? 'vec4' : 'vec3');
@@ -130,6 +225,10 @@ export class ReflectionProbesNode extends THREE.Node {
       if (options.position != null) this.positionNode = nodeObject(options.position);
       if (options.direction != null) this.directionNode = nodeObject(options.direction);
       if (options.roughness != null) this.roughnessNode = nodeObject(options.roughness);
+      if (options.normal != null) this.normalNode = nodeObject(options.normal);
+      if (options.ao != null) this.aoNode = nodeObject(options.ao);
+      if (options.view != null) this.viewNode = nodeObject(options.view);
+      if (options.frameIrradiance != null) this.frameIrradianceNode = nodeObject(options.frameIrradiance);
     }
     this.updateBeforeType = THREE.NodeUpdateType.RENDER;
     this.array = texture(probes.texture);
@@ -145,56 +244,23 @@ export class ReflectionProbesNode extends THREE.Node {
     return THREE.NodeUtils.hash(super.customCacheKey(), probes.bakedProbes.length, probes.bakedSeamFix === 'warp' ? 1 : 0, probes.texture?.id ?? 0);
   }
 
-  updateBefore(): undefined {
+  updateBefore(frame?: { renderId: number }): undefined {
     const probes = this.probes;
-    const tex = probes.texture!;
     // a bake that changes the layout disposes the previous texture, so switch even before a recompile
-    this.array.value = tex;
-    this.maxLod.value = tex.mipmaps.length - 1;
-    this.size.value = (tex.image as { width: number }).width;
-    if (probes.bakedProbes.length !== this.slots.length || probes.bakedSeamFix !== this.seamFix) {
+    this.array.value = probes.texture!;
+    if (probes.bakedProbes.length !== this.volumes || probes.bakedSeamFix !== this.seamFix) {
       this.needsUpdate = true;
       return;
     }
-    // captures see only the environment, so baking doesn't feed back into itself
-    this.local.value = probes.capturing ? 0 : 1;
-    this.boxProjection.value = probes.boxProjection ? 1 : 0;
-    for (let i = 0; i < this.slots.length; i++) {
-      const slot = this.slots[i];
-      const probe = probes.bakedProbes[i];
-      probe.getWorldPosition(slot.position.value);
-      probeOrigin(probe, slot.origin.value);
-      probe.getWorldScale(_scale);
-      slot.extent.value.copy(probe.influenceSize).multiply(_scale).multiplyScalar(0.5);
-      slot.fade.value = probe.blendDistance;
-      slot.projectionSize.value.copy(probe.projectionSize ?? probe.influenceSize).multiply(_scale);
-      slot.projectionOffset.value.copy(probe.projectionOffset).multiply(_scale);
-    }
-  }
-
-  /** Radiance of probe slot `slot` (the environment is the last one) along `dir` at mip `lod`. */
-  protected sampleProbe(slot: number, dir: N, lod: N): N {
-    const f = cubeFaceUV(dir).toVar();
-    const layer = int(f.z).add(slot * 6);
-    if (this.seamFix !== 'warp') return this.array.sample(f.xy).depth(layer).level(lod).rgb;
-    // edge-centred texels: uv' = uv * (s - 1) / s + 0.5 / s at face size s of each mip
-    const lod0 = lod.floor().toVar();
-    const lod1 = lod0.add(1).min(this.maxLod);
-    const at = (l: N) => {
-      const s = this.size.mul(l.negate().exp2());
-      return this.array.sample(f.xy.mul(s.sub(1).div(s)).add(float(0.5).div(s))).depth(layer).level(l).rgb;
-    };
-    return mix(at(lod0), at(lod1), lod.sub(lod0));
+    if (this.renderer !== null && this.table !== null) writeTable(probes, this.table, this.renderer, frame?.renderId ?? -1);
   }
 
   setup(builder: N) {
     const probes = this.probes;
+    this.renderer = builder.renderer;
     this.seamFix = probes.bakedSeamFix;
-    // keep the existing slots: every material program references the same uniforms (#35046 c4e4833e17)
-    this.slots = probes.bakedProbes.map((_, i) => this.slots[i] ?? {
-      position: shared(new THREE.Vector3()), origin: shared(new THREE.Vector3()), extent: shared(new THREE.Vector3()),
-      fade: shared(0.5), projectionSize: shared(new THREE.Vector3()), projectionOffset: shared(new THREE.Vector3()),
-    });
+    this.volumes = probes.bakedProbes.length;
+    this.table = tableFor(probes);
     this.updateBefore();
 
     // missing inputs come from the material: its fragment, reflection vector and roughness
@@ -202,58 +268,31 @@ export class ReflectionProbesNode extends THREE.Node {
     const position: N = this.positionNode ?? positionWorld;
     const direction: N = this.directionNode ?? (context.getUV ? context.getUV(this, builder) : reflectVector);
     const roughness: N = float(this.roughnessNode ?? (context.getTextureLevel ? context.getTextureLevel(this) : 0)).clamp();
+    const refit = this.frameIrradianceNode !== null;
+    const dominant = this.normalNode !== null;
+    const normal: N = this.normalNode ?? (refit ? normalWorld : direction);
     // the environment slot is unrotated: the material's direction gets its environment rotation,
     // an explicit direction is looked up as given
-    return this.lookup(position, direction, roughness, this.directionNode === null ? materialEnvRotation : null);
-  }
-
-  /**
-   * The probe lookup itself: influence weights (smallest volume first, each taking what the
-   * previous ones left), box projection, and the environment for whatever weight is left (or, with
-   * `coverage`, the probe radiance normalized by the weight it got, and that weight).
-   * `envRotation` (a mat3, or null) rotates the direction for the environment slot.
-   */
-  protected lookup(position: N, direction: N, roughness: N, envRotation: N): N {
-    return Fn(() => {
-      // Build the inputs before any branch: r186 emits a node's dependencies (normalView, ...)
-      // where it is first built, so building it inside one If leaves it unassigned in the others.
-      const P = vec3(position).toVar();
-      const dir = vec3(direction).toVar();
-      // same roughness to mip mapping as three r187's PMREMNode
-      const lod = this.maxLod.mul(roughness).mul(float(2).sub(roughness)).toVar();
-      const radiance = vec3(0).toVar();
-      const remaining = float(this.local).toVar();
-      for (let i = 0; i < this.slots.length; i++) {
-        const slot = this.slots[i];
-        const local = P.sub(slot.position);
-        const d = slot.extent.sub(local.abs());
-        // negative outside the box, so the clamped fade is zero there
-        const distance = d.x.min(d.y).min(d.z);
-        const weight = distance.div(slot.fade.max(1e-6)).clamp().mul(remaining).toVar();
-        If(weight.greaterThan(0), () => {
-          // the projection box is centred at position + projectionOffset; the capture point is origin
-          const insideProjection = local.sub(slot.projectionOffset).abs().lessThanEqual(slot.projectionSize.mul(0.5)).all();
-          const projected = parallaxCorrect(P, dir, slot.projectionSize, slot.position.add(slot.projectionOffset), slot.origin);
-          const corrected = this.boxProjection.greaterThan(0).and(insideProjection).select(projected, dir);
-          radiance.addAssign(this.sampleProbe(i, corrected, lod).mul(weight));
-        });
-        remaining.subAssign(weight);
-      }
-      if (this.coverage) {
-        // #35046 head: conditional radiance and coverage; the caller composes any fallback
-        const coverage = float(this.local).sub(remaining).toVar();
-        return vec4(radiance.div(coverage.max(1e-6)), coverage);
-      }
-      const environmentWeight = remaining.add(this.local.oneMinus());
-      const envDir = envRotation === null ? dir : envRotation.mul(dir);
-      radiance.addAssign(this.sampleProbe(this.slots.length, envDir, lod).mul(environmentWeight));
-      return radiance;
-    })();
+    const envDirection: N = this.directionNode === null ? materialEnvRotation.mul(direction) : direction;
+    const { fn } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit, count: this.volumes });
+    const result: N = fn({
+      atlas: this.array, samp: sampler(this.array), table: this.table.node,
+      P: vec3(position), N: vec3(normal), R: vec3(direction), roughness, envR: vec3(envDirection),
+      frameIrr: refit ? vec3(this.frameIrradianceNode) : vec3(-1), withEnv: bool(!this.coverage),
+    }).toVar();
+    if (this.aoNode === null) return this.coverage ? result : result.rgb;
+    const { includes } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit });
+    const occlusion = wgslFn('fn probesSpecularOcclusion(NdotV: f32, ao: f32, roughness: f32) -> f32 { return probeSpecularOcclusion(NdotV, ao, roughness); }', [includes]) as N;
+    const V: N = this.viewNode ?? cameraPosition.sub(position).normalize();
+    const n: N = this.normalNode ?? normalWorld;
+    const so: N = occlusion({ NdotV: vec3(n).dot(vec3(V)).clamp(), ao: float(this.aoNode), roughness });
+    return this.coverage ? vec4(result.rgb.mul(so), result.a) : result.rgb.mul(so);
   }
 }
 
 /** TSL function: environment radiance from a baked probe set, for `scene.environmentNode`. */
-export const reflectionProbes = (probes: ReflectionProbes) => nodeObject(new ReflectionProbesNode(probes));
+export const reflectionProbes = (probes: ReflectionProbes, options: Omit<ProbeLookupOptions, 'position' | 'direction' | 'roughness' | 'coverage'> = {}) =>
+  nodeObject(new ReflectionProbesNode(probes, options));
 
 /**
  * TSL function: radiance from a baked probe set at world position `position`, along world direction
@@ -261,8 +300,8 @@ export const reflectionProbes = (probes: ReflectionProbes) => nodeObject(new Ref
  * priority, box projection and environment fallback as {@link reflectionProbes}, for any shader
  * (a full-screen pass, a traced ray's miss, a hit point). Not in #35046.
  */
-export const sampleReflectionProbes = (probes: ReflectionProbes, position: N, direction: N, roughness: N): N =>
-  nodeObject(new ReflectionProbesNode(probes, { position, direction, roughness }));
+export const sampleReflectionProbes = (probes: ReflectionProbes, position: N, direction: N, roughness: N, options: Omit<ProbeLookupOptions, 'position' | 'direction' | 'roughness' | 'coverage'> = {}): N =>
+  nodeObject(new ReflectionProbesNode(probes, { ...options, position, direction, roughness }));
 
 /**
  * TSL function: local probe radiance and coverage, without environment fallback (what
@@ -272,11 +311,12 @@ export const sampleReflectionProbes = (probes: ReflectionProbes, position: N, di
  * `mix( environment, local.rgb, local.a )`; `scene.environmentNode = local.rgb.mul( local.a )` is
  * #35046's example. Material inputs, like {@link reflectionProbes}.
  */
-export const reflectionProbesLocal = (probes: ReflectionProbes) => nodeObject(new ReflectionProbesNode(probes, { coverage: true }));
+export const reflectionProbesLocal = (probes: ReflectionProbes, options: Omit<ProbeLookupOptions, 'position' | 'direction' | 'roughness' | 'coverage'> = {}) =>
+  nodeObject(new ReflectionProbesNode(probes, { ...options, coverage: true }));
 
 /**
  * TSL function: {@link reflectionProbesLocal} at an explicit world position, direction and roughness,
  * like {@link sampleReflectionProbes}: `vec4( radiance, coverage )`, no environment fallback.
  */
-export const sampleReflectionProbesLocal = (probes: ReflectionProbes, position: N, direction: N, roughness: N): N =>
-  nodeObject(new ReflectionProbesNode(probes, { position, direction, roughness, coverage: true }));
+export const sampleReflectionProbesLocal = (probes: ReflectionProbes, position: N, direction: N, roughness: N, options: Omit<ProbeLookupOptions, 'position' | 'direction' | 'roughness' | 'coverage'> = {}): N =>
+  nodeObject(new ReflectionProbesNode(probes, { ...options, position, direction, roughness, coverage: true }));

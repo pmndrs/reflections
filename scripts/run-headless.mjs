@@ -4,7 +4,9 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | ssr-rt | probe-bench)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | ssr-rt | probe-core | probe-bench)
+//   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
+//   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
@@ -449,6 +451,22 @@ async function main() {
       const stats = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots.warp)}, ${JSON.stringify(shots.hw)})`);
       check('image is lit', stats.lum > 10, `mean luminance ${stats.lum.toFixed(1)}`);
       check("'warp' lookup matches the hardware cube sampler", stats.mean < 1, `mean ${stats.mean.toFixed(3)}, max ${stats.max} / 255`);
+      // phase 2: the package's lookup is core WGSL; the pre-phase-2 TSL lookup lives in examples/probes/src/legacy.ts
+      for (const seam of ['warp', 'none']) {
+        await p.T(`(window.__p.setLookup('legacy-${seam}'), window.__p.capture(), true)`);
+        const legacy = await p.T('window.__p.shot()');
+        const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots[seam])}, ${JSON.stringify(legacy)})`);
+        check(`core lookup matches the pre-phase-2 TSL node ('${seam}')`, d.max <= 1, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
+      }
+      {
+        // the probe grid (every sphere box-projected in its own volume) and the mirror sphere in the doorway
+        const scene = (lookup) => p.T(`(async () => { const P = window.__p; P.setLookup('${lookup}'); P.setGrid(true, 0.05); P.setObject('Sphere', [0, 1.4, 1.2], 0); P.capture();
+          for (let i = 0; i < 3; i++) await P.shot(); const s = await P.shot(); P.setGrid(false); P.setObject('None'); return s; })()`);
+        const core = await scene('warp'), legacy = await scene('legacy-warp');
+        savePng('probes-grid-core.png', core);
+        const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(core)}, ${JSON.stringify(legacy)})`);
+        check('core lookup matches the pre-phase-2 TSL node (grid + mirror sphere)', d.max <= 1, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
+      }
       await p.T("window.__p.setLookup('warp')");
 
       // probe features (examples/probes/src/checks.ts); each restores the page's state
@@ -465,12 +483,35 @@ async function main() {
       check('coverage: alpha 0 outside every volume, 1 inside, fade between; rgb 0 outside', cov.alphaErr < 1e-4 && cov.rgbOutside === 0 && cov.lum > 0,
         `alpha ${JSON.stringify(cov.alpha)}, max err ${cov.alphaErr.toExponential(1)}`);
       check('coverage: rgb * alpha equals the vec3 form (black environment)', cov.composeErr < 1e-3, `max rel err ${cov.composeErr.toExponential(1)}`);
+      const lo = await C('lookupOptions');
+      check("lookup option normal: Lagarde's dominant direction (R at r 0, N at r 1)", lo.dom0 < 1e-4 && lo.dom1 < 1e-4 && lo.lum > 0, `max rel err ${lo.dom0.toExponential(1)}, ${lo.dom1.toExponential(1)}`);
+      check("lookup option ao: Lagarde's specular occlusion", lo.so < 1e-3, `max rel err ${lo.so.toExponential(1)}`);
+      check('lookup option frameIrradiance: re-fit by k / probe L1 irradiance, clamped', lo.refit < 2e-3 && lo.clampErr < 1e-4 && lo.lum > 0 && lo.ratios.every(Number.isFinite) && lo.slots.every((s) => s >= 0),
+        `max rel err ${lo.refit.toExponential(1)} (ratios ${lo.ratios.slice(0, 6).join(' ')} ...), clamp ${lo.clampErr.toExponential(1)}`);
+      const rf = await p.T(`(async () => { const P = window.__p; P.setGrid(true, 0.3); P.setLookup('warp'); for (let i = 0; i < 3; i++) await P.shot(); const off = await P.shot();
+        P.setRefit(true); for (let i = 0; i < 3; i++) await P.shot(); const on = await P.shot(); P.setRefit(false); P.setGrid(false); return { on, off }; })()`);
+      savePng('probes-refit-off.png', rf.off);
+      savePng('probes-refit-on.png', rf.on);
+      const rs = await p.T(`(${IMAGE_STATS})(${JSON.stringify(rf.on)}, ${JSON.stringify(rf.off)})`);
+      check('re-fit with LightProbeGrid renders and changes the image', rs.lum > 10 && rs.mean > 0.5, `lum ${rs.lum.toFixed(1)}, mean diff ${rs.mean.toFixed(2)} / 255`);
       const ck = await C('cacheKey');
       check('two probe sets of equal size keep their own programs', ck.left[0] > 200 && ck.left[2] < 50 && ck.right[2] > 200 && ck.right[0] < 50 && ck.keysDiffer,
         `left ${ck.left}, right ${ck.right}, keys differ ${ck.keysDiffer}`);
       const ts = await C('timeSlice');
-      check('time-sliced bake over 3 calls = full bake', ts.slicedVsFull.max <= 1, `max ${ts.slicedVsFull.max} / 255`);
+      // Residual under heavy GPU load from other processes (W7, HANDOFF): ~0.075 % of pixels, scattered
+      // over the point-light highlights of the grid spheres, differ between two renders of the same
+      // state (seen at max 75-81 / 255). Not the probes: tolerate up to 0.15 % of pixels. A missing or
+      // stale slice changes far more (one slice alone: tens of / 255 over the reflections; a stale
+      // shadow map: 0.26 % in one compact patch, density 0.3 in its bounding box, against 0.003 for the
+      // residual's scatter; the stress check below catches it).
+      const pixels = 960 * 540;
+      const residual = (d) => d.max <= 1 || (d.over < 0.0015 && d.box && (d.over * pixels) / ((d.box[2] - d.box[0] + 1) * (d.box[3] - d.box[1] + 1)) < 0.05);
+      check('time-sliced bake over 3 calls = full bake', residual(ts.slicedVsFull), `max ${ts.slicedVsFull.max} / 255, ${(ts.slicedVsFull.over * 100).toFixed(3)} % px`);
+      if (ts.slicedVsFull.max > 1) { console.log(`  box ${ts.slicedVsFull.box}, ${(ts.slicedVsFull.over * 100).toFixed(3)} % px`); savePng('timeslice-sliced.png', ts.slicedVsFull.a); savePng('timeslice-full.png', ts.slicedVsFull.b); }
       check('one slice alone differs from the full bake', ts.oneVsFull.max > 8, `max ${ts.oneVsFull.max} / 255`);
+      const tss = await C('timeSliceStress');
+      check('bake slices between renders of one frame: the view keeps its own shadows', tss.failures.every(residual), `max per slice ${tss.max.join(' ')} / 255`);
+      for (const f of tss.failures) { console.log(`  slice ${f.slice}: box ${f.box}, ${(f.over * 100).toFixed(3)} % px`); savePng(`slice-${f.slice}-same.png`, f.same); savePng(`slice-${f.slice}-fresh.png`, f.fresh); }
       const ev = await C('environment');
       const n = ev.counts;
       check('environment captured only when it changed', n.noEnvironment === 3 && n.added === 4 && n.unchanged === 3 && n.versionBumped === 4 && n.always === 4 && n.slicedUnchanged === 0 && n.removed === 3,
@@ -487,6 +528,27 @@ async function main() {
           console.log(`  bake, 3 probes at ${res} px: median ${t.median.toFixed(2)} ms (${t.all.map((x) => x.toFixed(2)).join(' ')})`);
         }
         await p.T('(window.__p.setResolution(128), true)');
+      }
+
+      if (args.includes('--time-lookup')) {
+        // lookup ms at 1080p, loop stopped: frame time with the probe node minus without it (no IBL),
+        // the core lookup and the pre-phase-2 TSL node alternated in one page, grid on (432 spheres)
+        const t = await openPage(`http://127.0.0.1:${PORT}/probes/?w=1920&h=1080&grid`);
+        pages.push(t);
+        await t.T(FREEZE);
+        const rows = await t.T(`(async () => {
+          const P = window.__p, out = { warp: [], 'legacy-warp': [] };
+          for (let k = 0; k < 5; k++) for (const lookup of ['legacy-warp', 'warp']) {
+            P.setLookup(lookup); P.setGrid(true, 0.08);
+            const on = await P.timeFrames(30, 7); P.setEnvNode(false); const off = await P.timeFrames(30, 7); P.setEnvNode(true);
+            out[lookup].push({ on: on.wall, off: off.wall, lookup: on.wall - off.wall });
+          }
+          return out;
+        })()`);
+        for (const [k, v] of Object.entries(rows)) {
+          const med = (a) => [...a].sort((x, y) => x - y)[a.length >> 1];
+          console.log(`  lookup ${k}: frame ${med(v.map((r) => r.on)).toFixed(3)} ms, without IBL ${med(v.map((r) => r.off)).toFixed(3)} ms, lookup ${med(v.map((r) => r.lookup)).toFixed(3)} ms (median of ${v.length}; each ${v.map((r) => r.lookup.toFixed(3)).join(' ')})`);
+        }
       }
 
       if (compareUrl) {
@@ -526,6 +588,32 @@ async function main() {
     if (runs('ssr')) await ssrChecks(pages);
     if (runs('ssr-rt')) await ssrRtChecks(pages);
 
+    if (runs('probe-core')) {
+      // examples/probe-core: the phase 2 probe core on a bare device (layouts x formats, CPU weights,
+      // re-fit, specular occlusion, the SSSR radiance-fallback seam)
+      console.log('examples/probe-core:');
+      const pc = await openPage(`http://127.0.0.1:${PORT}/probe-core/`);
+      pages.push(pc);
+      const r = await pc.T('window.__p.run()');
+      const L = r.layouts;
+      check('probe core: coverage matches the CPU volume weights', L.coverageErr < 1e-5 && L.inside > 0 && L.outside > 0 && L.fade > 0 && L.composeErr === 0,
+        `max err ${L.coverageErr.toExponential(2)}; ${L.inside} inside, ${L.fade} in a fade, ${L.outside} outside`);
+      for (const l of L.layouts) {
+        const name = `${l.layout}${l.size ? '@' + l.size : ''} ${l.format}${l.lodMapping ? ' lod ' + l.lodMapping : ''}`;
+        // same captures, same plan: only layout / format error (phase 1: mean <= 1, octa's mirror mip p99 ~20)
+        check(`probe core: ${name} agrees with cube-hw rgba16float`, l.full.mean < 2 && Number.isFinite(l.full.max), `mean ${l.full.mean.toFixed(3)}, p99 ${l.full.p99.toFixed(2)}, max ${l.full.max.toFixed(1)} / 255`);
+      }
+      check('probe core: a constant capture looks up as that constant', r.refit.constErr < 2e-3, `max rel err ${r.refit.constErr.toExponential(2)}`);
+      check('probe core: re-fit by 2x the probe L1 irradiance doubles the lookup', r.refit.refitErr < 2e-2, `max rel err ${r.refit.refitErr.toExponential(2)}`);
+      check("probe core: Lagarde's specular occlusion", r.refit.soErr < 1e-4, `max err ${r.refit.soErr.toExponential(2)}`);
+      check('sssr probe fallback: constant probes = constant fallback (to one f16 step)', r.sssr.constantVsProbes === 0, `${r.sssr.constantVsProbes} px differ`);
+      check('sssr probe fallback: structured probes reach the fallback pixels', r.sssr.structuredVsConstant > r.sssr.pixels * 0.05, `${r.sssr.structuredVsConstant} of ${r.sssr.pixels} px`);
+      const rt = r.sssr.rt;
+      check('rt probe fallback (misses + hit shading): constant probes = constant fallback', rt.stats && rt.stats.hits > 0 && rt.stats.tracedMisses > 0 && rt.constantVsProbes === 0,
+        `${rt.constantVsProbes} px differ; ${rt.stats?.hits} hits, ${rt.stats?.tracedMisses} traced misses, trace changed ${rt.changedByTrace} px`);
+      check('rt probe fallback: structured probes reach the traced frame', rt.structuredVsConstant > r.sssr.pixels * 0.05 && rt.changedByTrace > 0, `${rt.structuredVsConstant} of ${r.sssr.pixels} px`);
+    }
+
     if (runs('probe-bench')) {
       // examples/probe-bench: smoke run (or the full bench with --probe-bench). Not a numbers gate:
       // it must run without validation errors, and the generic prefilter must match ProbePrefilter.
@@ -537,6 +625,11 @@ async function main() {
         console.log('console:\n  ' + [...new Set(results.logs)].slice(0, 12).join('\n  '));
         throw e;
       });
+      if (args.includes('--low-roughness')) {
+        // D101 experiment: lookups between roughness mips, r187 lod mapping vs 'alpha' (blend linear in r^2)
+        await pb.cdp.evalJs('window.__p.lowRoughness().then((r) => JSON.stringify(r))');
+        console.log((await pb.cdp.evalJs('window.__p.log', false)).replace(/^/gm, '    '));
+      }
       if (process.env.BENCH_LOG || probeBenchFull) console.log((await pb.cdp.evalJs('window.__p.log', false)).replace(/^/gm, '    '));
       if (probeBenchFull) {
         fs.mkdirSync(OUT, { recursive: true });
