@@ -98,6 +98,7 @@ Layout from three: depth32float; normal = rgba16float world normal (mul 1, add 0
 ## Log
 
 - 2026-11-10: W4 first pass (`ff15973`): frame-contract types in core, `FrameGBuffer` (three MRT), scene kit (`examples/shared`), scenes viewer (`examples/scenes`), `pnpm assets`. Divergences D400–D406.
+- 2026-11-10: W4 merged (G-buffer + scene kit + viewer + `pnpm assets`). Main `pnpm check`: 17 PASS, all 8 procedural scenes fill every target, scene colour is 0 on mirrors (no specular leak). Open: one console 404 during the scenes check (unidentified resource; likely the skipped asset probe or a favicon).
 - 2026-11-10: three floor raised to r187 (maintainer's call). `pnpm check` all green after one fix (cube render-target mip count in examples/probes).
 - 2026-11-10: R1–R3 done. SPEC draft 4: miss list credited to FFX `hybridreflections`, ray-list packing 15+14+3, confidence instead of binary miss, thresholds in alpha, RT optional/off by default, Lagarde specular occlusion, L1-vs-SH9 re-fit noted. W3 told of the hybrid sample. W5 opened for probe parity.
 - 2026-11-10: Phase 0 done (`622985c`). SPEC drafts 2 and 3. Workstreams R1–R3, W1–W4 started in parallel. `REFLECTIONS_PORT` added so worktrees don't collide on 5370. `DIVERGES.md` seeded with D1–D11 from the SPEC.
