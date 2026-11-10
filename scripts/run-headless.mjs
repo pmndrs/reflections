@@ -677,9 +677,10 @@ async function ssrBench() {
 /**
  * examples/babylon (W15, SPEC phase 6): the mirrorWall scene on Babylon's WebGPUEngine through
  * @pmndrs/reflections/babylon. Smoke: renders, no validation errors, finite outputs, rays traced;
- * the mirror floor shows the wall (confident SSR); Babylon's cube captures sample as world directions
- * under core's plain cube lookup (the adapter's no-remap assumption, probes.ts). Screenshots of the
- * final image, SSR off (probes + environment only), probes off, and the debug views.
+ * the mirror floor shows the wall (confident SSR); the adapter's cube captures (Babylon's Y-mirror
+ * undone, probes.ts) sample as world directions under core's plain cube lookup; the velocity texture
+ * reprojects with motionVectorScale [-1, -1] (conventions.ts). Screenshots of the final image, SSR
+ * off (probes + environment only), probes off, and the debug views.
  */
 async function babylonChecks(pages) {
   console.log('examples/babylon:');
@@ -702,8 +703,12 @@ async function babylonChecks(pages) {
       `${st.mirrorPixels} mirror px, ${(st.mirrorConfident * 100).toFixed(1)}% with confidence >= 0.9`);
     if (variant === 'auto') {
       const o = await p.T('window.__p.orientation()');
-      check('babylon: cube captures sample as world directions (no remap in core)', o.ok,
+      check('babylon: adapter cube captures (Y-mirror undone) sample as world directions', o.ok,
         o.ok ? `${o.rows.length} directions` : o.rows.filter((r) => !r.ok).slice(0, 4).map((r) => `${r.dir.join(',')}: got ${r.got.join('')} want ${r.expect.join('')}`).join('; '));
+      const mc = await p.T('window.__p.motionCheck()');
+      const err = Object.fromEntries(mc.rows.map((r) => [r.scale, r.meanError]));
+      check('babylon: velocity reprojects with motionVectorScale [-1, -1]', mc.best === '-1,-1' && err['-1,-1'] < 0.5 * err['0,0'],
+        `${mc.pixels} px; mean colour error ${mc.rows.map((r) => `[${r.scale}] ${r.meanError.toFixed(4)}`).join(', ')}`);
       const shot = async (name) => savePng(`babylon-${name}.png`, await p.T('window.__p.shot()'));
       await shot('final');
       await p.T('window.__p.setSSR(false)');

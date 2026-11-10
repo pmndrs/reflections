@@ -17,6 +17,9 @@ import { backbufferColorTextureHandle } from '@babylonjs/core/FrameGraph/frameGr
 import { FrameGraphImageProcessingTask } from '@babylonjs/core/FrameGraph/Tasks/PostProcesses/imageProcessingTask.js';
 import { FrameGraphGeometryRendererTask } from '@babylonjs/core/FrameGraph/Tasks/Rendering/geometryRendererTask.js';
 import { FrameGraphObjectRendererTask } from '@babylonjs/core/FrameGraph/Tasks/Rendering/objectRendererTask.js';
+import { FrameGraphShadowGeneratorTask } from '@babylonjs/core/FrameGraph/Tasks/Rendering/shadowGeneratorTask.js';
+import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator.js';
+import '@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent.js';
 import { FrameGraphClearTextureTask } from '@babylonjs/core/FrameGraph/Tasks/Texture/clearTextureTask.js';
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight.js';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight.js';
@@ -190,8 +193,12 @@ hemi.intensity = 0.5;
 const sun = new DirectionalLight('sun', L(-3, -6, -6).normalize(), scene);
 sun.diffuse = lin(0xfff2e0);
 sun.intensity = 2.2;
+sun.position = L(3, 6, 6); // the shadow map's origin (three's key light position)
+sun.shadowMinZ = 0.5;
+sun.shadowMaxZ = 40;
 
 const sceneMeshes: AbstractMesh[] = scene.meshes.filter((m) => m !== skybox);
+for (const m of sceneMeshes) m.receiveShadows = true;
 
 // ---- reflections -------------------------------------------------------------------------------
 const probes = new BabylonProbeSet(scene, { capacity: 1, sourceSize: 128, environment: [skybox] });
@@ -227,7 +234,18 @@ async function build() {
   clear.clearDepth = true;
   graph.addTask(clear);
 
+  const shadows = new FrameGraphShadowGeneratorTask('shadows', graph);
+  shadows.light = sun;
+  shadows.camera = camera;
+  shadows.mapSize = 2048;
+  shadows.objectList = { meshes: sceneMeshes, particleSystems: [] };
+  shadows.filter = ShadowGenerator.FILTER_PCF;
+  shadows.bias = 0.0005;
+  shadows.normalBias = 0.02;
+  graph.addTask(shadows);
+
   const geometry = new FrameGraphGeometryRendererTask('geometry', graph, scene);
+  geometry.shadowGenerators = [shadows];
   geometry.targetTexture = clear.outputTexture;
   geometry.depthTexture = clear.outputDepthTexture;
   geometry.camera = camera;
@@ -467,6 +485,57 @@ async function orientation() {
   return { ok: rows.every((r) => r.ok), failed: rows.filter((r) => !r.ok).length, rows };
 }
 
+/**
+ * Motion-vector convention check (conventions.ts: motionVectorScale [-1, -1] on Babylon's Y-flipped
+ * targets): render a frame, move the camera, render again, and reproject this frame's scene colour
+ * into the last one through the velocity texture under each candidate scale. The contract's scale
+ * must give the smallest colour error, well below no reprojection at all.
+ */
+async function motionCheck() {
+  stopLoop();
+  const pos0 = camera.position.clone(), target0 = camera.getTarget().clone();
+  frame();
+  await idle();
+  const a = await readTexture(ssr.lastFrame!.textures.sceneColor);
+  camera.position.addInPlace(new Vector3(0.12, 0.05, -0.1));
+  camera.setTarget(target0.add(new Vector3(0.25, 0, 0)));
+  frame();
+  await idle();
+  const t = ssr.lastFrame!.textures;
+  const b = await readTexture(t.sceneColor);
+  const m = await readTexture(t.motion);
+  const mat = await readTexture(ssr.frame.material!);
+  const W = t.sceneColor.width, H = t.sceneColor.height;
+  const scales: [number, number][] = [[-1, -1], [1, 1], [1, -1], [-1, 1], [0, 0]];
+  const err = scales.map(() => 0);
+  let n = 0;
+  for (let y = 4; y < H - 4; y += 3) for (let x = 4; x < W - 4; x += 3) {
+    const i = y * W + x;
+    if (mat.data[i * 4] > 0.999) continue; // background
+    const mx = m.data[i * 4], my = m.data[i * 4 + 1];
+    if (Math.abs(mx) + Math.abs(my) < 1e-4) continue;
+    const res = scales.map(([sx, sy]) => {
+      const px = Math.floor(((x + 0.5) / W - mx * sx) * W), py = Math.floor(((y + 0.5) / H - my * sy) * H);
+      if (px < 0 || py < 0 || px >= W || py >= H) return null;
+      const j = py * W + px;
+      let e = 0;
+      for (let c = 0; c < 3; c++) e += Math.abs(Math.min(b.data[i * 4 + c], 4) - Math.min(a.data[j * 4 + c], 4));
+      return e;
+    });
+    if (res.some((r) => r === null)) continue;
+    res.forEach((r, k) => { err[k] += r!; });
+    n++;
+  }
+  camera.position.copyFrom(pos0);
+  camera.setTarget(target0);
+  ssr.frame.resetHistory();
+  frame();
+  await idle();
+  const rows = scales.map((sc, k) => ({ scale: sc.join(','), meanError: n ? err[k] / n : NaN }));
+  const best = rows.reduce((p, r) => (r.meanError < p.meanError ? r : p));
+  return { pixels: n, best: best.scale, rows };
+}
+
 Object.assign(window, {
   __p: {
     engine, scene, ssr, probes, get composite() { return composite; }, gpuErrors, views: COMPOSITE_VIEWS,
@@ -489,6 +558,6 @@ Object.assign(window, {
       const med = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
       return Object.fromEntries(Object.entries(per).map(([k, v]) => [k, Number(med(v).toFixed(4))]));
     },
-    stats, orientation,
+    stats, orientation, motionCheck,
   },
 });
