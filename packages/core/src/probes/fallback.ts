@@ -19,6 +19,8 @@ export interface ProbeRadianceFallback {
   layout: GPUBindGroupLayout;
   /** Bind group for `inputs.fallbackBindGroup` (the set's). */
   bindGroup: GPUBindGroup;
+  /** The volume table (1). */
+  storageBufferCount: number;
 }
 
 /** WGSL of sampleRadianceFallback over the probe lookup module (which must be in the same module). */
@@ -30,5 +32,5 @@ fn sampleRadianceFallback(P_world: vec3f, dir: vec3f, roughness: f32) -> vec3f {
 
 /** The radiance-fallback seam over `set` (its bind group at @group(1); visibility must include COMPUTE). */
 export function probeRadianceFallback(set: ProbeSet): ProbeRadianceFallback {
-  return { wgsl: set.wgsl({ group: 1 }) + PROBE_FALLBACK_WGSL, layout: set.bindGroupLayout, bindGroup: set.bindGroup };
+  return { wgsl: set.wgsl({ group: 1 }) + PROBE_FALLBACK_WGSL, layout: set.bindGroupLayout, bindGroup: set.bindGroup, storageBufferCount: 1 };
 }

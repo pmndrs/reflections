@@ -364,6 +364,19 @@ function f2Checks(r) {
       `traced per frame ${t.traced.join(' ')} (budget ${t.budget}, floor ${(t.budget - 4 * frameSd).toFixed(0)}), tile caps ${t.tileCaps.join(' ')}`);
     check('rtTiles: no WebGPU errors', t.gpuErrors.length === 0, t.gpuErrors.slice(0, 2).join(' | '));
   }
+  const l = section('rtLimits');
+  if (l) {
+    const d = (a) => a.skipped ?? `${a.threw ? `threw "${a.threw.slice(0, 160)}"` : 'built'}${a.validationError ? `; validation error "${a.validationError.slice(0, 120)}"` : ''}`;
+    check(`rt limits: 5-buffer provider + probe fallback throws a clear error (default ${l.limits.maxStorageBuffersPerShaderStage} storage buffers)`,
+      !!l.fiveBuffersAndProbes.threw && /maxStorageBuffersPerShaderStage/.test(l.fiveBuffersAndProbes.threw) && /requiredLimits/.test(l.fiveBuffersAndProbes.threw) && !l.fiveBuffersAndProbes.validationError,
+      d(l.fiveBuffersAndProbes));
+    check(`rt limits: a storage texture in the provider throws a clear error (default ${l.limits.maxStorageTexturesPerShaderStage} storage textures)`,
+      !!l.oneStorageTexture.threw && /maxStorageTexturesPerShaderStage/.test(l.oneStorageTexture.threw) && !l.oneStorageTexture.validationError,
+      d(l.oneStorageTexture));
+    check('rt limits: 4-buffer provider + probe fallback (8) and a raised limit (9) build without errors',
+      !l.fourBuffersAndProbes.threw && !l.fourBuffersAndProbes.validationError && (l.raised.skipped !== undefined || (!l.raised.threw && !l.raised.validationError)),
+      `4 + probes: ${d(l.fourBuffersAndProbes)}; raised: ${d(l.raised)}`);
+  }
 }
 
 /** examples/regressions: GPU repros of review bugs (stream F1). Each check failed before its fix. */

@@ -48,6 +48,10 @@ export interface RadianceFallback {
   wgsl: string;
   /** Layout of `@group(1)`; omit when the snippet has no bindings. */
   layout?: GPUBindGroupLayout;
+  /** Storage buffers in `layout`, counted against the device's per-stage limit by passes that check it. Default 0. */
+  storageBufferCount?: number;
+  /** Storage textures in `layout`, likewise. Default 0. */
+  storageTextureCount?: number;
 }
 
 /** Default fallback: `settings.fallbackColor * settings.iblFactor`, no bindings. */

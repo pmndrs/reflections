@@ -113,6 +113,29 @@ const tex = (binding: number): GPUBindGroupLayoutEntry => ({ binding, visibility
 const sto = (binding: number, format: GPUTextureFormat): GPUBindGroupLayoutEntry => ({ binding, visibility: C, storageTexture: { access: 'write-only', format } });
 const buf = (binding: number, type: GPUBufferBindingType): GPUBindGroupLayoutEntry => ({ binding, visibility: C, buffer: { type } });
 
+/** The trace pass's own bindings in group 0 (binding 7 is read-write, 5 and 6 read-only; 8-11 write-only). */
+const OWN_STORAGE_BUFFERS = 3, OWN_STORAGE_TEXTURES = 4;
+
+/**
+ * Counts every group of the trace pipeline (0 the pass, 1 the radiance fallback, 2 the provider, 3
+ * the hit shading) against the device's per-stage limits, so a combination that doesn't fit fails
+ * here with what to change, not as a validation error at createPipelineLayout.
+ */
+function checkStageLimits(device: GPUDevice, provider: TraceProvider, fallback: RadianceFallback, shading: HitShading) {
+  const providerTextures = provider.entries.filter((e) => e.storageTexture !== undefined).length;
+  const rows: [string, keyof GPUSupportedLimits, number[]][] = [
+    ['storage buffers', 'maxStorageBuffersPerShaderStage', [OWN_STORAGE_BUFFERS, fallback.storageBufferCount ?? 0, provider.storageBufferCount, shading.storageBufferCount ?? 0]],
+    ['storage textures', 'maxStorageTexturesPerShaderStage', [OWN_STORAGE_TEXTURES, fallback.storageTextureCount ?? 0, providerTextures, shading.storageTextureCount ?? 0]],
+  ];
+  for (const [what, limit, [own, fb, pr, hs]] of rows) {
+    const total = own + fb + pr + hs, max = device.limits[limit] as number;
+    if (total <= max) continue;
+    throw new Error(`rt: the trace pipeline binds ${total} ${what} in the compute stage (pass ${own}, radiance fallback ${fb}, provider '${provider.name}' ${pr}, hit shading ${hs}); `
+      + `the device allows ${max} (${limit}). Request more at requestDevice ({ requiredLimits: { ${limit}: adapter.limits.${limit} } }; `
+      + `three: new WebGPURenderer({ requiredLimits: { ${limit}: ${total} } })), or use a provider / fallback that binds fewer.`);
+  }
+}
+
 export function createTracedReflections(device: GPUDevice, options: TracedReflectionsOptions): TracedReflections {
   const { width: W, height: H, provider } = options;
   const fallback = options.radianceFallback ?? constantRadianceFallback();
@@ -120,11 +143,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   const tilesX = Math.ceil(W / 8), tilesY = Math.ceil(H / 8);
   const timer = options.timestamps && PassTimer.supported(device) ? new PassTimer(device, 4) : undefined;
 
-  const ownStorageBuffers = 3;
-  const maxSB = device.limits.maxStorageBuffersPerShaderStage;
-  if (ownStorageBuffers + provider.storageBufferCount > maxSB) {
-    throw new Error(`rt: the pass binds ${ownStorageBuffers} storage buffers and provider '${provider.name}' ${provider.storageBufferCount}; the device allows ${maxSB} per stage`);
-  }
+  checkStageLimits(device, provider, fallback, shading);
 
   const source = device.createTexture({
     label: 'rt source', size: [W, H], format: 'r32float',

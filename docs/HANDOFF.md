@@ -153,7 +153,7 @@ fn traceHitMaterial(hit: Hit) -> HitMaterial                                  //
 fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f          // HitShading (pass option); may call sampleRadianceFallback
 ```
 
-The traced pass binds group 0 (itself: 3 storage buffers, 4 storage textures), 1 (radiance fallback, same snippet as SSSR), 2 (provider), 3 (hit shading). With 3 storage buffers of its own, a provider may use 5 on a default device.
+The traced pass binds group 0 (itself: 3 storage buffers, 4 storage textures), 1 (radiance fallback, same snippet as SSSR), 2 (provider), 3 (hit shading). With 3 storage buffers of its own, a provider may use 5 on a default device, 4 with the probe fallback (its table is one more). F2: `createTracedReflections` counts all four groups (storage buffers and storage textures; `RadianceFallback` / `HitShading` declare theirs with `storageBufferCount` / `storageTextureCount`) against `device.limits` and throws with the limit to raise.
 
 **For @pmndrs/bvh to plug in:** a ~40-line wrapper whose `code(slot)` is `traceModuleWgsl(slot)` (+ its dependencies) followed by `traceFirstHit` calling `giTraceClosest(GiRay(origin, 0.0, dir, tMax))` and mapping `GiHit` (t, triangle, barycentrics, frontFace map one to one). What it lacks today: (1) a hit normal (GiHit has none; the walk has the triangle's corners and the instance transform, so a `giHitNormal(hit)` helper or a `normal` field would do; without it `hitNormal: false` and the pass shades with -dir); (2) an instance → material table (an extra binding, or a user word in the instance record); (3) the exported `GPU_LAYOUT_VERSION` constant (the split doc plans it; not in the source yet). Its 3 storage buffers fit (6 of 8 with the pass).
 
