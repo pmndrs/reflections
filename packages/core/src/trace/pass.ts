@@ -88,6 +88,8 @@ export interface TracedReflectionsStats {
   onScreenHits: number;
   /** 8x8 tiles with at least one miss. */
   tilesWithMisses: number;
+  /** Which dispatch these counts come from (1 = the first). */
+  frame: number;
   /** The most rays a tile could trace this frame (the floor share, + 1 for the tiles that got the remainder). */
   tileCap: number;
 }
@@ -107,7 +109,10 @@ export interface TracedReflections {
   readonly tilesX: number;
   readonly tilesY: number;
   dispatch(cmd: GPUCommandEncoder, frame: TracedReflectionsDispatch, settings?: TracedReflectionsSettings): void;
-  /** Counts of the last dispatched frame (call after submitting). */
+  /**
+   * Counts of the last frame dispatched before this call (call after submitting it), also while an
+   * earlier read is pending. `frame` says which dispatch they are from.
+   */
   readStats(): Promise<TracedReflectionsStats>;
   /** With `timestamps`: ms per pass ('rt begin', 'rt trace', 'total') for the last frame. */
   readTimings(): Promise<ReadonlyMap<string, number>>;
@@ -158,7 +163,13 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   const stateBytes = (RT_STATE_HEADER + tilesX * tilesY) * 4;
   const state = device.createBuffer({ label: 'rt state', size: stateBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
   const params = device.createBuffer({ label: 'rt params', size: RT_PARAMS_SIZE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-  const statsRead = device.createBuffer({ label: 'rt stats readback', size: RT_STATE_HEADER * 4 + 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  // Stats readback: each dispatch copies into a slot that isn't being mapped (a mapped buffer can't
+  // be a copy target), so a read never returns an older frame because an earlier read was pending.
+  interface StatsSlot { buffer: GPUBuffer; frame: number; reading: Promise<TracedReflectionsStats> | null }
+  const statsSlots: StatsSlot[] = [];
+  const MAX_STATS_SLOTS = 4;
+  let latestStats: StatsSlot | null = null;
+  let dispatches = 0;
 
   // ---- pipelines
   const beginBgl = device.createBindGroupLayout({ label: 'rt begin', entries: [buf(0, 'uniform'), buf(1, 'storage')] });
@@ -207,7 +218,6 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   };
 
   let afterSubmit: (() => void) | undefined;
-  let reading: Promise<TracedReflectionsStats> | null = null;
 
   function writeParams(frame: TracedReflectionsDispatch, s: TracedReflectionsSettings) {
     const cam = frame.inputs.camera;
@@ -285,9 +295,17 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     p.setBindGroup(3, frame.hitShadingBindGroup ?? emptyGroup);
     p.dispatchWorkgroupsIndirect(out.missArgs, 0);
     p.end();
-    if (!reading) { // a mapped buffer can't be a copy target; skip the debug copy while a read is pending
-      cmd.copyBufferToBuffer(state, 0, statsRead, 0, RT_STATE_HEADER * 4);
-      cmd.copyBufferToBuffer(out.missCounter, 0, statsRead, RT_STATE_HEADER * 4, 16);
+    dispatches++;
+    let slot = statsSlots.find((x) => x.reading === null);
+    if (!slot && statsSlots.length < MAX_STATS_SLOTS) {
+      slot = { buffer: device.createBuffer({ label: 'rt stats readback', size: RT_STATE_HEADER * 4 + 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), frame: 0, reading: null };
+      statsSlots.push(slot);
+    }
+    if (slot) { // all slots mapping (4 reads pending): this frame's counts are skipped
+      cmd.copyBufferToBuffer(state, 0, slot.buffer, 0, RT_STATE_HEADER * 4);
+      cmd.copyBufferToBuffer(out.missCounter, 0, slot.buffer, RT_STATE_HEADER * 4, 16);
+      slot.frame = dispatches;
+      latestStats = slot;
     }
     afterSubmit = timer?.end(cmd);
   }
@@ -295,16 +313,19 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   return {
     device, width: W, height: H, provider, source, state, tilesX, tilesY, dispatch,
     readStats() {
-      // one mapping at a time; a second caller waits for the first
-      reading ??= statsRead.mapAsync(GPUMapMode.READ).then(() => {
-        const s = new Uint32Array(statsRead.getMappedRange().slice(0));
-        statsRead.unmap();
+      const slot = latestStats;
+      if (!slot) return Promise.resolve({ misses: 0, traced: 0, capped: 0, hits: 0, tracedMisses: 0, onScreenHits: 0, tilesWithMisses: 0, tileCap: 0, frame: 0 });
+      // one mapping per slot; a second caller for the same frame waits for the first
+      slot.reading ??= slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
+        const s = new Uint32Array(slot.buffer.getMappedRange().slice(0));
+        slot.buffer.unmap();
         return {
           misses: s[RT_STATE_HEADER + 1], traced: s[RT_STATE.traced], capped: s[RT_STATE.capped], hits: s[RT_STATE.hits],
           tracedMisses: s[RT_STATE.misses], onScreenHits: s[RT_STATE.onScreen], tilesWithMisses: s[RT_STATE.tilesWithMisses], tileCap: s[RT_STATE.tileCap],
+          frame: slot.frame,
         };
-      }).finally(() => { reading = null; });
-      return reading;
+      }).finally(() => { slot.reading = null; });
+      return slot.reading;
     },
     async readTimings() {
       if (!timer) return new Map();
@@ -314,7 +335,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
       return timer.timings;
     },
     destroy() {
-      source.destroy(); state.destroy(); params.destroy(); statsRead.destroy(); noHistory.destroy();
+      source.destroy(); state.destroy(); params.destroy(); for (const x of statsSlots) x.buffer.destroy(); noHistory.destroy();
       timer?.destroy();
     },
   };
