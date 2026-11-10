@@ -1,7 +1,9 @@
 // examples/showcase: the whole pipeline on real assets. Pick a scene; the page bakes the scene's
 // suggested reflection probes, renders ScreenSpaceReflectionsPass (G-buffer + screen-space trace,
-// hit colour from last frame's image) and composites with screenSpaceComposite; the ray-traced
-// fallback (three-mesh-bvh behind core's trace seam) is a toggle that builds the BVH on first use.
+// hit colour from last frame's image) and resolves with HybridReflections (SSR -> RT -> probes ->
+// environment, denoised through the denoise seam by denoiser/ffx when the sibling Denoiser repo is
+// there); the ray-traced fallback (three-mesh-bvh behind core's trace seam) is a toggle that builds
+// the BVH on first use.
 //
 // Sources: probes on/off swaps `scene.environmentNode` (and the composite's probe term) between the
 // probes and the plain environment; SSR off with RT on traces every ray (the screen-space march gets
@@ -9,15 +11,16 @@
 // "Reflections off" is the composite minus its whole specular image-based term (direct-light
 // highlights stay).
 //
-// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?off ?view=<view> ?w=&h= (fixed size) ?manual
+// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?denoise=0 ?off ?view=<view> ?w=&h= (fixed size) ?manual
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
-import { mix, renderOutput, uniform, vec3, vec4 } from 'three/tsl';
+import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, reflectionProbes, screenSpaceComposite,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, reflectionProbes,
 } from '@pmndrs/reflections/three';
 import { availableAssets } from '../../shared';
+import { createReflectionDenoiser, denoiserAvailable } from '../../shared/denoiser';
 import { SHOWCASE, type FloorKind, type ShowcaseEntry, type ShowcaseScene } from './scenes';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -28,10 +31,12 @@ const manual = q.has('manual');
 
 const VIEWS = {
   final: 'Final (hybrid)',
+  split: 'Raw | denoised',
   off: 'Reflections off',
   ibl: 'Probes / environment only',
   reflections: 'Reflection term only',
   source: 'Source per pixel',
+  rtSource: 'Ray-traced pass per pixel',
   confidence: 'Screen-space confidence',
   hitDistance: 'Hit distance',
 } as const;
@@ -64,6 +69,10 @@ async function main() {
   const gpuErrors: string[] = [];
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });
   const timestampsOn = device.features.has('timestamp-query');
+  // hybrid resolve + denoise seam: FFX's reflection denoiser gated at the tracer's roughness threshold
+  const denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, timestampsOn) : null;
+  const hybrid = new HybridReflections(ssr, { denoiser });
+  hybrid.denoise = q.get('denoise') !== '0' && !!denoiser;
   const nextNodeFrame = () => (renderer as N)._nodes.nodeFrame.update();
 
   // ---- state ---------------------------------------------------------------------------------------
@@ -91,7 +100,7 @@ async function main() {
   const uProbes = uniform(1);
   const pipeline = new THREE.RenderPipeline(renderer);
   pipeline.outputColorTransform = false;
-  let composite: ReturnType<typeof screenSpaceComposite> | null = null;
+  let composite: ReturnType<HybridReflections['composite']> | null = null;
   const historyRT = new THREE.RenderTarget(W, H, { type: THREE.HalfFloatType, depthBuffer: false });
   historyRT.texture.name = 'showcase final history';
   const historyMaterial = new THREE.MeshBasicNodeMaterial();
@@ -100,20 +109,26 @@ async function main() {
 
   function buildDisplay() {
     const tone = (c: N) => (renderOutput(c, TONE[state.tone], THREE.SRGBColorSpace) as N).rgb;
-    const opts = { probes: state.probes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity };
-    const c = composite = screenSpaceComposite(ssr, opts);
+    Object.assign(hybrid.options, { probes: state.probes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity });
+    hybrid.rebuild();
+    const c = composite = hybrid.composite();
     c.amount.value = state.ssr || state.rt ? 1 : 0;
     const off: N = c.geometry.select(c.lit.sub(c.weight.mul(c.probeSpecular)).max(0), c.lit);
+    const raw: N = c.geometry.select(c.lit.add(c.weight.mul(c.signal.sub(c.probeSpecular)).mul(c.amount)).max(0), c.lit);
+    const dim: N = tone(off).mul(0.25);
+    const at: N = uv();
     const views: Record<View, N> = {
       final: tone(c.final.rgb),
+      split: at.x.sub(0.5).abs().lessThan(0.0008).select(vec3(1), at.x.lessThan(0.5).select(tone(raw), tone(c.final.rgb))),
       off: tone(off),
       ibl: tone(c.lit),
-      reflections: tone(c.ssr.mul(c.weight)),
-      source: (() => {
-        // SSR hit green (by confidence), traced hit blue, traced hit shaded from the screen cyan,
-        // traced miss magenta, capped orange, probe amber / environment grey; dimmed scene under it
+      reflections: tone(c.specular.mul(c.weight).mul(c.amount)),
+      // SSR green, traced blue, probe orange, environment magenta, rough (probe/env, untraced) grey
+      source: c.geometry.select(dim.add(HybridReflections.sourceColor(c, hybrid.roughnessThreshold).mul(0.75)), vec3(0)),
+      rtSource: (() => {
+        // traced hit blue, traced hit coloured from the screen cyan, traced miss magenta, capped
+        // orange; untouched: SSR hit green (by confidence), else probe amber / environment grey
         const src: N = c.source.add(0.5).floor();
-        const dim: N = tone(off).mul(0.25);
         const fallback: N = uProbes.equal(1).select(vec3(0.85, 0.6, 0.15), vec3(0.4));
         const ssrHit: N = mix(fallback, vec3(0.15, 0.85, 0.25), c.confidence.clamp(0, 1));
         const col: N = src.equal(1).select(vec3(0.2, 0.4, 1), src.equal(4).select(vec3(0.2, 0.9, 0.95),
@@ -127,7 +142,7 @@ async function main() {
     VIEW_IDS.forEach((v, i) => { out = uView.equal(i).select(views[v], out); });
     pipeline.outputNode = vec4(out, 1);
     pipeline.needsUpdate = true;
-    const h = screenSpaceComposite(ssr, opts);
+    const h = hybrid.composite();
     h.amount.value = c.amount.value;
     historyMaterial.colorNode = h.final;
     historyMaterial.needsUpdate = true;
@@ -233,6 +248,7 @@ async function main() {
       p.position.set(...v.position);
       if (v.projectionSize) p.projectionSize = new THREE.Vector3(...v.projectionSize);
       if (v.originOffset) p.originOffset.set(...v.originOffset);
+      if (v.projectionOffset) p.projectionOffset.set(...v.projectionOffset);
       if (v.blendDistance !== undefined) p.blendDistance = v.blendDistance;
       probes.add(p);
     }
@@ -244,6 +260,7 @@ async function main() {
     applySources();
     ssr.gbuffer.resetHistory();
     ssr.resetHistory();
+    hybrid.resetHistory();
     refreshUI();
     const u = new URL(location.href); u.searchParams.set('scene', id); history.replaceState(null, '', u);
     return { id, probes: probes.bakedProbes.length, bakeMs };
@@ -257,6 +274,7 @@ async function main() {
     controls.target.set(...v.target);
     controls.update();
     ssr.resetHistory();
+    hybrid.resetHistory();
     currentPose = name;
   }
   let currentPose = '';
@@ -273,10 +291,12 @@ async function main() {
       renderer.setSize(W, H, false);
       historyRT.setSize(W, H);
       ssr.resetHistory();
+      hybrid.resetHistory();
     }
     controls.update();
     kit.camera.aspect = W / H; kit.camera.updateProjectionMatrix(); kit.camera.updateMatrixWorld();
     ssr.render(kit.scene, kit.camera);
+    hybrid.update();
     pipeline.render();
     if (state.hit === 'final') {
       const prev = renderer.getRenderTarget();
@@ -336,6 +356,8 @@ async function main() {
   const probesBox = check('Reflection probes', state.probes, (v) => setProbes(v));
   const ssrBox = check('Screen-space (SSR)', state.ssr, (v) => { state.ssr = v; applySources(); });
   const rtBox = check('Ray-traced fallback (BVH)', state.rt, (v) => { setRT(v).catch(fail); });
+  const denoiseBox = check(denoiser ? `Denoise (${denoiser.name})` : 'Denoise (no denoiser found)', hybrid.denoise, (v) => { hybrid.denoise = v && !!denoiser; });
+  denoiseBox.disabled = !denoiser;
   row('Hit colour', select(HIT_MODES, state.hit, (v) => setHit(v as HitMode)));
   check('Show probe volumes', state.helpers, (v) => setHelpers(v));
 
@@ -350,11 +372,15 @@ async function main() {
   h2('Debug view');
   const viewSel = select(VIEWS, state.view, (v) => setView(v as View));
   row('Show', viewSel);
-  const legend = document.createElement('div'); legend.className = 'legend';
-  for (const [c, t] of [['#26d940', 'screen-space hit'], ['#3366ff', 'ray-traced hit'], ['#33e6f2', 'ray-traced, colour from screen'], ['#f233d9', 'ray-traced miss (environment)'], ['#ff8c1a', 'over the ray budget'], ['#d99926', 'probe (grey: environment)']]) {
-    const i = document.createElement('i'); i.style.background = c; const s = document.createElement('span'); s.textContent = t; legend.append(i, s);
-  }
-  panel.append(legend);
+  const legendOf = (items: [string, string][]) => {
+    const l = document.createElement('div'); l.className = 'legend';
+    for (const [c, t] of items) { const i = document.createElement('i'); i.style.background = c; const sp = document.createElement('span'); sp.textContent = t; l.append(i, sp); }
+    panel.append(l); return l;
+  };
+  const legends: Partial<Record<View, HTMLElement>> = {
+    source: legendOf([['#26d940', 'screen-space hit'], ['#3373ff', 'ray-traced hit'], ['#ff8c1a', 'probe'], ['#d933d9', 'environment'], ['#595959', 'rough: probe / environment only']]),
+    rtSource: legendOf([['#3366ff', 'ray-traced hit'], ['#33e6f2', 'ray-traced, colour from screen'], ['#f233d9', 'ray-traced miss'], ['#ff8c1a', 'over the ray budget'], ['#26d940', 'screen-space hit'], ['#d99926', 'probe (grey: environment)']]),
+  };
 
   h2('Image');
   row('Tone mapping', select({ agx: 'AgX', neutral: 'Neutral (Khronos PBR)', aces: 'ACES filmic' }, state.tone, (v) => { state.tone = v as Tone; buildDisplay(); applySources(); }));
@@ -369,7 +395,7 @@ async function main() {
     viewSel.value = v;
     onBtn.classList.toggle('on', v !== 'off');
     offBtn.classList.toggle('on', v === 'off');
-    legend.style.display = v === 'source' ? '' : 'none';
+    for (const [k, l] of Object.entries(legends)) l!.style.display = k === v ? '' : 'none';
   }
   function refreshUI() {
     if (!kit) return;
@@ -391,7 +417,11 @@ async function main() {
     else {
       const total = timings.get('total');
       for (const [k, v] of timings) if (k !== 'total') lines.push(`${k.padEnd(22)}${v.toFixed(3).padStart(7)} ms`);
-      if (total !== undefined) lines.push(`${'reflections total'.padEnd(22)}${total.toFixed(3).padStart(7)} ms`);
+      const dn = hybrid.denoise ? denoiser?.gpuTimings : undefined;
+      if (dn) for (const [k, v] of dn) if (k !== 'total') lines.push(`${('denoise ' + k).padEnd(22)}${v.toFixed(3).padStart(7)} ms`);
+      const sum = (total ?? 0) + (dn?.get('total') ?? 0);
+      if (total !== undefined) lines.push(`${'reflections total'.padEnd(22)}${sum.toFixed(3).padStart(7)} ms`);
+      lines.push('(G-buffer and composite not timed)');
     }
     lines.push(`${'frame (CPU interval)'.padEnd(22)}${frameMs.toFixed(1).padStart(7)} ms`);
     timingsEl.textContent = lines.join('\n');
@@ -428,10 +458,11 @@ async function main() {
       poses: () => Object.keys(kit!.views),
       setPose,
       setView: (v: View) => setView(v),
-      async setSources(s: { probes?: boolean; ssr?: boolean; rt?: boolean }) {
+      async setSources(s: { probes?: boolean; ssr?: boolean; rt?: boolean; denoise?: boolean }) {
         if (s.probes !== undefined && s.probes !== state.probes) setProbes(s.probes);
         if (s.ssr !== undefined) state.ssr = s.ssr;
         if (s.rt !== undefined) await setRT(s.rt); else applySources();
+        if (s.denoise !== undefined) { hybrid.denoise = s.denoise && !!denoiser; denoiseBox.checked = hybrid.denoise; }
         refreshUI();
       },
       setHit: (m: HitMode) => setHit(m),
@@ -440,7 +471,7 @@ async function main() {
       async shot() { frame(); const url = canvas.toDataURL('image/png'); await idle(); return url; },
       async info() {
         await idle();
-        return { scene: kit!.id, size: [W, H], probes: probes?.bakedProbes.length ?? 0, bakeMs, bvh: bvhInfo, rt: ssr.rayTracing, gpuErrors: gpuErrors.length, timings: Object.fromEntries(timings), trace: await ssr.readTraceStats() };
+        return { scene: kit!.id, denoiser: hybrid.denoise ? denoiser?.name ?? null : null, size: [W, H], probes: probes?.bakedProbes.length ?? 0, bakeMs, bvh: bvhInfo, rt: ssr.rayTracing, gpuErrors: gpuErrors.length, timings: Object.fromEntries(timings), trace: await ssr.readTraceStats() };
       },
     },
   });

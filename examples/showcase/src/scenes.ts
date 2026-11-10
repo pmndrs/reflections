@@ -28,7 +28,7 @@ export interface ShowcaseScene {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   views: Record<string, CameraView>;
-  probes: ProbeVolume[];
+  probes: (ProbeVolume & { projectionOffset?: Vec3 })[];
   floor: ShowcaseFloor;
   exposure: number;
   /** Bake settings for the probes (far plane in scene units). */
@@ -134,15 +134,21 @@ async function stage(asset: string, file: string, o: StageOptions, aspect: numbe
     id: o.id, title: o.title, credit: o.credit, scene, views, floor,
     camera: camera(views.hero, aspect, r * 0.01, r * 60),
     exposure: o.exposure ?? 1,
-    // One probe for the model's own surfaces (paint and chrome see the mirror floor and the rest of
-    // the model, which the HDRI alone doesn't hold). Captured above the model and projected onto a
-    // far box (close to infinity): a box projection with a near capture point smears the model
-    // across the floor (pieces show under the board, the toy car under its cloth). The floor's
-    // reflection of the model is screen-space / ray-traced work; the probe stays out of its way.
-    probes: [{
-      position: [0, s.y / 2, 0], influenceSize: [s.x * 1.25 + r * 0.05, s.y * 1.2, s.z * 1.25 + r * 0.05], projectionSize: [r * 30, r * 30, r * 30],
-      originOffset: [0, s.y * 0.5 + r * 0.08, 0], blendDistance: r * 0.06,
-    }],
+    // One probe over the whole floor disc, captured just above the model and projected onto a far
+    // box (close to infinity): it gives the model's paint and chrome the mirror floor and the rest
+    // of the model, and gives the floor the environment as seen from the model. A box projection with
+    // a near capture point smears the model across the floor (pieces under the board, the toy car
+    // under its cloth); the floor's reflection of the model is screen-space / ray-traced work.
+    // The box reaches r/4 below the floor, so the floor isn't in its blend fade, and covers the disc,
+    // so three's lit image and the composite read the same term everywhere (outside every probe
+    // they don't quite: HANDOFF fine-tune backlog, W11).
+    probes: [(() => {
+      const y0 = -r * 0.25, y1 = s.y * 1.1 + r * 0.1, cy = (y0 + y1) / 2;
+      return {
+        position: [0, cy, 0] as Vec3, influenceSize: [r * 14.2, y1 - y0, r * 14.2] as Vec3, projectionSize: [r * 30, r * 30, r * 30] as Vec3,
+        originOffset: [0, s.y + r * 0.08 - cy, 0] as Vec3, blendDistance: r * 0.06,
+      };
+    })()],
     bake: { near: r * 0.01, far: r * 40 },
     thickness: { depthBufferThickness: r * 0.01, thicknessRoughnessFactor: r * 0.5 },
   };
@@ -196,7 +202,7 @@ async function sponza(aspect: number): Promise<ShowcaseScene> {
     low: { pos: [-6.5, 0.35, 0.4], target: [4, 1.0, -0.4], fov: 60 },
     aisle: { pos: [-9, 1.6, -3.8], target: [6, 1.3, -3.6], fov: 60 },
     gallery: { pos: [8, 5.8, -3.6], target: [-6, 5.2, -3.6], fov: 60 },
-    overview: { pos: [-10.6, 7.2, -0.3], target: [3, 0.6, -0.3], fov: 55 },
+    overview: { pos: [-8.5, 9.6, -0.3], target: [5, 0.2, -0.3], fov: 55 },
   };
   const floor: ShowcaseFloor = {
     kinds: null, roughness: polished?.roughness ?? 0.06, polishable: !!polished,
@@ -205,15 +211,17 @@ async function sponza(aspect: number): Promise<ShowcaseScene> {
   };
   floor.setPolished!(true);
 
-  const aisle = (x0: number, x1: number, z: number, y0: number, y1: number, depth: number): ProbeVolume => ({
-    position: [(x0 + x1) / 2, (y0 + y1) / 2, z], influenceSize: [x1 - x0, y1 - y0, depth], blendDistance: 0.6,
+  // Influence boxes reach `below` under their floor (a floor on the box face sits in the blend fade,
+  // at coverage ~0); the projection box stays on the walls and floor (projectionOffset).
+  const box = (x0: number, x1: number, z: number, depth: number, y0: number, y1: number, blendDistance: number, below = 0.8) => ({
+    position: [(x0 + x1) / 2, (y0 - below + y1) / 2, z] as Vec3, influenceSize: [x1 - x0, y1 - y0 + below, depth] as Vec3,
+    projectionSize: [x1 - x0, y1 - y0, depth] as Vec3, projectionOffset: [0, below / 2, 0] as Vec3, blendDistance,
   });
-  const probes: ProbeVolume[] = [
-    // courtyard: projected onto the full open box up to the roof line
-    { position: [-0.5, 5.2, -0.3], influenceSize: [21.8, 10.4, 4.4], blendDistance: 0.8 },
-    aisle(-11.4, -0.5, -3.85, 0, 3.6, 2.7), aisle(-0.5, 10.4, -3.85, 0, 3.6, 2.7),
-    aisle(-11.4, -0.5, 3.25, 0, 3.6, 2.7), aisle(-0.5, 10.4, 3.25, 0, 3.6, 2.7),
-    aisle(-11.4, 10.4, -3.85, 3.6, 8.2, 2.7), aisle(-11.4, 10.4, 3.25, 3.6, 8.2, 2.7),
+  const probes = [
+    box(-11.4, 10.4, -0.3, 4.4, 0, 10.4, 0.8), // courtyard, up to the roof line
+    box(-11.4, -0.5, -3.85, 2.7, 0, 3.6, 0.6), box(-0.5, 10.4, -3.85, 2.7, 0, 3.6, 0.6), // south aisle, two halves
+    box(-11.4, -0.5, 3.25, 2.7, 0, 3.6, 0.6), box(-0.5, 10.4, 3.25, 2.7, 0, 3.6, 0.6), // north aisle
+    box(-11.4, 10.4, -3.85, 2.7, 3.6, 8.2, 0.6, 0.3), box(-11.4, 10.4, 3.25, 2.7, 3.6, 8.2, 0.6, 0.3), // galleries
   ];
   return {
     id: 'sponza', title: 'Sponza', credit: 'Sponza: Crytek (CryENGINE limited licence), Khronos glTF; sky: Poly Haven (CC0)',

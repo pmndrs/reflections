@@ -693,7 +693,7 @@ async function showcaseChecks(pages) {
     const shots = {};
     for (const [name, setup] of [['on', "window.__p.setView('final')"], ['off', "window.__p.setView('off')"], ['rt', "(window.__p.setView('final'), window.__p.setSources({ rt: true }))"]]) {
       await p.T(setup);
-      await p.T('window.__p.step(4)');
+      await p.T('window.__p.step(8)'); // a few frames of denoiser history
       shots[name] = await p.T('window.__p.shot()');
       savePng(`showcase-${id}-${name}.png`, shots[name]);
     }
@@ -702,7 +702,7 @@ async function showcaseChecks(pages) {
     const lum = await p.T(`(${tone})(${JSON.stringify(shots.on)})`);
     const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
     check(`showcase ${id}: renders on / off / rt, no GPU errors`, s.gpuErrors === 0 && errs.length === 0 && lum > 8 && !!s.bvh,
-      `${info.probes} probes (${info.bakeMs.toFixed(0)} ms), mean ${lum.toFixed(0)}/255, BVH ${s.bvh?.triangles} tris; reflections ${(s.timings.total ?? NaN).toFixed(2)} ms${errs.length ? '; ' + errs[0] : ''}`);
+      `${info.probes} probes (${info.bakeMs.toFixed(0)} ms), denoiser ${s.denoiser ?? 'none'}, mean ${lum.toFixed(0)}/255, BVH ${s.bvh?.triangles} tris; reflections ${(s.timings.total ?? NaN).toFixed(2)} ms${errs.length ? '; ' + errs[0] : ''}`);
   }
 }
 
