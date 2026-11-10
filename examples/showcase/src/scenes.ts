@@ -35,8 +35,9 @@ export interface ShowcaseScene {
   bake: { near: number; far: number };
   /**
    * Screen-space hit thickness for this scene's scale. The tracer's defaults (0.2 + 10 alpha +
-   * 0.01 x ray length, in metres) suit rooms; on a 1 m chess board they let rays pass behind the
-   * board and hit the pieces, and on a car they give false hits on the dark sills (speckles).
+   * 0.01 x ray length, in metres) suit rooms; on a 1 m chess board or a car they accept hits far
+   * behind thin parts. (The pieces seen over the board's edge in the floor are correct: the board is
+   * 2.6 cm thick. The black specks on raw car paint are hits on the dark sill, W17.)
    */
   thickness?: { depthBufferThickness: number; thicknessRoughnessFactor: number };
 }
