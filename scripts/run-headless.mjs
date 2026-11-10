@@ -179,7 +179,11 @@ async function main() {
     console.log(`examples/probe-bench${probeBenchFull ? ' (full)' : ' (smoke)'}:`);
     const pb = await openPage(`http://127.0.0.1:${PORT}/probe-bench/`);
     pages.push(pb);
-    const bench = await pb.cdp.evalJs(`window.__p.run(${probeBenchFull ? '' : '{ smoke: true }'}).then((r) => JSON.stringify(r))`).then(JSON.parse);
+    const bench = await pb.cdp.evalJs(`window.__p.run(${probeBenchFull ? '' : '{ smoke: true }'}).then((r) => JSON.stringify(r))`).then(JSON.parse).catch(async (e) => {
+      console.log((await pb.cdp.evalJs('window.__p.log', false).catch(() => '')).replace(/^/gm, '    '));
+      console.log('console:\n  ' + [...new Set(results.logs)].slice(0, 12).join('\n  '));
+      throw e;
+    });
     if (process.env.BENCH_LOG || probeBenchFull) console.log((await pb.cdp.evalJs('window.__p.log', false)).replace(/^/gm, '    '));
     if (probeBenchFull) {
       fs.mkdirSync(OUT, { recursive: true });

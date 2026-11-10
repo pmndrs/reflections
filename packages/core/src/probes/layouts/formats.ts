@@ -64,8 +64,10 @@ export class ProbeFormatWriter {
   private bc6hDst: GPUTexture | null = null;
   private readonly bc6h: BC6HEncoderLike | null;
 
-  constructor(device: GPUDevice, layout: ProbeLayout, size: number, format: ProbeFormat, scratch: GPUTexture, bc6h: BC6HEncoderLike | null = null) {
-    this.device = device; this.layout = layout; this.size = size; this.format = format; this.bc6h = bc6h;
+  private readonly bc6hQuality: 'fast' | 'normal';
+
+  constructor(device: GPUDevice, layout: ProbeLayout, size: number, format: ProbeFormat, scratch: GPUTexture, bc6h: BC6HEncoderLike | null = null, bc6hQuality: 'fast' | 'normal' = 'normal') {
+    this.device = device; this.layout = layout; this.size = size; this.format = format; this.bc6h = bc6h; this.bc6hQuality = bc6hQuality;
     const L = layout.layersPerProbe;
     if (format === 'rg11b10ufloat' || format === 'rgb9e5ufloat') {
       this.pipe = device.createComputePipeline({
@@ -115,7 +117,7 @@ export class ProbeFormatWriter {
       return;
     }
     if (this.format === 'bc6h-rgb-ufloat') {
-      this.bc6h!.encodeInto(encoder, scratch, this.bc6hDst!);
+      this.bc6h!.encodeInto(encoder, scratch, this.bc6hDst!, { quality: this.bc6hQuality });
       for (let m = 0; m < this.layout.mipLevelCount; m++) {
         const s = Math.max(this.size >> m, 1);
         const p = Math.ceil(s / 4) * 4;

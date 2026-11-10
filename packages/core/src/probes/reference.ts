@@ -7,7 +7,7 @@
 //
 // Two estimators of the same integral; `auto` picks per roughness from the lobe's width in mip 0
 // texels (about 4 α size / π):
-//   'qmc'         `samples` GGX samples (Hammersley, randomly rotated per direction), each a
+//   'qmc'         `samples` GGX samples (default 65536) (Hammersley, randomly rotated per direction), each a
 //                 bilinear hardware-cube sample of mip 0. For narrow lobes, where every sample
 //                 lands among a few texels.
 //   'exhaustive'  a weighted sum over every texel of mip 0 (6 size^2), weight D (N·l) dΩ. No
@@ -134,7 +134,7 @@ export class GGXReference {
    * Reference radiance along `count` directions of `dirs` at `roughness`, written to `out`
    * (vec4f per direction). Submits in chunks so no single dispatch runs long; resolves when done.
    */
-  async compute(dirs: GPUBuffer, out: GPUBuffer, count: number, roughness: number, { mode = 'auto', samples = 16384, chunk = 0 }: { mode?: ReferenceMode; samples?: number; chunk?: number } = {}) {
+  async compute(dirs: GPUBuffer, out: GPUBuffer, count: number, roughness: number, { mode = 'auto', samples = 65536, chunk = 0 }: { mode?: ReferenceMode; samples?: number; chunk?: number } = {}) {
     const m = roughness <= 0 ? 'qmc' : mode === 'auto' ? referenceModeFor(roughness, this.size) : mode;
     const pipe = m === 'qmc' ? this.qmc : this.exhaustive;
     // work per direction: samples (qmc) or 6 size^2 texels; aim for ~2^30 per submit

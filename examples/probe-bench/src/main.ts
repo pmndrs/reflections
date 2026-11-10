@@ -27,7 +27,12 @@ const statusEl = document.querySelector<HTMLElement>('#status')!;
 const lines: string[] = [];
 const log = (s: string) => { lines.push(s); statusEl.textContent = lines.join('\n'); console.log(s); };
 
-const FORMATS: ProbeFormat[] = ['rgba16float', 'rg11b10ufloat', 'rgb9e5ufloat', 'bc6h-rgb-ufloat'];
+// 'bc6h-fast' is bc6h-rgb-ufloat from the encoder's mode-11-only preset; 'bc6h-rgb-ufloat' uses 'normal'
+type BenchFormat = ProbeFormat | 'bc6h-fast';
+const FORMATS: BenchFormat[] = ['rgba16float', 'rg11b10ufloat', 'rgb9e5ufloat', 'bc6h-rgb-ufloat', 'bc6h-fast'];
+const gpuFormat = (f: BenchFormat): ProbeFormat => (f === 'bc6h-fast' ? 'bc6h-rgb-ufloat' : f);
+const writerFor = (layout: ProbeLayout, size: number, f: BenchFormat, scratch: GPUTexture) =>
+  new ProbeFormatWriter(device, layout, size, gpuFormat(f), scratch, bc6h, f === 'bc6h-fast' ? 'fast' : 'normal');
 const U = () => GPUBufferUsage;
 const T = () => GPUTextureUsage;
 
@@ -64,7 +69,7 @@ async function init() {
   device = await adapter.requestDevice({ requiredFeatures });
   device.addEventListener('uncapturederror', (e) => console.error('uncaptured WebGPU error:', (e as GPUUncapturedErrorEvent).error.message));
   device.lost.then((i) => console.error('device lost:', i.message));
-  hasTimestamps = device.features.has('timestamp-query');
+  hasTimestamps = device.features.has('timestamp-query') && !q.has('nots');
   if (device.features.has('texture-compression-bc')) bc6h = createBC6HEncoder(device);
   const info = adapter.info;
   return { vendor: info.vendor, architecture: info.architecture, description: info.description, features: requiredFeatures, userAgent: navigator.userAgent };
@@ -109,11 +114,21 @@ async function readTexture16(tex: GPUTexture, mips: number): Promise<Uint16Array
   return out;
 }
 
-/** Timestamp pairs: `writes(i)` for pass i, `read()` gives each pair's ms. */
+/**
+ * Timestamp pairs: `writes(i)` for pass i, `read()` gives each pair's ms. Pooled per size and
+ * reused (`Timer.get`): creating a query set per measurement ran this Metal device out of memory
+ * (kIOGPUCommandBufferCallbackErrorOutOfMemory) after a few hundred.
+ */
 class Timer {
+  private static readonly pool = new Map<number, Timer>();
+  static get(n: number) {
+    let t = Timer.pool.get(n);
+    if (!t) Timer.pool.set(n, (t = new Timer(n)));
+    return t;
+  }
   private readonly qs: GPUQuerySet;
   private readonly res: GPUBuffer;
-  constructor(private readonly n: number) {
+  private constructor(private readonly n: number) {
     this.qs = device.createQuerySet({ type: 'timestamp', count: 2 * n });
     this.res = device.createBuffer({ size: 16 * n, usage: U().QUERY_RESOLVE | U().COPY_SRC });
   }
@@ -131,7 +146,7 @@ class Timer {
     for (let i = 0; i < this.n; i++) pairs.push(Number(raw[2 * i + 1] - raw[2 * i]) / 1e6);
     return { pairs, raw };
   }
-  destroy() { this.qs.destroy(); this.res.destroy(); }
+  destroy() { /* pooled */ }
 }
 
 // A one-workgroup pass that reads texel (0, 0) of a texture: closes a timed span after work that
@@ -262,7 +277,8 @@ const nextFrame = () => new Promise((r) => setTimeout(r, 0));
 
 // ---- the bench --------------------------------------------------------------------------------
 
-async function run({ smoke = false, runs = 5 } = {}) {
+async function run({ smoke = false, runs = 9 } = {}) {
+  const timedRuns = runs;
   const t0 = performance.now();
   lines.length = 0;
   const classes = smoke ? SMOKE : FULL;
@@ -272,7 +288,7 @@ async function run({ smoke = false, runs = 5 } = {}) {
   };
   touchPipe ??= device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: TOUCH_WGSL }), entryPoint: 'main' } });
   touchBuf ??= device.createBuffer({ size: 16, usage: U().STORAGE });
-  const formats = FORMATS.filter((f) => f !== 'bc6h-rgb-ufloat' || bc6h);
+  const formats = FORMATS.filter((f) => !f.startsWith('bc6h') || bc6h);
   if (!bc6h) results.pending.push('bc6h: no texture-compression-bc on this device');
   const dirsCpu = fibonacciDirs(nDirs);
   const dirs = buffer(dirsCpu, U().STORAGE);
@@ -300,17 +316,30 @@ async function run({ smoke = false, runs = 5 } = {}) {
       oldPf.dispose(); newPf.dispose(); a.destroy(); b.destroy();
     }
 
-    // reference per roughness mip
+    // reference per roughness mip, plus roughness between the first mips (r < 0.2, where the
+    // roughness-to-lod mappings differ most, D64): those lookups blend two mips
+    const levels: { lod: number; r: number; between: boolean }[] = [];
+    for (let lod = 0; lod <= maxLod; lod++) levels.push({ lod, r: lodToRoughness(lod, maxLod), between: false });
+    if (!smoke) for (const r of [0.05, 0.1, 0.15]) levels.push({ lod: maxLod * r * (2 - r), r, between: true });
     const reference = new GGXReference(device, src, N);
     const refs: Float32Array[] = [];
     const refOut = device.createBuffer({ size: nDirs * 16, usage: U().STORAGE | U().COPY_SRC });
-    for (let lod = 0; lod <= maxLod; lod++) {
-      const r = lodToRoughness(lod, maxLod);
+    for (const { lod, r } of levels) {
       const tr = performance.now();
       const mode = await reference.compute(dirs, refOut, nDirs, r);
       refs.push(new Float32Array(await readBuffer(refOut, nDirs * 16)));
-      log(`reference lod ${lod} r ${r.toFixed(3)} (${mode}) ${(performance.now() - tr).toFixed(0)} ms`);
+      log(`reference lod ${lod.toFixed(2)} r ${r.toFixed(3)} (${mode}) ${(performance.now() - tr).toFixed(0)} ms`);
       await nextFrame();
+    }
+    // QMC noise: the 65536-sample reference against 262144 samples, at every QMC mip
+    for (let lod = 1; lod <= maxLod && !smoke; lod++) {
+      const r = lodToRoughness(lod, maxLod);
+      if (referenceModeFor(r, N) !== 'qmc') continue;
+      await reference.compute(dirs, refOut, nDirs, r, { mode: 'qmc', samples: 262144 });
+      const alt = new Float32Array(await readBuffer(refOut, nDirs * 16));
+      const st = errorStats(alt, refs[lod], new Uint8Array(nDirs));
+      results.refCheck.push({ source: N, lod, roughness: r, used: 'qmc', against: 'qmc 262144', ...st.all });
+      log(`reference check lod ${lod}: qmc 65536 vs 262144: mean ${st.all.mean.toFixed(3)} p99 ${st.all.p99.toFixed(2)} max ${st.all.max.toFixed(1)} /255`);
     }
     // the two estimators on the same lobes, either side of the switch
     for (let lod = 1; lod <= maxLod; lod++) {
@@ -320,7 +349,7 @@ async function run({ smoke = false, runs = 5 } = {}) {
       const next = lod < maxLod ? referenceModeFor(lodToRoughness(lod + 1, maxLod), N) : mode;
       if (smoke || (mode === prev && mode === next)) continue;
       const other = mode === 'qmc' ? 'exhaustive' : 'qmc';
-      await reference.compute(dirs, refOut, nDirs, r, { mode: other, samples: 65536 });
+      await reference.compute(dirs, refOut, nDirs, r, { mode: other, samples: 262144 });
       const alt = new Float32Array(await readBuffer(refOut, nDirs * 16));
       const st = errorStats(alt, refs[lod], new Uint8Array(nDirs));
       results.refCheck.push({ source: N, lod, roughness: r, used: mode, against: other, ...st.all });
@@ -333,74 +362,102 @@ async function run({ smoke = false, runs = 5 } = {}) {
       const layout = createProbeLayout(cfg.id, { maxLod });
       const pf = new LayoutPrefilter(device, layout, cfg.size, N);
       const masks = Array.from({ length: maxLod + 1 }, (_, lod) => seamMask(cfg, maxLod, lod, dirsCpu));
-      // prefilter alone
+      // Bake times are spans over a block of BLOCK back-to-back bakes (begin of the first pass to
+      // the end of a pass that reads the result), divided by BLOCK: single-pass timestamps on
+      // Metal overlap with neighbouring passes and with clock ramps. Two untimed bakes go first.
+      const BLOCK = Number(q.get('block') ?? (smoke ? 1 : 8));
+      // The span opens and closes with a one-texel pass carrying both of its timestamps: with
+      // begin-only / end-only timestamps on the prefilter passes themselves, more than ~4 prefilters
+      // per command buffer failed on this Metal device (kIOGPUCommandBufferCallbackErrorOutOfMemory).
+      const span = async (one: (enc: GPUCommandEncoder) => void, tex: GPUTexture) => {
+        const timer = hasTimestamps ? Timer.get(2) : null;
+        const enc = device.createCommandEncoder();
+        for (let i = 0; i < 2; i++) one(enc);
+        touch(enc, tex, timer?.writes(0));
+        for (let i = 0; i < BLOCK; i++) one(enc);
+        touch(enc, tex, timer?.writes(1));
+        timer?.resolve(enc);
+        device.queue.submit([enc.finish()]);
+        if (!timer) { await device.queue.onSubmittedWorkDone(); return NaN; }
+        const { raw } = await timer.read();
+        return Number(raw[3] - raw[1]) / 1e6 / BLOCK;
+      };
       const prefMs: number[] = [];
       if (hasTimestamps) {
-        for (let k = 0; k < runs; k++) {
-          const timer = new Timer(1);
-          const enc = device.createCommandEncoder();
-          pf.encodeScratch(enc, src, timer.writes(0));
-          timer.resolve(enc);
-          device.queue.submit([enc.finish()]);
-          prefMs.push((await timer.read()).pairs[0]);
-          timer.destroy();
-        }
+        for (let k = 0; k < timedRuns; k++) prefMs.push(await span((enc) => pf.encodeScratch(enc, src), pf.scratch));
       }
       for (const format of formats) {
-        const writer = new ProbeFormatWriter(device, layout, cfg.size, format, pf.scratch, bc6h);
-        const target = makeTarget(layout, cfg.size, 1, format);
+        const writer = writerFor(layout, cfg.size, format, pf.scratch);
+        const target = makeTarget(layout, cfg.size, 1, gpuFormat(format));
         // bake: prefilter + conversion, closed by a pass that reads the target
         const bakeMs: number[] = [];
-        for (let k = 0; k < (hasTimestamps ? runs : 1); k++) {
-          const timer = hasTimestamps ? new Timer(1) : null;
-          const enc = device.createCommandEncoder();
-          pf.encodeScratch(enc, src, timer ? timer.writes(0, 'begin') : undefined);
-          writer.encode(enc, pf.scratch, target, 0);
-          touch(enc, target, timer ? timer.writes(0, 'end') : undefined);
-          timer?.resolve(enc);
-          device.queue.submit([enc.finish()]);
-          if (timer) { bakeMs.push((await timer.read()).pairs[0]); timer.destroy(); } else await device.queue.onSubmittedWorkDone();
+        for (let k = 0; k < (hasTimestamps ? timedRuns : 1); k++) {
+          bakeMs.push(await span((enc) => { pf.encodeScratch(enc, src); writer.encode(enc, pf.scratch, target, 0); }, target));
         }
-        const bytes = probeBytes(layout, cfg.size, format);
-        results.bake.push({ source: N, layout: cfg.id, size: cfg.size, format, prefilterMs: median(prefMs), bakeMs: median(bakeMs) });
+        const bytes = probeBytes(layout, cfg.size, gpuFormat(format));
+        results.bake.push({ source: N, layout: cfg.id, size: cfg.size, format, prefilterMs: Math.min(...prefMs), bakeMs: Math.min(...bakeMs), prefilterMedianMs: median(prefMs), bakeMedianMs: median(bakeMs) });
         const row: string[] = [];
-        for (let lod = 0; lod <= maxLod; lod++) {
+        for (let li = 0; li < levels.length; li++) {
+          const { lod, r, between } = levels[li];
           const test = await lookupAll(layout, target, dirs, nDirs, lod);
-          const st = errorStats(test, refs[lod], masks[lod]);
-          results.error.push({ source: N, layout: cfg.id, size: cfg.size, format, bytes, lod, roughness: lodToRoughness(lod, maxLod), ...st });
+          const st = errorStats(test, refs[li], masks[Math.floor(lod)]);
+          results.error.push({ source: N, layout: cfg.id, size: cfg.size, format, bytes, lod, roughness: r, between, ...st });
           row.push(`${st.all.mean.toFixed(2)}/${st.all.p99.toFixed(1)}`);
         }
-        log(`${cfg.id}@${cfg.size} ${format}: ${(bytes / 1024).toFixed(0)} KiB, bake ${median(bakeMs).toFixed(3)} ms (prefilter ${median(prefMs).toFixed(3)}), mean/p99 per lod ${row.join('  ')}`);
+        log(`${cfg.id}@${cfg.size} ${format}: ${(bytes / 1024).toFixed(0)} KiB, bake ${median(bakeMs).toFixed(3)} ms (prefilter ${median(prefMs).toFixed(3)}), mean/p99 per level ${row.join('  ')}`);
         writer.dispose(); target.destroy();
         await nextFrame();
       }
       pf.dispose();
     }
 
-    // lookup cost
+    // lookup cost. Apple GPUs change clocks with load, so every timed pass of a configuration is
+    // interleaved with the same pass on the baseline (cube-hw, rgba16float, same probe count) in
+    // one submit, after a warm-up; the ratio is the robust number, the ms are that submit's.
     const W = smoke ? 320 : 1920, H = smoke ? 180 : 1080;
+    const baseLayout = createProbeLayout('cube-hw', { maxLod });
+    const basePf = new LayoutPrefilter(device, baseLayout, N, N);
+    const baseWriter = new ProbeFormatWriter(device, baseLayout, N, 'rgba16float', basePf.scratch);
+    { const e = device.createCommandEncoder(); basePf.encodeScratch(e, src); device.queue.submit([e.finish()]); }
+    const counts = smoke ? [3] : [1, 3, 16];
+    const baseTex = new Map<number, GPUTexture>();
+    for (const probes of counts) {
+      const t = makeTarget(baseLayout, N, probes, 'rgba16float');
+      const e = device.createCommandEncoder();
+      for (let k = 0; k < probes; k++) baseWriter.encode(e, basePf.scratch, t, k);
+      device.queue.submit([e.finish()]);
+      baseTex.set(probes, t);
+    }
+    const patterns = smoke ? ['coherent'] : ['coherent', 'scattered', 'x8'];
     for (const cfg of cls.lookup) {
       const layout = createProbeLayout(cfg.id, { maxLod });
       const pf = new LayoutPrefilter(device, layout, cfg.size, N);
       const enc0 = device.createCommandEncoder();
       pf.encodeScratch(enc0, src);
       device.queue.submit([enc0.finish()]);
-      const pipe = lookupPipe(layout);
-      for (const format of smoke ? (['rgba16float', 'rgb9e5ufloat'] as ProbeFormat[]) : formats) {
-        for (const probes of smoke ? [3] : [1, 3, 16]) {
-          const target = makeTarget(layout, cfg.size, probes, format);
-          const writer = new ProbeFormatWriter(device, layout, cfg.size, format, pf.scratch, bc6h);
+      for (const format of smoke ? (['rgba16float', 'rgb9e5ufloat'] as ProbeFormat[]) : formats.filter((f) => f !== 'bc6h-fast')) {
+        for (const probes of counts) {
+          const target = makeTarget(layout, cfg.size, probes, gpuFormat(format));
+          const writer = writerFor(layout, cfg.size, format, pf.scratch);
           const enc = device.createCommandEncoder();
-          for (let s = 0; s < probes; s++) writer.encode(enc, pf.scratch, target, s);
+          for (let k = 0; k < probes; k++) writer.encode(enc, pf.scratch, target, k);
           device.queue.submit([enc.finish()]);
-          const ms = await timeLookup(pipe, layout, target, probes, maxLod, W, H, smoke ? 1 : runs);
-          results.lookup.push({ source: N, layout: cfg.id, size: cfg.size, format, probes, width: W, height: H, ms });
-          log(`lookup ${cfg.id}@${cfg.size} ${format} x${probes}: ${ms.toFixed(3)} ms`);
+          for (const pattern of patterns) {
+            if ((pattern === 'scattered' && probes !== 16) || (pattern === 'x8' && probes !== 3)) continue;
+            const m = await timeLookup(
+              { layout, tex: target }, { layout: baseLayout, tex: baseTex.get(probes)! },
+              probes, maxLod, W, H, smoke ? 1 : timedRuns, pattern,
+            );
+            results.lookup.push({ source: N, layout: cfg.id, size: cfg.size, format, probes, pattern, width: W, height: H, ...m });
+            log(`lookup ${cfg.id}@${cfg.size} ${format} x${probes} ${pattern}: ${m.ms.toFixed(3)} ms, baseline ${m.baseMs.toFixed(3)} ms, ratio ${m.ratio.toFixed(3)} (timestamps ${m.timestampMs.toFixed(3)} ms)`);
+          }
           writer.dispose(); target.destroy();
         }
       }
       pf.dispose();
     }
+    for (const t of baseTex.values()) t.destroy();
+    basePf.dispose(); baseWriter.dispose();
     src.destroy();
   }
   dirs.destroy();
@@ -410,9 +467,11 @@ async function run({ smoke = false, runs = 5 } = {}) {
   return results;
 }
 
-// Full-screen lookup: directions over the whole sphere (equirect of the screen, slightly jittered
-// per pixel), roughness in diagonal bands 0 ... 1, probe chosen per screen region (1, 3 columns,
-// or a 4x4 grid), so neighbouring pixels read neighbouring texels, as a real frame does.
+// Full-screen lookup. 'coherent': directions over the whole sphere (equirect of the screen, slightly
+// jittered per pixel), roughness in diagonal bands 0 ... 1, probe chosen per screen region (1, 3
+// columns, or a 4x4 grid), so neighbouring pixels read neighbouring texels, as a real frame does.
+// 'scattered': random direction, roughness and probe per pixel (cache worst case). 'x8': eight
+// coherent lookups per pixel.
 const lookupPipes = new Map<string, GPURenderPipeline>();
 function lookupPipe(layout: ProbeLayout) {
   let p = lookupPipes.get(layout.wgsl);
@@ -431,13 +490,32 @@ fn hash2(p: vec2<u32>) -> vec2<f32> {
 }
 @fragment fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
   let uv = pos.xy / P.res;
-  let j = hash2(vec2<u32>(pos.xy)) * 0.01;
-  let az = (uv.x + j.x) * 6.283185307; let el = (0.5 - uv.y + j.y) * 3.14159265;
-  let dir = vec3(cos(el) * sin(az), sin(el), cos(el) * cos(az));
-  let r = fract(uv.x * 5.0 + uv.y * 3.0);
+  let scattered = (P.probes & 0x100u) != 0u;
+  let count = P.probes & 0xffu;
+  let j = hash2(vec2<u32>(pos.xy));
+  var az = (uv.x + j.x * 0.01) * 6.283185307; var el = (0.5 - uv.y + j.y * 0.01) * 3.14159265;
+  var r = fract(uv.x * 5.0 + uv.y * 3.0);
   var probe = 0u;
-  if (P.probes == 3u) { probe = min(u32(uv.x * 3.0), 2u); }
-  else if (P.probes == 16u) { probe = min(u32(uv.x * 4.0), 3u) + 4u * min(u32(uv.y * 4.0), 3u); }
+  if (count == 3u) { probe = min(u32(uv.x * 3.0), 2u); }
+  else if (count == 16u) { probe = min(u32(uv.x * 4.0), 3u) + 4u * min(u32(uv.y * 4.0), 3u); }
+  if (scattered) {
+    // worst case for the texture cache: every pixel a random direction, roughness and probe
+    let k = hash2(vec2<u32>(pos.yx) + 7u);
+    az = j.x * 6.283185307; el = asin(clamp(j.y * 2.0, -1.0, 1.0)); r = k.x + 0.5;
+    probe = min(u32((k.y + 0.5) * f32(count)), count - 1u);
+  }
+  if ((P.probes & 0x200u) != 0u) {
+    // 8 lookups per pixel (nearby directions, spread roughness): sampling cost without the
+    // render-target write dominating
+    var acc = vec4(0.0);
+    for (var i = 0u; i < 8u; i++) {
+      let a = az + f32(i) * 0.02;
+      let ri = fract(r + f32(i) * 0.125);
+      acc += sampleLayout(tex, samp, probe, vec3(cos(el) * sin(a), sin(el), cos(el) * cos(a)), P.maxLod * ri * (2.0 - ri));
+    }
+    return acc * 0.125;
+  }
+  let dir = vec3(cos(el) * sin(az), sin(el), cos(el) * cos(az));
   return sampleLayout(tex, samp, probe, dir, P.maxLod * r * (2.0 - r));
 }`;
     const module = device.createShaderModule({ code, label: `lookup.${layout.id}` });
@@ -447,44 +525,67 @@ fn hash2(p: vec2<u32>) -> vec2<f32> {
   return p;
 }
 
-/** Median GPU ms of one full-screen lookup pass: `runs` submits of 8 timed passes each. */
-async function timeLookup(pipe: GPURenderPipeline, layout: ProbeLayout, tex: GPUTexture, probes: number, maxLod: number, W: number, H: number, runs: number) {
+/**
+ * ms of one full-screen lookup pass of `test`, and of the same pass on `base` (wall clock over
+ * bursts, see below), and their ratio.
+ */
+async function timeLookup(test: { layout: ProbeLayout; tex: GPUTexture }, base: { layout: ProbeLayout; tex: GPUTexture }, probes: number, maxLod: number, W: number, H: number, runs: number, pattern: string) {
+  const scattered = pattern === 'scattered';
   const rt = device.createTexture({ size: [W, H], format: 'rgba16float', usage: T().RENDER_ATTACHMENT | T().TEXTURE_BINDING });
   const u = new ArrayBuffer(16);
   new Float32Array(u, 0, 2).set([W, H]);
-  new Uint32Array(u, 8, 1).set([probes]);
+  new Uint32Array(u, 8, 1).set([probes | (scattered ? 0x100 : 0) | (pattern === 'x8' ? 0x200 : 0)]);
   new Float32Array(u, 12, 1).set([maxLod]);
-  const group = device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [
-    { binding: 0, resource: tex.createView({ dimension: layout.viewDimension }) },
-    { binding: 1, resource: sampler() },
-    { binding: 2, resource: { buffer: buffer(new Uint8Array(u), U().UNIFORM) } },
-  ] });
-  const K = 8;
-  const per: number[] = [];
-  for (let run = 0; run < runs + 1; run++) {
-    const timer = hasTimestamps ? new Timer(K) : null;
+  const ub = buffer(new Uint8Array(u), U().UNIFORM);
+  const bind = (c: { layout: ProbeLayout; tex: GPUTexture }) => {
+    const pipe = lookupPipe(c.layout);
+    return { pipe, group: device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [
+      { binding: 0, resource: c.tex.createView({ dimension: c.layout.viewDimension }) },
+      { binding: 1, resource: sampler() },
+      { binding: 2, resource: { buffer: ub } },
+    ] }) };
+  };
+  const t = bind(test), b = bind(base);
+  const burst = (c: typeof t, n: number, tw?: { timer: Timer }) => {
     const enc = device.createCommandEncoder();
-    for (let k = 0; k < K; k++) {
-      const pass = enc.beginRenderPass({ colorAttachments: [{ view: rt.createView(), loadOp: 'clear', storeOp: 'store' }], timestampWrites: timer?.writes(k) });
-      pass.setPipeline(pipe);
-      pass.setBindGroup(0, group);
-      pass.draw(3);
-      pass.end();
+    for (let k = 0; k < n; k++) {
+      const writes = tw ? (k === 0 ? tw.timer.writes(0, 'begin') : k === n - 1 ? tw.timer.writes(0, 'end') : undefined) : undefined;
+      const pass = enc.beginRenderPass({ colorAttachments: [{ view: rt.createView(), loadOp: 'clear', storeOp: 'store' }], timestampWrites: writes });
+      pass.setPipeline(c.pipe); pass.setBindGroup(0, c.group); pass.draw(3); pass.end();
     }
-    timer?.resolve(enc);
+    tw?.timer.resolve(enc);
+    return enc.finish();
+  };
+  // Wall clock over bursts of N passes (submit to onSubmittedWorkDone, / N), test and baseline
+  // bursts alternating, after a warm-up burst; median over `runs` pairs. Render-pass timestamps on
+  // this Metal device were not usable for this: identical passes timed ~0.8x depending on order,
+  // and the spans came out at ~2x the wall clock, so they are kept only as a secondary number.
+  // Scattered passes are ~10x slower: fewer of them per burst, under the GPU watchdog.
+  const N = scattered ? 4 : 32;
+  const wallOf = async (c: typeof t) => {
     const c0 = performance.now();
-    device.queue.submit([enc.finish()]);
-    if (timer) {
-      const { pairs } = await timer.read();
-      if (run > 0) per.push(median(pairs)); // the first submit warms caches and pipelines
-      timer.destroy();
-    } else {
-      await device.queue.onSubmittedWorkDone();
-      if (run > 0) per.push((performance.now() - c0) / K);
+    device.queue.submit([burst(c, N)]);
+    await device.queue.onSubmittedWorkDone();
+    return (performance.now() - c0) / N;
+  };
+  device.queue.submit([burst(t, N), burst(b, N)]);
+  await device.queue.onSubmittedWorkDone();
+  const ms: number[] = [], baseMs: number[] = [], ts: number[] = [];
+  for (let run = 0; run < runs; run++) {
+    ms.push(await wallOf(t));
+    baseMs.push(await wallOf(b));
+  }
+  if (hasTimestamps) {
+    for (let run = 0; run < runs; run++) {
+      const timer = Timer.get(1);
+      device.queue.submit([burst(t, N, { timer })]);
+      ts.push((await timer.read()).pairs[0] / N);
     }
   }
-  rt.destroy();
-  return median(per);
+  rt.destroy(); ub.destroy();
+  // min: the least contended run (other GPU work shared this machine); ratio: median of the
+  // per-pair ratios of back-to-back bursts
+  return { ms: Math.min(...ms), medianMs: median(ms), baseMs: Math.min(...baseMs), ratio: median(ms.map((m, i) => m / baseMs[i])), timestampMs: hasTimestamps ? median(ts) : NaN };
 }
 
 let deviceInfo: unknown = null;
