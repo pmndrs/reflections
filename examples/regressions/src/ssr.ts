@@ -13,21 +13,24 @@ const W = 320, H = 160;
 const STALE = 20;
 
 export interface SsrRig {
+  width: number;
+  height: number;
   renderer: THREE.WebGPURenderer;
   device: GPUDevice;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   box: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
+  meshes: THREE.Mesh[];
   gpuErrors: string[];
 }
 
 /** A mirror floor under an emissive box, seen from the front; black background, no lights. */
-export async function ssrRig(): Promise<SsrRig> {
+export async function ssrRig(width = W, height = H): Promise<SsrRig> {
   const canvas = document.createElement('canvas');
-  canvas.width = W; canvas.height = H;
+  canvas.width = width; canvas.height = height;
   const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { maxColorAttachmentBytesPerSample: 64 } } as never);
   renderer.setPixelRatio(1);
-  renderer.setSize(W, H, false);
+  renderer.setSize(width, height, false);
   await renderer.init();
   const device = getDevice(renderer);
   const gpuErrors: string[] = [];
@@ -40,12 +43,12 @@ export async function ssrRig(): Promise<SsrRig> {
   const box = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.6, 1.6), new THREE.MeshStandardMaterial({ color: 0x000000, emissive: new THREE.Color(0, 1, 0), roughness: 1 }));
   box.position.set(0, 0.8, 0);
   scene.add(box);
-  const camera = new THREE.PerspectiveCamera(50, W / H, 0.1, 100);
+  const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 100);
   camera.position.set(0, 1.0, 5);
   camera.lookAt(0, 0.2, 0);
   camera.updateMatrixWorld();
   scene.updateMatrixWorld(true);
-  return { renderer, device, scene, camera, box, gpuErrors };
+  return { width, height, renderer, device, scene, camera, box, meshes: [floor, box], gpuErrors };
 }
 
 /** SSR radiance over confident hits: how many there are, and how many carry the stale colour. */
@@ -109,6 +112,61 @@ export async function ssrHistoryChecks() {
     ssr.dispose();
   }
   out.gpuErrors = rig.gpuErrors;
+  renderer.dispose();
+  return out;
+}
+
+/**
+ * rtTiles: with a frame budget below the number of tiles with misses (each tile then gets at most
+ * one ray), which tiles trace must not depend on the miss list's append order. Every ray goes to
+ * the miss list (missConfidenceThreshold > 1) on a static frame; over `frames` frames we count, per
+ * tile with misses, the frames in which it traced. The yardstick is independent uniform selection
+ * at p = budget / tiles: a tile is never traced with probability (1 - p)^frames, every frame p^frames.
+ */
+export async function rtTileChecks() {
+  const { MeshBVHTraceProvider } = await import('@pmndrs/reflections/three');
+  const rig = await ssrRig(640, 320);
+  const { renderer, device, scene, camera, width, height } = rig;
+  const provider = await MeshBVHTraceProvider.fromObjects(device, rig.meshes);
+  const ssr = new ScreenSpaceReflectionsPass(renderer, {
+    gbufferOptions: { width, height }, settings: { missConfidenceThreshold: 1.01 }, trace: { provider, lights: false },
+  });
+  const tilesX = Math.ceil(width / 8), tilesY = Math.ceil(height / 8);
+  // unlimited budget first: the tiles that have misses
+  for (let i = 0; i < 2; i++) ssr.render(scene, camera);
+  const open = (await ssr.readTraceStats())!;
+  const tiles = open.tilesWithMisses;
+  const budget = Math.round(0.35 * tiles);
+  ssr.traceSettings = { maxTracedRaysPerFrame: budget };
+  for (let i = 0; i < 2; i++) ssr.render(scene, camera); // tile feedback settles
+  const frames = 4;
+  const count = new Uint32Array(tilesX * tilesY);
+  const missFrames = new Uint32Array(tilesX * tilesY);
+  const traced: number[] = [], capped: number[] = [], tileCaps: number[] = [], tilesWithMisses: number[] = [];
+  for (let f = 0; f < frames; f++) {
+    ssr.render(scene, camera);
+    const st = (await ssr.readTraceStats())!;
+    traced.push(st.traced); capped.push(st.capped); tileCaps.push(st.tileCap); tilesWithMisses.push(st.tilesWithMisses);
+    const src = await readTexture(device, getGPUTexture(renderer, ssr.source));
+    // every miss pixel gets a source code (traced 1 / 2 / 4, capped 3)
+    const hit = new Uint8Array(tilesX * tilesY), miss = new Uint8Array(tilesX * tilesY);
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const v = Math.round(src.data[y * width + x]);
+      const t = (y >> 3) * tilesX + (x >> 3);
+      if (v !== 0) miss[t] = 1;
+      if (v === 1 || v === 2 || v === 4) hit[t] = 1;
+    }
+    for (let t = 0; t < hit.length; t++) { count[t] += hit[t]; missFrames[t] += miss[t]; }
+  }
+  const hist = new Array(frames + 1).fill(0);
+  let n = 0;
+  // tiles with misses in every measured frame (a few edge tiles come and go)
+  for (let t = 0; t < count.length; t++) if (missFrames[t] === frames) { hist[count[t]]++; n++; }
+  const p = budget / (tilesWithMisses.reduce((a, b) => a + b, 0) / frames);
+  const qNever = (1 - p) ** frames, qEvery = p ** frames;
+  const expect = (q: number) => ({ mean: n * q, sd: Math.sqrt(n * q * (1 - q)) });
+  ssr.dispose(); provider.destroy();
+  const out = { width, height, tiles, tilesWithMisses, tilesSeen: n, budget, p, frames, hist, traced, capped, tileCaps, never: hist[0], every: hist[frames], expectNever: expect(qNever), expectEvery: expect(qEvery), gpuErrors: rig.gpuErrors };
   renderer.dispose();
   return out;
 }

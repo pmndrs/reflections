@@ -14,7 +14,7 @@ export const RT_STATE_HEADER = 16;
 
 /**
  * State buffer header, u32 words. 0-4 and 6-7 are this frame's counts (zeroed by the begin pass,
- * read back for debug); 5 and 8 are inputs the begin pass computes.
+ * read back for debug); 5 and 8-11 are inputs the begin pass computes (10 persists across frames).
  */
 export const RT_STATE = {
   traced: 0,
@@ -25,7 +25,14 @@ export const RT_STATE = {
   tilesWithMissesLastFrame: 5,
   granted: 6,
   onScreen: 7,
+  /** The most rays any tile may trace this frame (`tileBase`, + 1 when `tileExtra` > 0). */
   tileCap: 8,
+  /** Rays every tile may trace: floor(budget / tiles with misses last frame), at most maxRaysPerTile. */
+  tileBase: 9,
+  /** f32 bits: phase of the rotating remainder, in [0, 1). */
+  tilePhase: 10,
+  /** f32 bits: the fraction of tiles that get one ray more (remainder / tiles). */
+  tileExtra: 11,
 } as const;
 
 /** Per-pixel source codes written to `source` (0 = the RT pass did not touch the pixel). */
@@ -59,7 +66,14 @@ struct RtParams {
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
 
-/** Begin pass: roll the tile-occupancy feedback and size this frame's per-tile cap (D9, D56). */
+/**
+ * Begin pass: roll the tile-occupancy feedback and size this frame's per-tile cap (D9, D56, D1100).
+ * n tiles had misses last frame and the budget is B: every tile may trace floor(B / n) rays, and a
+ * fraction (B mod n) / n of them one more. Which ones rotates: a tile gets the extra ray when
+ * fract(hash(tile) + phase) < that fraction, and the phase advances by the fraction each frame, so
+ * the window of chosen tiles sweeps the hash order round-robin and every tile gets its share over
+ * 1 / fraction frames, whatever order the miss list appends in.
+ */
 export const RT_BEGIN_WGSL = /* wgsl */ `
 ${RT_PARAMS_WGSL}
 @group(0) @binding(1) var<storage, read_write> state: array<u32>;
@@ -67,13 +81,21 @@ ${RT_PARAMS_WGSL}
 fn main() {
   let last = state[${RT_STATE.tilesWithMisses}];
   state[${RT_STATE.tilesWithMissesLastFrame}] = last;
-  // Spread the frame budget over the tiles that had misses last frame (FFX's per-tile hit counter
-  // feeds the next frame the same way); the global grant counter still bounds the frame.
-  let n = max(last, 1u);
-  let share = P.maxRaysPerFrame / n + select(0u, 1u, P.maxRaysPerFrame % n != 0u); // ceil, no u32 overflow
-  state[${RT_STATE.tileCap}] = clamp(select(share, P.maxRaysPerFrame, last == 0u), 1u, P.maxRaysPerTile);
-  for (var i = 0u; i < ${RT_STATE_HEADER}u; i++) {
-    if (i != ${RT_STATE.tilesWithMissesLastFrame}u && i != ${RT_STATE.tileCap}u) { state[i] = 0u; }
+  let budget = P.maxRaysPerFrame;
+  var base = min(budget, P.maxRaysPerTile); // first frame: no feedback yet, the grant counter bounds it
+  var extra = 0.0;
+  if (last > 0u) {
+    base = budget / last;
+    extra = f32(budget % last) / f32(last);
+    if (base >= P.maxRaysPerTile) { base = P.maxRaysPerTile; extra = 0.0; }
+  }
+  let phase = fract(bitcast<f32>(state[${RT_STATE.tilePhase}]) + extra);
+  state[${RT_STATE.tileBase}] = base;
+  state[${RT_STATE.tileExtra}] = bitcast<u32>(extra);
+  state[${RT_STATE.tilePhase}] = bitcast<u32>(phase);
+  state[${RT_STATE.tileCap}] = base + select(0u, 1u, extra > 0.0);
+  for (var i = 0u; i < 8u; i++) {
+    if (i != ${RT_STATE.tilesWithMissesLastFrame}u) { state[i] = 0u; }
   }
 }
 `;
@@ -105,6 +127,14 @@ ${parts.fallbackWgsl}
 ${parts.providerWgsl}
 ${parts.materialWgsl}
 ${parts.hitShadingWgsl}
+
+// A fixed position in [0, 1) per tile (PCG hash), the order the rotating remainder walks.
+fn rtTileHash(tile: u32) -> f32 {
+  var h = tile * 747796405u + 2891336453u;
+  h = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
+  h = (h >> 22u) ^ h;
+  return f32(h >> 8u) * (1.0 / 16777216.0);
+}
 
 fn unpackRayCoords(packed: u32) -> vec2u { return vec2u(packed & 32767u, (packed >> 15u) & 16383u); }
 
@@ -194,7 +224,11 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
   let tile = (coords.y / 8u) * P.tilesX + coords.x / 8u;
   let k = atomicAdd(&state[${RT_STATE_HEADER}u + tile], 1u);
   if (k == 0u) { atomicAdd(&state[${RT_STATE.tilesWithMisses}], 1u); }
-  var granted = k < atomicLoad(&state[${RT_STATE.tileCap}]);
+  // floor share + the rotating remainder (D1100): see RT_BEGIN_WGSL
+  let extra = bitcast<f32>(atomicLoad(&state[${RT_STATE.tileExtra}]));
+  let phase = bitcast<f32>(atomicLoad(&state[${RT_STATE.tilePhase}]));
+  let cap = atomicLoad(&state[${RT_STATE.tileBase}]) + select(0u, 1u, fract(rtTileHash(tile) + phase) < extra);
+  var granted = k < cap;
   if (granted) { granted = atomicAdd(&state[${RT_STATE.granted}], 1u) < P.maxRaysPerFrame; }
   if (!granted) {
     atomicAdd(&state[${RT_STATE.capped}], 1u);

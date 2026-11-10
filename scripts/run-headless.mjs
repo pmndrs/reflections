@@ -351,6 +351,19 @@ function f2Checks(r) {
       `while stale ${f(h.litWhileStale)}; current ${f(h.litCurrent)}; back to history ${f(h.litBackToHistory)}`);
     check('ssrHistory: no WebGPU errors', h.gpuErrors.length === 0, h.gpuErrors.slice(0, 2).join(' | '));
   }
+  const t = section('rtTiles');
+  if (t) {
+    // yardstick: independent uniform selection at p = budget / tiles; a fair scheme is at most 4 sd
+    // above it in tiles never traced and tiles traced every frame (one-sided: fairer is fine)
+    const bound = (e) => e.mean + 4 * e.sd;
+    const frameSd = Math.sqrt(t.tilesSeen * t.p * (1 - t.p));
+    check(`rt tile cap: budget ${t.budget} over ${t.tilesSeen} tiles is spread fairly over ${t.frames} frames`,
+      t.tilesSeen > 500 && t.never <= bound(t.expectNever) && t.every <= bound(t.expectEvery),
+      `tiles traced in k of ${t.frames} frames ${JSON.stringify(t.hist)}; never ${t.never} (uniform ${t.expectNever.mean.toFixed(1)} +- ${t.expectNever.sd.toFixed(1)}, bound ${bound(t.expectNever).toFixed(1)}), every frame ${t.every} (uniform ${t.expectEvery.mean.toFixed(1)} +- ${t.expectEvery.sd.toFixed(1)}, bound ${bound(t.expectEvery).toFixed(1)})`);
+    check('rt tile cap: the frame budget holds and is used', t.traced.every((x) => x <= t.budget && x >= t.budget - 4 * frameSd),
+      `traced per frame ${t.traced.join(' ')} (budget ${t.budget}, floor ${(t.budget - 4 * frameSd).toFixed(0)}), tile caps ${t.tileCaps.join(' ')}`);
+    check('rtTiles: no WebGPU errors', t.gpuErrors.length === 0, t.gpuErrors.slice(0, 2).join(' | '));
+  }
 }
 
 /** examples/regressions: GPU repros of review bugs (stream F1). Each check failed before its fix. */

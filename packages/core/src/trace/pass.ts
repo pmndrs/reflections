@@ -34,9 +34,10 @@ export interface TracedReflectionsSettings {
   /** Rays per frame at most (D9). Entries past it keep intersect's fallback. Default unlimited. */
   maxTracedRaysPerFrame?: number;
   /**
-   * Rays per 8x8 tile at most (1..64). The tile cap each frame is min(this, ceil(max rays per frame /
-   * tiles with misses last frame)), so a capped frame spreads its budget over the screen (D9, D56).
-   * Default 64 (no tile cap beyond the frame budget's share).
+   * Rays per 8x8 tile at most (1..64). Each frame every tile may trace min(this, floor(max rays per
+   * frame / tiles with misses last frame)) rays, and a rotating fraction of the tiles one more (the
+   * remainder of that division), so a capped frame spreads its budget over the screen and over time
+   * (D9, D56, D1100). Default 64 (no tile cap beyond the frame budget's share).
    */
   maxRaysPerTile?: number;
   /** Ray length cap at roughness 0 (world units); the cap is this x exp(-falloff x alpha). Default 100 (FFX hybrid sample). */
@@ -81,7 +82,7 @@ export interface TracedReflectionsStats {
   onScreenHits: number;
   /** 8x8 tiles with at least one miss. */
   tilesWithMisses: number;
-  /** The per-tile cap this frame ran with. */
+  /** The most rays a tile could trace this frame (the floor share, + 1 for the tiles that got the remainder). */
   tileCap: number;
 }
 
