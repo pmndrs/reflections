@@ -120,6 +120,60 @@ const IMAGE_STATS = `async (a, b) => {
   return out;
 }`;
 
+/** examples/sssr-core: subgroup vs workgroup parity, hit fraction on the mirror floor, reverse-Z, GPU ms at 1080p. */
+async function sssrCoreChecks(pages) {
+  console.log('examples/sssr-core:');
+  const s = await openPage(`http://127.0.0.1:${PORT}/sssr-core/`);
+  pages.push(s);
+  const st = await s.T('window.__p.stats()');
+  console.log('  stats', JSON.stringify(st));
+  check('sssr: rays traced, denoiser tiles listed', st.rays > 0 && st.tiles > 0, `${st.rays} rays, ${st.tiles} tiles, ${st.misses} misses`);
+  check('sssr: sane hit fraction on the mirror floor', st.mirrorHitFraction > 0.5 && st.mirrorHitFraction < 1, `${(st.mirrorHitFraction * 100).toFixed(1)}% of ${st.mirrorPixels} px`);
+  check('sssr: no ray above the roughness threshold', st.maxTracedRoughness < 0.2, `max traced alpha ${st.maxTracedRoughness.toFixed(4)}`);
+  check('sssr: roughness ramp partly traced', st.rampTracedFraction > 0.2 && st.rampTracedFraction < 0.9, `${(st.rampTracedFraction * 100).toFixed(1)}%`);
+  savePng('sssr-core-grid.png', await s.T('window.__p.shot()'));
+  const hasSubgroups = await s.T('window.__p.hasSubgroups');
+  if (!hasSubgroups) console.log('  device has no subgroups: parity skipped');
+  else {
+    for (const cfg of [{ minTraversalOccupancy: 0, samplesPerQuad: 1 }, { minTraversalOccupancy: 0, samplesPerQuad: 2 }, { minTraversalOccupancy: 0, samplesPerQuad: 4 }]) {
+      const r = await s.T(`window.__p.parity(${JSON.stringify(cfg)})`);
+      const tag = `occupancy 0, ${cfg.samplesPerQuad} spq`;
+      check(`sssr parity (${tag}): ray, tile, miss lists and tile flags`, r.rayListSame && r.tileListSame && r.missListSame && r.tileFlagsSame,
+        `rays ${r.rays}, tiles ${r.tiles}, misses ${r.misses}`);
+      check(`sssr parity (${tag}): radiance, hit distance, roughness, pyramid bit for bit`,
+        r.radianceDiffPixels === 0 && r.hitDiffPixels === 0 && r.roughnessDiffPixels === 0 && r.pyramidDiffTexels === 0 && r.blueNoiseDiff === 0,
+        `differing px: radiance ${r.radianceDiffPixels}, hit ${r.hitDiffPixels}, roughness ${r.roughnessDiffPixels}, pyramid ${r.pyramidDiffTexels}`);
+    }
+    // Default occupancy (4) counts per subgroup vs per workgroup, so images may differ (D3xx); lists must not.
+    const r = await s.T('window.__p.parity({})');
+    check('sssr parity (default occupancy): lists', r.rayListSame && r.tileListSame && r.tileFlagsSame, `rays ${r.rays}`);
+    console.log(`  default occupancy: radiance differs on ${r.radianceDiffPixels} px, misses ${r.misses.join(' vs ')} (informational)`);
+  }
+  // Reverse-Z: same scene, max-reduced pyramid; the hit fraction should match the forward-Z page closely.
+  const rz = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?reverse`);
+  pages.push(rz);
+  const sr = await rz.T('window.__p.stats()');
+  check('sssr reverse-Z: hit fraction matches forward Z', Math.abs(sr.mirrorHitFraction - st.mirrorHitFraction) < 0.02 && sr.rays === st.rays,
+    `${(sr.mirrorHitFraction * 100).toFixed(1)}% vs ${(st.mirrorHitFraction * 100).toFixed(1)}%, rays ${sr.rays} vs ${st.rays}`);
+  if (await rz.T('window.__p.hasSubgroups')) {
+    const r = await rz.T('window.__p.parity({ minTraversalOccupancy: 0 })');
+    check('sssr reverse-Z parity: lists and images', r.rayListSame && r.tileListSame && r.missListSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
+      `radiance ${r.radianceDiffPixels} px`);
+  }
+  // The radiance-fallback seam with a cube environment in @group(1).
+  const env = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?env`);
+  pages.push(env);
+  const se = await env.T('window.__p.stats()');
+  check('sssr cube-environment fallback: same rays and hits', se.rays === st.rays && Math.abs(se.mirrorHitFraction - st.mirrorHitFraction) < 1e-3,
+    `rays ${se.rays}, hit ${(se.mirrorHitFraction * 100).toFixed(1)}%`);
+  savePng('sssr-core-env.png', await env.T('window.__p.shot()'));
+  // GPU ms at 1080p, informational (loop stopped: frames are submitted one at a time).
+  const big = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?w=1920&h=1080`);
+  pages.push(big);
+  const t = await big.T('window.__p.time(30)');
+  console.log(`  GPU ms ${t.size.join('x')} (${t.variant}, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
+}
+
 /**
  * examples/scenes: every procedural scene (and every downloaded asset scene) renders into the
  * frame-contract G-buffer with no validation errors, and each target holds what the contract says.
@@ -239,6 +293,7 @@ async function main() {
     }
 
     if (runs('scenes')) pages.push(...(await checkScenes()));
+    if (runs('sssr-core')) await sssrCoreChecks(pages);
 
     const validation = results.logs.filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
     check('no WebGPU validation errors or exceptions', validation.length === 0, validation.slice(0, 3).join(' | '));
