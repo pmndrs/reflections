@@ -35,8 +35,13 @@
 import { PROBE_HEADER_ROWS, PROBE_IRRADIANCE_ROWS, PROBE_ROWS_PER_VOLUME } from './table';
 import type { ProbeLayout } from './layouts/types';
 
-/** How roughness maps to the atlas mip: three r187's `maxLod * r * (2 - r)` (D3). */
-export type ProbeLodMapping = 'r187';
+/**
+ * How roughness maps to the atlas mip. 'r187': three r187's `maxLod * r * (2 - r)` (D3), so a
+ * lookup between two mips blends them linearly in lod. 'alpha': the same mips (each exact at the
+ * roughness it was prefiltered for), but between neighbouring mips that are both below r = 0.3 the
+ * blend is linear in alpha = r^2, the lobe width, instead of in lod (D101 experiment, W7).
+ */
+export type ProbeLodMapping = 'r187' | 'alpha';
 
 export interface ProbeLookupOptions {
   layout: ProbeLayout;
@@ -60,6 +65,7 @@ export interface ProbeLookupOptions {
 export function lodWgsl(mapping: ProbeLodMapping = 'r187') {
   switch (mapping) {
     case 'r187': return 'maxLod * r * (2.0 - r)';
+    case 'alpha': return 'pr_lodAlpha(r, maxLod)';
   }
 }
 
@@ -73,6 +79,16 @@ const PR_HEADER_ROWS: u32 = ${PROBE_HEADER_ROWS}u;
 const PR_ROWS_PER_VOLUME: u32 = ${PROBE_ROWS_PER_VOLUME}u;
 const PR_IRRADIANCE_ROWS: u32 = ${PROBE_IRRADIANCE_ROWS}u;
 const PR_MIRROR_X: bool = ${o.mirrorX === true};
+// Mip l holds roughness 1 - sqrt(1 - l / maxLod); between mips l and l + 1 below r = 0.3, blend
+// linearly in r^2 (the lobe width) instead of in lod.
+fn pr_lodAlpha(r: f32, maxLod: f32) -> f32 {
+  let l = min(floor(maxLod * r * (2.0 - r)), max(maxLod - 1.0, 0.0));
+  let rl = 1.0 - sqrt(1.0 - l / maxLod);
+  let rh = 1.0 - sqrt(max(1.0 - (l + 1.0) / maxLod, 0.0));
+  // only between sharp mips (both below r = 0.3): above, lod-linear measured better (W7, D101)
+  if (rh > 0.3) { return maxLod * r * (2.0 - r); }
+  return l + clamp((r * r - rl * rl) / max(rh * rh - rl * rl, 1e-6), 0.0, 1.0);
+}
 fn pr_lod(roughness: f32, maxLod: f32) -> f32 {
   let r = clamp(roughness, 0.0, 1.0);
   return ${lodWgsl(o.lodMapping)};

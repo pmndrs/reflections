@@ -6,6 +6,7 @@
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | probe-core | probe-bench)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
+//   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
@@ -505,7 +506,7 @@ async function main() {
       check('probe core: coverage matches the CPU volume weights', L.coverageErr < 1e-5 && L.inside > 0 && L.outside > 0 && L.fade > 0 && L.composeErr === 0,
         `max err ${L.coverageErr.toExponential(2)}; ${L.inside} inside, ${L.fade} in a fade, ${L.outside} outside`);
       for (const l of L.layouts) {
-        const name = `${l.layout}${l.size ? '@' + l.size : ''} ${l.format}`;
+        const name = `${l.layout}${l.size ? '@' + l.size : ''} ${l.format}${l.lodMapping ? ' lod ' + l.lodMapping : ''}`;
         // same captures, same plan: only layout / format error (phase 1: mean <= 1, octa's mirror mip p99 ~20)
         check(`probe core: ${name} agrees with cube-hw rgba16float`, l.full.mean < 2 && Number.isFinite(l.full.max), `mean ${l.full.mean.toFixed(3)}, p99 ${l.full.p99.toFixed(2)}, max ${l.full.max.toFixed(1)} / 255`);
       }
@@ -527,6 +528,11 @@ async function main() {
         console.log('console:\n  ' + [...new Set(results.logs)].slice(0, 12).join('\n  '));
         throw e;
       });
+      if (args.includes('--low-roughness')) {
+        // D101 experiment: lookups between roughness mips, r187 lod mapping vs 'alpha' (blend linear in r^2)
+        await pb.cdp.evalJs('window.__p.lowRoughness().then((r) => JSON.stringify(r))');
+        console.log((await pb.cdp.evalJs('window.__p.log', false)).replace(/^/gm, '    '));
+      }
       if (process.env.BENCH_LOG || probeBenchFull) console.log((await pb.cdp.evalJs('window.__p.log', false)).replace(/^/gm, '    '));
       if (probeBenchFull) {
         fs.mkdirSync(OUT, { recursive: true });

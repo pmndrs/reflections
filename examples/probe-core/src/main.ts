@@ -118,8 +118,8 @@ async function main() {
   const evalGroup = device.createBindGroup({ layout: evalBgl, entries: [{ binding: 0, resource: { buffer: ptsBuf } }, { binding: 1, resource: { buffer: outBuf } }] });
 
   /** A probe set over the rooms, captures `kinds` (slots 0..2, then the environment), looked up at every point. */
-  async function evaluate(options: { layout?: ProbeLayoutId; format?: ProbeSetFormat; size?: number; refit?: boolean; frameIrradianceWgsl?: string; dominantDirection?: boolean; kinds?: number[] }) {
-    const set = new ProbeSet(device, { capacity: 3, sourceSize: SOURCE, layout: options.layout, format: options.format, size: options.size, refit: options.refit, frameIrradianceWgsl: options.frameIrradianceWgsl, dominantDirection: options.dominantDirection });
+  async function evaluate(options: { layout?: ProbeLayoutId; format?: ProbeSetFormat; size?: number; lodMapping?: 'r187' | 'alpha'; refit?: boolean; frameIrradianceWgsl?: string; dominantDirection?: boolean; kinds?: number[] }) {
+    const set = new ProbeSet(device, { capacity: 3, sourceSize: SOURCE, layout: options.layout, format: options.format, size: options.size, refit: options.refit, frameIrradianceWgsl: options.frameIrradianceWgsl, dominantDirection: options.dominantDirection, lodMapping: options.lodMapping });
     const kinds = options.kinds ?? [0, 1, 3, 0];
     const enc = device.createCommandEncoder();
     for (let s = 0; s < 3; s++) set.capture(enc, s, cubes[kinds[s]]);
@@ -164,10 +164,12 @@ async function main() {
     log.length = 0;
     const result: Record<string, unknown> = {};
     // ---- layouts x formats
-    const configs: { layout: ProbeLayoutId; format: ProbeSetFormat; size?: number }[] = [
+    const configs: { layout: ProbeLayoutId; format: ProbeSetFormat; size?: number; lodMapping?: 'alpha' }[] = [
       { layout: 'cube-hw', format: 'rgba16float' }, { layout: 'cube-hw', format: 'rgb9e5ufloat' },
       { layout: 'cube2d-warp', format: 'rgba16float' }, { layout: 'cube2d-none', format: 'rgba16float' },
       { layout: 'octa', format: 'rgba16float', size: 160 },
+      // D101: the same atlas, blended linearly in r^2 between the sharp mips (differs only below r = 0.3)
+      { layout: 'cube-hw', format: 'rgba16float', lodMapping: 'alpha' },
     ];
     const ref = await evaluate(configs[0]);
     let coverageErr = 0, composeErr = 0;
@@ -183,7 +185,7 @@ async function main() {
       const out = await evaluate(cfg);
       const local = compare(out, ref, 0), full = compare(out, ref, 1);
       layouts.push({ ...cfg, local, full });
-      say(`${cfg.layout}${cfg.size ? '@' + cfg.size : ''} ${cfg.format} vs cube-hw rgba16f: full mean ${full.mean.toFixed(3)} p99 ${full.p99.toFixed(2)} max ${full.max.toFixed(1)} /255`);
+      say(`${cfg.layout}${cfg.size ? '@' + cfg.size : ''} ${cfg.format}${cfg.lodMapping ? ' lod ' + cfg.lodMapping : ''} vs cube-hw rgba16f: full mean ${full.mean.toFixed(3)} p99 ${full.p99.toFixed(2)} max ${full.max.toFixed(1)} /255`);
     }
     const covered = Array.from({ length: COUNT }, (_, i) => ref[i * 12 + 3]);
     result.layouts = { coverageErr, composeErr, layouts, inside: covered.filter((a) => a > 0.999).length, outside: covered.filter((a) => a === 0).length, fade: covered.filter((a) => a > 0 && a < 0.999).length };
