@@ -17,12 +17,15 @@ import { createDepthPyramidBuilder, createDepthPyramidTexture, depthPyramidMipCo
 import { mat4Invert, mat4Mul, type Mat4Like } from './math';
 import {
   BLUE_NOISE_WGSL, classifyWgsl, CONSTANT_FALLBACK_WGSL, ENVIRONMENT_FALLBACK_WGSL,
-  INDIRECT_ARGS_WGSL, intersectWgsl, MISS_ARGS_WGSL, PARAMS_SIZE, type Variant,
+  INDIRECT_ARGS_WGSL, intersectWgsl, missArgsWgsl, PARAMS_SIZE, type Variant,
 } from './shaders';
 import { PassTimer } from './timer';
 import type { FrameInputs } from '../frame/contract';
 
 export type ScreenSpaceVariant = Variant;
+
+/** Default `roughnessThreshold`, perceptual: sqrt of FFX's 0.2 alpha, rounded. */
+export const DEFAULT_ROUGHNESS_THRESHOLD = 0.447;
 
 /**
  * The radiance-fallback seam (docs/HANDOFF.md): WGSL defining
@@ -81,7 +84,10 @@ export interface ScreenSpaceReflectionsOptions {
 }
 
 export interface ScreenSpaceReflectionsSettings {
-  /** Linear roughness (alpha = perceptual^2) below which a pixel traces. Default 0.2 (~0.447 perceptual). */
+  /**
+   * Perceptual roughness below which a pixel traces; squared to alpha at the pass boundary (FFX
+   * compares alpha, DIVERGES D43). Default 0.447 (alpha 0.1998, FFX's 0.2).
+   */
   roughnessThreshold?: number;
   /** Minimum rays per 2x2 quad for glossy (non-mirror) pixels: 1, 2 or 4. Default 1. */
   samplesPerQuad?: 1 | 2 | 4;
@@ -105,7 +111,7 @@ export interface ScreenSpaceReflectionsSettings {
   fallbackColor?: readonly [number, number, number];
   /** Miss list: a ray goes there when its confidence is below this. Default 0.9 (hybrid sample). */
   missConfidenceThreshold?: number;
-  /** Miss list: only rays with linear roughness <= this. Default 1 (all traced rays). The hybrid sample uses 0.22. */
+  /** Miss list: only rays with perceptual roughness <= this (squared like `roughnessThreshold`). Default 1 (all traced rays). The hybrid sample's 0.22 alpha is 0.469. */
   missRoughnessThreshold?: number;
   /** Override the frame index (blue-noise rotation). Default: increments per dispatch. */
   frameIndex?: number;
@@ -149,6 +155,12 @@ export interface ScreenSpaceReflectionsOutputs {
   radiance: GPUTexture;
   /** r32float: world hit distance, 0 where the ray found no screen-space hit (the denoiser's convention). */
   hitDistance: GPUTexture;
+  /**
+   * r32float: hit confidence in [0, 1] (FFX's vignette x thickness falloff; 0 for rejected rays, rough
+   * pixels and the background). Radiance is `mix(fallback, hit, confidence)`; a resolve that blends
+   * its own fallback reads this. Port addition: FFX only uses it inside intersect.
+   */
+  confidence: GPUTexture;
   /** r32float: linear roughness (alpha). */
   extractedRoughness: GPUTexture;
   depthHierarchy: GPUTexture;
@@ -161,13 +173,17 @@ export interface ScreenSpaceReflectionsOutputs {
   tileFlags: GPUBuffer;
   /** [0] next frame's ray counter, [1] rays this frame, [2] next frame's tile counter, [3] tiles this frame. */
   rayCounter: GPUBuffer;
-  /** Indirect args: intersect at byte 0, denoiser (one group per tile) at byte 12. */
+  /**
+   * Indirect args: intersect at byte 0, denoiser (one group per tile) at byte 12. 2-D groups
+   * (x = min(n, 65535), y = ceil(n / x)): index a group as wg.y * nwg.x + wg.x and bounds-check
+   * against rayCounter[1] / [3] (D601; FFX writes 1-D, which overflows at 4K).
+   */
   indirectArgs: GPUBuffer;
   /** vec2u per miss: packed ray coords (as rayList), oct-encoded world direction (2 x snorm16). */
   missList?: GPUBuffer;
-  /** [0] append counter (reset after intersect), [1] misses this frame, [2] dropped past capacity. */
+  /** [0] append counter (reset after intersect), [1] misses listed this frame, [2] overflow append counter (reset), [3] dropped past capacity this frame. */
   missCounter?: GPUBuffer;
-  /** Indirect args for a ray-traced pass over the miss list (64 per group). */
+  /** Indirect args for a ray-traced pass over the miss list: 64 per group, 2-D groups (index (wg.y * nwg.x + wg.x) * 64 + local, bounds-check against missCounter[1]). */
   missArgs?: GPUBuffer;
 }
 
@@ -247,6 +263,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const pyramid = createDepthPyramidBuilder(device, { inverted });
   const radiance = tex('radiance', 'rgba16float');
   const hitDistance = tex('hit distance', 'r32float');
+  const confidence = tex('confidence', 'r32float');
   const extractedRoughness = tex('extracted roughness', 'r32float');
   const blueNoise = tex('blue noise', 'rgba8unorm', 128, 128);
   const rayList = buf('ray list', W * H * 4);
@@ -254,7 +271,12 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const tileFlags = buf('tile flags', tilesX * tilesY * 4);
   const rayCounter = buf('ray counter', 16);
   const indirectArgs = buf('indirect args', 24, GPUBufferUsage.INDIRECT);
-  const missCapacity = W * H;
+  // Buffers must fit one storage binding (default limit 128 MiB): the ray list is W*H*4 bytes, so
+  // above ~33.5 Mpx (8K) the tracer can't run; the miss list (8 B per entry) is capped instead and
+  // counts what it drops (missCounter[3]). The per-tile cap (D9) will bound it further.
+  const maxBinding = device.limits.maxStorageBufferBindingSize;
+  if (W * H * 4 > maxBinding) throw new Error(`ssr: ${W}x${H} needs a ${W * H * 4} B ray list; the device's maxStorageBufferBindingSize is ${maxBinding}`);
+  const missCapacity = Math.min(W * H, Math.floor(maxBinding / 8));
   const missList = useMissList ? buf('miss list', missCapacity * 8) : undefined;
   const missCounter = useMissList ? buf('miss counter', 16) : undefined;
   const missArgs = useMissList ? buf('miss args', 12, GPUBufferUsage.INDIRECT) : undefined;
@@ -276,7 +298,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     label: 'ssr classify',
     entries: [uniformEntry(0), texEntry(1), texEntry(2), texEntry(3), texEntry(4),
       bufEntry(5), bufEntry(6), bufEntry(7), bufEntry(8),
-      storageTexEntry(9, 'rgba16float'), storageTexEntry(10, 'r32float'), storageTexEntry(11, 'r32float')],
+      storageTexEntry(9, 'rgba16float'), storageTexEntry(10, 'r32float'), storageTexEntry(11, 'r32float'), storageTexEntry(12, 'r32float')],
   });
   const classifyPipe = pipe(`classify (${variant})`, classifyWgsl(variant, inverted, fallback.wgsl), withFallback(classifyBgl));
 
@@ -300,15 +322,15 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     label: 'ssr intersect',
     entries: [uniformEntry(0), texEntry(1), texEntry(2), texEntry(3), texEntry(4), texEntry(5),
       bufEntry(6, 'read-only-storage'), bufEntry(7, 'read-only-storage'),
-      storageTexEntry(8, 'rgba16float'), storageTexEntry(9, 'r32float'),
-      ...(useMissList ? [bufEntry(10), bufEntry(11)] : [])],
+      storageTexEntry(8, 'rgba16float'), storageTexEntry(9, 'r32float'), storageTexEntry(10, 'r32float'),
+      ...(useMissList ? [bufEntry(11), bufEntry(12)] : [])],
   });
   const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList), withFallback(intersectBgl));
 
   let missArgsPipe: GPUComputePipeline | undefined, missArgsGroup: GPUBindGroup | undefined;
   if (useMissList) {
     const bgl = device.createBindGroupLayout({ label: 'ssr miss args', entries: [bufEntry(0), bufEntry(1)] });
-    missArgsPipe = pipe('miss args', MISS_ARGS_WGSL, [bgl]);
+    missArgsPipe = pipe('miss args', missArgsWgsl(missCapacity), [bgl]);
     missArgsGroup = device.createBindGroup({
       label: 'ssr miss args', layout: bgl,
       entries: [{ binding: 0, resource: { buffer: missCounter! } }, { binding: 1, resource: { buffer: missArgs! } }],
@@ -316,7 +338,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   }
 
   const outputs: ScreenSpaceReflectionsOutputs = {
-    radiance, hitDistance, extractedRoughness, depthHierarchy, blueNoise, rayList, denoiserTileList, tileFlags,
+    radiance, hitDistance, confidence, extractedRoughness, depthHierarchy, blueNoise, rayList, denoiserTileList, tileFlags,
     rayCounter, indirectArgs, missList, missCounter, missArgs,
   };
 
@@ -344,7 +366,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     f[104] = s.iblFactor ?? 1;
     f[105] = s.temporalStabilityFactor ?? 0.7;
     f[106] = s.depthBufferThickness ?? 0.015;
-    f[107] = s.roughnessThreshold ?? 0.2;
+    f[107] = (s.roughnessThreshold ?? DEFAULT_ROUGHNESS_THRESHOLD) ** 2; // perceptual -> alpha (D43)
     f[108] = s.varianceThreshold ?? 0;
     u[109] = s.frameIndex ?? frameIndex;
     u[110] = s.maxTraversalIntersections ?? 128;
@@ -357,7 +379,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     f[116] = fc[0]; f[117] = fc[1]; f[118] = fc[2]; f[119] = 1;
     u[120] = missCapacity;
     f[121] = s.missConfidenceThreshold ?? 0.9;
-    f[122] = s.missRoughnessThreshold ?? 1;
+    f[122] = (s.missRoughnessThreshold ?? 1) ** 2;
     device.queue.writeBuffer(params, 0, data);
   }
 
@@ -380,7 +402,8 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
         { binding: 8, resource: { buffer: tileFlags } },
         { binding: 9, resource: radiance.createView() },
         { binding: 10, resource: hitDistance.createView() },
-        { binding: 11, resource: extractedRoughness.createView() }],
+        { binding: 11, resource: extractedRoughness.createView() },
+        { binding: 12, resource: confidence.createView() }],
     });
     const intersectGroup = device.createBindGroup({
       label: 'ssr intersect', layout: intersectBgl,
@@ -394,7 +417,8 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
         { binding: 7, resource: { buffer: rayCounter } },
         { binding: 8, resource: radiance.createView() },
         { binding: 9, resource: hitDistance.createView() },
-        ...(useMissList ? [{ binding: 10, resource: { buffer: missList! } }, { binding: 11, resource: { buffer: missCounter! } }] : [])],
+        { binding: 10, resource: confidence.createView() },
+        ...(useMissList ? [{ binding: 11, resource: { buffer: missList! } }, { binding: 12, resource: { buffer: missCounter! } }] : [])],
     });
 
     timer?.begin();
@@ -432,7 +456,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
       return timer.timings;
     },
     destroy() {
-      for (const t of [depthHierarchy, radiance, hitDistance, extractedRoughness, blueNoise, dummyVariance]) t.destroy();
+      for (const t of [depthHierarchy, radiance, hitDistance, confidence, extractedRoughness, blueNoise, dummyVariance]) t.destroy();
       for (const b of [rayList, denoiserTileList, tileFlags, rayCounter, indirectArgs, missList, missCounter, missArgs, params, noiseTable]) b?.destroy();
       timer?.destroy();
     },

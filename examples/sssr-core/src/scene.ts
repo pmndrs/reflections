@@ -92,6 +92,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     case 4u: { albedo = vec3f(0.8, 0.15, 0.1); }
     default: { albedo = vec3f(0.1, 0.3, 0.85); }
   }
+  if (S.pad != 0u) { rough = 0.0; } // ?allmirror: every surface a mirror (most rays per frame)
   textureStore(o_material, id.xy, vec4f(0.0, rough, 0.0, f32(h.id) / 255.0));
 
   let L = normalize(vec3f(-0.4, 0.8, 0.5));
