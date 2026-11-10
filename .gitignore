@@ -5,3 +5,4 @@ examples/dist/
 out/
 *.log
 .DS_Store
+examples/assets/
