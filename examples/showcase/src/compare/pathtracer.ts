@@ -10,7 +10,7 @@
 // blurred by a cone jitter instead of a PMREM mip (backdrop pixels only, never reflective ones).
 import * as T from 'three';
 import { WebGLPathTracer } from 'three-gpu-pathtracer-webgl';
-import { type CompareMethod, type MethodContext, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
+import { type CompareMethod, type MethodContext, applySceneParams, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -29,7 +29,8 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
   renderer.outputColorSpace = T.SRGBColorSpace;
 
   const kit = await ctx.entry.build(W / H);
-  await freshEnvironment(kit, ctx.entry); // its own HDRI, never the WebGPU renderers' texture
+  await freshEnvironment(kit, ctx.entry);
+  applySceneParams(kit, params); // its own HDRI, never the WebGPU renderers' texture
   const { scene, camera } = kit;
   // Clearcoat renders black in three-gpu-pathtracer on these assets (ToyCar's and CarConcept's
   // paint; both the local checkout and the upstream build the upscaler pins; any roughness, with or

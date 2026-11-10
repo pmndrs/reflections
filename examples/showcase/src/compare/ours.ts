@@ -9,7 +9,7 @@ import {
   HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, reflectionProbes,
 } from '@pmndrs/reflections/three';
 import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
-import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
+import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, applySceneParams, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -41,11 +41,13 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
 
   const kit = await ctx.entry.build(W / H);
   await freshEnvironment(kit, ctx.entry);
+  applySceneParams(kit, params);
   const camera = kit.camera;
   delete ssr.settings.depthBufferThickness; delete ssr.settings.thicknessRoughnessFactor;
   if (kit.thickness) Object.assign(ssr.settings, kit.thickness);
   if (params.has('spq')) ssr.settings.samplesPerQuad = Number(params.get('spq')) as 1 | 2 | 4;
   const hit = (params.get('hit') ?? 'final') as 'final' | 'lit' | 'current';
+  const motionScale = Number(params.get('motionScale') ?? 1);
 
   // probes, as the showcase bakes them
   const probes = new ReflectionProbes();
@@ -104,6 +106,13 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     nextNodeFrame();
     syncCamera(camera, cam);
     ssr.render(kit.scene, camera);
+    if (motionScale !== 1) {
+      // experiment (?motionScale=): scale the motion the denoise seam hands the denoiser, to test
+      // whether the reprojection is aligned (flicker in motion should be lowest at 1)
+      const f = ssr.gbuffer.frame as N;
+      const m = f.conventions.motionVectorScale;
+      f.conventions = { ...f.conventions, motionVectorScale: [m[0] * motionScale, m[1] * motionScale] };
+    }
     hybrid.update();
   };
   ssr.resetHistory(); hybrid.resetHistory();

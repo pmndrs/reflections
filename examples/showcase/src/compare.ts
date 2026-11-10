@@ -22,6 +22,7 @@
 // URL: ?scene=<id> ?pose=<name> ?left=<method> ?right=<method> ?split=0.5 ?w=960&h=540 ?freeze ?manual
 // Experiment overrides (not product defaults): ?spq=1|2|4 ?tsf=<FFX temporalStabilityFactor>
 // ?hit=final|lit|current (ours), ?mirrorBias= ?ssrMaxDistance= ?ssrThickness= (three's SSR), ?ptBounces=
+// ?ptTiles= ?ptClearcoat=1 (path tracer), ?floorRoughness= (every method's floor, before the bake)
 import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { availableAssets } from '../../shared';
@@ -216,7 +217,7 @@ async function main() {
    * cancels to first order in the second temporal difference; frame-to-frame noise doesn't. Edges
    * moving across pixels leave a floor common to every method ('probes only' shows it: no noise).
    */
-  async function orbitFlicker(m: CompareMethod, mask: number[], orbitDeg: number, frames: number) {
+  async function orbitFlicker(m: CompareMethod, mask: number[], orbitDeg: number, frames: number, perPixel?: Float32Array) {
     const pos = camera.position.clone(), quat = camera.quaternion.clone(), target = controls.target.clone();
     const up = new THREE.Vector3(0, 1, 0), off = pos.clone().sub(target);
     const at = (k: number) => {
@@ -233,7 +234,10 @@ async function main() {
           const d = read(m.canvas);
           const l = new Float32Array(n);
           for (let k = 0; k < n; k++) { const o = mask[k] * 4; l[k] = 0.2126 * d[o] + 0.7152 * d[o + 1] + 0.0722 * d[o + 2]; }
-          if (a && b) { for (let k = 0; k < n; k++) sum += Math.abs(b[k] - (a[k] + l[k]) / 2); count += n; }
+          if (a && b) {
+            for (let k = 0; k < n; k++) { const e = Math.abs(b[k] - (a[k] + l[k]) / 2); sum += e; if (perPixel) perPixel[k] += e / (frames - 2); }
+            count += n;
+          }
           a = b; b = l;
         }
         await m.idle();
@@ -427,6 +431,23 @@ async function main() {
         const url = m.canvas.toDataURL('image/png');
         await m.idle();
         return url;
+      },
+      /** Orbit flicker per pixel (whole frame) as a heat map: black 0, white >= `scale` (8-bit luma). */
+      async flickerMap(id: MethodId, frames = 32, orbitDeg = 0.05, scale = 4) {
+        const m = await get(id);
+        m.reset();
+        for (let f = 0; f < 48; f++) { m.frame(camera); await m.idle(); }
+        const all = Array.from({ length: W * H }, (_, i) => i);
+        const per = new Float32Array(W * H);
+        const mean = await orbitFlicker(m, all, orbitDeg, frames, per);
+        const c = document.createElement('canvas'); c.width = W; c.height = H;
+        const g = c.getContext('2d')!, img = g.createImageData(W, H);
+        for (let i = 0; i < W * H; i++) {
+          const t = Math.min(1, per[i] / scale);
+          img.data[i * 4] = 255 * Math.min(1, t * 3); img.data[i * 4 + 1] = 255 * Math.min(1, Math.max(0, t * 3 - 1)); img.data[i * 4 + 2] = 255 * Math.max(0, t * 3 - 2); img.data[i * 4 + 3] = 255;
+        }
+        g.putImageData(img, 0, 0);
+        return { mean, url: c.toDataURL('image/png') };
       },
       async converge(samples: number) { const pt = await get('pathtraced'); while ((pt.samples?.() ?? 0) < samples) { pt.frame(camera); await nextFrame(); } return pt.samples?.(); },
       measure, get lastMeasure() { return lastMeasure; },

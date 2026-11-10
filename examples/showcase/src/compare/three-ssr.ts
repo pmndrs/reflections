@@ -24,7 +24,7 @@ import { ssr as threeSSR } from 'three/addons/tsl/display/SSRNode.js';
 import { temporalReproject } from 'three/addons/tsl/display/TemporalReprojectNode.js';
 import { recurrentDenoise } from 'three/addons/tsl/display/RecurrentDenoiseNode.js';
 import { ffxReflections } from '@pmndrs/denoiser-three-ffx';
-import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
+import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, applySceneParams, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -71,6 +71,7 @@ export async function createThreeSSR(id: Extract<MethodId, 'three-raw' | 'three-
 
   const kit = await ctx.entry.build(W / H);
   await freshEnvironment(kit, ctx.entry);
+  applySceneParams(kit, params);
   const { scene, camera } = kit;
 
   const scenePass: N = pass(scene, camera);

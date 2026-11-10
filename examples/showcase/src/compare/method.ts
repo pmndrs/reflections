@@ -103,3 +103,8 @@ export async function freshEnvironment(kit: ShowcaseScene, entry: ShowcaseEntry)
   scene.environment = hdr;
   return hdr;
 }
+
+/** Scene overrides every method applies the same way, before baking or rendering: ?floorRoughness=. */
+export function applySceneParams(kit: ShowcaseScene, params: URLSearchParams) {
+  if (params.has('floorRoughness')) kit.floor.setRoughness(Number(params.get('floorRoughness')));
+}
