@@ -4,7 +4,7 @@
 // floor; time(n) gives median GPU ms per pass with the loop stopped (there is no loop: frames render
 // on demand); shot() returns the canvas as a PNG data URL.
 import {
-  createScreenSpaceReflections, environmentRadianceFallback, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs,
+  createScreenSpaceReflections, environmentRadianceFallback, screenSpaceInputsFromFrame, type FrameInputs, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs,
   type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant,
 } from '@pmndrs/reflections/core';
 import { lookAt, perspective, SCENE_WGSL } from './scene';
@@ -154,9 +154,25 @@ async function main() {
     const p = enc.beginComputePass(); p.setPipeline(scenePipe); p.setBindGroup(0, sceneGroup); p.dispatchWorkgroups(Math.ceil(W / 8), Math.ceil(H / 8)); p.end();
     device.queue.submit([enc.finish()]);
   }
-  const inputs: ScreenSpaceReflectionsInputs = {
-    depth, normal, roughness: material, roughnessChannel: 1, roughnessIsPerceptual: true, color, camera: { view, projection },
+  // The analytic targets described as the general frame contract (core/frame/contract.ts), then
+  // mapped to the tracer's inputs. Roughness sits in the material's g channel; normals are raw floats.
+  const motion = device.createTexture({ label: 'motion (still)', size: [W, H], format: 'rg16float', usage: GPUTextureUsage.TEXTURE_BINDING });
+  const frameInputs: FrameInputs = {
+    width: W, height: H, frameIndex: 0,
+    textures: {
+      depth, normal, roughness: { texture: material, channel: 1 }, metalness: { texture: material, channel: 0 },
+      albedo: material, motion, sceneColor: color,
+    },
+    conventions: {
+      depthInverted: reverse, depthLinear: false, normalUnpackMul: 1, normalUnpackAdd: 0, roughnessIsPerceptual: true,
+      motionVectorScale: [1, 1], sceneColorSpecular: 'none',
+    },
+    camera: {
+      view, projection, prevView: view, prevProjection: projection, prevViewProjection: viewProj, jitter: [0, 0],
+      near: 0.1, far: 100, position: [0, 1.7, 5.5], reversedDepth: reverse,
+    },
   };
+  const inputs: ScreenSpaceReflectionsInputs = screenSpaceInputsFromFrame(frameInputs, { depthInverted: reverse });
   const baseSettings: ScreenSpaceReflectionsSettings = { fallbackColor: [0.35, 0.45, 0.6] };
 
   // ?env: the radiance-fallback seam with a cube environment (a procedural sky, 32 px, 6 mips)

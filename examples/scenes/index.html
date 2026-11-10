@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Scene kit</title>
+    <style>
+      :root { color-scheme: dark; --dn-border: #333; }
+      body { margin: 0; padding: 16px; background: #111; color: #ddd; font: 14px/1.45 system-ui, sans-serif; }
+      a { color: #8cf; }
+      .dn-status { font-size: .8rem; white-space: pre-wrap; color: #9a9; }
+      .dn-page { max-width: 1020px; }
+      code { background: #0006; padding: 0 .3em; border-radius: 4px; }
+      canvas { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; border: 1px solid var(--dn-border); border-radius: 8px; display: block; touch-action: none; }
+      #controls { max-width: 960px; display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; font-size: .85rem; margin: .6rem 0; }
+      #controls label { display: inline-flex; align-items: center; gap: .35rem; }
+    </style>
+  </head>
+  <body>
+    <div class="dn-page">
+      <header class="dn-head">
+        <h1>Scene kit and frame-contract G-buffer</h1>
+        <p class="dn-lede">
+          The reflection test scenes, rendered once per frame with WebGPURenderer MRT into the frame contract's targets
+          (<code>FrameGBuffer</code>): depth, world normal, perceptual roughness, metalness, albedo, uv-space motion, scene
+          colour without specular, and three's full lit image. Pick a target to inspect, or <code>grid</code> for all of them.
+          URL: <code>?scene=</code>, <code>?view=</code>, <code>?pose=</code>, <code>?manual</code> (loop stopped).
+        </p>
+      </header>
+      <canvas id="view" width="960" height="540"></canvas>
+      <div id="controls"></div>
+      <pre id="status" class="dn-status">starting...</pre>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

@@ -20,6 +20,7 @@ import {
   INDIRECT_ARGS_WGSL, intersectWgsl, MISS_ARGS_WGSL, PARAMS_SIZE, type Variant,
 } from './shaders';
 import { PassTimer } from './timer';
+import type { FrameInputs } from '../frame/contract';
 
 export type ScreenSpaceVariant = Variant;
 
@@ -125,6 +126,7 @@ export interface ScreenSpaceReflectionsInputs {
   depth: GPUTexture;
   /** World-space normal, decoded as normalize(mul * texel.xyz + add). */
   normal: GPUTexture;
+  /** Default { mul: 1, add: 0 } (raw float normals, e.g. rgba16float); unorm-packed normals use { mul: 2, add: -1 }. */
   normalUnpack?: { mul: number; add: number };
   /** A material texture holding roughness in `roughnessChannel`. */
   roughness: GPUTexture;
@@ -175,6 +177,7 @@ export interface ScreenSpaceReflections {
   readonly width: number;
   readonly height: number;
   readonly mipCount: number;
+  readonly depthInverted: boolean;
   readonly outputs: ScreenSpaceReflectionsOutputs;
   /** Record every pass into `cmd`. Writes the uniform block through `device.queue` immediately, so
    *  one instance dispatches at most once per submit. */
@@ -182,6 +185,34 @@ export interface ScreenSpaceReflections {
   /** With `timestamps`: call after submitting the encoder; resolves to ms per pass (+ 'total'). */
   readTimings(): Promise<ReadonlyMap<string, number>>;
   destroy(): void;
+}
+
+/**
+ * Map the general frame contract (`frame/contract.ts`, W4) onto this tracer's inputs. Throws for
+ * what the tracer can't take: linear depth (it marches device depth), or a depth convention that
+ * differs from the one the tracer was created with. Pass `frame.frameIndex` as `settings.frameIndex`.
+ * The three G-buffer's targets bind as they are: depth32float depth, rgba16float raw normal
+ * (unpack 1, 0) with perceptual roughness in alpha, rgba16float scene colour.
+ */
+export function screenSpaceInputsFromFrame(
+  frame: FrameInputs, tracer: Pick<ScreenSpaceReflections, 'depthInverted'>,
+  extra: Pick<ScreenSpaceReflectionsInputs, 'variance' | 'fallbackBindGroup'> = {},
+): ScreenSpaceReflectionsInputs {
+  const { textures: t, conventions: c } = frame;
+  if (c.depthLinear) throw new Error('ssr: linear depth is not supported; pass hardware (device) depth');
+  if (c.depthInverted !== tracer.depthInverted) throw new Error(`ssr: frame depthInverted=${c.depthInverted}, tracer created with ${tracer.depthInverted}`);
+  return {
+    depth: t.depth,
+    normal: t.normal,
+    normalUnpack: { mul: c.normalUnpackMul, add: c.normalUnpackAdd },
+    roughness: t.roughness.texture,
+    roughnessChannel: t.roughness.channel,
+    roughnessIsPerceptual: c.roughnessIsPerceptual,
+    color: t.sceneColor,
+    motion: t.motion,
+    camera: frame.camera,
+    ...extra,
+  };
 }
 
 const C = 0x4; // GPUShaderStage.COMPUTE (a literal, so importing core never touches WebGPU globals)
@@ -392,7 +423,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   }
 
   return {
-    device, variant, width: W, height: H, mipCount, outputs, dispatch,
+    device, variant, width: W, height: H, mipCount, depthInverted: inverted, outputs, dispatch,
     async readTimings() {
       if (!timer) return new Map();
       afterSubmit?.();
