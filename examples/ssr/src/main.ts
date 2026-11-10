@@ -375,6 +375,7 @@ async function main() {
       get bvh() { return bvhInfo; },
       tileCapCheck: () => tileCapCheck(),
       rtOracle: (n?: number) => rtOracle(n),
+      hitShadingError: () => hitShadingError(),
       stop: stopLoop, start: startLoop,
       async step(n = 1) { for (let i = 0; i < n; i++) frame(); await idle(); },
       async shot() { frame(); const url = canvas.toDataURL('image/png'); await idle(); return url; },
@@ -530,6 +531,28 @@ async function main() {
     }
     const maxPerTile = Math.max(0, ...perTile.values());
     return { entries: n, traced, capped, other, tilesTraced: perTile.size, maxPerTile, stats };
+  }
+
+  /**
+   * Hit-shading error (D55): traced hits the camera also sees are shaded twice, once from the
+   * screen (scene colour, the reference) and once by the hit shading (reuse off); compare.
+   */
+  async function hitShadingError() {
+    const rt = ssr.traced!, core = ssr.tracer!;
+    const keep = ssr.traceSettings;
+    frame(); await idle();
+    const [srcA, radA] = await Promise.all([readTexture(device, rt.source), readTexture(device, core.outputs.radiance)]);
+    ssr.traceSettings = { ...keep, reuseOnScreenHits: false };
+    frame(); await idle();
+    const radB = await readTexture(device, core.outputs.radiance);
+    ssr.traceSettings = keep;
+    let n = 0, sa = 0, sb = 0, sabs = 0;
+    for (let i = 0; i < W * H; i++) {
+      if (Math.round(srcA[i]) !== 4) continue;
+      const a = (radA[i * 4] + radA[i * 4 + 1] + radA[i * 4 + 2]) / 3, b = (radB[i * 4] + radB[i * 4 + 1] + radB[i * 4 + 2]) / 3;
+      n++; sa += a; sb += b; sabs += Math.abs(a - b);
+    }
+    return { pixels: n, meanScreen: n ? sa / n : 0, meanShaded: n ? sb / n : 0, ratio: sa ? sb / sa : NaN, meanAbsRel: sa ? sabs / sa : NaN };
   }
 
   /**

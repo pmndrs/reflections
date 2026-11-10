@@ -19,7 +19,7 @@ import * as THREE from 'three/webgpu';
 import { uniform } from 'three/tsl';
 import {
   createScreenSpaceReflections, createTracedReflections, environmentHitShading, screenSpaceInputsFromFrame,
-  type EnvironmentHitShading, type EnvironmentMapping, type FrameInputs, type ScreenSpaceReflections as CoreTracer,
+  type EnvironmentHitShading, type EnvironmentMapping, type FrameInputs, type HitLights, type ScreenSpaceReflections as CoreTracer,
   type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant, type TraceProvider, type TracedReflections,
   type TracedReflectionsSettings, type TracedReflectionsStats,
 } from '@pmndrs/reflections-core';
@@ -59,6 +59,11 @@ export interface ScreenSpaceTraceOptions {
   environment?: THREE.Texture | null;
   /** Default: the scene's `environmentIntensity` at `render()` (1 if `trace()` is called directly). */
   environmentIntensity?: number;
+  /**
+   * Light traced hits with the scene's visible directional and hemisphere lights too (Lambert, no
+   * shadows; up to 4 + 2), gathered at `render()`. Default true.
+   */
+  lights?: boolean;
   /** Ray budget, length cap, origin offset, on-screen reuse. */
   settings?: TracedReflectionsSettings;
 }
@@ -118,6 +123,7 @@ export class ScreenSpaceReflectionsPass {
   private hitGroupFor: GPUTexture | null = null;
   private sceneEnvironment: THREE.Texture | null = null;
   private sceneEnvironmentIntensity = 1;
+  private sceneLights: HitLights = {};
   private blackEnvironment: THREE.DataTexture | null = null;
   private sourceDirty = false;
   private traceOptions: ScreenSpaceTraceOptions | null;
@@ -167,6 +173,7 @@ export class ScreenSpaceReflectionsPass {
   render(scene: THREE.Scene, camera: THREE.Camera, opts: { jitter?: readonly [number, number] } = {}): FrameInputs {
     this.sceneEnvironment = scene.environment;
     this.sceneEnvironmentIntensity = scene.environmentIntensity ?? 1;
+    if (this.traceOptions && this.traceOptions.lights !== false) this.sceneLights = ScreenSpaceReflectionsPass.gatherLights(scene);
     const frame = this.gbuffer.render(scene, camera, opts);
     this.trace(frame, camera);
     return frame;
@@ -229,6 +236,27 @@ export class ScreenSpaceReflectionsPass {
     return this.blackEnvironment;
   }
 
+  /** Visible directional and hemisphere lights as the hit shading takes them (colour x intensity, world directions). */
+  static gatherLights(scene: THREE.Scene): HitLights {
+    const lights: Required<HitLights> = { directional: [], hemisphere: [] };
+    const a = new THREE.Vector3(), b = new THREE.Vector3();
+    const rgb = (c: THREE.Color, k: number) => [c.r * k, c.g * k, c.b * k] as [number, number, number];
+    scene.traverseVisible((o) => {
+      const l = o as THREE.DirectionalLight & THREE.HemisphereLight;
+      if (l.isDirectionalLight) {
+        l.updateMatrixWorld();
+        l.target.updateMatrixWorld();
+        a.setFromMatrixPosition(l.matrixWorld).sub(b.setFromMatrixPosition(l.target.matrixWorld)).normalize();
+        lights.directional.push({ direction: [a.x, a.y, a.z], color: rgb(l.color, l.intensity) });
+      } else if (l.isHemisphereLight) {
+        l.updateMatrixWorld();
+        a.setFromMatrixPosition(l.matrixWorld).normalize();
+        lights.hemisphere.push({ up: [a.x, a.y, a.z], sky: rgb(l.color, l.intensity), ground: rgb(l.groundColor, l.intensity) });
+      }
+    });
+    return lights;
+  }
+
   private static mappingOf(t: THREE.Texture): EnvironmentMapping {
     return (t as THREE.CubeTexture).isCubeTexture ? 'cube' : 'equirect';
   }
@@ -240,7 +268,7 @@ export class ScreenSpaceReflectionsPass {
       this.hitGroup = this.hitShading!.createBindGroup(view);
       this.hitGroupFor = gpu;
     }
-    this.hitShading!.setIntensity(this.traceOptions?.environmentIntensity ?? this.sceneEnvironmentIntensity);
+    this.hitShading!.setLighting(this.traceOptions?.environmentIntensity ?? this.sceneEnvironmentIntensity, this.traceOptions?.lights === false ? {} : this.sceneLights);
     return this.hitGroup;
   }
 

@@ -3,7 +3,7 @@ export {
   HIT_WGSL, DEFAULT_HIT_MATERIAL_WGSL, fallbackHitShading,
   type BindingSlot, type ModuleBindingEntry, type TraceProvider, type TraceProviderCapabilities, type HitShading,
 } from './provider';
-export { environmentHitShading, type EnvironmentHitShading, type EnvironmentMapping } from './hitShading';
+export { environmentHitShading, HIT_MAX_DIRECTIONAL, HIT_MAX_HEMISPHERE, type EnvironmentHitShading, type EnvironmentMapping, type HitLights } from './hitShading';
 export {
   createTracedReflections,
   type TracedReflections, type TracedReflectionsOptions, type TracedReflectionsSettings, type TracedReflectionsDispatch, type TracedReflectionsStats,

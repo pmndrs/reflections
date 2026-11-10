@@ -26,5 +26,5 @@ export { screenSpaceComposite, type ScreenSpaceComposite, type ScreenSpaceCompos
 
 // Ray-traced fallback: three-mesh-bvh behind core's trace seam (the stopgap until @pmndrs/bvh).
 // three-mesh-bvh is an optional peer, imported on demand by MeshBVHTraceProvider.fromObjects.
-export { MeshBVHTraceProvider, defaultHitMaterial, type HitMaterial, type MeshBVHComputeDataLike, type MeshBVHTraceProviderOptions } from './trace/MeshBVHTraceProvider';
+export { MeshBVHTraceProvider, defaultHitMaterial, textureMeanColor, type HitMaterial, type MeshBVHComputeDataLike, type MeshBVHTraceProviderOptions } from './trace/MeshBVHTraceProvider';
 export type { ScreenSpaceTraceOptions } from './sssr/ScreenSpaceReflectionsPass';

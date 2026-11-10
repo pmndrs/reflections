@@ -46,24 +46,66 @@ const LAYOUT = { nodeWords: 16, transformWords: 36, stackDepth: 60 } as const;
 
 export interface MeshBVHTraceProviderOptions {
   /**
-   * The material a mesh contributes to traced-hit shading. Default: diffuse albedo
-   * `color x (1 - metalness)` (no maps: D902) and `emissive x emissiveIntensity`.
+   * The material a mesh contributes to traced-hit shading. Default {@link defaultHitMaterial}:
+   * diffuse albedo `color x mean(map) x (1 - metalness)` and `emissive x mean(emissiveMap) x
+   * emissiveIntensity` (one colour per mesh: D902).
    */
   material?: (mesh: THREE.Mesh) => HitMaterial;
 }
 
-/** Default hit material of a three mesh (first material of a multi-material mesh). */
+const mapMeans = new WeakMap<THREE.Texture, [number, number, number] | null>();
+const srgbToLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+
+/**
+ * Mean linear colour of a texture's image (cached per texture), or null if it can't be read on the
+ * CPU (compressed, render target, not loaded yet). Images are averaged over a 16x16 downscale.
+ */
+export function textureMeanColor(t: THREE.Texture): [number, number, number] | null {
+  if (mapMeans.has(t)) return mapMeans.get(t)!;
+  let mean: [number, number, number] | null = null;
+  const img = t.image as { data?: ArrayLike<number>; width?: number; height?: number } | CanvasImageSource | undefined;
+  const srgb = t.colorSpace === THREE.SRGBColorSpace;
+  try {
+    if (img && 'data' in img && img.data && img.width && img.height) {
+      const d = img.data, n = img.width * img.height, ch = Math.round(d.length / n);
+      const scale = d instanceof Uint8Array || d instanceof Uint8ClampedArray ? 1 / 255 : 1;
+      const acc = [0, 0, 0];
+      for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) acc[c] += d[i * ch + Math.min(c, ch - 1)] * scale;
+      mean = acc.map((v) => (srgb ? srgbToLinear(v / n) : v / n)) as [number, number, number];
+    } else if (img && typeof document !== 'undefined' && ((img as { width?: number }).width ?? 0) > 0) {
+      const S = 16;
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = S;
+      const g = cv.getContext('2d', { willReadFrequently: true })!;
+      g.drawImage(img as CanvasImageSource, 0, 0, S, S);
+      const px = g.getImageData(0, 0, S, S).data;
+      const acc = [0, 0, 0];
+      // 8-bit canvas data is sRGB-encoded whatever the texture says; decode per texel
+      for (let i = 0; i < S * S; i++) for (let c = 0; c < 3; c++) acc[c] += srgb ? srgbToLinear(px[i * 4 + c] / 255) : px[i * 4 + c] / 255;
+      mean = acc.map((v) => v / (S * S)) as [number, number, number];
+    }
+  } catch { mean = null; }
+  if (mean) mapMeans.set(t, mean);
+  return mean;
+}
+
+/**
+ * Default hit material of a three mesh (first material of a multi-material mesh): diffuse albedo
+ * `color x mean(map) x (1 - metalness)` and `emissive x mean(emissiveMap) x emissiveIntensity`.
+ */
 export function defaultHitMaterial(mesh: THREE.Mesh): HitMaterial {
   const m = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshStandardMaterial | undefined;
   const albedo: [number, number, number] = [0.5, 0.5, 0.5];
   const emissive: [number, number, number] = [0, 0, 0];
   if (m?.color) {
     const k = 1 - (m.metalness ?? 0);
-    albedo[0] = m.color.r * k; albedo[1] = m.color.g * k; albedo[2] = m.color.b * k;
+    const t = m.map ? textureMeanColor(m.map) ?? [1, 1, 1] : [1, 1, 1];
+    albedo[0] = m.color.r * t[0] * k; albedo[1] = m.color.g * t[1] * k; albedo[2] = m.color.b * t[2] * k;
   }
   if (m?.emissive) {
     const k = m.emissiveIntensity ?? 1;
-    emissive[0] = m.emissive.r * k; emissive[1] = m.emissive.g * k; emissive[2] = m.emissive.b * k;
+    const t = m.emissiveMap ? textureMeanColor(m.emissiveMap) ?? [1, 1, 1] : [1, 1, 1];
+    emissive[0] = m.emissive.r * t[0] * k; emissive[1] = m.emissive.g * t[1] * k; emissive[2] = m.emissive.b * t[2] * k;
   }
   return { albedo, emissive };
 }

@@ -356,7 +356,7 @@ async function ssrRtChecks(pages) {
   await p.T('window.__p.setTraceSettings({})');
   savePng('ssr-rt-offscreen-capped.png', await p.T('window.__p.shot()'));
 
-  // the other scenes still render with RT on
+  // the other scenes still render with RT on; hit-shading error on traced hits the camera also sees
   for (const id of ['mirrorWall', 'contact', 'moving']) {
     const b = results.logs.length;
     await p.T(`window.__p.load(${JSON.stringify(id)})`);
@@ -365,6 +365,8 @@ async function ssrRtChecks(pages) {
     const e = results.logs.slice(b).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
     const extra = id === 'mirrorWall' ? `; wall: ${(st.wall.confidentFraction * 100).toFixed(1)}% confident, corr ${st.wall.lumCorrelation.toFixed(3)}` : '';
     check(`rt ${id}: renders, finite, no validation errors`, e.length === 0 && st.nonFinite === 0, e.length ? e.slice(0, 2).join(' | ') : `${st.misses} misses -> ${JSON.stringify(st.rt)}${extra}`);
+    const hs = await p.T('window.__p.hitShadingError()');
+    console.log(`  rt ${id}: hit shading vs on-screen colour over ${hs.pixels} traced hits the camera sees: mean ${hs.meanShaded.toFixed(3)} vs ${hs.meanScreen.toFixed(3)} (ratio ${hs.ratio.toFixed(3)}), mean abs rel ${hs.meanAbsRel.toFixed(3)}`);
   }
 
   // GPU ms vs miss count at 1080p: the same frame, misses varied with the miss-list threshold
