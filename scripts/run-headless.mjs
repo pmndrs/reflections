@@ -482,26 +482,30 @@ async function ssrBenchSmoke(pages) {
 /** The full bench (`--ssr-bench`): references, metrics per scene and method, GPU ms at 1080p. */
 async function ssrBench() {
   const scenes = args.includes('--ssr-scenes') ? args[args.indexOf('--ssr-scenes') + 1].split(',') : ['rooms', 'explainer', 'mirrorWall', 'roughnessRamp'];
+  const timingOnly = args.includes('--ssr-timing-only'); // repeat the 1080p timing without the metrics
   const out = { started: new Date().toISOString(), scenes: {}, timing: [] };
-  const save = () => { fs.mkdirSync(OUT, { recursive: true }); fs.writeFileSync(path.join(OUT, 'ssr-bench.json'), JSON.stringify(out, null, 1)); };
+  const file = path.join(OUT, timingOnly ? 'ssr-bench-timing.json' : 'ssr-bench.json');
+  const save = () => { fs.mkdirSync(OUT, { recursive: true }); fs.writeFileSync(file, JSON.stringify(out, null, 1)); };
   const page = await openPage(`http://127.0.0.1:${PORT}/ssr-bench/?scene=${scenes[0]}&method=reference`, ['--enable-webgpu-developer-features']);
   try {
     out.device = await page.cdp.evalJs('(async () => { const a = await navigator.gpu.requestAdapter(); return JSON.stringify({ ...a.info, ua: navigator.userAgent }); })()').then(JSON.parse);
     for (const scene of scenes) {
       const res = (out.scenes[scene] = { methods: {} });
       const url = (m, extra = '') => `http://127.0.0.1:${PORT}/ssr-bench/?scene=${scene}&method=${m}${extra}`;
-      await page.navigate(url('reference'));
-      res.reference = await page.T('window.__p.reference()');
-      console.log(`  ${scene} reference:`, JSON.stringify(res.reference));
-      savePng(`ssr-bench-${scene}-reference.png`, await page.T('window.__p.shot()'));
-      save();
-      for (const m of SSR_BENCH_METHODS) {
-        await page.navigate(url(m));
-        res.methods[m] = await page.T('window.__p.measure()');
-        const r = res.methods[m];
-        console.log(`  ${scene} ${m}: still bias ${r.still.bias.toFixed(4)} rmse ${r.still.rmse.toFixed(4)} std ${r.still.stdMean.toFixed(4)}/${r.still.stdP99.toFixed(4)} | orbit std ${r.orbit.stdMean.toFixed(4)}/${r.orbit.stdP99.toFixed(4)} |de| ${r.orbit.meanAbsDelta.toFixed(4)}`);
-        savePng(`ssr-bench-${scene}-${m}.png`, await page.T('window.__p.shot()'));
+      if (!timingOnly) {
+        await page.navigate(url('reference'));
+        res.reference = await page.T('window.__p.reference()');
+        console.log(`  ${scene} reference:`, JSON.stringify(res.reference));
+        savePng(`ssr-bench-${scene}-reference.png`, await page.T('window.__p.shot()'));
         save();
+        for (const m of SSR_BENCH_METHODS) {
+          await page.navigate(url(m));
+          res.methods[m] = await page.T('window.__p.measure()');
+          const r = res.methods[m];
+          console.log(`  ${scene} ${m}: still bias ${r.still.bias.toFixed(4)} rmse ${r.still.rmse.toFixed(4)} std ${r.still.stdMean.toFixed(4)}/${r.still.stdP99.toFixed(4)} | orbit std ${r.orbit.stdMean.toFixed(4)}/${r.orbit.stdP99.toFixed(4)} |de| ${r.orbit.meanAbsDelta.toFixed(4)}`);
+          savePng(`ssr-bench-${scene}-${m}.png`, await page.T('window.__p.shot()'));
+          save();
+        }
       }
       // GPU ms at 1920x1080, loop stopped: each method, and each pipeline's own G-buffer + lit baseline
       const runsT = [...SSR_BENCH_METHODS.map((m) => [m, '']), ['ours', '&base=1'], ['three-blur', '&base=1'], ['three-stoch', '&base=1']];
@@ -515,7 +519,7 @@ async function ssrBench() {
     }
     out.finished = new Date().toISOString();
     save();
-    console.log('  saved', path.relative(process.cwd(), path.join(OUT, 'ssr-bench.json')));
+    console.log('  saved', path.relative(process.cwd(), file));
   } finally {
     page.close();
   }
