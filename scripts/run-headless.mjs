@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | ssr-rt | probe-core | probe-bench | ssr-bench)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | probe-core | probe-bench | ssr-bench)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
@@ -281,6 +281,31 @@ async function checkScenes() {
  * shows the wall (SSR hit colour vs the analytic planar reflection). offscreen: the wall mirror,
  * which reflects what is behind the camera, has low confidence. Both variants; GPU ms at 1080p.
  */
+/**
+ * examples/ssr hybrid resolve + denoise seam (phase 5, W10): smoke only. Rooms and mirrorWall with
+ * the denoiser on: renders, no validation errors; screenshots of the denoised composite, the raw one,
+ * a left-raw / right-denoised split and the source-per-pixel view.
+ */
+async function hybridChecks(pages) {
+  console.log('examples/ssr (hybrid + denoise):');
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1`);
+  pages.push(p);
+  const name = await p.T('window.__p.denoiserName');
+  check('hybrid: denoiser found', !!name, name ?? 'none (no sibling Denoiser repo): the composite runs the raw signal');
+  for (const id of ['rooms', 'mirrorWall', 'explainer']) {
+    const before = results.logs.length;
+    await p.T(`window.__p.load(${JSON.stringify(id)})`);
+    await p.T('window.__p.step(24)');
+    for (const v of ['final', 'raw', 'split', 'source', 'confidence']) {
+      await p.T(`window.__p.setView(${JSON.stringify(v)})`);
+      savePng(`hybrid-${id}-${v}.png`, await p.T('window.__p.shot()'));
+    }
+    await p.T("window.__p.setView('final')");
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    check(`hybrid ${id}: denoised composite renders, no validation errors`, errs.length === 0, errs.slice(0, 2).join(' | '));
+  }
+}
+
 async function ssrChecks(pages) {
   console.log('examples/ssr:');
   for (const variant of ['auto', 'workgroup']) {
@@ -587,7 +612,7 @@ async function ssrRtChecks(pages) {
  * examples/ssr-bench (phase 3 gate, docs/research/ssr-gate.md). The smoke (section `ssr-bench`):
  * every method renders on mirrorWall with finite output and no validation error; not a numbers gate.
  */
-const SSR_BENCH_METHODS = ['ours', 'ours-accum', 'three-blur', 'three-stoch', 'three-denoise'];
+const SSR_BENCH_METHODS = ['ours', 'ours-accum', 'ours-denoise', 'three-blur', 'three-stoch', 'three-denoise'];
 async function ssrBenchSmoke(pages) {
   console.log('examples/ssr-bench (smoke):');
   const url = (m) => `http://127.0.0.1:${PORT}/ssr-bench/?scene=mirrorWall&method=${m}`;
@@ -604,6 +629,9 @@ async function ssrBenchSmoke(pages) {
 async function ssrBench() {
   const scenes = args.includes('--ssr-scenes') ? args[args.indexOf('--ssr-scenes') + 1].split(',') : ['rooms', 'explainer', 'mirrorWall', 'roughnessRamp'];
   const timingOnly = args.includes('--ssr-timing-only'); // repeat the 1080p timing without the metrics
+  // --ssr-methods ours,ours-denoise,three-denoise: only these methods (and their pipelines' baselines)
+  const methods = args.includes('--ssr-methods') ? args[args.indexOf('--ssr-methods') + 1].split(',') : SSR_BENCH_METHODS;
+  const baseOf = (m) => (m.startsWith('ours') ? 'ours' : m === 'three-blur' ? 'three-blur' : 'three-stoch');
   const out = { started: new Date().toISOString(), scenes: {}, timing: [] };
   const file = path.join(OUT, timingOnly ? 'ssr-bench-timing.json' : 'ssr-bench.json');
   const save = () => { fs.mkdirSync(OUT, { recursive: true }); fs.writeFileSync(file, JSON.stringify(out, null, 1)); };
@@ -619,7 +647,7 @@ async function ssrBench() {
         console.log(`  ${scene} reference:`, JSON.stringify(res.reference));
         savePng(`ssr-bench-${scene}-reference.png`, await page.T('window.__p.shot()'));
         save();
-        for (const m of SSR_BENCH_METHODS) {
+        for (const m of methods) {
           await page.navigate(url(m));
           res.methods[m] = await page.T('window.__p.measure()');
           const r = res.methods[m];
@@ -629,7 +657,7 @@ async function ssrBench() {
         }
       }
       // GPU ms at 1920x1080, loop stopped: each method, and each pipeline's own G-buffer + lit baseline
-      const runsT = [...SSR_BENCH_METHODS.map((m) => [m, '']), ['ours', '&base=1'], ['three-blur', '&base=1'], ['three-stoch', '&base=1']];
+      const runsT = [...methods.map((m) => [m, '']), ...[...new Set(methods.map(baseOf))].map((b) => [b, '&base=1'])];
       for (const [m, extra] of runsT) {
         await page.navigate(url(m, `${extra}&w=1920&h=1080`));
         const t = await page.T('window.__p.time(30)');
@@ -807,6 +835,7 @@ async function main() {
     if (runs('scenes')) pages.push(...(await checkScenes()));
     if (runs('sssr-core')) await sssrCoreChecks(pages);
     if (runs('ssr')) await ssrChecks(pages);
+    if (runs('hybrid')) await hybridChecks(pages);
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (ssrBenchFull) await ssrBench();
     else if (runs('ssr-bench')) await ssrBenchSmoke(pages);

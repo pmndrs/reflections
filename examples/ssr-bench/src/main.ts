@@ -8,6 +8,8 @@
 //   ours           ScreenSpaceReflectionsPass + screenSpaceComposite, product defaults, no denoiser
 //   ours-accum     ours + an exponential history of the specular term, reprojected by the G-buffer
 //                  motion, reset on disocclusion. A BENCH STAND-IN for the denoise seam, not a feature.
+//   ours-denoise   ours through the hybrid resolve with denoiser/ffx's FfxReflectionDenoiser behind the
+//                  denoise seam (HybridReflections; phase 5, W10). Needs the sibling Denoiser repo.
 //   three-blur     SSRNode (mirror ray + roughness blur mips) added to the lit pass, as
 //                  webgpu_postprocessing_ssr.html (without its SMAA)
 //   three-stoch    SSRNode stochastic, env specular off in the lighting, lit + SSR, as
@@ -32,14 +34,15 @@ import { ssr as threeSSR } from 'three/addons/tsl/display/SSRNode.js';
 import { temporalReproject } from 'three/addons/tsl/display/TemporalReprojectNode.js';
 import { recurrentDenoise } from 'three/addons/tsl/display/RecurrentDenoiseNode.js';
 import {
-  MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes, screenSpaceComposite,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes, screenSpaceComposite,
 } from '@pmndrs/reflections/three';
 import { HIT_WGSL } from '@pmndrs/reflections/core';
 import { SCENES, type KitScene } from '../../shared';
+import { createReflectionDenoiser } from '../../shared/denoiser';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
-const METHODS = ['ours', 'ours-accum', 'three-blur', 'three-stoch', 'three-denoise', 'reference'] as const;
+const METHODS = ['ours', 'ours-accum', 'ours-denoise', 'three-blur', 'three-stoch', 'three-denoise', 'reference'] as const;
 type Method = (typeof METHODS)[number];
 const q = new URLSearchParams(location.search);
 const W = Number(q.get('w') ?? 960), H = Number(q.get('h') ?? 540);
@@ -399,6 +402,14 @@ async function main() {
     } else if (method === 'ours') {
       pipeline.outputNode = screenSpaceComposite(pass0, { probes, environment: env, environmentIntensity: envI }).final;
       render = () => { pass0.render(scene, camera); draw(); };
+    } else if (method === 'ours-denoise') {
+      const denoiser = createReflectionDenoiser(device, GLOSSY);
+      if (!denoiser) throw new Error('ours-denoise needs the sibling Denoiser repo (examples/vite.config.ts)');
+      const hybrid = new HybridReflections(pass0, { probes, environment: env, environmentIntensity: envI, denoiser });
+      pipeline.outputNode = hybrid.composite().final;
+      render = () => { pass0.render(scene, camera); hybrid.update(); draw(); };
+      info = { denoiser: denoiser.name, roughnessThreshold: `${GLOSSY}^2 alpha`, seam: 'HybridReflections (signal = ssr + (1 - c) probe/env)' };
+      (window as N).__resetAccum = () => hybrid.resetHistory();
     } else {
       // ours-accum: BENCH STAND-IN. history.rgb = exponential mean of the specular radiance
       // (mix(probe/env, SSR hit, confidence)), history.a = linear view depth; reprojected by the

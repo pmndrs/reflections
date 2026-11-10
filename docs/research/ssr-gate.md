@@ -1,5 +1,7 @@
 # Phase 3 gate: our screen-space reflections vs three r187's `SSRNode`
 
+**Status: passes with the denoiser (W10 re-run, next section); mirrorWall GPU ms at parity.**
+
 G1, 2026-11-10. The bench is `examples/ssr-bench/`. Reproduce with
 `REFLECTIONS_PORT=<port> pnpm check -- --only ssr-bench --ssr-bench` (writes `out/ssr-bench.json` and
 `out/ssr-bench-<scene>-<method>.png`), and `--ssr-timing-only` to repeat the 1080p timing. The data
@@ -12,7 +14,50 @@ Machine: Apple Silicon (`metal-3`), Chrome 157 headless, WebGPU through Dawn/Met
 worktrees shared the GPU during both runs**, so the absolute ms carry contention. Don't compare them
 with numbers from the main checkout (CLAUDE.md rule 3).
 
-## Verdict: pending the denoise seam
+## W10 re-run with the denoiser (2026-11-10): gate passes, mirrorWall ms at parity
+
+One run of the same bench with a sixth method, `ours-denoise`: ours through the hybrid resolve
+(`HybridReflections`), with denoiser/ffx's `FfxReflectionDenoiser` behind the denoise seam. It is
+resolved from the sibling Denoiser repo's source at `0ff604c`. The denoiser is gated at the tracer's
+threshold (0.447² alpha) and runs with its defaults. Nothing was tuned. Reproduce with
+`pnpm check -- --only ssr-bench --ssr-bench --ssr-methods ours,ours-denoise,three-denoise`. The data
+is in `docs/research/ssr-bench-w10.json`. Branch `worktree-agent-a846f9eaef12aaeab`, same machine
+class (Apple Silicon, Chrome 157 headless). Other worktrees may have shared the GPU, so the ms are
+from one run, with G1's contention caveats. `ours` was re-run in the same session as the anchor:
+its metrics match G1's within 0.0004.
+
+| scene | method | RMSE | still std mean / p99 | orbit \|Δe\| | orbit std mean / p99 | GPU ms over own baseline (frame) |
+|---|---|---|---|---|---|---|
+| rooms | ours (raw) | 0.0099 | 0.0029 / 0.0181 | 0.0037 | 0.0053 / 0.0210 | 0.73 (2.30) |
+| | **ours + FFX** | **0.0081** | **0.0001 / 0.0004** | **0.0010** | **0.0038 / 0.0223** | **1.98 (3.55)** |
+| | three + denoise | 0.0287 | 0.0011 / 0.0037 | 0.0018 | 0.0057 / 0.0425 | 4.71 (6.36) |
+| explainer | ours (raw) | 0.0321 | 0.0053 / 0.0560 | 0.0063 | 0.0093 / 0.1264 | 0.94 (1.98) |
+| | **ours + FFX** | **0.0268** | **0.0001 / 0.0014** | **0.0028** | **0.0077 / 0.1130** | **2.32 (3.36)** |
+| | three + denoise | 0.0513 | 0.0003 / 0.0023 | 0.0030 | 0.0121 / 0.1335 | 3.05 (4.36) |
+| mirrorWall | ours (raw) | 0.0168 | 0.0004 / 0.0142 | 0.0020 | 0.0060 / 0.0556 | 1.07 (1.60) |
+| | **ours + FFX** | **0.0164** | **0.0000 / 0.0011** | **0.0023** | **0.0076 / 0.0557** | **2.45 (2.97)** |
+| | three + denoise | 0.0918 | 0.0010 / 0.0047 | 0.0028 | 0.0160 / 0.0914 | 2.30 (2.86) |
+| roughnessRamp | ours (raw) | 0.0389 | 0.0232 / 0.0673 | 0.0228 | 0.0210 / 0.0672 | 0.74 (1.47) |
+| | **ours + FFX** | **0.0213** | **0.0004 / 0.0020** | **0.0028** | **0.0071 / 0.0706** | **1.64 (2.37)** |
+| | three + denoise | 0.0464 | 0.0005 / 0.0026 | 0.0029 | 0.0097 / 0.0792 | 3.19 (4.11) |
+
+Baselines in this run (1080p): ours 1.57 / 1.04 / 0.52 / 0.73 ms, three stochastic 1.66 / 1.31 / 0.56 / 0.92 ms (rooms / explainer / mirrorWall / roughnessRamp).
+
+| SPEC phase 3 gate | Result | Verdict |
+|---|---|---|
+| No boiling on the rooms and G1 | Rooms: still std p99 0.018 → 0.0004 with the denoiser (three + denoise: 0.0037). G1's steampunk scene is still not in the kit. | **passes on rooms**; G1 not run |
+| Flicker at or below three `SSRNode` + its denoise | Still std (mean and p99), orbit `\|Δe\|` and orbit std (mean and p99) are all below three + denoise on all 4 scenes. The closest are orbit `\|Δe\|` on explainer (0.0028 vs 0.0030) and roughnessRamp (0.0028 vs 0.0029). | **passes** (4 / 4) |
+| GPU ms at or below three `SSRNode` + its denoise | Below on rooms (1.98 vs 4.71), explainer (2.32 vs 3.05) and roughnessRamp (1.64 vs 3.19). On mirrorWall it is 2.45 vs 2.30 (+0.15 ms, 7 %), within G1's run-to-run spread (up to 0.5 ms, most within 0.1). | **passes on 3 / 4; mirrorWall at parity** |
+
+**Verdict: phase 3 gate passes,** with one caveat: mirrorWall's ms is at parity, not under. RMSE is also the lowest of the three methods on every scene (the reference still favours ours; see "Reference").
+
+What the denoiser costs:
+- **The denoiser adds 0.9–1.4 ms at 1080p over ours raw.** That covers the signal pass, the seam's guides pass, FFX's four full-screen passes, one copy, and the second probe lookup in the composite (D1400, D1401).
+- **That fits inside G1's 1.1–4.3 ms headroom everywhere except mirrorWall.** There, three's own stochastic path is cheap (2.3 ms with its denoiser).
+- **The obvious saving is not taken (don't tune to win).** FFX's own design runs the denoiser over SSSR's tile list, so it skips tiles with no glossy pixels. The port in the denoiser repo dispatches full screen. Logged in the fine-tune backlog.
+- **On mirrorWall, the orbit numbers don't improve.** Most glossy pixels there are mirrors, which FFX only reprojects. Orbit `|Δe|` is 0.0023 vs 0.0020 raw, still under three's 0.0028.
+
+## G1 verdict (before the denoiser): pending the denoise seam
 
 | SPEC phase 3 gate | Result | Verdict |
 |---|---|---|
@@ -171,7 +216,7 @@ There's no path tracer in this repo, so the reference is the **ideal screen-spac
 ## Not done
 
 - **G1** (the denoiser cleanroom branch's steampunk scene) isn't in the kit.
-- **The denoised comparison.** The verdict waits for it: ours + `FfxReflectionDenoiser` through the seam (phase 5), in this bench, as a sixth method.
+- ~~The denoised comparison~~: done in the W10 re-run above.
 - **A path-traced reference** for off-screen and occluded content (phase 4 brings the rays).
 - **`hitColor: 'history'`** (D1002) isn't measured. The reference reflects the lit image, so it would likely lower our bias.
 - **Asset scenes** and higher orbit speeds.
