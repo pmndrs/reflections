@@ -144,6 +144,35 @@ async function main() {
     check("'warp' lookup matches the hardware cube sampler", stats.mean < 1, `mean ${stats.mean.toFixed(3)}, max ${stats.max} / 255`);
     await p.T("window.__p.setLookup('warp')");
 
+    // probe features (examples/probes/src/checks.ts); each restores the page's state
+    const C = (name) => p.T(`window.__p.checks.${name}()`);
+    const f = (x, d = 3) => Number(x).toFixed(d);
+    const sh = await C('shadows');
+    check('bake restores shadow autoUpdate', sh.lights === 2 && sh.autoUpdate, JSON.stringify(sh));
+    const po = await C('projectionOffset');
+    // the room's walls lie on the projection box's faces, so a few texels flip inside/outside by rounding
+    check('projectionOffset = moving the probe with the opposite originOffset', po.same.mean < 0.05 && po.same.over < 0.002,
+      `mean ${f(po.same.mean, 4)}, ${f(po.same.over * 100)} % of pixels > 2/255`);
+    check('projectionOffset changes the image', po.changed.mean > 0.2, `mean ${f(po.changed.mean)} without the offset`);
+    const cov = await C('coverage');
+    check('coverage: alpha 0 outside every volume, 1 inside, fade between; rgb 0 outside', cov.alphaErr < 1e-4 && cov.rgbOutside === 0 && cov.lum > 0,
+      `alpha ${JSON.stringify(cov.alpha)}, max err ${cov.alphaErr.toExponential(1)}`);
+    check('coverage: rgb * alpha equals the vec3 form (black environment)', cov.composeErr < 1e-3, `max rel err ${cov.composeErr.toExponential(1)}`);
+    const ck = await C('cacheKey');
+    check('two probe sets of equal size keep their own programs', ck.left[0] > 200 && ck.left[2] < 50 && ck.right[2] > 200 && ck.right[0] < 50 && ck.keysDiffer,
+      `left ${ck.left}, right ${ck.right}, keys differ ${ck.keysDiffer}`);
+    const ts = await C('timeSlice');
+    check('time-sliced bake over 3 calls = full bake', ts.slicedVsFull.max <= 1, `max ${ts.slicedVsFull.max} / 255`);
+    check('one slice alone differs from the full bake', ts.oneVsFull.max > 8, `max ${ts.oneVsFull.max} / 255`);
+    const ev = await C('environment');
+    const n = ev.counts;
+    check('environment captured only when it changed', n.noEnvironment === 3 && n.added === 4 && n.unchanged === 3 && n.versionBumped === 4 && n.always === 4 && n.slicedUnchanged === 0 && n.removed === 3,
+      JSON.stringify(n));
+    check('environment reaches the image, and removing it clears the slot', ev.litVsBefore.mean > 1 && ev.afterVsBefore.max <= 1,
+      `lit mean ${f(ev.litVsBefore.mean)}, removed max ${ev.afterVsBefore.max} / 255`);
+    const hp = await C('helper');
+    check('helper draws world-space influence and projection boxes', hp.children === 9 && hp.boxes === 6 && hp.centreErr < 1e-6, JSON.stringify(hp));
+
     if (args.includes('--time-bake')) {
       // loop stopped (FREEZE); median ms per bake, 5 bakes per submit-wait, 7 bursts
       for (const res of [128, 256]) {

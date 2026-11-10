@@ -16,6 +16,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ReflectionProbesNode, reflectionProbes, type SeamFix,
 } from '@pmndrs/reflections/three';
+import { makeChecks, type Page } from './checks';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any; // TSL's node typings are too strict for hand-written shader maths
@@ -263,9 +264,8 @@ async function main() {
   // ---- headless hooks (same shape as the harness for the PR build) --------------------------
   const median = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
   const idle = () => device.queue.onSubmittedWorkDone();
-  Object.assign(window, {
-    __p: {
-      THREE, scene, camera, renderer, controls, probes, gridMaterial, dynamicMaterial, dynamicObject, grid, params, capture,
+  const page = {
+      THREE, scene, camera, renderer, controls, probes, probesHelper, gridMaterial, dynamicMaterial, dynamicObject, grid, params, capture,
       get node() { return node; },
       stop() { renderer.setAnimationLoop(null); },
       start() { renderer.setAnimationLoop(animate); },
@@ -317,8 +317,9 @@ async function main() {
       },
       /** Swap the environment node (null: no IBL at all), for the lookup's marginal cost. */
       setEnvNode(on: boolean) { scene.environmentNode = on ? node : null; },
-    },
-  });
+  };
+  // feature checks for scripts/run-headless.mjs
+  Object.assign(window, { __p: Object.assign(page, { checks: makeChecks(page as Page) }) });
 }
 
 main().catch((e) => {

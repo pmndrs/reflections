@@ -23,14 +23,21 @@
 //     one trilinear), nothing in the bake.
 //
 //   - `originOffset` (new, per probe): captures from a point other than the volumes' centre.
-//   - `bake( ..., { environment: false } )` (new): skip the environment slot.
+//     `projectionOffset` (#35046) is the converse: it moves the projection box, not the capture point.
+//   - `bake( ..., { environment: false | 'always' } )` (new): skip the environment slot, or capture
+//     it every bake; by default it is captured only when `scene.environment` changed (the
+//     maintainer's fork, 351167b7d1).
+//   - `bake( ..., { probes } )` (the fork, 37bf331235): capture only some probes, to spread a live
+//     update over several frames.
 //
 // Swapping to #35046 once it lands: import ReflectionProbe / ReflectionProbes / reflectionProbes
 // from three/addons instead, drop `seamFix` / `bakedSeamFix`, and move any probe with an
 // `originOffset` to its box centre (or keep that one extension); `texture` becomes a CubeArrayTexture
 // (nothing outside the node should sample it directly). Everything else (constructor, influenceSize,
-// projectionSize, blendDistance, boxProjection, bake( renderer, scene, { resolution, near, far } ),
-// texture, bakedProbes, capturing, dispose) has the same name and meaning.
+// projectionSize, projectionOffset, blendDistance, boxProjection, bake( renderer, scene, { resolution,
+// near, far } ), texture, bakedProbes, capturing, dispose) has the same name and meaning. #35046 head's
+// vec4 `reflectionProbes()` is our `reflectionProbesLocal()`; ours keeps the vec3 form with the
+// environment fallback (docs/DIVERGES.md D20).
 
 import * as THREE from 'three/webgpu';
 import { ProbePrefilter, maxLodFor } from '@pmndrs/reflections-core';
@@ -53,6 +60,13 @@ export class ReflectionProbe extends THREE.Object3D {
   readonly influenceSize: THREE.Vector3;
   /** Size of the box reflections are projected onto, usually the room's walls. `null` uses `influenceSize`. */
   projectionSize: THREE.Vector3 | null = null;
+  /**
+   * Offset of the projection box's centre from the probe (#35046), scaled with the probe like the
+   * volume sizes; rotation is ignored. Use it when the capture point isn't at the room's centre: the
+   * probe (and its influence volume) stays where it captures, the box moves onto the walls.
+   * {@link originOffset} is the converse: the volumes stay, the capture point moves. Both can be set.
+   */
+  readonly projectionOffset = new THREE.Vector3();
   /** Distance over which the influence fades in from the volume's faces. */
   blendDistance = 0.5;
   /**
@@ -73,6 +87,7 @@ export class ReflectionProbe extends THREE.Object3D {
     super.copy(source, recursive);
     this.influenceSize.copy(source.influenceSize);
     this.projectionSize = source.projectionSize === null ? null : source.projectionSize.clone();
+    this.projectionOffset.copy(source.projectionOffset);
     this.blendDistance = source.blendDistance;
     this.originOffset.copy(source.originOffset);
     return this;
@@ -80,18 +95,26 @@ export class ReflectionProbe extends THREE.Object3D {
 }
 
 export interface BakeOptions {
-  /** Cube face size, a power of two from 64. Default 128. */
+  /** Cube face size, rounded down to a power of two, at least 64. Default 128. */
   resolution?: number;
   /** Near plane of the capture camera. Default 0.1. */
   near?: number;
   /** Far plane of the capture camera. Default 100. */
   far?: number;
   /**
-   * Whether to capture `scene.environment` into the fallback slot. Default true. Pass false when the
-   * probes' influence covers every surface that samples them: the slot then stays black and the
-   * bake skips its six faces and prefilter. (Not in #35046.)
+   * The fallback slot (not in #35046). `true` (default): capture `scene.environment` when it changed
+   * since the last bake (another texture, or its `version` / `pmremVersion` moved) or the layout
+   * changed. `'always'`: capture it every bake, for an environment whose content changes without a
+   * version bump (a render target's texture). `false`: leave the slot black; use it when the probes'
+   * influence covers every surface that samples them.
    */
-  environment?: boolean;
+  environment?: boolean | 'always';
+  /**
+   * Capture only these probes and keep the others' slots, for example to spread a live update over
+   * several frames (the maintainer's fork, 37bf331235). Ignored, and every probe captured, when the
+   * bake changes the layout (resolution, seam fix, or the set or order of probes).
+   */
+  probes?: ReflectionProbe[];
 }
 
 export type SeamFix = 'warp' | 'none';
@@ -121,7 +144,12 @@ export class ReflectionProbes extends THREE.Object3D {
   private cubeCamera: THREE.CubeCamera | null = null;
   private prefilter: ProbePrefilter | null = null;
   private readonly environment = new THREE.Scene();
-  private environmentBaked = false;
+  /** The environment the fallback slot holds (null: black), and its versions when captured. */
+  private environmentTexture: THREE.Texture | null = null;
+  private environmentVersion = -1;
+  private environmentPMREMVersion = -1;
+  /** Nodes sampling this set, rebuilt when a bake replaces the texture (see {@link track}). */
+  private readonly users = new Set<WeakRef<THREE.Node>>();
 
   constructor() {
     super();
@@ -129,16 +157,26 @@ export class ReflectionProbes extends THREE.Object3D {
   }
 
   /**
-   * Captures every probe and `scene.environment` into the array. Hide helpers and objects that
-   * should not appear in reflections first. Reuses the array, the capture cube and the prefilter
-   * between bakes of the same layout, so re-baking every frame neither allocates nor changes the
-   * texture materials sample.
+   * Registers a node that samples this set. A bake that replaces the texture (a new layout) marks it
+   * for rebuild, so static meshes rebind the new texture on the next frame; r186 doesn't rebind
+   * unchanged render objects on its own. Called by {@link ReflectionProbesNode}.
+   */
+  track(node: THREE.Node) {
+    this.users.add(new WeakRef(node));
+  }
+
+  /**
+   * Captures the probes and `scene.environment` into the array (see {@link BakeOptions} for which
+   * ones). Hide helpers and objects that should not appear in reflections first. Reuses the array,
+   * the capture cube and the prefilter between bakes of the same layout, so re-baking every frame
+   * neither allocates nor changes the texture materials sample.
    */
   bake(renderer: THREE.WebGPURenderer, scene: THREE.Scene, options: BakeOptions = {}) {
     const r = renderer as Renderer;
     if (r.backend.isWebGPUBackend !== true) throw new Error('ReflectionProbes: .bake() requires the WebGPU backend.');
-    const { resolution = 128, near = 0.1, far = 100, environment: captureEnvironment = true } = options;
-    if (!Number.isInteger(Math.log2(resolution)) || resolution < 64) throw new Error('ReflectionProbes: resolution must be a power of two from 64.');
+    const { near = 0.1, far = 100, environment: environmentOption = true } = options;
+    // rounded down like #35046 (2712ba1b23), but from 64: our prefilter has no 256 floor (D23)
+    const resolution = Math.max(64, THREE.MathUtils.floorPowerOfTwo(options.resolution ?? 128));
 
     this.updateWorldMatrix(true, true);
     const probes = (this.children.filter((c) => (c as ReflectionProbe).isReflectionProbe) as ReflectionProbe[]).sort((a, b) => volume(a) - volume(b));
@@ -148,6 +186,8 @@ export class ReflectionProbes extends THREE.Object3D {
 
     let renderTarget = this.renderTarget;
     let previous: THREE.RenderTarget | null = null;
+    // a new array, or every slot to be filtered again (the seam fix changed)
+    const layoutChanged = renderTarget === null || renderTarget.width !== resolution || renderTarget.depth !== depth || this.bakedSeamFix !== this.seamFix;
     if (renderTarget === null || renderTarget.width !== resolution || renderTarget.depth !== depth) {
       // materials keep sampling the previous array while the probes are captured
       previous = renderTarget;
@@ -173,8 +213,20 @@ export class ReflectionProbes extends THREE.Object3D {
     for (const cam of cubeCamera.children as THREE.PerspectiveCamera[]) {
       if (cam.near !== near || cam.far !== far) { cam.near = near; cam.far = far; cam.updateProjectionMatrix(); }
     }
+    // Capturing only some probes keeps the other slots, so it needs the slots of the last bake.
+    const sameProbes = probes.length === this.bakedProbes.length && probes.every((probe, i) => probe === this.bakedProbes[i]);
+    const captured = options.probes !== undefined && !layoutChanged && sameProbes ? probes.filter((probe) => options.probes!.includes(probe)) : probes;
+
+    // The environment is captured again only when it changed. A new array starts black, which is
+    // what no environment looks like; a reused one still holds the last environment, so that slot
+    // is cleared when the environment goes away.
+    const environmentTexture = environmentOption === false ? null : scene.environment;
+    const environmentChanged = environmentTexture !== this.environmentTexture || (environmentTexture !== null
+      && (environmentTexture.version !== this.environmentVersion || environmentTexture.pmremVersion !== this.environmentPMREMVersion));
+    const captureEnvironment = environmentTexture !== null && (layoutChanged || environmentChanged || environmentOption === 'always');
+    const clearEnvironment = environmentTexture === null && this.environmentTexture !== null && renderTarget === this.renderTarget;
     const environment = this.environment;
-    environment.background = scene.environment;
+    environment.background = environmentTexture;
 
     // clear every captured face, whatever the application's clear settings
     const { autoClear, autoClearColor, autoClearDepth, autoClearStencil } = r;
@@ -195,26 +247,24 @@ export class ReflectionProbes extends THREE.Object3D {
       }
     });
 
+    const device: GPUDevice = r.backend.device;
+    const target: GPUTexture = r.backend.get(renderTarget.texture).texture;
+    const captureSlot = (source: THREE.Scene, position: THREE.Vector3, slot: number) => {
+      cubeCamera.position.copy(position);
+      cubeCamera.updateMatrixWorld(true);
+      cubeCamera.update(r, source);
+      // three submitted the six face renders; the prefilter goes after them on the same queue
+      const encoder = device.createCommandEncoder({ label: 'ReflectionProbes.bake' });
+      this.prefilter!.encode(encoder, r.backend.get(this.cubeTarget!.texture).texture, target, slot);
+      device.queue.submit([encoder.finish()]);
+    };
+
     this.capturing = true;
     try {
-      // unfilled slots stay black, so an empty environment needs no capture
-      const count = scene.environment !== null && captureEnvironment ? probes.length + 1 : probes.length;
-      const device: GPUDevice = r.backend.device;
-      // ...but a reused array still holds the last bake's environment: clear that slot
-      if (count === probes.length && renderTarget === this.renderTarget && this.environmentBaked) {
-        clearSlot(device, r.backend.get(renderTarget.texture).texture, probes.length);
-      }
-      this.environmentBaked = count > probes.length;
-      for (let i = 0; i < count; i++) {
-        const probe = probes[i];
-        cubeCamera.position.copy(probe !== undefined ? probeOrigin(probe, _position) : _position.set(0, 0, 0));
-        cubeCamera.updateMatrixWorld(true);
-        cubeCamera.update(r, probe !== undefined ? scene : environment);
-        // three submitted the six face renders; the prefilter goes after them on the same queue
-        const encoder = device.createCommandEncoder({ label: 'ReflectionProbes.bake' });
-        this.prefilter.encode(encoder, r.backend.get(this.cubeTarget.texture).texture, r.backend.get(renderTarget.texture).texture, i);
-        device.queue.submit([encoder.finish()]);
-      }
+      if (clearEnvironment) clearSlot(device, target, probes.length);
+      // the environment goes first: the probe captures reflect it
+      if (captureEnvironment) captureSlot(environment, _position.set(0, 0, 0), probes.length);
+      for (const probe of captured) captureSlot(scene, probeOrigin(probe, _position), probes.indexOf(probe));
     } finally {
       for (const shadow of shadows) shadow.autoUpdate = true;
       this.capturing = false;
@@ -222,11 +272,24 @@ export class ReflectionProbes extends THREE.Object3D {
       Object.assign(r, { autoClear, autoClearColor, autoClearDepth, autoClearStencil });
     }
 
+    this.environmentTexture = environmentTexture;
+    this.environmentVersion = environmentTexture?.version ?? -1;
+    this.environmentPMREMVersion = environmentTexture?.pmremVersion ?? -1;
+
     previous?.dispose();
     this.renderTarget = renderTarget;
     this.texture = renderTarget.texture;
     this.bakedProbes = probes;
     this.bakedSeamFix = this.seamFix;
+    if (layoutChanged) {
+      // the cache key of each node changes with the texture and probe count; bump the nodes so the
+      // next frame sees it before drawing anything (updateBefore would be one frame late)
+      for (const ref of this.users) {
+        const node = ref.deref();
+        if (node === undefined) this.users.delete(ref);
+        else node.needsUpdate = true;
+      }
+    }
   }
 
   /** Frees the GPU resources allocated by this instance. */
@@ -236,6 +299,7 @@ export class ReflectionProbes extends THREE.Object3D {
     this.prefilter?.dispose();
     this.renderTarget = this.cubeTarget = this.cubeCamera = this.prefilter = null;
     this.texture = null;
+    this.environmentTexture = null;
   }
 }
 
