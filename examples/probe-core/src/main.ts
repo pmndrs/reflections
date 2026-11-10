@@ -8,7 +8,7 @@
 //             probe set holding the constant c must give the image of the constant fallback c, bit for
 //             bit; a structured capture must change the fallback pixels
 import {
-  ProbeSet, createScreenSpaceReflections, constantRadianceFallback, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
+  ProbeSet, createScreenSpaceReflections, createTracedReflections, constantRadianceFallback, type TraceProvider, type TracedReflectionsStats, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
   type FrameInputs, type ProbeLayoutId, type ProbeSetFormat, type ProbeVolume, type ScreenSpaceReflectionsInputs,
 } from '@pmndrs/reflections/core';
 import { lookAt, perspective, SCENE_WGSL } from '../../sssr-core/src/scene';
@@ -242,10 +242,27 @@ async function main() {
     const inputs: ScreenSpaceReflectionsInputs = screenSpaceInputsFromFrame(frame, { depthInverted: false });
     // occupancy 0: deterministic between tracer instances (the occupancy exit depends on atomic order)
     const settings = { fallbackColor: C, frameIndex: 3, minTraversalOccupancy: 0 };
-    const radianceOf = async (fallback: Parameters<typeof createScreenSpaceReflections>[1]['radianceFallback'], group?: GPUBindGroup) => {
-      const ssr = createScreenSpaceReflections(device, { width: W, height: H, radianceFallback: fallback });
+    // The trace seam (W8's pass) with an analytic provider: the back wall z = -6 (|x| < 4, 0 < y < 4),
+    // no bindings, no materials (grey). Traced misses and hit shading both go through the fallback.
+    const wall: TraceProvider = {
+      name: 'analytic-wall', entries: [], resources: () => [], version: 0, storageBufferCount: 0,
+      capabilities: { hitNormal: true, hitMaterial: false },
+      code: () => /* wgsl */ `
+fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
+  if (dir.z >= -1e-4) { return noHit(); }
+  let t = (-6.0 - origin.z) / dir.z;
+  let p = origin + dir * t;
+  if (t <= 0.0 || t > tMax || abs(p.x) > 4.0 || p.y < 0.0 || p.y > 4.0) { return noHit(); }
+  return Hit(t, 0u, vec2f(0.0), 0u, 0u, vec3f(0.0, 0.0, 1.0), true);
+}`,
+    };
+    let rtStats: TracedReflectionsStats | null = null;
+    const radianceOf = async (fallback: Parameters<typeof createScreenSpaceReflections>[1]['radianceFallback'], group?: GPUBindGroup, traced = false) => {
+      const ssr = createScreenSpaceReflections(device, { width: W, height: H, radianceFallback: fallback, missList: traced });
+      const rt = traced ? createTracedReflections(device, { width: W, height: H, provider: wall, radianceFallback: fallback }) : null;
       const enc = device.createCommandEncoder();
       ssr.dispatch(enc, { ...inputs, fallbackBindGroup: group }, settings);
+      rt?.dispatch(enc, { tracer: ssr, inputs, fallbackBindGroup: group }, { fallbackColor: C });
       const out = ssr.outputs.radiance;
       const row = Math.ceil((W * 8) / 256) * 256;
       const rb = device.createBuffer({ size: row * H, usage: U.MAP_READ | U.COPY_DST });
@@ -255,6 +272,7 @@ async function main() {
       const src = new Uint16Array(rb.getMappedRange().slice(0)); rb.destroy();
       const px = new Uint16Array(W * H * 4);
       for (let y = 0; y < H; y++) px.set(src.subarray((y * row) / 2, (y * row) / 2 + W * 4), y * W * 4);
+      if (rt) { rtStats = await rt.readStats(); rt.destroy(); }
       return px;
     };
     // pixels whose rgb differs by more than one f16 step (the prefilter of a constant rounds by up to one)
@@ -277,8 +295,16 @@ async function main() {
     const sset = probeSet([0, 1, 3, 0]);
     const sfb = probeRadianceFallback(sset);
     const structured = await radianceOf(sfb, sfb.bindGroup);
-    const res = { pixels: W * H, constantVsProbes: differing(constant, viaProbes), structuredVsConstant: differing(constant, structured) };
+    // + the traced pass: misses and grey hits shaded by the same fallback
+    const rtConstant = await radianceOf(constantRadianceFallback(), undefined, true);
+    const rtViaProbes = await radianceOf(cfb, cfb.bindGroup, true);
+    const rtStructured = await radianceOf(sfb, sfb.bindGroup, true);
+    const res = {
+      pixels: W * H, constantVsProbes: differing(constant, viaProbes), structuredVsConstant: differing(constant, structured),
+      rt: { stats: rtStats as TracedReflectionsStats | null, constantVsProbes: differing(rtConstant, rtViaProbes), structuredVsConstant: differing(rtConstant, rtStructured), changedByTrace: differing(viaProbes, rtViaProbes) },
+    };
     say(`sssr fallback: constant probes vs constant fallback ${res.constantVsProbes} px differ; structured probes change ${res.structuredVsConstant} of ${res.pixels} px`);
+    say(`rt (analytic wall): ${JSON.stringify(res.rt)}`);
     cset.dispose(); sset.dispose();
     return res;
   }
