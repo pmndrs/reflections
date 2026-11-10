@@ -78,7 +78,7 @@ export function rooms(opts: SceneOptions = {}): KitScene {
   };
   update(0);
   return {
-    id: 'rooms', title: "Ben Houston's two rooms (#35046)", scene, camera: makeCamera(views.default, opts.aspect, 0.05, 60),
+    id: 'rooms', title: 'Two rooms (the scene of three.js #35046)', scene, camera: makeCamera(views.default, opts.aspect, 0.05, 60),
     target: new THREE.Vector3(...views.default.target), views,
     probes: [
       { position: [-4, 2.5, 0], influenceSize: [8.4, 5.4, 8.4], projectionSize: [8, 5, 8] },
