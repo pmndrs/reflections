@@ -46,6 +46,7 @@ export default defineConfig({
       { find: /^@pmndrs\/reflections\/three$/, replacement: resolve(root, '../src/three.ts') },
       { find: /^@pmndrs\/reflections\/core$/, replacement: resolve(root, '../src/core.ts') },
       { find: /^@pmndrs\/reflections\/babylon$/, replacement: resolve(root, '../src/babylon.ts') },
+      { find: /^@pmndrs\/reflections\/pixi$/, replacement: resolve(root, '../src/pixi.ts') },
       { find: /^@pmndrs\/reflections$/, replacement: resolve(root, '../src/index.ts') },
       {
         find: /^@pmndrs\/denoiser-ffx$/,

@@ -31,6 +31,7 @@ The probes are this library's: an engine-agnostic core (GGX prefilter, cube-arra
 | `@pmndrs/reflections` / `/three` | three.js adapter: probes, TSL nodes |
 | `@pmndrs/reflections/core` | engine-agnostic WebGPU: the probe prefilter (more per the spec) |
 | `@pmndrs/reflections/babylon` | Babylon.js WebGPUEngine adapter (experimental): core SSR + probe set, frame-graph tasks (`examples/babylon`) |
+| `@pmndrs/reflections/pixi` | pixi.js v8 WebGPURenderer adapter (experimental): a small 3-D layer whose materials take pixi Textures, core SSR + probe set on pixi's device, the composite as a pixi `Filter` (`examples/pixi`) |
 
 ## Examples
 
