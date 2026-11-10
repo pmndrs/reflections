@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Reflections compare</title>
+    <style>
+      :root { color-scheme: dark; --panel: #0d0f13f0; --line: #ffffff1a; --fg: #e6e6e6; --muted: #9aa0a8; --accent: #7aa7ff; }
+      html, body { margin: 0; height: 100%; background: #08090b; color: var(--fg); font: 13px/1.4 system-ui, sans-serif; overflow: hidden; }
+      #wrap { position: fixed; left: 0; top: 0; right: 316px; bottom: 0; display: flex; align-items: center; justify-content: center; }
+      #stage { position: relative; max-width: 100%; max-height: 100%; background: #000; user-select: none; }
+      #stage .layer { position: absolute; inset: 0; }
+      #stage .layer canvas { width: 100%; height: 100%; display: block; }
+      #input { position: absolute; inset: 0; touch-action: none; cursor: grab; }
+      #divider { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 3px #000; }
+      #handle { position: absolute; top: 50%; left: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; background: #fff; color: #000;
+        display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: ew-resize; box-shadow: 0 1px 4px #000a; }
+      .label { position: absolute; top: 8px; padding: 3px 8px; border-radius: 5px; background: #000b; font-size: 12px; pointer-events: none; white-space: pre; }
+      #labelA { left: 8px; } #labelB { right: 8px; text-align: right; }
+      #panel { position: fixed; top: 0; right: 0; bottom: 0; width: 316px; box-sizing: border-box; overflow-y: auto; background: var(--panel); border-left: 1px solid var(--line); padding: 10px 12px; }
+      #panel h1 { font-size: 14px; margin: 0 0 2px; }
+      #panel .sub { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+      #panel h2 { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 12px 0 4px; font-weight: 600; }
+      #panel label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 3px 0; }
+      #panel label.check { justify-content: flex-start; }
+      #panel select { width: 190px; }
+      #panel input[type=number] { width: 64px; }
+      #panel button { background: #1b1e24; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer; font: inherit; }
+      #panel button:disabled { opacity: .5; cursor: default; }
+      #readout { font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #c8d0c8; white-space: pre; overflow-x: auto; margin-top: 6px; }
+      #status { font-size: 11px; color: var(--muted); white-space: pre-wrap; margin-top: 8px; }
+      .note { color: var(--muted); font-size: 11px; margin: 4px 0; }
+      a { color: var(--accent); }
+      @media (max-width: 720px) { #wrap { right: 0; bottom: 45vh; } #panel { top: auto; height: 45vh; width: auto; left: 0; border-left: 0; border-top: 1px solid var(--line); } }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <div id="stage">
+        <div class="layer" id="layerA"></div>
+        <div class="layer" id="layerB"></div>
+        <div id="input"></div>
+        <div id="divider"><div id="handle">&#x2194;</div></div>
+        <div class="label" id="labelA"></div>
+        <div class="label" id="labelB"></div>
+      </div>
+    </div>
+    <div id="panel">
+      <h1>Reflections: compare</h1>
+      <div class="sub">Two methods, same scene and camera, split by the divider. Each method has its own renderer and its own copy of the scene. <a href="./">showcase</a></div>
+      <div id="controls"></div>
+      <pre id="status">starting...</pre>
+    </div>
+    <script type="module" src="./src/compare.ts"></script>
+  </body>
+</html>

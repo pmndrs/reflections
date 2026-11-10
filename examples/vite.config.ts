@@ -25,6 +25,37 @@ function findDenoiser(): string | null {
   return null;
 }
 const denoiserRepo = findDenoiser();
+// denoiser/three's `ffxReflections()` TSL helper (examples/showcase compare page, method "three SSR +
+// FFX"), from the same Denoiser checkout. Only its temporal/ffx.ts module graph is used.
+const denoiserThreeFfx = denoiserRepo && existsSync(resolve(denoiserRepo, 'packages/denoiser-three/src/temporal/ffx.ts'))
+  ? resolve(denoiserRepo, 'packages/denoiser-three/src/temporal/ffx.ts') : null;
+
+// three-gpu-pathtracer (the compare page's path-traced reference, WebGL in its own canvas): a sibling
+// checkout found like the Denoiser repo, or $PATHTRACER_REPO; else a null stub.
+function findPathTracer(): string | null {
+  const entry = (repo: string) => resolve(repo, 'src/core/WebGLPathTracer.js');
+  const env = process.env.PATHTRACER_REPO;
+  if (env) return existsSync(entry(env)) ? resolve(env) : null;
+  for (let dir = resolve(root, '..'); dirname(dir) !== dir; dir = dirname(dir)) {
+    const repo = resolve(dirname(dir), 'three-gpu-pathtracer');
+    if (existsSync(entry(repo))) return repo;
+  }
+  return null;
+}
+const pathTracerRepo = findPathTracer();
+
+// Sources served from outside this repo (the Denoiser checkout, three-gpu-pathtracer) resolve `three`
+// and `three-mesh-bvh` from here, never from their own node_modules: one three instance per page.
+const outside = [denoiserRepo, pathTracerRepo].filter((x): x is string => !!x);
+const sharedDeps = {
+  name: 'reflections-shared-deps',
+  enforce: 'pre' as const,
+  async resolveId(this: { resolve: (s: string, i?: string, o?: object) => Promise<unknown> }, source: string, importer?: string) {
+    if (!importer || !/^(three|three-mesh-bvh)(\/|$)/.test(source)) return null;
+    if (!outside.some((r) => importer.startsWith(r + '/'))) return null;
+    return this.resolve(source, resolve(root, 'index.html'), { skipSelf: true });
+  },
+};
 
 // `downsampler` is linked (packages/core: `link:` to a checkout outside this repo); vite serves it
 // from its real path, so that checkout has to be on the allow list.
@@ -38,9 +69,10 @@ export default defineConfig({
   root,
   server: {
     port: Number(process.env.REFLECTIONS_PORT ?? 5370), strictPort: true, host: '127.0.0.1',
-    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : []), ...(downsamplerRepo ? [downsamplerRepo] : []), ...(bvhRepo ? [bvhRepo] : [])] },
+    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : []), ...(pathTracerRepo ? [pathTracerRepo] : []), ...(downsamplerRepo ? [downsamplerRepo] : []), ...(bvhRepo ? [bvhRepo] : [])] },
   },
-  define: { __DENOISER_SOURCE__: JSON.stringify(denoiserRepo ?? '') },
+  plugins: [sharedDeps],
+  define: { __DENOISER_SOURCE__: JSON.stringify(denoiserRepo ?? ''), __PATHTRACER_SOURCE__: JSON.stringify(pathTracerRepo ?? '') },
   resolve: {
     alias: [
       { find: /^@pmndrs\/reflections\/three$/, replacement: resolve(root, '../src/three.ts') },
@@ -52,7 +84,9 @@ export default defineConfig({
         find: /^@pmndrs\/denoiser-ffx$/,
         replacement: denoiserRepo ? resolve(denoiserRepo, 'packages/denoiser-ffx/src/index.ts') : resolve(root, 'shared/denoiser-missing.ts'),
       },
+      { find: /^@pmndrs\/denoiser-three-ffx$/, replacement: denoiserThreeFfx ?? resolve(root, 'shared/denoiser-three-missing.ts') },
+      { find: /^three-gpu-pathtracer-webgl$/, replacement: pathTracerRepo ? resolve(pathTracerRepo, 'src/core/WebGLPathTracer.js') : resolve(root, 'shared/pathtracer-missing.ts') },
     ],
   },
-  build: { outDir: resolve(root, 'dist'), emptyOutDir: true, rollupOptions: { input: pages } },
+  build: { outDir: resolve(root, 'dist'), emptyOutDir: true, rollupOptions: { input: { ...pages, 'showcase-compare': resolve(root, 'showcase/compare.html') } } },
 });
