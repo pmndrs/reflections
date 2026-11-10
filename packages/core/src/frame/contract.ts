@@ -72,6 +72,8 @@ export interface FrameCamera {
   view: Mat4;
   /** View to clip, WITHOUT jitter. */
   projection: Mat4;
+  /** View to clip as this frame was rasterised, jitter included. Equals `projection` without jitter. */
+  projectionJittered?: Mat4;
   prevView: Mat4;
   prevProjection: Mat4;
   /** prevProjection · prevView: last frame's world to clip, unjittered. */
@@ -120,8 +122,12 @@ export class FrameCameraHistory {
   private prevProjection = new Float32Array(16);
   private hasPrev = false;
 
+  /** False on the first frame and after `reset()`: the next `update()` has no previous frame. */
+  get hasPrevious() { return this.hasPrev; }
+
+  /** `projection` is the unjittered matrix; pass the jittered one as `projectionJittered`. */
   update(frame: {
-    view: Mat4; projection: Mat4; near: number; far: number;
+    view: Mat4; projection: Mat4; projectionJittered?: Mat4; near: number; far: number;
     position: readonly [number, number, number]; jitter?: readonly [number, number]; reversedDepth?: boolean;
   }): FrameCamera {
     const view = Float32Array.from(frame.view as ArrayLike<number>);
@@ -133,6 +139,7 @@ export class FrameCameraHistory {
     this.hasPrev = true;
     return {
       view, projection, prevView, prevProjection,
+      projectionJittered: Float32Array.from((frame.projectionJittered ?? frame.projection) as ArrayLike<number>),
       prevViewProjection: mat4Multiply(prevProjection, prevView),
       jitter: frame.jitter ?? [0, 0],
       near: frame.near, far: frame.far,

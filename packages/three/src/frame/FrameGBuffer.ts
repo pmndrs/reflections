@@ -11,11 +11,14 @@
 //   output           rgba16float   scene colour WITHOUT specular (emissive + direct + indirect diffuse), a = alpha
 //   normalRoughness  rgba16float   world normal (raw, unit) in xyz, perceptual roughness in w
 //   albedoMetalness  rgba8unorm    linear base colour in rgb, metalness in a
-//   motion           rg16float     uv-space motion, current - previous (or three's NDC velocity, option)
+//   velocity         rg16float     uv-space motion, current - previous (or three's NDC velocity, option);
+//                                  `textures.motion`. The MRT slot must be named 'velocity': three only
+//                                  moves `positionPrevious` by last frame's instance / bone / batch
+//                                  matrices when `builder.needsPreviousData()`, i.e. `mrt.has('velocity')`.
 //   lit (optional)   rgba16float   three's full lit output (+8 bytes: needs a raised limit, see `lit`)
 //   depth            depth32float  hardware depth (reverse-Z if the renderer uses it)
 import * as THREE from 'three/webgpu';
-import { diffuseColor, mrt, normalWorld, output, vec2, vec4, velocity } from 'three/tsl';
+import { diffuseColor, mrt, nodeObject, normalWorld, output, uniform, vec2, vec4 } from 'three/tsl';
 import {
   FrameCameraHistory, type FrameCamera, type FrameConventions, type FrameInputs, type FrameTextures,
 } from '@pmndrs/reflections-core';
@@ -60,6 +63,27 @@ export interface FrameGBufferOptions {
 const BYTES = { base: 8 + 8 + 8 + 4, lit: 8 };
 
 /**
+ * three's VelocityNode with the camera half of its history taken from our FrameCamera instead of
+ * three's per-animation-frame camera record, so motion and `FrameInputs.camera` advance together,
+ * once per `FrameGBuffer.render()`, however many renders an animation frame holds. The object
+ * half (previous model, instance and batch matrices) stays three's: it advances per draw in a
+ * velocity MRT pass, which is once per render() here. Skinned meshes' previous bones advance per
+ * animation frame in three (r187 Skinning.js), not per draw.
+ */
+class HistoryVelocityNode extends (THREE as N).VelocityNode {
+  readonly prevView = new THREE.Matrix4();
+  readonly prevProjection = new THREE.Matrix4();
+  readonly projection = new THREE.Matrix4();
+  update(frame: N) {
+    super.update(frame); // previous model matrix (per object); three's camera record is overridden below
+    const s = this as N;
+    s.previousCameraViewMatrix.value.copy(this.prevView);
+    s.previousProjectionMatrix.value.copy(this.prevProjection);
+    s.currentProjectionMatrix.value.copy(this.projection);
+  }
+}
+
+/**
  * Renders a scene into the frame-contract G-buffer and hands out the GPU textures.
  *
  * ```ts
@@ -67,9 +91,13 @@ const BYTES = { base: 8 + 8 + 8 + 4, lit: 8 };
  * const frame = gbuffer.render(scene, camera); // FrameInputs: GPUTextures + conventions + camera
  * ```
  *
- * Call `render()` once per frame: the previous-frame matrices (camera struct) and three's velocity
- * history both advance per render. Transparent objects blend into `output` (scene colour) only;
- * the guide targets take whatever was drawn last.
+ * Each `render()` is one frame of history: the camera struct and the motion target both take the
+ * previous render as "last frame" (two renders in one animation frame are fine). Objects keep their
+ * history in three, per draw in a velocity MRT pass: render an object in one such pass per frame
+ * (this one), or its motion goes to zero. Skinned meshes' previous bones advance once per
+ * animation frame (three). The first render and the one after `resetHistory()` write zero motion.
+ * Transparent objects blend into `output` (scene colour) only; the guide targets take whatever was
+ * drawn last. Not supported: `logarithmicDepthBuffer` (the constructor throws).
  */
 export class FrameGBuffer {
   readonly renderer: THREE.WebGPURenderer;
@@ -83,10 +111,16 @@ export class FrameGBuffer {
   private readonly fixedSize: boolean;
   private frameIndex = 0;
   private last: FrameInputs | null = null;
+  private readonly velocityNode: HistoryVelocityNode;
+  /** 0 when there is no previous frame (first render, after resetHistory()), else 1. */
+  private readonly historyValid = uniform(0);
 
   constructor(renderer: THREE.WebGPURenderer, options: FrameGBufferOptions = {}) {
     this.renderer = renderer;
     const device = getDevice(renderer);
+    if ((renderer as N).logarithmicDepthBuffer === true && renderer.reversedDepthBuffer !== true) {
+      throw new Error('FrameGBuffer: logarithmicDepthBuffer is not supported (the contract has no log-depth convention; depth would not invert with the projection). Use reversedDepthBuffer for precision instead.');
+    }
     const limit = device.limits.maxColorAttachmentBytesPerSample;
     const wantLit = options.lit ?? 'auto';
     this.lit = wantLit === 'auto' ? limit >= BYTES.base + BYTES.lit : wantLit;
@@ -104,7 +138,7 @@ export class FrameGBuffer {
     depth.name = 'depth';
     const rt = new THREE.RenderTarget(w, h, { count: names.length, type: THREE.HalfFloatType, depthTexture: depth, depthBuffer: true });
     rt.textures.forEach((t, i) => {
-      t.name = names[i];
+      t.name = names[i] === 'motion' ? 'velocity' : names[i]; // MRT outputs bind by texture name
       t.minFilter = t.magFilter = THREE.NearestFilter;
       t.generateMipmaps = false;
     });
@@ -115,17 +149,19 @@ export class FrameGBuffer {
     this.renderTarget = rt;
     this.textures = Object.fromEntries([...names.map((n, i) => [n, rt.textures[i]]), ['depth', depth]]) as never;
 
-    const motionNode = this.motionMode === 'uv' ? (velocity as N).mul(vec2(0.5, -0.5)) : velocity;
+    this.velocityNode = new HistoryVelocityNode();
+    const velocity = (nodeObject(this.velocityNode as N) as N).mul(this.historyValid);
+    const motionNode = this.motionMode === 'uv' ? velocity.mul(vec2(0.5, -0.5)) : velocity;
     const outputs: Record<string, N> = {
       output: vec4(sceneColorNoSpecular, (diffuseColor as N).a),
       normalRoughness: vec4(normalWorld, gbufferRoughness),
       albedoMetalness: vec4((diffuseColor as N).rgb, gbufferMetalness),
-      motion: motionNode,
+      velocity: motionNode, // must be 'velocity', see the header
     };
     if (this.lit) outputs.lit = output;
     this.mrt = mrt(outputs);
     // guides clear to zero (no surface); scene colour keeps the renderer's clear / background
-    for (const n of ['normalRoughness', 'albedoMetalness', 'motion', 'lit']) this.mrt.setClearColor(n, 0x000000, 0);
+    for (const n of ['normalRoughness', 'albedoMetalness', 'velocity', 'lit']) this.mrt.setClearColor(n, 0x000000, 0);
   }
 
   /** The contract's convention flags for this G-buffer. */
@@ -149,19 +185,41 @@ export class FrameGBuffer {
     this.renderTarget.setSize(width, height);
   }
 
-  /** Drop the previous-frame camera (camera cut, scene switch). */
+  /** Drop the previous frame (camera cut, scene switch): the next render has prev = current and zero motion. */
   resetHistory() { this.history.reset(); }
 
   /**
    * Render `scene` from `camera` into the G-buffer and return the frame's inputs.
    * `jitter`: the sub-pixel offset (pixels) already applied to `camera` this frame, if any.
+   * `projection`: the unjittered projection when `camera.projectionMatrix` carries jitter (e.g.
+   * `setViewOffset`). It becomes `camera.projection` in the contract and drives motion, so motion
+   * is unjittered; `camera.projectionJittered` keeps the rasterised one.
    */
-  render(scene: THREE.Scene, camera: THREE.Camera, opts: { jitter?: readonly [number, number] } = {}): FrameInputs {
+  render(scene: THREE.Scene, camera: THREE.Camera, opts: { jitter?: readonly [number, number]; projection?: ArrayLike<number> } = {}): FrameInputs {
     const r = this.renderer;
     if (!this.fixedSize) {
       const size = r.getDrawingBufferSize(new THREE.Vector2());
       this.setSize(size.x, size.y);
     }
+    camera.updateMatrixWorld();
+    const p = camera.matrixWorld.elements;
+    const cam = camera as THREE.PerspectiveCamera;
+    const projection = opts.projection ?? camera.projectionMatrix.elements;
+    this.historyValid.value = this.history.hasPrevious ? 1 : 0;
+    const frameCamera: FrameCamera = this.history.update({
+      view: camera.matrixWorldInverse.elements,
+      projection,
+      projectionJittered: camera.projectionMatrix.elements,
+      near: cam.near ?? 0.1, far: cam.far ?? 1000,
+      position: [p[12], p[13], p[14]],
+      jitter: opts.jitter,
+      reversedDepth: r.reversedDepthBuffer === true,
+    });
+    const v = this.velocityNode;
+    v.prevView.fromArray(frameCamera.prevView as ArrayLike<number> as number[]);
+    v.prevProjection.fromArray(frameCamera.prevProjection as ArrayLike<number> as number[]);
+    v.projection.fromArray(projection as number[]);
+
     const prevTarget = r.getRenderTarget();
     const prevMRT = r.getMRT();
     r.setRenderTarget(this.renderTarget);
@@ -170,17 +228,6 @@ export class FrameGBuffer {
     r.setRenderTarget(prevTarget);
     r.setMRT(prevMRT);
 
-    camera.updateMatrixWorld();
-    const p = camera.matrixWorld.elements;
-    const cam = camera as THREE.PerspectiveCamera;
-    const frameCamera: FrameCamera = this.history.update({
-      view: camera.matrixWorldInverse.elements,
-      projection: camera.projectionMatrix.elements,
-      near: cam.near ?? 0.1, far: cam.far ?? 1000,
-      position: [p[12], p[13], p[14]],
-      jitter: opts.jitter,
-      reversedDepth: r.reversedDepthBuffer === true,
-    });
     this.last = { width: this.width, height: this.height, textures: this.gpuTextures(), conventions: this.conventions, camera: frameCamera, frameIndex: this.frameIndex++ };
     return this.last;
   }

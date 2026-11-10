@@ -192,8 +192,8 @@ async function gbufferChecks() {
     const f = gb.render(scene, cam, { jitter: j, projection: unjittered.elements } as N);
     if (i > 0) jitterMax = Math.max(jitterMax, motionStats(await motion()).max);
     const pj = (f.camera as N).projectionJittered as ArrayLike<number> | undefined;
-    projOk &&= Array.from(f.camera.projection as ArrayLike<number>).every((v, k) => Math.abs(v - unjittered.elements[k]) < 1e-7)
-      && !!pj && Array.from(pj).every((v, k) => Math.abs(v - cam.projectionMatrix.elements[k]) < 1e-7);
+    projOk &&= Array.from(f.camera.projection as ArrayLike<number>).every((v, k) => Math.abs(v - unjittered.elements[k]) < 1e-5)
+      && !!pj && Array.from(pj).every((v, k) => Math.abs(v - cam.projectionMatrix.elements[k]) < 1e-5);
   }
   cam.clearViewOffset();
   r.jitter = { maxMotion: jitterMax, projectionUnjitteredAndJitteredExposed: projOk };
