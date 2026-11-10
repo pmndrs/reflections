@@ -10,7 +10,7 @@ The working state of the project: who is on what, which interfaces the workstrea
 - **Commit after every run** (CLAUDE.md rule 4): what was tried, numbers, verdict, failures included. Explicit paths, never `git add -A`.
 - **Stay in your lane.** Each stream owns the paths in its row. Touching a shared file (`packages/*/src/index.ts`, `src/*.ts`, `package.json`, `scripts/run-headless.mjs`) is allowed but keep the edit to adding your exports or your check, so merges stay trivial.
 - **Stopping a server:** kill by port (`lsof -ti tcp:<your port> | xargs kill`), never `pkill -f vite`. A pattern kill takes down every other worktree's server too.
-- **Ports.** Each worktree runs its examples server on its own port: `REFLECTIONS_PORT=<port> pnpm examples` / `REFLECTIONS_PORT=<port> pnpm check`. The main checkout keeps 5370; 5310 belongs to another project.
+- **Ports.** Each worktree runs its examples server on its own port: `REFLECTIONS_PORT=<port> pnpm examples` / `REFLECTIONS_PORT=<port> pnpm check`. 5370 is the maintainer's own server: agents and the lead never use it (the lead runs main-checkout checks on 5389). `pnpm check` reuses any server already on its port, so a wrong port means testing someone else's build. 5310 belongs to another project.
 
 ## Workstreams (started 2026-11-10)
 
