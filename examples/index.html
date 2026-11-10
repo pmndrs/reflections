@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>@pmndrs/reflections examples</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #fafafa; --fg: #1a1a1a; --muted: #666; --line: #ddd; --link: #0b5fff; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; --muted: #999; --line: #333; --link: #7aa7ff; } }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+    main { max-width: 820px; margin: 0 auto; padding: 32px 16px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    p.lead { color: var(--muted); margin: 0 0 24px; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 28px 0 8px; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { padding: 10px 0; border-top: 1px solid var(--line); }
+    a { color: var(--link); font-weight: 600; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { font-size: 13px; }
+    .d { color: var(--muted); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>@pmndrs/reflections examples</h1>
+  <p class="lead">Each page also accepts <code>?manual</code> (render loop stopped). See <code>docs/HANDOFF.md</code> for status.</p>
+
+  <h2>Demos</h2>
+  <ul>
+    <li><a href="ssr/">ssr</a> — screen-space reflections in three on the scene kit. <span class="d"><code>?scene=mirrorWall|offscreen|contact|roughnessRamp|boxRoom|moving|explainer|rooms|facingMirrors</code>, <code>?rt=1</code> ray-traced misses, <code>?hit=final</code> mirrors-in-mirrors, <code>?probes=0</code>.</span></li>
+    <li><a href="probes/">probes</a> — reflection probes (three #35046 API) in Ben's rooms. <span class="d"><code>?grid</code> for the test grid, <code>?refit</code> for LightProbeGrid re-fit.</span></li>
+    <li><a href="scenes/">scenes</a> — the scene kit and every G-buffer target (depth, normal, roughness, motion, scene colour without specular). <span class="d"><code>?scene=…</code></span></li>
+  </ul>
+
+  <h2>Core (raw WebGPU, no three)</h2>
+  <ul>
+    <li><a href="sssr-core/">sssr-core</a> — the screen-space tracer on exact analytic inputs, with debug views and variant parity.</li>
+    <li><a href="probe-core/">probe-core</a> — the core probe set and its radiance fallback.</li>
+    <li><a href="bc6h/">bc6h</a> — the BC6H GPU encoder against the hardware decoder.</li>
+  </ul>
+
+  <h2>Benches and tests</h2>
+  <ul>
+    <li><a href="probe-bench/">probe-bench</a> — probe layout × format bench (cube array, 2D array, octahedral; rgba16f, rgb9e5, rg11b10, BC6H).</li>
+    <li><a href="ssr-bench/">ssr-bench</a> — ours vs three r187's SSRNode (± its denoiser): error, flicker, GPU ms.</li>
+    <li><a href="regressions/">regressions</a> — GPU repros of review bugs, each failing before its fix.</li>
+  </ul>
+</main>
+</body>
+</html>
