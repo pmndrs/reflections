@@ -1,5 +1,5 @@
 import { dirname, resolve } from 'path';
-import { readdirSync, existsSync } from 'fs';
+import { readdirSync, existsSync, realpathSync } from 'fs';
 import { defineConfig } from 'vite';
 
 // Examples dev server: http://127.0.0.1:5370/<name>/ ($REFLECTIONS_PORT overrides; worktrees use their own) for each examples/<name>/index.html.
@@ -26,11 +26,15 @@ function findDenoiser(): string | null {
 }
 const denoiserRepo = findDenoiser();
 
+// @pmndrs/bvh is linked (package.json `link:`) from a sibling checkout; the dev server may serve its source.
+const bvhLink = resolve(root, '../node_modules/@pmndrs/bvh');
+const bvhRepo = existsSync(bvhLink) ? realpathSync(bvhLink) : null;
+
 export default defineConfig({
   root,
   server: {
     port: Number(process.env.REFLECTIONS_PORT ?? 5370), strictPort: true, host: '127.0.0.1',
-    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : [])] },
+    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : []), ...(bvhRepo ? [bvhRepo] : [])] },
   },
   define: { __DENOISER_SOURCE__: JSON.stringify(denoiserRepo ?? '') },
   resolve: {

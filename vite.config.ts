@@ -21,7 +21,7 @@ export default defineConfig({
       formats: ['es'],
     },
     rollupOptions: {
-      external: [/^three(\/|$)/, /^three-mesh-bvh(\/|$)/],
+      external: [/^three(\/|$)/, /^three-mesh-bvh(\/|$)/, /^@pmndrs\/bvh(\/|$)/],
       output: { chunkFileNames: 'chunks/reflections-[hash].js' },
     },
   },

@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | probe-core | probe-bench | ssr-bench)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | ssr-rt-bvh | probe-core | probe-bench | ssr-bench)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
@@ -609,6 +609,95 @@ async function ssrRtChecks(pages) {
 }
 
 /**
+ * examples/ssr?rt=1&bvh=pmndrs (W14): core's @pmndrs/bvh provider.
+ *  - the ray oracle against THREE.Raycaster (camera rays and rays spread through the scene): first
+ *    hit, triangle, normal, frontFace, instance and material, for each builder (auto, tinybvh);
+ *  - the offscreen wall mirror with RT on, as for three-mesh-bvh;
+ *  - SPEC phase 4 gate: the @pmndrs/bvh walk vs three-mesh-bvh's on the same rays, per scene
+ *    (`--rt-compare-rays N`, default 16384 per ray set).
+ */
+async function ssrRtBvhChecks(pages) {
+  console.log('examples/ssr (?rt=1&bvh=pmndrs):');
+  const nCompare = args.includes('--rt-compare-rays') ? Number(args[args.indexOf('--rt-compare-rays') + 1]) : 16384;
+  const fmtOracle = (o) => `${o.agree}/${o.rays} agree (${o.bothMiss} both miss), gpu-only ${o.gpuOnly}, cpu-only ${o.cpuOnly}, p99 rel ${o.p99Rel.toExponential(1)}; of ${o.compared} hits: triangle ${o.triangle}, normal ${o.normalSigned} (same line ${o.normalAbs}), frontFace ${o.frontFace}, instance ${o.instance}, material ${o.material}`;
+  // Where both hit within 1e-3 the attributes must agree, but for ties: rays spread through a scene
+  // hit contact lines and coincident faces, where either answer is right (D1704).
+  const oracleOk = (o) => o.agree / o.rays > 0.995 && o.gpuOnly + o.cpuOnly <= o.rays * 0.003
+    && [o.triangle, o.normalSigned, o.frontFace, o.instance, o.material].every((k) => k >= o.compared * 0.995);
+  for (const builder of ['auto', 'tinybvh']) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&bvh=pmndrs&bvhBuilder=${builder}`);
+    pages.push(p);
+    const before = results.logs.length;
+    await p.T("window.__p.load('offscreen')");
+    const bvh = await p.T('window.__p.bvh');
+    for (const kind of ['camera', 'scene']) {
+      const o = await p.T(`window.__p.rtOracle(4096, '${kind}')`);
+      check(`rt @pmndrs/bvh (${bvh.builder}) agrees with THREE.Raycaster, ${kind} rays`, oracleOk(o),
+        `${fmtOracle(o)}; BVH ${bvh.meshes} meshes, ${bvh.triangles} tris, ${bvh.buildMs.toFixed(0)} ms${bvh.fallbackReason ? ` (${bvh.fallbackReason})` : ''}`);
+    }
+    if (builder !== 'auto') continue;
+    await p.T("window.__p.setPose('mirror')");
+    await p.T('window.__p.setRT(false)');
+    await p.T('window.__p.step(2)');
+    const off = await p.T('window.__p.stats()');
+    await p.T('window.__p.setRT(true)');
+    await p.T('window.__p.step(2)');
+    const on = await p.T('window.__p.stats()');
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    check('rt @pmndrs/bvh offscreen: renders, no validation errors, finite outputs', errs.length === 0 && on.nonFinite === 0 && on.rt && on.rt.traced > 0,
+      errs.length ? errs.slice(0, 2).join(' | ') : `${on.misses} misses -> ${JSON.stringify(on.rt)}`);
+    check('rt @pmndrs/bvh offscreen: the wall mirror shows the wall behind the camera',
+      on.facingPanelConfidence > 0.9 && off.facingPanelConfidence < 0.1 && on.panel.hitDistanceMedianRelErr < 0.02 && on.panel.within2pc > 0.8 && on.panel.brightFraction > 0.02,
+      `confidence ${off.facingPanelConfidence.toFixed(3)} -> ${on.facingPanelConfidence.toFixed(3)}; hit distance median rel err ${on.panel.hitDistanceMedianRelErr.toExponential(2)}, ${(on.panel.within2pc * 100).toFixed(1)}% within 2%; bright ${(on.panel.brightFraction * 100).toFixed(2)}%`);
+    await p.T("window.__p.setView('final')");
+    savePng('ssr-rt-bvh-offscreen-mirror-final.png', await p.T('window.__p.shot()'));
+    await p.T("window.__p.setView('grid')");
+
+    // the phase 4 gate: same rays through both walks, per scene
+    const assets = fs.existsSync(path.join(ROOT, 'examples/assets/Sponza')) ? ['sponza'] : [];
+    for (const id of ['offscreen', 'mirrorWall', 'contact', 'boxRoom', 'moving', 'facingMirrors', 'rooms', ...assets]) {
+      const b = results.logs.length;
+      await p.T(`window.__p.load(${JSON.stringify(id)})`);
+      await p.T('window.__p.step(1)');
+      const big = assets.includes(id);
+      if (big) {
+        // Which walk is right where they disagree? THREE.Raycaster (brute force per mesh) on fewer rays,
+        // ours first: building three-mesh-bvh's BVH reorders the geometry's index buffer in place,
+        // after which our triangle ids (taken before) no longer match three's faceIndex.
+        for (const which of ['pmndrs', 'three-mesh-bvh']) {
+          const o = await p.T(`window.__p.rtOracle(1024, 'camera', '${which}')`);
+          if (which === 'pmndrs') check(`rt @pmndrs/bvh vs THREE.Raycaster, ${id}, camera rays`, oracleOk(o), fmtOracle(o));
+          else console.log(`  (info) three-mesh-bvh vs THREE.Raycaster, ${id}, camera rays - ${fmtOracle(o)}`);
+        }
+      }
+      for (const kind of ['camera', 'scene']) {
+        const c = await p.T(`window.__p.rtCompare(${nCompare}, '${kind}')`);
+        const e = results.logs.slice(b).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+        const detail = `${c.agree}/${c.rays} agree (${c.bothMiss} both miss), pmndrs-only ${c.pmndrsOnly}, three-mesh-bvh-only ${c.tmbOnly}, p99 rel ${c.p99Rel.toExponential(1)}, max rel ${c.maxRel.toExponential(1)}; of ${c.compared} hits: normal ${c.normal}, frontFace ${c.frontFace}; ${c.triangles} tris, ${c.builder}, build ${c.buildMs.pmndrs.toFixed(0)} vs ${c.buildMs.threeMeshBvh.toFixed(0)} ms`;
+        // On the asset the stopgap misses the nearest hit on some rays (D1705); the oracle above is its check.
+        if (big && e.length === 0) { console.log(`  (info) rt @pmndrs/bvh vs three-mesh-bvh, ${id}, ${kind} rays - ${detail}`); continue; }
+        check(`rt @pmndrs/bvh vs three-mesh-bvh, ${id}, ${kind} rays`,
+          e.length === 0 && c.agree / c.rays > 0.995 && c.pmndrsOnly + c.tmbOnly <= c.rays * 0.003 && c.normal >= c.compared * 0.995,
+          e.length ? e.slice(0, 2).join(' | ') : detail);
+      }
+    }
+  }
+
+  // Information, not a gate: trace-pass GPU ms of both walks on the same frame (1080p, offscreen
+  // 'mirror', every confidence below 1.01 traced), loop stopped, median of 20.
+  const ms = {};
+  for (const bvh of ['three-mesh-bvh', 'pmndrs']) {
+    const t = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1&bvh=${bvh}&scene=offscreen&pose=mirror`);
+    pages.push(t);
+    await t.T('window.__p.setSettings({ missConfidenceThreshold: 1.01 })');
+    const r = await t.T('window.__p.time(20)');
+    await t.T('window.__p.step(1)');
+    ms[bvh] = { trace: r.ms['rt trace'], misses: (await t.T('window.__p.traceStats()')).misses };
+  }
+  console.log(`  (info) rt trace GPU ms at 1920x1080, offscreen 'mirror', ${ms.pmndrs.misses} misses: @pmndrs/bvh ${ms.pmndrs.trace?.toFixed(3)} ms, three-mesh-bvh ${ms['three-mesh-bvh'].trace?.toFixed(3)} ms`);
+}
+
+/**
  * examples/ssr-bench (phase 3 gate, docs/research/ssr-gate.md). The smoke (section `ssr-bench`):
  * every method renders on mirrorWall with finite output and no validation error; not a numbers gate.
  */
@@ -837,6 +926,7 @@ async function main() {
     if (runs('ssr')) await ssrChecks(pages);
     if (runs('hybrid')) await hybridChecks(pages);
     if (runs('ssr-rt')) await ssrRtChecks(pages);
+    if (runs('ssr-rt-bvh')) await ssrRtBvhChecks(pages);
     if (ssrBenchFull) await ssrBench();
     else if (runs('ssr-bench')) await ssrBenchSmoke(pages);
 

@@ -47,10 +47,14 @@
     "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "peerDependencies": {
+    "@pmndrs/bvh": "*",
     "three": ">=0.187.0",
     "three-mesh-bvh": ">=0.9.18"
   },
   "peerDependenciesMeta": {
+    "@pmndrs/bvh": {
+      "optional": true
+    },
     "three": {
       "optional": true
     },
@@ -59,6 +63,7 @@
     }
   },
   "devDependencies": {
+    "@pmndrs/bvh": "link:../bvh",
     "@pmndrs/reflections-core": "workspace:*",
     "@pmndrs/reflections-three": "workspace:*",
     "@types/three": "^0.187.0",

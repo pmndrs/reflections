@@ -9,5 +9,16 @@
   "exports": {
     ".": "./src/index.ts",
     "./*": "./src/*.ts"
+  },
+  "peerDependencies": {
+    "@pmndrs/bvh": "*"
+  },
+  "peerDependenciesMeta": {
+    "@pmndrs/bvh": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@pmndrs/bvh": "link:../../../bvh"
   }
 }

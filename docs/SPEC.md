@@ -103,6 +103,7 @@ Hit shading belongs to the resolve, not the provider. It looks up the probes at 
   - The GPU builders need the `subgroups` feature. Without it, `createMeshLayoutBuilder` falls back to tinybvh on its own.
   - Because it lives in core, babylon, pixi and raw WebGPU all get rays, not only three.
   - It is an optional peer: the pixel paths that don't trace never load it.
+  - As built (W14): `createPmndrsBvhTraceProvider` in `packages/core/src/trace/pmndrsBvh.ts`, linked as `link:../bvh` (a sibling checkout on bvh's `reflections-integration` branch, which adds `GiHit.normal` and a per-instance `GiHit.material`); three builds it with `createPmndrsBvhTraceProviderFromObjects`. Opt-in in `examples/ssr` (`&bvh=pmndrs`); the gate numbers are in `docs/HANDOFF.md`, W14.
 - **three stopgap:** wraps `three-mesh-bvh/webgpu` (`BVHComputeData`, `raycastFirstHit`), which the explainer pages already use. It stays until `@pmndrs/bvh` passes its own oracle on our scenes. After that, it remains only for apps that already have a three-mesh-bvh tree.
 
 ## Sources

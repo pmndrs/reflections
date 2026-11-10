@@ -5,6 +5,6 @@ import { dts } from 'rollup-plugin-dts';
 export default {
   input: { index: 'src/index.ts', three: 'src/three.ts', core: 'src/core.ts' },
   output: { dir: 'dist', format: 'es', chunkFileNames: 'chunks/reflections-[hash].d.ts' },
-  external: [/^three(\/|$)/],
+  external: [/^three(\/|$)/, /^@pmndrs\/bvh(\/|$)/],
   plugins: [dts({ respectExternal: true, tsconfig: 'tsconfig.build.json' })],
 };
