@@ -123,9 +123,10 @@ Hit shading belongs to the resolve, not the provider. It looks up the probes at 
 It works as follows:
 
 - It uses the API of three.js #35046. The three floor is r187 (raised from r186 on 2026-11-10).
-- r187 still can't bind `texture_cube_array` (#35045 was merged then reverted; #35053 is open; r187's `wgslFn` accepts the type, but no texture creates a cube-array view), so the cubes live in a 2D array of 6 × N layers, and the node picks the face itself.
+- Stock r187 can't bind `texture_cube_array` (#35045 was merged then reverted; #35053 is open; r187's `wgslFn` accepts the type, but no texture creates a cube-array view). Since W20, `installCubeArraySupport(renderer)` (`packages/three/src/compat/cubeArray.ts`) ports #35053's renderer changes onto r187 at runtime, self-tested at install, and `ReflectionProbes.layout: 'auto'` (default) then bakes into a real cube array (#35053's `CubeArrayTexture`, vendored; core layout `cube-hw`). Without the shim (or if its self-test fails) the cubes live in a 2D array of 6 × N layers, and the node picks the face itself. `bakedLayout` says which.
+- W20 numbers (1080p, 3 probes, 432-sphere grid, loop stopped): the cube array matches the hardware-cube reference at max 0 / 255 (`warp`: mean 0.05, max 3), and its lookup costs 0.090 ms wall / 0.133 ms GPU against `warp`'s 0.113 / 0.192 (1.26× / 1.44×), measured once.
 - The prefilter is a raw-WebGPU compute pass, now in core (`probes/prefilter.ts`). It implements r187's cube-PMREM plan: lod 0 copy, 256-sample filtered importance sampling, and the last three levels as full 16 px integrals. Roughness maps to lod by `lod = maxLod · r · (2 − r)`.
-- `seamFix: 'warp'` centres the edge texels on the cube edges. Measured against the hardware cube sampler on the same bake, it differs by a mean of 0.05 / 255 and at most 3 / 255. It costs about 0.06 ms per 1080p frame for 3 probes.
+- `seamFix: 'warp'` (2D array only; a no-op on cube arrays) centres the edge texels on the cube edges. Measured against the hardware cube sampler on the same bake, it differs by a mean of 0.05 / 255 and at most 3 / 255. It costs about 0.06 ms per 1080p frame for 3 probes.
 
 **Measured numbers (denoiser repo, M-series):**
 
@@ -142,6 +143,7 @@ It works as follows:
 - `originOffset`
 - `bake({ environment: false })`
 - `seamFix`
+- `layout` / `bakedLayout` (`'auto' | 'cube-array' | 'cube2d'`) and the r187 cube-array shim (W20)
 
 **Where it goes:**
 
@@ -150,7 +152,7 @@ It works as follows:
   - The three node becomes a thin TSL wrapper over it.
   - The layout is a parameter (next section).
 - **Capture stays in the adapter.** Rendering six faces is engine work. Core takes the six face textures and does everything after: prefilter, atlas write, environment slot.
-- **three upstream.** When three ships `CubeArrayTexture` sampling (#35053) and #35046, the three adapter can bake into three's texture for a `cube-array` layout. The API stays the same either way.
+- **three upstream.** Done ahead of upstream for r187 by the W20 shim. When three ships `CubeArrayTexture` (#35053), the adapter uses three's own class (`installCubeArraySupport` reports `native` and patches nothing) and `compat/` can go. The API stays the same either way.
 - **Probe re-fit.** Normalize the probe radiance by irradiance, as idTech 8 does: `reflection × frameIrradiance / probeIrradiance`. Lazarov 2013 describes the same normalization (Hobson 2019 is cited for it too, but unverified: the slides are gated).
   - `probeIrradiance` is the probe's L1 SH, taken from the same capture and evaluated at the shading normal, with the ratio clamped. Lazarov uses SH9 here; L1 is our cheaper choice and gets measured against SH9 (DIVERGES D60).
   - `frameIrradiance` comes from whatever GI the app has: three r187's `LightProbeGrid` (L2 SH), `@pmndrs/ddgi`'s irradiance volumes, VXGI, SSGI or a lightmap.

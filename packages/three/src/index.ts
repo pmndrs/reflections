@@ -12,6 +12,14 @@ export {
 } from './probes/ReflectionProbesNode';
 export { ReflectionProbesHelper } from './probes/ReflectionProbesHelper';
 
+// Cube arrays on stock three r187: CubeArrayTexture vendored from three.js #35053 (Ben Houston) and a
+// runtime shim that ports #35053's renderer changes, self-tested at install (W20).
+export { CubeArrayTexture } from './compat/CubeArrayTexture';
+export {
+  installCubeArraySupport, uninstallCubeArraySupport, cubeArraySupported, cubeArraySupportStatus, cubeArrayTextureClass, nativeCubeArrayTexture,
+  CUBE_ARRAY_SHIM_REVISIONS, type CubeArraySupportMode, type CubeArraySupportStatus, type InstallCubeArrayOptions,
+} from './compat/cubeArray';
+
 // Shared sampling: GGX lobe sample, per-pixel seed, firefly clamp, reference accumulation.
 export { AccumulateNode, clampSample, ggxLobeSample, pixelSeed } from './sampling';
 

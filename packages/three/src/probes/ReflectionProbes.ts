@@ -8,14 +8,19 @@
 // normal and clearcoat.
 //
 // What three (r187, the floor) forces to differ (see ReflectionProbesNode.ts for the lookup side):
-//   - three can't bind `texture_cube_array` yet (#35045 was reverted; #35053 is open), so the cubes live
-//     in a 2D array texture, layer = probe * 6 + face, mip = roughness level. Same layers and mips
-//     as #35046's CubeArrayTexture (with 'warp', texel centres differ); the node picks face and uv
-//     itself instead of the sampler.
+//   - stock r187 can't bind `texture_cube_array` (#35045 was reverted; #35053 is open). `layout`
+//     (new) picks the storage: 'cube-array' bakes into a CubeArrayTexture (#35053's class, vendored
+//     in ../compat), as #35046 does, sampled by the hardware cube sampler (core layout `cube-hw`);
+//     it needs three with #35053, or `await installCubeArraySupport( renderer )` (../compat/cubeArray.ts,
+//     a self-tested runtime port of #35053's renderer changes). 'cube2d' keeps the cubes in a 2D array
+//     texture, layer = probe * 6 + face, mip = roughness level, and the node picks face and uv itself.
+//     'auto' (default) takes the cube array when the renderer supports it. Same layers and mips either
+//     way (with 'warp', texel centres differ). `bakedLayout` says which one the texture uses.
 //   - r187's PMREMGenerator writes cube mips, but per probe into its own render target and in render
 //     passes; the prefilter is our own compute pass with r187's algorithm, writing straight into the
 //     array layers (core: probes/prefilter.ts).
-//   - `seamFix` (new): a manual face lookup has no seamless cube filtering. 'none' clamps at face
+//   - `seamFix` (new, 2D array only; a no-op on cube arrays, which filter seamlessly): a manual face
+//     lookup has no seamless cube filtering. 'none' clamps at face
 //     edges: measured against the hardware cube sampler on the same bake, the probe radiance is off
 //     by up to 5-14 % (p99 4-6 %) in half-texel bands along the edges at roughness >= 0.5 (faces
 //     of 8-16 px), which shows as a faint crease after tone mapping (1-3 / 255). 'warp' (default)
@@ -32,9 +37,10 @@
 //     update over several frames.
 //
 // Swapping to #35046 once it lands: import ReflectionProbe / ReflectionProbes / reflectionProbes
-// from three/addons instead, drop `seamFix` / `bakedSeamFix`, and move any probe with an
-// `originOffset` to its box centre (or keep that one extension); `texture` becomes a CubeArrayTexture
-// (nothing outside the node should sample it directly). Everything else (constructor, influenceSize,
+// from three/addons instead, drop `seamFix` / `bakedSeamFix` / `layout` / `bakedLayout`, and move any
+// probe with an `originOffset` to its box centre (or keep that one extension); `texture` is then always
+// a CubeArrayTexture, as it already is here with `bakedLayout === 'cube-array'` (nothing outside the
+// node should sample it directly). Everything else (constructor, influenceSize,
 // projectionSize, projectionOffset, blendDistance, boxProjection, bake( renderer, scene, { resolution,
 // near, far } ), texture, bakedProbes, capturing, dispose) has the same name and meaning. #35046 head's
 // vec4 `reflectionProbes()` is our `reflectionProbesLocal()`; ours keeps the vec3 form with the
@@ -42,6 +48,7 @@
 
 import * as THREE from 'three/webgpu';
 import { PROBE_IRRADIANCE_ROWS, ProbeIrradiance, ProbePrefilter, createProbeLayout, maxLodFor } from '@pmndrs/reflections-core';
+import { cubeArraySupported, cubeArraySupportStatus, cubeArrayTextureClass } from '../compat/cubeArray';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Renderer = THREE.WebGPURenderer & { backend: any };
@@ -134,6 +141,10 @@ export interface BakeOptions {
 }
 
 export type SeamFix = 'warp' | 'none';
+/** How a probe set stores its cubes: a real cube array, or a 2D array of 6 layers per cube. */
+export type ProbeStorage = 'cube-array' | 'cube2d';
+/** {@link ReflectionProbes.layout}: a storage, or 'auto' (a cube array when the renderer supports it). */
+export type ProbeStorageOption = 'auto' | ProbeStorage;
 
 /**
  * A set of {@link ReflectionProbe} children baked into one texture. Assign
@@ -144,14 +155,29 @@ export class ReflectionProbes extends THREE.Object3D {
   readonly isReflectionProbes = true;
   /** Whether the probes use box projection. */
   boxProjection = true;
-  /** Face-edge handling of the manual cube lookup (not in #35046, see the file header). Re-bake after changing it. */
+  /**
+   * Face-edge handling of the manual cube lookup on the 2D-array storage (not in #35046, see the file
+   * header). A no-op on cube arrays (hardware filtering is seamless). Re-bake after changing it.
+   */
   seamFix: SeamFix = 'warp';
-  /** The baked 2D array texture: 6 layers per probe, then 6 for the environment; mips = roughness. */
+  /**
+   * Storage of the next bake (not in #35046, which always uses a cube array): 'auto' (default) a
+   * CubeArrayTexture when the renderer can bind one (three with #35053, or after
+   * `await installCubeArraySupport( renderer )`), else the 2D array; 'cube-array' requires it (the bake
+   * throws without it); 'cube2d' always the 2D array. {@link bakedLayout} is what the bake chose.
+   */
+  layout: ProbeStorageOption = 'auto';
+  /**
+   * The baked texture: one cube per probe, then one for the environment; mips = roughness. A
+   * CubeArrayTexture when {@link bakedLayout} is 'cube-array', else a 2D array texture of 6 layers per cube.
+   */
   texture: THREE.Texture | null = null;
   /** The probes in baked order, smallest volume first. */
   bakedProbes: ReflectionProbe[] = [];
-  /** The seam fix the current `texture` was baked with (the node samples to match). */
+  /** The seam fix the current `texture` was baked with (the node samples to match); 'none' on cube arrays. */
   bakedSeamFix: SeamFix = 'warp';
+  /** The storage the current `texture` uses ('cube2d' before the first bake). */
+  bakedLayout: ProbeStorage = 'cube2d';
   /** Whether a bake is in progress. Probes then contribute only the environment. */
   capturing = false;
   /** Upper bound of the re-fit ratio frameIrradiance / probeIrradiance (lookups with `frameIrradiance`). */
@@ -205,7 +231,11 @@ export class ReflectionProbes extends THREE.Object3D {
     const probes = (this.children.filter((c) => (c as ReflectionProbe).isReflectionProbe) as ReflectionProbe[]).sort((a, b) => volume(a) - volume(b));
     const maxLod = maxLodFor(resolution);
     const depth = (probes.length + 1) * 6;
-    const warp = this.seamFix === 'warp';
+    const storage = this.storageFor(r);
+    const cubeArray = storage === 'cube-array';
+    // cube arrays filter across face edges in hardware, so they take plain texel centres ('none')
+    const seamFix: SeamFix = cubeArray ? 'none' : this.seamFix;
+    const warp = seamFix === 'warp';
     const device0: GPUDevice = r.backend.device;
     // 6 layers per slot: the default limit (256 layers) holds 41 probes plus the environment
     if (depth > device0.limits.maxTextureArrayLayers) {
@@ -217,14 +247,18 @@ export class ReflectionProbes extends THREE.Object3D {
     let renderTarget = this.renderTarget;
     let previous: THREE.RenderTarget | null = null;
     // a new array, or every slot to be filtered again (the seam fix changed)
-    const layoutChanged = renderTarget === null || renderTarget.width !== resolution || renderTarget.depth !== depth || this.bakedSeamFix !== this.seamFix;
-    if (renderTarget === null || renderTarget.width !== resolution || renderTarget.depth !== depth) {
+    const newTarget = renderTarget === null || renderTarget.width !== resolution || renderTarget.depth !== depth || this.bakedLayout !== storage;
+    const layoutChanged = newTarget || this.bakedSeamFix !== seamFix;
+    if (newTarget || renderTarget === null) {
       // materials keep sampling the previous array while the probes are captured
       previous = renderTarget;
       renderTarget = new THREE.RenderTarget(resolution, resolution, {
         depth, type: THREE.HalfFloatType, depthBuffer: false, generateMipmaps: false,
         minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter,
+        ...(cubeArray ? { mapping: THREE.CubeReflectionMapping } : {}),
       });
+      // six face layers per cube, as #35046 allocates its CubeArrayTexture (depth counts cubes)
+      if (cubeArray) renderTarget.texture = new (cubeArrayTextureClass())().copy(renderTarget.texture);
       renderTarget.texture.name = 'ReflectionProbes';
       for (let lod = 0; lod <= maxLod; lod++) renderTarget.texture.mipmaps.push({ width: resolution >> lod, height: resolution >> lod } as never);
       r.initRenderTarget(renderTarget);
@@ -318,7 +352,7 @@ export class ReflectionProbes extends THREE.Object3D {
       Object.assign(r, { autoClear, autoClearColor, autoClearDepth, autoClearStencil });
     }
 
-    if (options.irradiance !== false) this.computeIrradiance(device, target, probes.length + 1);
+    if (options.irradiance !== false) this.computeIrradiance(device, target, probes.length + 1, warp);
 
     this.environmentTexture = environmentTexture;
     this.environmentVersion = environmentTexture?.version ?? -1;
@@ -328,7 +362,8 @@ export class ReflectionProbes extends THREE.Object3D {
     this.renderTarget = renderTarget;
     this.texture = renderTarget.texture;
     this.bakedProbes = probes;
-    this.bakedSeamFix = this.seamFix;
+    this.bakedSeamFix = seamFix;
+    this.bakedLayout = storage;
     if (layoutChanged) {
       // the cache key of each node changes with the texture and probe count; bump the nodes so the
       // next frame sees it before drawing anything (updateBefore would be one frame late)
@@ -346,9 +381,23 @@ export class ReflectionProbes extends THREE.Object3D {
     }
   }
 
-  /** L1 SH of every slot into `irradiance` (core ProbeIrradiance on three's 2D-array atlas, x mirrored). */
-  private computeIrradiance(device: GPUDevice, target: GPUTexture, slots: number) {
-    const layout = createProbeLayout(this.seamFix === 'warp' ? 'cube2d-warp' : 'cube2d-none', { maxLod: target.mipLevelCount - 1 });
+  /** The storage a bake on `renderer` uses (see {@link layout}). */
+  storageFor(renderer: THREE.WebGPURenderer): ProbeStorage {
+    if (this.layout === 'cube2d') return 'cube2d';
+    const supported = cubeArraySupported(renderer);
+    if (this.layout === 'cube-array' && !supported) {
+      throw new Error(`ReflectionProbes: layout 'cube-array' needs a renderer that binds cube arrays: three with CubeArrayTexture (#35053), `
+        + `or await installCubeArraySupport( renderer ) first (${cubeArraySupportStatus(renderer).reason}). Use layout 'auto' to fall back to the 2D array.`);
+    }
+    return supported ? 'cube-array' : 'cube2d';
+  }
+
+  /**
+   * L1 SH of every slot into `irradiance` (core ProbeIrradiance over a 2D-array view of the atlas, x
+   * mirrored; a cube array has cube2d-none's texels, so it reads as that layout).
+   */
+  private computeIrradiance(device: GPUDevice, target: GPUTexture, slots: number, warp: boolean) {
+    const layout = createProbeLayout(warp ? 'cube2d-warp' : 'cube2d-none', { maxLod: target.mipLevelCount - 1 });
     if (this.irradianceFilter === null || this.irradianceFilter.layout.id !== layout.id || this.irradianceFilter.layout.mipLevelCount !== layout.mipLevelCount) {
       this.irradianceFilter?.dispose();
       this.irradianceFilter = new ProbeIrradiance(device, layout, { mirrorX: true });

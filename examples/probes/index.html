@@ -26,7 +26,7 @@
           the torus knot spins and the left room's light cycles colour, and every reflection follows. The probe core (prefilter,
           layouts, the WGSL lookup) is engine-agnostic. The three adapter keeps the API of Ben Houston's
           <a href="https://github.com/mrdoob/three.js/pull/35046">three.js #35046</a>; the two projects grew up together and have
-          traded ideas and fixes throughout. On three r187 the cubes live in a 2D array with edge-centred texels until three can bind cube arrays.
+          traded ideas and fixes throughout. On stock three r187 the probes live in a real cube array through a self-tested runtime port of <a href="https://github.com/mrdoob/three.js/pull/35053">#35053</a> (CubeArrayTexture), with a 2D array of edge-centred texels as the fallback; the status line below shows which one is active.
         </p>
       </header>
       <canvas id="view" width="960" height="540"></canvas>
