@@ -42,12 +42,13 @@ interface Class { source: number; configs: Config[]; lookup: Config[] }
 const FULL: Class[] = [
   {
     source: 128,
-    configs: [{ id: 'cube2d-warp', size: 128 }, { id: 'cube2d-none', size: 128 }, { id: 'cube-hw', size: 128 }, { id: 'octa', size: 128 }, { id: 'octa', size: 256 }, { id: 'octa', size: 512 }],
-    lookup: [{ id: 'cube2d-warp', size: 128 }, { id: 'cube2d-none', size: 128 }, { id: 'cube-hw', size: 128 }, { id: 'octa', size: 256 }],
+    // octa 320 / 640: about the memory of the 128 / 256 cube (320^2 vs 6 x 128^2 = 1.04x)
+    configs: [{ id: 'cube2d-warp', size: 128 }, { id: 'cube2d-none', size: 128 }, { id: 'cube-hw', size: 128 }, { id: 'octa', size: 128 }, { id: 'octa', size: 256 }, { id: 'octa', size: 320 }, { id: 'octa', size: 512 }],
+    lookup: [{ id: 'cube2d-warp', size: 128 }, { id: 'cube2d-none', size: 128 }, { id: 'cube-hw', size: 128 }, { id: 'octa', size: 256 }, { id: 'octa', size: 320 }],
   },
   {
     source: 256,
-    configs: [{ id: 'cube2d-warp', size: 256 }, { id: 'cube2d-none', size: 256 }, { id: 'cube-hw', size: 256 }, { id: 'octa', size: 256 }, { id: 'octa', size: 512 }, { id: 'octa', size: 1024 }],
+    configs: [{ id: 'cube2d-warp', size: 256 }, { id: 'cube2d-none', size: 256 }, { id: 'cube-hw', size: 256 }, { id: 'octa', size: 256 }, { id: 'octa', size: 512 }, { id: 'octa', size: 640 }, { id: 'octa', size: 1024 }],
     lookup: [{ id: 'cube2d-warp', size: 256 }, { id: 'cube2d-none', size: 256 }, { id: 'cube-hw', size: 256 }, { id: 'octa', size: 512 }],
   },
 ];

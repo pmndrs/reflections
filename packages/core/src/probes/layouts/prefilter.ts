@@ -202,13 +202,13 @@ export class LayoutPrefilter {
 
   constructor(device: GPUDevice, layout: ProbeLayout, size: number, sourceSize: number) {
     if (!Number.isInteger(Math.log2(sourceSize)) || sourceSize < 2 * INTEGRATION_SIZE) throw new Error(`LayoutPrefilter: sourceSize must be a power of two >= ${2 * INTEGRATION_SIZE}, got ${sourceSize}.`);
-    if (!Number.isInteger(Math.log2(size))) throw new Error(`LayoutPrefilter: size must be a power of two, got ${size}.`);
     this.device = device;
     this.layout = layout;
     this.size = size;
     this.sourceSize = sourceSize;
     this.maxLod = layout.mipLevelCount - 1;
-    if (this.maxLod < INTEGRATION_LEVELS || size >> this.maxLod < 1) throw new Error(`LayoutPrefilter: ${layout.mipLevelCount} mips don't fit ${size} px.`);
+    // any size that halves exactly down to the last mip (octa can sit between powers of two)
+    if (this.maxLod < INTEGRATION_LEVELS || size % (1 << this.maxLod) !== 0) throw new Error(`LayoutPrefilter: ${layout.mipLevelCount} mips need a size divisible by ${1 << this.maxLod}, got ${size}.`);
     const pipes = pipesFor(device, layout);
     const U = GPUTextureUsage;
     const srcMips = Math.log2(sourceSize) + 1;
