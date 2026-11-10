@@ -67,6 +67,12 @@ export function makeChecks(p: Page) {
     p.probes.bake(renderer, scene, { ...bakeOptions(), ...extra });
     p.grid.visible = grid; p.dynamicObject.visible = object; p.probesHelper.visible = helper;
   };
+  /**
+   * Render a few frames after a visibility or node change. On r187 the frame after the first one
+   * that shows the grid differs once (692 px of 518k off by up to 75 / 255, then stable), so shots
+   * taken in different frames only compare after this.
+   */
+  const settle = async () => { for (let i = 0; i < 3; i++) { nextFrame(); await p.shot(); } };
   const restore = () => { p.dynamicObject.visible = false; p.setGrid(false); bake(); scene.environmentNode = p.node; };
 
   return {
@@ -90,6 +96,7 @@ export function makeChecks(p: Page) {
       probe.projectionSize = new THREE.Vector3(8, 5, 8);
       set.add(probe);
       p.setGrid(true, 0.05);
+      await settle();
       const capture = (position: number[], projectionOffset: number[], originOffset: number[]) => {
         probe.position.fromArray(position);
         probe.projectionOffset.fromArray(projectionOffset);
@@ -199,6 +206,7 @@ export function makeChecks(p: Page) {
     async timeSlice() {
       p.setGrid(true, 0.05);
       bake();
+      await settle();
       // something new for the probes to see: the mirror sphere in the doorway
       p.dynamicObject.position.set(0, 1.4, 1.2);
       p.dynamicMaterial.roughness = 0;
@@ -230,6 +238,7 @@ export function makeChecks(p: Page) {
       env.mapping = THREE.EquirectangularReflectionMapping;
       env.needsUpdate = true;
       p.setGrid(true, 0.05);
+      await settle();
       const counts: Record<string, number> = {};
       counts.noEnvironment = count();
       const before = await p.shot();
