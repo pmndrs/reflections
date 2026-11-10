@@ -16,6 +16,8 @@ export { ReflectionProbesHelper } from './probes/ReflectionProbesHelper';
 export { AccumulateNode, clampSample, ggxLobeSample, pixelSeed } from './sampling';
 
 // Frame contract G-buffer: one MRT render of a three scene into the core's FrameInputs.
+// Device limits for six-level mip/Hi-Z dispatches: new WebGPURenderer({ requiredLimits: reflectionsRequiredLimits(adapter) }).
+export { reflectionsRequiredLimits } from '@pmndrs/reflections-core';
 export { FrameGBuffer, getDevice, getGPUTexture, type FrameGBufferOptions, type FrameTargetName } from './frame/FrameGBuffer';
 export { sceneColorNoSpecular, gbufferRoughness, gbufferMetalness } from './frame/nodes';
 

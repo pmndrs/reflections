@@ -42,7 +42,11 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      downsampler:
+        specifier: link:../../../downsampler-reflections
+        version: link:../../../downsampler-reflections
 
   packages/three:
     dependencies:

@@ -6,7 +6,7 @@
 import * as THREE from 'three/webgpu';
 import { float, perspectiveDepthToViewZ, renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { FrameGBuffer, getDevice } from '@pmndrs/reflections/three';
+import { FrameGBuffer, getDevice, reflectionsRequiredLimits } from '@pmndrs/reflections/three';
 import { ASSET_SCENES, SCENES, availableAssets, type KitScene } from '../../shared';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,7 +58,7 @@ async function main() {
   // ask for room for the optional `lit` target (36 bytes/sample); FrameGBuffer drops it if refused
   const adapter = await navigator.gpu.requestAdapter();
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { maxColorAttachmentBytesPerSample: maxBytes } } as N);
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { ...(adapter ? reflectionsRequiredLimits(adapter) : {}), maxColorAttachmentBytesPerSample: maxBytes } } as N);
   renderer.setPixelRatio(1);
   renderer.setSize(W, H, false);
   renderer.shadowMap.enabled = true;
