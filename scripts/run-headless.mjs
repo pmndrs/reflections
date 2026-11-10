@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | sssr-core | ssr)
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
 import { spawn } from 'node:child_process';
@@ -237,6 +237,60 @@ async function checkScenes() {
   return [p];
 }
 
+/**
+ * examples/ssr: the three adapter (ScreenSpaceReflectionsPass + screenSpaceComposite) on every
+ * procedural scene: no validation errors, finite outputs, rays traced. mirrorWall: the mirror floor
+ * shows the wall (SSR hit colour vs the analytic planar reflection). offscreen: the wall mirror,
+ * which reflects what is behind the camera, has low confidence. Both variants; GPU ms at 1080p.
+ */
+async function ssrChecks(pages) {
+  console.log('examples/ssr:');
+  for (const variant of ['auto', 'workgroup']) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid${variant === 'workgroup' ? '&variant=workgroup' : ''}`);
+    pages.push(p);
+    const ids = await p.T('window.__p.scenes()');
+    for (const id of variant === 'auto' ? ids : ['mirrorWall', 'offscreen']) {
+      const before = results.logs.length;
+      const info = await p.T(`window.__p.load(${JSON.stringify(id)})`);
+      await p.T('window.__p.step(2)');
+      const st = await p.T('window.__p.stats()');
+      const fails = [];
+      if (st.nonFinite) fails.push(`${st.nonFinite} non-finite px`);
+      if (!(st.rays > 0)) fails.push('no rays');
+      const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+      if (errs.length) fails.push(errs.slice(0, 2).join(' | '));
+      const tag = `ssr ${id} (${st.variant})`;
+      check(`${tag}: renders, no validation errors, finite outputs`, fails.length === 0,
+        fails.length ? fails.join('; ') : `${info.probes} probe(s), ${st.rays} rays, ${st.misses} misses, mean confidence ${st.meanConfidence.toFixed(3)} on geometry, mirror floor ${st.mirrorFloorConfidence.toFixed(3)}`);
+      if (id === 'mirrorWall') {
+        const w = st.wall;
+        check(`${tag}: mirror floor shows the wall`, w.confidentFraction > 0.6 && w.lumCorrelation > 0.8 && w.hitDistanceMedianRelErr < 0.05,
+          `${w.pixels} floor px reflect a visible wall point; ${(w.confidentFraction * 100).toFixed(1)}% with confidence >= 0.9; luminance correlation ${w.lumCorrelation.toFixed(3)}, mean abs rel diff ${w.meanAbsRelative.toFixed(3)}; hit distance median rel err ${w.hitDistanceMedianRelErr.toFixed(4)}`);
+        if (variant === 'auto') {
+          savePng('ssr-mirrorWall-grid.png', await p.T('window.__p.shot()'));
+          await p.T("window.__p.setView('final')");
+          savePng('ssr-mirrorWall-final.png', await p.T('window.__p.shot()'));
+          await p.T("window.__p.setView('noSSR')");
+          savePng('ssr-mirrorWall-noSSR.png', await p.T('window.__p.shot()'));
+          await p.T("window.__p.setView('grid')");
+        }
+      }
+      if (id === 'offscreen') {
+        await p.T("window.__p.setPose('mirror')");
+        await p.T('window.__p.step(2)');
+        const sm = await p.T('window.__p.stats()');
+        check(`${tag}: low confidence where the reflection comes from behind the camera`, sm.facingPanelPixels > 1000 && sm.facingPanelConfidence < 0.1,
+          `wall mirror (${sm.facingPanelPixels} px, view 'mirror'): mean confidence ${sm.facingPanelConfidence.toFixed(4)}; floor reflecting above the frame (default view): ${st.mirrorFloorConfidence.toFixed(3)}`);
+        if (variant === 'auto') savePng('ssr-offscreen-mirror-grid.png', await p.T('window.__p.shot()'));
+      } else if (variant === 'auto' && id !== 'mirrorWall') savePng(`ssr-${id}-grid.png`, await p.T('window.__p.shot()'));
+    }
+  }
+  const big = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080`);
+  pages.push(big);
+  const t = await big.T('window.__p.time(30)');
+  console.log(`  GPU ms ${t.size.join('x')} through the three adapter (${t.variant}, mirrorWall, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
+}
+
 async function main() {
   setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, 600_000).unref();
   let server = null;
@@ -336,6 +390,7 @@ async function main() {
 
     if (runs('scenes')) pages.push(...(await checkScenes()));
     if (runs('sssr-core')) await sssrCoreChecks(pages);
+    if (runs('ssr')) await ssrChecks(pages);
 
     const validation = results.logs.filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
     check('no WebGPU validation errors or exceptions', validation.length === 0, validation.slice(0, 3).join(' | '));

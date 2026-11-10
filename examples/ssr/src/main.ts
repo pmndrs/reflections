@@ -1,0 +1,443 @@
+// examples/ssr: the scene kit with screen-space reflections on (ScreenSpaceReflectionsPass +
+// screenSpaceComposite from @pmndrs/reflections/three).
+//
+// Each frame: the pass renders the frame-contract G-buffer, traces with the core SSR on three's
+// device and copies radiance / hit distance / confidence into three textures; a RenderPipeline
+// shows the composite or a debug view. The probes suggested by each kit scene are baked and lit
+// with (`scene.environmentNode = reflectionProbes(probes)`) unless `?probes=0`; the composite then
+// reads them with `sampleReflectionProbesLocal` and falls back to `scene.environment` by coverage.
+//
+// `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `ssr`).
+import * as THREE from 'three/webgpu';
+import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import {
+  ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes, screenSpaceComposite,
+} from '@pmndrs/reflections/three';
+import { SCENES, type KitScene } from '../../shared';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type N = any;
+const q = new URLSearchParams(location.search);
+const W = Number(q.get('w') ?? 960), H = Number(q.get('h') ?? 540);
+const manual = q.has('manual');
+const useProbes = q.get('probes') !== '0';
+
+const VIEWS = ['final', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'probeSpecular', 'grid'] as const;
+type View = (typeof VIEWS)[number];
+const GRID: View[] = ['final', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'probeSpecular'];
+
+// ---- GPU readback ------------------------------------------------------------------------------
+function halfToFloat(h: number) {
+  const s = h & 0x8000 ? -1 : 1, e = (h >> 10) & 0x1f, f = h & 0x3ff;
+  if (e === 0) return s * 2 ** -14 * (f / 1024);
+  if (e === 31) return f ? NaN : s * Infinity;
+  return s * 2 ** (e - 15) * (1 + f / 1024);
+}
+const FORMATS: Record<string, { bytes: number; channels: number; read: (dv: DataView, o: number, c: number) => number }> = {
+  rgba16float: { bytes: 8, channels: 4, read: (dv, o, c) => halfToFloat(dv.getUint16(o + c * 2, true)) },
+  rgba8unorm: { bytes: 4, channels: 4, read: (dv, o, c) => dv.getUint8(o + c) / 255 },
+  r32float: { bytes: 4, channels: 1, read: (dv, o) => dv.getFloat32(o, true) },
+  depth32float: { bytes: 4, channels: 1, read: (dv, o) => dv.getFloat32(o, true) },
+};
+async function readTexture(device: GPUDevice, tex: GPUTexture) {
+  const info = FORMATS[tex.format];
+  if (!info) throw new Error(`readback: unsupported format ${tex.format}`);
+  const bpr = Math.ceil((tex.width * info.bytes) / 256) * 256;
+  const buf = device.createBuffer({ size: bpr * tex.height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const enc = device.createCommandEncoder();
+  enc.copyTextureToBuffer({ texture: tex, aspect: tex.format.startsWith('depth') ? 'depth-only' : 'all' }, { buffer: buf, bytesPerRow: bpr }, [tex.width, tex.height]);
+  device.queue.submit([enc.finish()]);
+  await buf.mapAsync(GPUMapMode.READ);
+  const dv = new DataView(buf.getMappedRange());
+  const out = new Float32Array(tex.width * tex.height * info.channels);
+  for (let y = 0; y < tex.height; y++) for (let x = 0; x < tex.width; x++) for (let c = 0; c < info.channels; c++) {
+    out[(y * tex.width + x) * info.channels + c] = info.read(dv, y * bpr + x * info.bytes, c);
+  }
+  buf.unmap(); buf.destroy();
+  return out;
+}
+async function readU32(device: GPUDevice, b: GPUBuffer, size = 16) {
+  const r = device.createBuffer({ size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const enc = device.createCommandEncoder();
+  enc.copyBufferToBuffer(b, 0, r, 0, size);
+  device.queue.submit([enc.finish()]);
+  await r.mapAsync(GPUMapMode.READ);
+  const out = Array.from(new Uint32Array(r.getMappedRange().slice(0)));
+  r.unmap(); r.destroy();
+  return out;
+}
+
+// ---- ray-list / miss-list coverage (debug): lists -> per-pixel bits -> rgba8 texture ------------
+const MASK_WGSL = /* wgsl */ `
+struct U { size: vec2u, pad: vec2u };
+@group(0) @binding(0) var<uniform> u: U;
+@group(0) @binding(1) var<storage, read> rayList: array<u32>;
+@group(0) @binding(2) var<storage, read> rayCounter: array<u32, 4>;
+@group(0) @binding(3) var<storage, read> missList: array<vec2u>;
+@group(0) @binding(4) var<storage, read> missCounter: array<u32, 4>;
+@group(0) @binding(5) var<storage, read_write> bits: array<atomic<u32>>;
+@group(0) @binding(6) var mask: texture_storage_2d<rgba8unorm, write>;
+fn coords(p: u32) -> vec2u { return vec2u(p & 32767u, (p >> 15u) & 16383u); }
+fn mark(c: vec2u, b: u32) { if (all(c < u.size)) { atomicOr(&bits[c.y * u.size.x + c.x], b); } }
+@compute @workgroup_size(8, 8) fn clear(@builtin(global_invocation_id) id: vec3u) {
+  if (all(id.xy < u.size)) { atomicStore(&bits[id.y * u.size.x + id.x], 0u); }
+}
+// one invocation per list entry, indexed over the pixel grid (entries <= pixels)
+@compute @workgroup_size(8, 8) fn markLists(@builtin(global_invocation_id) id: vec3u) {
+  if (any(id.xy >= u.size)) { return; }
+  let i = id.y * u.size.x + id.x;
+  if (i < rayCounter[1]) {
+    let p = rayList[i];
+    let c = coords(p);
+    mark(c, 1u);
+    if (((p >> 29u) & 1u) != 0u) { mark(vec2u(c.x ^ 1u, c.y), 2u); }
+    if (((p >> 30u) & 1u) != 0u) { mark(vec2u(c.x, c.y ^ 1u), 2u); }
+    if (((p >> 31u) & 1u) != 0u) { mark(c ^ vec2u(1u), 2u); }
+  }
+  if (i < min(missCounter[1], arrayLength(&missList))) { mark(coords(missList[i].x), 4u); }
+}
+@compute @workgroup_size(8, 8) fn resolve(@builtin(global_invocation_id) id: vec3u) {
+  if (any(id.xy >= u.size)) { return; }
+  let b = atomicLoad(&bits[id.y * u.size.x + id.x]);
+  textureStore(mask, id.xy, vec4f(select(0.0, 1.0, (b & 1u) != 0u), select(0.0, 1.0, (b & 2u) != 0u), select(0.0, 1.0, (b & 4u) != 0u), 1.0));
+}
+`;
+
+async function main() {
+  const status = document.querySelector<HTMLElement>('#status')!;
+  const canvas = document.querySelector<HTMLCanvasElement>('#view')!;
+  if (!navigator.gpu) { status.textContent = 'WebGPU is not available in this browser.'; return; }
+  const adapter = await navigator.gpu.requestAdapter();
+  // the composite needs the G-buffer's `lit` target: 36 bytes/sample
+  const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { maxColorAttachmentBytesPerSample: maxBytes } } as N);
+  renderer.setPixelRatio(1);
+  renderer.setSize(W, H, false);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  await renderer.init();
+  const ssr = new ScreenSpaceReflectionsPass(renderer, {
+    gbufferOptions: { width: W, height: H }, missList: true, timestamps: q.has('timing'),
+    subgroups: q.get('variant') !== 'workgroup',
+  });
+  const device = ssr.device;
+  const gpuErrors: string[] = [];
+  device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });
+  // With the loop stopped, three renders each shadow map once per camera per frame: advance it ourselves.
+  const nextNodeFrame = () => (renderer as N)._nodes.nodeFrame.update();
+
+  // ---- coverage mask -----------------------------------------------------------------------------
+  const maskTex = new THREE.StorageTexture(W, H);
+  maskTex.type = THREE.UnsignedByteType;
+  maskTex.minFilter = maskTex.magFilter = THREE.NearestFilter;
+  maskTex.generateMipmaps = false;
+  const maskModule = device.createShaderModule({ label: 'ssr example mask', code: MASK_WGSL });
+  const maskLayout = device.createBindGroupLayout({
+    label: 'ssr example mask',
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+      ...[1, 2, 3, 4].map((binding) => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' as const } })),
+      { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+      { binding: 6, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba8unorm' } },
+    ],
+  });
+  const maskPipes = ['clear', 'markLists', 'resolve'].map((entryPoint) => device.createComputePipeline({
+    label: `ssr example ${entryPoint}`, layout: device.createPipelineLayout({ bindGroupLayouts: [maskLayout] }), compute: { module: maskModule, entryPoint },
+  }));
+  const maskU = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(maskU, 0, new Uint32Array([W, H, 0, 0]));
+  const maskBits = device.createBuffer({ size: W * H * 4, usage: GPUBufferUsage.STORAGE });
+  let maskGroup: GPUBindGroup | null = null, maskFor: unknown = null;
+  function updateMask() {
+    const core = ssr.tracer!;
+    if (maskFor !== core) {
+      renderer.initTexture(maskTex);
+      const o = core.outputs;
+      maskGroup = device.createBindGroup({
+        layout: maskLayout,
+        entries: [
+          { binding: 0, resource: { buffer: maskU } }, { binding: 1, resource: { buffer: o.rayList } }, { binding: 2, resource: { buffer: o.rayCounter } },
+          { binding: 3, resource: { buffer: o.missList! } }, { binding: 4, resource: { buffer: o.missCounter! } }, { binding: 5, resource: { buffer: maskBits } },
+          { binding: 6, resource: getGPUTexture(renderer, maskTex).createView({ mipLevelCount: 1 }) },
+        ],
+      });
+      maskFor = core;
+    }
+    const enc = device.createCommandEncoder({ label: 'ssr example mask' });
+    for (const pipe of maskPipes) {
+      const p = enc.beginComputePass();
+      p.setPipeline(pipe); p.setBindGroup(0, maskGroup!); p.dispatchWorkgroups(Math.ceil(W / 8), Math.ceil(H / 8)); p.end();
+    }
+    device.queue.submit([enc.finish()]);
+  }
+
+  // ---- display ------------------------------------------------------------------------------------
+  const uView = uniform(0);
+  const uGrid = uniform(0);
+  const tone = (c: N) => (renderOutput(c, THREE.ACESFilmicToneMapping, THREE.SRGBColorSpace) as N).rgb;
+  const pipeline = new THREE.RenderPipeline(renderer);
+  pipeline.outputColorTransform = false;
+  let composite: ReturnType<typeof screenSpaceComposite> | null = null;
+  function buildDisplay() {
+    // one composite, sampled at the full-screen uv or at a grid cell's local uv
+    const gridUV = uv().mul(3);
+    const cell = gridUV.floor();
+    const at = uGrid.equal(1).select(gridUV.fract(), uv());
+    const c = composite = screenSpaceComposite(ssr, {
+      probes: useProbes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity, uv: at,
+    });
+    const mask = texture(maskTex, at);
+    const dim = tone(c.lit).mul(0.35);
+    const viewColor = (v: View): N => {
+      switch (v) {
+        case 'final': return tone(c.final.rgb);
+        case 'noSSR': return tone(c.lit);
+        case 'ssr': return tone(c.ssr);
+        case 'specular': return tone(c.specular);
+        case 'probeSpecular': return tone(c.probeSpecular);
+        case 'confidence': return c.geometry.select(vec3(c.confidence), vec3(0.02, 0.03, 0.08));
+        case 'hitDistance': { const d = c.hitDistance; return d.greaterThan(0).select((vec3(1, 0.8, 0.5) as N).mul(d.div(d.add(2))), vec3(0)); }
+        // traced = green, quad copy = yellow-green, neither = dimmed lit image
+        case 'rays': return mask.r.greaterThan(0.5).select(vec3(0.1, 0.9, 0.2), mask.g.greaterThan(0.5).select(vec3(0.6, 0.8, 0.1), dim));
+        case 'misses': return mask.b.greaterThan(0.5).select(vec3(1, 0.15, 0.1), mask.r.greaterThan(0.5).select(vec3(0.1, 0.35, 0.15), dim));
+        default: return vec3(0);
+      }
+    };
+    let full: N = vec3(0);
+    VIEWS.forEach((v, i) => { if (v !== 'grid') full = uView.equal(i).select(viewColor(v), full); });
+    const idx = cell.y.mul(3).add(cell.x); // row-major from the top left
+    let grid: N = vec3(0.06);
+    GRID.forEach((v, i) => { grid = idx.equal(i).select(viewColor(v), grid); });
+    const local = gridUV.fract();
+    grid = local.x.lessThan(0.004).or(local.y.lessThan(0.006)).select(vec3(0.15), grid);
+    pipeline.outputNode = vec4(uGrid.equal(1).select(grid, full) as N, 1);
+    pipeline.needsUpdate = true;
+  }
+
+  // ---- scene state --------------------------------------------------------------------------------
+  const controls = new OrbitControls(new THREE.PerspectiveCamera(), canvas);
+  let kit: KitScene | null = null;
+  let probes: ReflectionProbes | null = null;
+  let time = 0, paused = false;
+
+  async function load(id: string) {
+    const factory = SCENES[id];
+    if (!factory) throw new Error(`unknown scene ${id}`);
+    kit?.dispose?.();
+    probes?.dispose?.();
+    probes = null;
+    status.textContent = `loading ${id}...`;
+    kit = await factory({ aspect: W / H });
+    controls.object = kit.camera;
+    controls.target.copy(kit.target);
+    controls.update();
+    time = 0; kit.update?.(0);
+    if (useProbes && kit.probes.length) {
+      probes = new ReflectionProbes();
+      for (const v of kit.probes) {
+        const p = new ReflectionProbe(...v.influenceSize);
+        p.position.set(...v.position);
+        if (v.projectionSize) p.projectionSize = new THREE.Vector3(...v.projectionSize);
+        if (v.originOffset) p.originOffset.set(...v.originOffset);
+        if (v.blendDistance !== undefined) p.blendDistance = v.blendDistance;
+        probes.add(p);
+      }
+      kit.scene.add(probes);
+      probes.bake(renderer, kit.scene, { resolution: 128, near: 0.05, far: 60 });
+      nextNodeFrame();
+      kit.scene.environmentNode = reflectionProbes(probes) as N;
+    }
+    ssr.gbuffer.resetHistory();
+    buildDisplay();
+    refreshUI();
+    return { id: kit.id, views: Object.keys(kit.views), probes: probes?.bakedProbes.length ?? 0, animated: !!kit.update };
+  }
+
+  function setPose(name: string) {
+    const v = kit!.views[name];
+    if (!v) throw new Error(`no view ${name} in ${kit!.id}`);
+    kit!.camera.position.set(...v.pos);
+    if (v.fov) { kit!.camera.fov = v.fov; kit!.camera.updateProjectionMatrix(); }
+    controls.target.set(...v.target);
+    controls.update();
+  }
+
+  function frame() {
+    if (!kit) return;
+    if (manual || !looping) nextNodeFrame();
+    kit.camera.aspect = W / H; kit.camera.updateProjectionMatrix(); kit.camera.updateMatrixWorld();
+    ssr.render(kit.scene, kit.camera);
+    updateMask();
+    pipeline.render();
+  }
+
+  let looping = false;
+  const timer = new THREE.Timer();
+  function animate() {
+    timer.update();
+    if (kit?.update && !paused) { time += Math.min(timer.getDelta(), 0.1); kit.update(time); }
+    frame();
+  }
+  const startLoop = () => { looping = true; renderer.setAnimationLoop(animate); };
+  const stopLoop = () => { looping = false; renderer.setAnimationLoop(null); };
+
+  // ---- UI ----------------------------------------------------------------------------------------
+  const panel = document.querySelector<HTMLElement>('#controls')!;
+  const row = (label: string, el: HTMLElement) => { const l = document.createElement('label'); l.textContent = `${label} `; l.append(el); panel.append(l); return el; };
+  const sceneSel = document.createElement('select');
+  const viewSel = document.createElement('select');
+  const poseSel = document.createElement('select');
+  for (const id of Object.keys(SCENES)) sceneSel.append(new Option(id, id));
+  for (const v of VIEWS) viewSel.append(new Option(v, v));
+  sceneSel.onchange = () => { const u = new URL(location.href); u.searchParams.set('scene', sceneSel.value); u.searchParams.delete('pose'); history.replaceState(null, '', u); load(sceneSel.value).then(() => !looping && frame()); };
+  viewSel.onchange = () => { setView(viewSel.value as View); if (!looping) frame(); };
+  poseSel.onchange = () => { setPose(poseSel.value); if (!looping) frame(); };
+  row('Scene', sceneSel); row('Show', viewSel); row('Camera', poseSel);
+  const thr = document.createElement('input'); thr.type = 'range'; thr.min = '0'; thr.max = '1'; thr.step = '0.01'; thr.value = '0.447';
+  thr.oninput = () => { ssr.settings.roughnessThreshold = Number(thr.value); refreshUI(); if (!looping) frame(); };
+  row('Roughness threshold (perceptual)', thr);
+  const ssrBox = document.createElement('input'); ssrBox.type = 'checkbox'; ssrBox.checked = true;
+  ssrBox.onchange = () => { composite!.amount.value = ssrBox.checked ? 1 : 0; if (!looping) frame(); };
+  row('SSR', ssrBox);
+  const pauseBox = document.createElement('input'); pauseBox.type = 'checkbox'; pauseBox.onchange = () => { paused = pauseBox.checked; };
+  row('Pause', pauseBox);
+  function refreshUI() {
+    sceneSel.value = kit!.id;
+    const pose = poseSel.value;
+    poseSel.replaceChildren(...Object.keys(kit!.views).map((v) => new Option(v, v)));
+    if (kit!.views[pose]) poseSel.value = pose;
+    status.textContent = [
+      `three r${THREE.REVISION} | ${kit!.title} | ${W}x${H}${manual ? ' | manual (loop stopped)' : ''}`,
+      `variant ${ssr.variant ?? '(first frame pending)'} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
+      `specular IBL term: ${probes ? `${probes.bakedProbes.length} probe(s) by coverage, then scene.environment` : 'scene.environment'}`,
+    ].join('\n');
+  }
+  function setView(v: View) {
+    uGrid.value = v === 'grid' ? 1 : 0;
+    uView.value = VIEWS.indexOf(v);
+    viewSel.value = v;
+  }
+
+  await load(q.get('scene') ?? 'mirrorWall');
+  if (q.get('pose')) setPose(q.get('pose')!);
+  setView((q.get('view') as View) ?? 'final');
+  if (manual) frame(); else startLoop();
+  refreshUI();
+
+  // ---- headless hooks ----------------------------------------------------------------------------
+  const idle = () => device.queue.onSubmittedWorkDone();
+  Object.assign(window, {
+    __p: {
+      THREE, renderer, ssr, controls, get kit() { return kit; }, gpuErrors, get variant() { return ssr.variant; },
+      scenes: () => Object.keys(SCENES),
+      load: (id: string) => load(id),
+      setPose, setView: (v: View) => setView(v),
+      setSSR(on: boolean) { composite!.amount.value = on ? 1 : 0; },
+      setSettings(s: N) { Object.assign(ssr.settings, s); },
+      stop: stopLoop, start: startLoop,
+      async step(n = 1) { for (let i = 0; i < n; i++) frame(); await idle(); },
+      async shot() { frame(); const url = canvas.toDataURL('image/png'); await idle(); return url; },
+      /** Median GPU ms per core pass over `n` frames, one frame per submit (loop stopped). */
+      async time(n = 30) {
+        stopLoop();
+        const per: Record<string, number[]> = {};
+        for (let i = 0; i < n + 3; i++) {
+          frame();
+          await idle();
+          const t = await ssr.readTimings();
+          if (i >= 3) for (const [k, v] of t) (per[k] ??= []).push(v);
+        }
+        const med = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
+        return { size: [W, H], variant: ssr.variant, frames: n, ms: Object.fromEntries(Object.entries(per).map(([k, v]) => [k, Number(med(v).toFixed(4))])) };
+      },
+      stats: () => stats(),
+    },
+  });
+
+  /**
+   * Readback stats for the check: confidence / ray / miss counts, and two scene checks.
+   * mirrorWall: for every mirror-floor pixel whose planar reflection lands on the wall (z = -3,
+   * |x| < 5, 0 < y < 4) at a point the camera sees, the expected colour is the scene colour where
+   * that wall point projects; SSR's hit colour (radiance / confidence) is compared with it by
+   * luminance correlation, and its hit distance with the analytic distance.
+   * Any scene: mean confidence over the mirror panels facing the camera (normal toward +z), the
+   * offscreen scene's behind-the-camera case.
+   */
+  async function stats() {
+    await idle();
+    const core = ssr.tracer!;
+    const t = ssr.gbuffer.gpuTextures();
+    const [depth, nr, am, sc, rad, conf, hit] = await Promise.all([
+      readTexture(device, t.depth), readTexture(device, t.normal), readTexture(device, t.albedo), readTexture(device, t.sceneColor),
+      readTexture(device, core.outputs.radiance), readTexture(device, core.outputs.confidence), readTexture(device, core.outputs.hitDistance),
+    ]);
+    const counter = await readU32(device, core.outputs.rayCounter);
+    const missCounter = await readU32(device, core.outputs.missCounter!);
+    const cam = ssr.gbuffer.frame!.camera;
+    const VP = new THREE.Matrix4().fromArray(cam.projection as N).multiply(new THREE.Matrix4().fromArray(cam.view as N));
+    const invVP = VP.clone().invert();
+    const eye = new THREE.Vector3(...(cam.position as [number, number, number]));
+    const inverted = ssr.gbuffer.conventions.depthInverted;
+    const isFar = (d: number) => (inverted ? d <= 0 : d >= 1);
+    let geo = 0, confSum = 0, nonFinite = 0;
+    let panel = 0, panelConf = 0, floorPx = 0, floorConf = 0;
+    const pairs: [number, number][] = [];
+    let wallPx = 0, wallConfident = 0, hitErr: number[] = [];
+    const P = new THREE.Vector3(), Q = new THREE.Vector3(), d = new THREE.Vector3(), s = new THREE.Vector3();
+    const lum = (a: Float32Array, i: number) => (a[i * 4] + a[i * 4 + 1] + a[i * 4 + 2]) / 3;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (!Number.isFinite(rad[i * 4]) || !Number.isFinite(conf[i])) nonFinite++;
+      if (isFar(depth[i])) continue;
+      geo++; confSum += conf[i];
+      const mirrorPx = am[i * 4 + 3] > 0.99 && nr[i * 4 + 3] < 0.03;
+      if (!mirrorPx) continue;
+      if (nr[i * 4 + 2] > 0.99) { panel++; panelConf += conf[i]; }
+      if (nr[i * 4 + 1] < 0.99) continue;
+      floorPx++; floorConf += conf[i];
+      if (kit!.id !== 'mirrorWall') continue;
+      P.set(((x + 0.5) / W) * 2 - 1, 1 - ((y + 0.5) / H) * 2, depth[i]).applyMatrix4(invVP);
+      d.copy(P).sub(eye).normalize(); d.y = -d.y; // planar mirror at y = 0
+      if (d.z >= -1e-4) continue;
+      const tw = (-3 - P.z) / d.z;
+      Q.copy(P).addScaledVector(d, tw);
+      if (Math.abs(Q.x) > 4.9 || Q.y < 0.05 || Q.y > 3.95) continue;
+      s.copy(Q).applyMatrix4(VP);
+      const sx = Math.floor((s.x * 0.5 + 0.5) * W), sy = Math.floor((0.5 - s.y * 0.5) * H);
+      if (sx < 0 || sy < 0 || sx >= W || sy >= H) continue;
+      const j = sy * W + sx;
+      if (Math.abs(depth[j] - s.z) > 2e-4) continue; // the wall point is hidden (posts, objects)
+      wallPx++;
+      if (conf[i] < 0.9) continue;
+      wallConfident++;
+      pairs.push([lum(rad, i) / conf[i], lum(sc, j)]);
+      hitErr.push(Math.abs(hit[i] - tw) / tw);
+    }
+    let corr = NaN, meanAbs = NaN;
+    if (pairs.length > 10) {
+      const n = pairs.length;
+      const ma = pairs.reduce((a, p) => a + p[0], 0) / n, mb = pairs.reduce((a, p) => a + p[1], 0) / n;
+      let sab = 0, saa = 0, sbb = 0, ad = 0;
+      for (const [a, b] of pairs) { sab += (a - ma) * (b - mb); saa += (a - ma) ** 2; sbb += (b - mb) ** 2; ad += Math.abs(a - b); }
+      corr = sab / Math.sqrt(saa * sbb);
+      meanAbs = ad / n / Math.max(mb, 1e-6);
+    }
+    hitErr = hitErr.sort((a, b) => a - b);
+    return {
+      scene: kit!.id, variant: ssr.variant, rays: counter[1], tiles: counter[3], misses: missCounter[1],
+      geometry: geo / (W * H), meanConfidence: geo ? confSum / geo : 0, nonFinite,
+      mirrorFloorPixels: floorPx, mirrorFloorConfidence: floorPx ? floorConf / floorPx : 0,
+      facingPanelPixels: panel, facingPanelConfidence: panel ? panelConf / panel : 0,
+      wall: kit!.id === 'mirrorWall' ? {
+        pixels: wallPx, confidentFraction: wallPx ? wallConfident / wallPx : 0, lumCorrelation: corr, meanAbsRelative: meanAbs,
+        hitDistanceMedianRelErr: hitErr.length ? hitErr[hitErr.length >> 1] : NaN,
+      } : null,
+    };
+  }
+}
+
+main().catch((e) => {
+  console.error(e);
+  document.querySelector<HTMLElement>('#status')!.textContent = String(e?.stack ?? e);
+});
