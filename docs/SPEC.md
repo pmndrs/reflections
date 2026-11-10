@@ -1,6 +1,6 @@
 # @pmndrs/reflections — spec
 
-Status: draft 1, 2026-11-10. Phase 0 (this repo's first commit) is done. Everything after it is a plan.
+Status: draft 2, 2026-11-10. Phase 0 (this repo's first commit) is done. Everything after it is a plan.
 
 ## What this is
 
@@ -27,7 +27,8 @@ This repo gives the reflection sources a home. The siblings keep their own jobs:
 | `denoiser` | Denoises the noisy reflection signal (`ffxReflections` / `FfxReflectionDenoiser`). It plugs in through the denoise seam (below). Its examples become consumers of this package. |
 | `@pmndrs/upscaler` | Runs after composition, as it does for any frame. Reflection passes can run at a reduced resolution and are upscaled by their own resolve, not by the upscaler. |
 | three.js | The first vendor. The probes keep the API of three.js #35046 (Ben Houston's `ReflectionProbes`), so code can move between this repo and three. |
-| three-mesh-bvh / three-gpu-pathtracer | BVH tracing for the ray-traced source, behind a trace seam (below). |
+| `@pmndrs/bvh` | The BVH for the ray-traced source: engine-free WebGPU builders and a WGSL ray walk, behind the trace seam (below). Still WIP. three-mesh-bvh covers three until it is ready. |
+| `@pmndrs/ddgi` | A diffuse GI sibling, and the first user of `@pmndrs/bvh`. One source of the irradiance that the probe re-fit consumes. |
 
 ### Non-goals
 
@@ -92,8 +93,15 @@ A trace provider is a WGSL snippet plus a bind group. The snippet provides `fn t
 
 Hit shading belongs to the resolve, not the provider. It looks up the probes at the hit point, plus whatever cheap material evaluation the engine exposes.
 
-- **three adapter:** wraps `three-mesh-bvh/webgpu` (`BVHComputeData`, `raycastFirstHit`), which the explainer pages already use.
-- **Core-native BVH:** open question 1.
+- **Core provider: `@pmndrs/bvh`** (pmndrs/bvh, WIP; split out of webgpu-ddgi on 2026-11-10). This is ours, and it is the target.
+  - It is engine-free.
+  - It builds with tinybvh in WebAssembly on the CPU, or with H-PLOC or LBVH on the GPU, and refits on the GPU (instance top level, skinned meshes).
+  - Every builder writes one GPU layout, versioned by `GPU_LAYOUT_VERSION`, currently 1. Its WGSL walk is `giTraceClosest` / `giTraceAny`, with a CPU port and a ray oracle.
+  - The provider wraps that walk as `traceFirstHit`, and checks `GPU_LAYOUT_VERSION` at start-up.
+  - The GPU builders need the `subgroups` feature. Without it, `createMeshLayoutBuilder` falls back to tinybvh on its own.
+  - Because it lives in core, babylon, pixi and raw WebGPU all get rays, not only three.
+  - It is an optional peer: the pixel paths that don't trace never load it.
+- **three stopgap:** wraps `three-mesh-bvh/webgpu` (`BVHComputeData`, `raycastFirstHit`), which the explainer pages already use. It stays until `@pmndrs/bvh` passes its own oracle on our scenes. After that, it remains only for apps that already have a three-mesh-bvh tree.
 
 ## Sources
 
@@ -138,7 +146,7 @@ It works as follows:
 - **three upstream.** When three ships `CubeArrayTexture` sampling (#35053) and #35046, the three adapter can bake into three's texture for a `cube-array` layout. The API stays the same either way.
 - **Probe re-fit.** Normalize the probe radiance by irradiance, as idTech 8 does: `reflection × frameIrradiance / probeIrradiance`. Lazarov 2013 and Hobson 2019 describe the same normalization.
   - `probeIrradiance` is the probe's L1 SH, taken from the same capture.
-  - `frameIrradiance` comes from whatever GI the app has: three r187's `LightProbeGrid` (L2 SH), VXGI, SSGI or a lightmap.
+  - `frameIrradiance` comes from whatever GI the app has: three r187's `LightProbeGrid` (L2 SH), `@pmndrs/ddgi`'s irradiance volumes, VXGI, SSGI or a lightmap.
   - This is the main way reflections "work with GI tools". It removes glowing corners and picks up bounce colour that the probe's single capture point missed.
 
 ### 2. Octahedral probes vs PMREM (phase 1 research)
@@ -172,11 +180,23 @@ The core prefilter will take the layout as two functions, `dirForTexel(layout, t
 | `octa` | 1 layer per probe, full-sphere octahedral, a gutter at each mip | 1 trilinear sample |
 | `octa-hemi` (maybe) | hemi-octahedral for probes on a wall | 1 sample, half the texels |
 
+**Storage format, a second axis.** Format is independent of layout, so every layout above is also measured in each format that can hold it:
+
+| Format | Bytes / texel | Notes |
+|---|---|---|
+| `rgba16float` | 8 | Today's format and the default everywhere. Compute can write it directly. |
+| `rg11b10ufloat` | 4 | No alpha and no storage binding. Written by a render pass or a copy. Renderable only with the optional `rg11b10ufloat-renderable` feature. |
+| BC6H (`bc6h-rgb-ufloat`) | 1 | Optional `texture-compression-bc` feature, so desktop only (Apple Silicon included); mobile WebGPU has no compressed HDR format. Compute can't write it, so a GPU encoder writes 16-byte blocks to a buffer, then `copyBufferToTexture`. Every mip has to be at least one 4×4 block, which an 8 px floor satisfies. Gutters have to be wide enough not to bleed across blocks. |
+
+BC6H is a format for baked probes. For a live capture, the encode time counts against the frame, so it is measured as part of the bake. For BC6H, the metrics add the encode error on top of the layout error.
+
+idTech 8 ships BC6H cube arrays. For us, a layout that wins on `rgba16float` and also compresses well is the goal.
+
 **Metrics.** Each is measured per roughness level, on the same captures, on two scenes: the two rooms and the explainer room.
 
 - **Error** against a brute-force GGX reference: a compute pass integrating mip 0 with thousands of samples per texel direction. Reported as mean and p99, split into face-edge or fold texels versus the rest.
 - **Seam visibility** after tone mapping.
-- **Memory per probe** at equal p99 error.
+- **Memory per probe** at equal p99 error, per format.
 - **Bake time** (prefilter only, then full).
 - **Lookup cost**: ms per 1080p frame for 1, 3 and 16 probes.
 - **Engine fit**: what babylon, pixi and raw WebGPU need in order to sample it.
@@ -186,7 +206,9 @@ The core prefilter will take the layout as two functions, `dirForTexel(layout, t
 - it matches `cube2d-warp` error at less than or equal memory;
 - it costs no more per frame.
 
-Otherwise it stays an option. The `cube-hw` path remains the reference for "what a cube array would give".
+Otherwise it stays an option. The format default stays `rgba16float`. BC6H becomes an opt-in for baked probes if two things hold: at 128 px and up its p99 error stays within twice the layout's own error, and sampling is no slower.
+
+The `cube-hw` path remains the reference for "what a cube array would give".
 
 ### 3. Screen-space: SSSR port (phase 3)
 
@@ -270,7 +292,7 @@ Debug views:
 | 1 | Layout bench: `octa` / `cube2d-warp` / `cube2d-none` / `cube-hw`, brute-force reference | The decision above, written up in `docs/research/probe-layouts.md` |
 | 2 | Probe core: layout-generic prefilter, atlas, WGSL lookup in core, three node on top, re-fit with an irradiance input | Rooms example on the core path, identical or better; lookup ms not worse |
 | 3 | SSSR port in core + three adapter node | No boiling on the rooms and G1; flicker and GPU ms at or below three `SSRNode` + its denoise |
-| 4 | Trace seam, three-mesh-bvh provider, hit shading through probes | Off-screen scenario matches the reference; rays only where SSR failed |
+| 4 | Trace seam; `@pmndrs/bvh` provider in core (three-mesh-bvh as the three stopgap); hit shading through probes | Off-screen scenario matches the reference; rays only where SSR failed; the `@pmndrs/bvh` walk agrees with three-mesh-bvh on the same rays |
 | 5 | Hybrid resolve + denoise seam; the denoiser repo's reflection pages switch to the package | Explainer and rooms pages run on `@pmndrs/reflections` with no local copies |
 | 6 | babylon / pixi adapters; publish 0.1 | Packed-subpath checks like the upscaler's `verify:packed-subpaths` |
 
@@ -310,9 +332,11 @@ See `NOTICE`:
 
 ## Open questions
 
-1. **Which BVH is "ours" for the core trace provider?** The options are `three-mesh-bvh/webgpu` (three-bound, used today), the three-gpu-pathtracer fork, or a core-native BVH so babylon and pixi get rays too.
+1. ~~Which BVH?~~ Decided 2026-11-10: `@pmndrs/bvh` (pmndrs/bvh, WIP) in core, with three-mesh-bvh as the three stopgap. Still open: what this repo needs from it before phase 4.
+   - A published package, or a workspace link?
+   - Does the subgroups-only GPU build cover the devices we target?
 2. **When does the repo go public, and is `@pmndrs/reflections` the npm name?**
-3. **pnpm**, matching the upscaler (the denoiser uses yarn 4). Chosen here; say if the denoiser's toolchain should win.
+3. ~~pnpm or yarn?~~ pnpm, matching the upscaler and pmndrs/bvh.
 4. **Should SSSR's intersect pass trace at half resolution by default** (idTech's RT runs at ½ or ¼), or follow FFX's full-rate mirrors and quarter-rate glossy?
 
 ## References
@@ -321,6 +345,7 @@ See `NOTICE`:
 - AMD GPUOpen, *FidelityFX Stochastic Screen-Space Reflections 1.5* manual; FidelityFX SDK v1.1.4 sources (`ffx_sssr`, `ffx_denoiser`).
 - Stachowiak, *Stochastic Screen-Space Reflections*, SIGGRAPH 2015.
 - Engelhardt & Dachsbacher, *Octahedron Environment Maps*, 2008.
+- Benthin et al., *H-PLOC: Hierarchical Parallel Locally-Ordered Clustering for Bounding Volume Hierarchy Construction*, HPG 2024 (one of `@pmndrs/bvh`'s GPU builders).
 - Majercik et al., *Dynamic Diffuse Global Illumination with Ray-Traced Irradiance Fields*, JCGT 2019.
 - Lazarov, *Getting More Physical in Call of Duty: Black Ops II*, 2013 (probe normalization).
 - three.js PRs #35046 (ReflectionProbes), #35053 (CubeArrayTexture), #35045 (cube-array sampling).
