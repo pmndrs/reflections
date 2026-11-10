@@ -182,6 +182,19 @@ export class ReflectionProbes extends THREE.Object3D {
     r.autoClear = r.autoClearColor = r.autoClearDepth = r.autoClearStencil = true;
     if (background === null) scene.background = r.getClearColor(_clear).clone();
 
+    // Shadow maps don't depend on the camera, so render each one once for the whole bake instead of
+    // once per captured face (#35046, 2b95820110). Restored in `finally`.
+    const shadows: THREE.LightShadow[] = [];
+    scene.traverse((object) => {
+      const light = object as THREE.Light & { shadow?: THREE.LightShadow };
+      if (light.castShadow === true && light.shadow !== undefined && light.shadow.autoUpdate === true
+        && ((light as THREE.PointLight).isPointLight === true || (light as THREE.SpotLight).isSpotLight === true || (light as THREE.DirectionalLight).isDirectionalLight === true)) {
+        shadows.push(light.shadow);
+        light.shadow.autoUpdate = false;
+        light.shadow.needsUpdate = true;
+      }
+    });
+
     this.capturing = true;
     try {
       // unfilled slots stay black, so an empty environment needs no capture
@@ -203,6 +216,7 @@ export class ReflectionProbes extends THREE.Object3D {
         device.queue.submit([encoder.finish()]);
       }
     } finally {
+      for (const shadow of shadows) shadow.autoUpdate = true;
       this.capturing = false;
       scene.background = background;
       Object.assign(r, { autoClear, autoClearColor, autoClearDepth, autoClearStencil });
