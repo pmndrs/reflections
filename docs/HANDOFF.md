@@ -15,12 +15,13 @@ The working state of the project: who is on what, which interfaces the workstrea
 
 | id | stream | kind | owns | port | status | stuck on / next |
 |---|---|---|---|---|---|---|
-| R1 | Probe lineage: which of Ben's probe versions is latest, and what ours lacks | research | `docs/research/probe-lineage.md` | — | running | |
+| R1 | Probe lineage: which of Ben's probe versions is latest, and what ours lacks | research | `docs/research/probe-lineage.md` | — | done | Latest is #35046 head `77bbaaaa05` (2026-11-09); the interior branch has more features but is older and needs r187-dev lighting hooks. Adoption → W5. |
 | R2 | Source survey: SSSR 1.5, idTech 8, Lumen, Frostbite, Pica Pica, CoD, HDRP, Godot | research | `docs/research/sources.md` | — | running | |
-| R3 | Demo scenes: what to test reflections on | research | `docs/research/demo-scenes.md` | — | running | |
+| R3 | Demo scenes: what to test reflections on | research | `docs/research/demo-scenes.md` | — | done | Procedural rooms first; Khronos Sponza; ToyCar/CarConcept/ABeautifulGame on a mirror floor; Bistro (converted) for phases 4–5. |
 | W1 | Phase 1 layout × format bench | code | `packages/core/src/probes/layouts/`, `packages/core/src/probes/reference.ts`, `examples/probe-bench/`, `docs/research/probe-layouts.md` | 5371 | running | |
 | W2 | BC6H GPU encoder | code | `packages/core/src/encode/` , `examples/bc6h/` | 5372 | running | |
 | W3 | SSSR core port (phase 3) | code | `packages/core/src/sssr/`, `examples/sssr-core/` | 5373 | running | |
+| W5 | Probe parity with #35046 head + fork features (shadow reuse in bake, `projectionOffset`, coverage node, cache key, time-sliced bake, env versioning, world-space helper) | code | `packages/three/src/probes/` (not `prefilter.ts`) | 5375 | running | |
 | W4 | Frame contract G-buffer (three) + scene kit for demos | code | `packages/three/src/frame/`, `examples/shared/`, `examples/scenes/`, `scripts/fetch-assets.mjs` | 5374 | running | |
 
 ## Agreed interfaces between streams
