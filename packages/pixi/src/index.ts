@@ -1,20 +1,26 @@
-// PixiJS v8 WebGPURenderer adapter (experimental): an adapter-owned 3-D G-buffer layer (pixi has
-// none), core's screen-space tracer and probe set on pixi's device, the composite as a pixi Filter.
+// PixiJS v8 WebGPURenderer adapter (experimental), for pixi-3d (`@pixi/3d`, closed beta) scenes:
+// pixi's device and textures, the frame contract from a View3D's outputs, core's screen-space tracer
+// and probe set on pixi's device, the composite as a pixi Filter. The adapter never imports
+// @pixi/3d: it takes pixi Textures and structural shapes (./pixi3d.ts), so it builds and type-checks
+// without the beta. examples/pixi3d/shared has the one pixi-3d class the beta lacks (the G-buffer pass).
 
 // pixi's device and textures.
 export { asWebGPURenderer, createPixiTarget, getDevice, getGPUTexture, requestReflectionsDevice } from './internal/pixiWebGPU';
 
-// The 3-D layer: scene, camera, meshes (materials take pixi Textures, e.g. RenderTextures of pixi content).
-export { ReflectionCamera, ReflectionMaterial, ReflectionMesh, ReflectionScene, type ReflectionMaterialOptions, type SkyOptions, type SunOptions } from './scene';
-export { Geometry, VERTEX_STRIDE, type GeometryData } from './geometry';
-export { mat4Compose, mat4Invert, mat4LookAt, mat4Mul, mat4Perspective, type Mat4, type Vec3 } from './math';
+// What the adapter needs from pixi-3d, as plain data and structural types.
+export {
+  REFLECTIONS_GBUFFER_FORMAT, REFLECTIONS_GBUFFER_PASS, REFLECTIONS_GBUFFER_SHADER, REFLECTIONS_SCENE_COLOR_BIT,
+  type Matrix4Like, type Pixi3DCameraLike, type Pixi3DShaderBitLike, type Pixi3DShaderTemplateLike,
+} from './pixi3d';
 
-// The frame contract from the adapter's G-buffer.
-export { GBufferRenderer, GBufferTargets, GBUFFER_WGSL } from './gbuffer';
-export { PixiFrame, PIXI_FRAME_CONVENTIONS } from './frame';
+// The frame contract from a pixi-3d View3D.
+export {
+  Pixi3DFrame, Pixi3DFrameTargets, PIXI3D_FRAME_CONVENTIONS, cameraFromPixi3D, eyeFromView, mat4Invert, projectionToZeroOne,
+  type Pixi3DFrameSources,
+} from './frame';
 
-// Probes: core ProbeSet, captured by the 3-D layer (environment slot = the sky).
-export { PixiProbeSet, type PixiProbe, type PixiProbeSetOptions } from './probes';
+// Probes: core ProbeSet, captured from pixi-3d renders (faces) and the view's Hemisphere (environment slot).
+export { PixiProbeSet, type HemisphereColors, type PixiProbe, type PixiProbeSetOptions } from './probes';
 
 // Screen-space reflections, the composite Filter, and the all-in-one Sprite.
 export { ScreenSpaceReflections, type ScreenSpaceReflectionsOptions } from './ScreenSpaceReflections';

@@ -1,5 +1,5 @@
 // Screen-space reflections on a pixi.js v8 WebGPURenderer: core's tracer (@pmndrs/reflections-core,
-// sssr/) on pixi's own GPUDevice, fed the frame contract from the adapter's G-buffer (./frame.ts).
+// sssr/) on pixi's own GPUDevice, fed the frame contract unpacked from a pixi-3d view (./frame.ts).
 // The adapter does no tracing maths: it dispatches core and repacks core's outputs into pixi
 // textures, so a pixi Filter can sample them (./ReflectionsFilter.ts).
 //
@@ -152,7 +152,7 @@ export class ScreenSpaceReflections {
 
   /**
    * Records core's passes into `encoder` and submits it (with whatever the caller recorded before,
-   * e.g. the G-buffer), then denoises (when set) and repacks into the pixi textures. pixi's next
+   * e.g. the frame unpack), then denoises (when set) and repacks into the pixi textures. pixi's next
    * render samples the results.
    */
   dispatch(encoder: GPUCommandEncoder, frame: FrameInputs) {
