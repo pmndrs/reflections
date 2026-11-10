@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p: core on the 2D array (warp), core on the cube array, the pre-phase-2 TSL node
 //   pnpm check -- --only probes --probes-layout cube2d   # run the probe feature checks on the 2D array (default: 'auto', a cube array through the shim)
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
@@ -864,6 +864,33 @@ async function showcaseChecks(pages) {
 }
 
 /**
+ * examples/showcase/compare.html (smoke, W21): the split renders with our denoised pipeline on the
+ * left and three's SSRNode + FFX on the right, and the path tracer accumulates, with no GPU errors
+ * and a non-black image. Skipped without assets. Screenshots: out/showcase-compare-{split,pathtraced}.png.
+ */
+async function showcaseCompareChecks(pages) {
+  console.log('examples/showcase/compare.html:');
+  const p = await openPage(`http://127.0.0.1:${PORT}/showcase/compare.html?manual&scene=toyCar&left=ours-denoised&right=three-ffx`);
+  pages.push(p);
+  const ids = await p.T('window.__p.entries()');
+  if (!ids.length) { console.log('  (no assets downloaded: compare skipped)'); return; }
+  const before = results.logs.length;
+  await p.T('window.__p.freeze(true)');
+  await p.T('window.__p.step(16)');
+  const split = await p.T('window.__p.shot()');
+  savePng('showcase-compare-split.png', split);
+  const spp = await p.T('window.__p.converge(16)');
+  const pt = await p.T("window.__p.shotOf('pathtraced')");
+  savePng('showcase-compare-pathtraced.png', pt);
+  const lum = async (url) => p.T(`(async (u) => { const i = new Image(); i.src = u; await i.decode(); const c = document.createElement('canvas'); c.width = 160; c.height = 90;
+    const g = c.getContext('2d'); g.drawImage(i, 0, 0, 160, 90); const d = g.getImageData(0, 0, 160, 90).data; let s = 0; for (let k = 0; k < d.length; k += 4) s += d[k] + d[k + 1] + d[k + 2]; return s / (d.length / 4) / 3; })(${JSON.stringify(url)})`);
+  const [ls, lp] = [await lum(split), await lum(pt)];
+  const errs = (await p.T('window.__p.gpuErrors()')).concat(results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l)));
+  check('showcase compare: split and path tracer render, no GPU errors', errs.length === 0 && ls > 8 && lp > 8 && spp >= 16,
+    `split mean ${ls.toFixed(0)}/255, path traced ${spp} spp mean ${lp.toFixed(0)}/255${errs.length ? '; ' + errs[0] : ''}`);
+}
+
+/**
  * examples/babylon (W15, SPEC phase 6): the mirrorWall scene on Babylon's WebGPUEngine through
  * @pmndrs/reflections/babylon. Smoke: renders, no validation errors, finite outputs, rays traced;
  * the mirror floor shows the wall (confident SSR); the adapter's cube captures (Babylon's Y-mirror
@@ -1221,6 +1248,7 @@ async function main() {
     if (ssrBenchFull) await ssrBench();
     else if (runs('ssr-bench')) await ssrBenchSmoke(pages);
     if (runs('showcase')) await showcaseChecks(pages);
+    if (runs('showcase-compare')) await showcaseCompareChecks(pages);
 
     if (runs('probe-core')) {
       // examples/probe-core: the phase 2 probe core on a bare device (layouts x formats, CPU weights,

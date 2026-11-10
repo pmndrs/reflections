@@ -1,0 +1,1677 @@
+{
+ "carConcept-measure": {
+  "scene": "carConcept",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 592,
+  "glossyPixels": 367551,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "ours-raw",
+    "mad": 21.378708669163135,
+    "bias": 20.97803819514708,
+    "stdMean": 2.5389933539169456,
+    "stdP99": 41.444925895178976,
+    "orbit": 2.7968347708051375,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": null,
+     "thickness": {
+      "depthBufferThickness": 0.046,
+      "thicknessRoughnessFactor": 2.3
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "ours-denoised",
+    "mad": 21.025381313443713,
+    "bias": 21.02324765247401,
+    "stdMean": 0.13101422962630493,
+    "stdP99": 2.3580889555870144,
+    "orbit": 0.33297970685183237,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.046,
+      "thicknessRoughnessFactor": 2.3
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "ours-rt",
+    "mad": 17.471801192304255,
+    "bias": 17.468446555713438,
+    "stdMean": 0.13557994888488384,
+    "stdP99": 2.0952814429739606,
+    "orbit": 0.32262518854552297,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.046,
+      "thicknessRoughnessFactor": 2.3
+     },
+     "rayTracing": true,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "probes",
+    "mad": 25.21014135913737,
+    "bias": 25.21014135907262,
+    "stdMean": 2.0952458939834262e-06,
+    "stdP99": 8.092194914091653e-06,
+    "orbit": 0.24245653963291114,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": null,
+     "thickness": {
+      "depthBufferThickness": 0.046,
+      "thicknessRoughnessFactor": 2.3
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "three-raw",
+    "mad": 17.49165711040279,
+    "bias": 14.622467131545722,
+    "stdMean": 8.043838772993814,
+    "stdP99": 86.56687919123209,
+    "orbit": 6.773859917651866,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 46,
+      "thickness": 0.138,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   },
+   {
+    "method": "three-denoise",
+    "mad": 15.759595493878667,
+    "bias": 15.75756703377339,
+    "stdMean": 0.2511394356739262,
+    "stdP99": 2.452650982101207,
+    "orbit": 0.2560533390383296,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 46,
+      "thickness": 0.138,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "temporalReproject": {
+      "maxFrames": 16,
+      "clampIntensity": 0.25,
+      "flickerSuppression": 1,
+      "hitPointReprojection": true
+     },
+     "recurrentDenoise": {
+      "lumaPhi": 0.75,
+      "depthPhi": 20,
+      "normalPhi": 0.3,
+      "roughnessPhi": 100,
+      "radius": 1.5,
+      "alphaPhi": 5,
+      "strength": 0.725,
+      "adapt": 0.5,
+      "smoothDisocclusions": true,
+      "flickerSuppression": 1,
+      "adaptiveTrust": 1
+     },
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   },
+   {
+    "method": "three-ffx",
+    "mad": 15.677528056299552,
+    "bias": 15.669062677687666,
+    "stdMean": 0.47899347655044755,
+    "stdP99": 5.491533318422227,
+    "orbit": 0.33404047436224676,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 46,
+      "thickness": 0.138,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "ffx": "ffxReflections defaults (roughnessThreshold 1, temporalStabilityFactor 0.7), SSR history = FFX output",
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   }
+  ],
+  "seconds": 34.638
+ },
+ "chess-measure": {
+  "scene": "chess",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 592,
+  "glossyPixels": 373043,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "ours-raw",
+    "mad": 14.317907888648598,
+    "bias": 14.008069221686227,
+    "stdMean": 0.979932607263709,
+    "stdP99": 29.840886279060843,
+    "orbit": 1.222630972491556,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": null,
+     "thickness": {
+      "depthBufferThickness": 0.01,
+      "thicknessRoughnessFactor": 0.5
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "ours-denoised",
+    "mad": 14.074987976152384,
+    "bias": 14.074511433665519,
+    "stdMean": 0.034476317574795384,
+    "stdP99": 0.7073402942260397,
+    "orbit": 0.2549705921780556,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.01,
+      "thicknessRoughnessFactor": 0.5
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "ours-rt",
+    "mad": 13.9728670410352,
+    "bias": 13.97173362610436,
+    "stdMean": 0.07150621383216767,
+    "stdP99": 0.9114156159298302,
+    "orbit": 0.2862374613853899,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.01,
+      "thicknessRoughnessFactor": 0.5
+     },
+     "rayTracing": true,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "probes",
+    "mad": 15.527394965224866,
+    "bias": 15.527394965187286,
+    "stdMean": 2.223483012585459e-06,
+    "stdP99": 8.529922399520072e-06,
+    "orbit": 0.16662629169750712,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": null,
+     "thickness": {
+      "depthBufferThickness": 0.01,
+      "thicknessRoughnessFactor": 0.5
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "three-raw",
+    "mad": 4.422450238155455,
+    "bias": 3.8329855740491623,
+    "stdMean": 1.917982200172359,
+    "stdP99": 36.90627857001383,
+    "orbit": 1.7135185006620806,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 10,
+      "thickness": 0.03,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   },
+   {
+    "method": "three-denoise",
+    "mad": 3.768873969205649,
+    "bias": 3.767949198659784,
+    "stdMean": 0.10322934956076434,
+    "stdP99": 1.2818503281229945,
+    "orbit": 0.1486182531275357,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 10,
+      "thickness": 0.03,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "temporalReproject": {
+      "maxFrames": 16,
+      "clampIntensity": 0.25,
+      "flickerSuppression": 1,
+      "hitPointReprojection": true
+     },
+     "recurrentDenoise": {
+      "lumaPhi": 0.75,
+      "depthPhi": 20,
+      "normalPhi": 0.3,
+      "roughnessPhi": 100,
+      "radius": 1.5,
+      "alphaPhi": 5,
+      "strength": 0.725,
+      "adapt": 0.5,
+      "smoothDisocclusions": true,
+      "flickerSuppression": 1,
+      "adaptiveTrust": 1
+     },
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   },
+   {
+    "method": "three-ffx",
+    "mad": 3.6614662496679253,
+    "bias": 3.659339149014024,
+    "stdMean": 0.1454462067234347,
+    "stdP99": 1.9641436503921823,
+    "orbit": 0.1570223036680292,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 10,
+      "thickness": 0.03,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "ffx": "ffxReflections defaults (roughnessThreshold 1, temporalStabilityFactor 0.7), SSR history = FFX output",
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   }
+  ],
+  "seconds": 22.023099999994038
+ },
+ "sponza-measure": {
+  "scene": "sponza",
+  "pose": "courtyard",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 592,
+  "glossyPixels": 119966,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "ours-raw",
+    "mad": 26.75166045310263,
+    "bias": 26.635470240873843,
+    "stdMean": 1.9843844262232286,
+    "stdP99": 19.675213279387336,
+    "orbit": 3.2334085543527253,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": null,
+     "thickness": "default",
+     "rayTracing": false,
+     "probes": 7,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "ours-denoised",
+    "mad": 26.901646525549086,
+    "bias": 26.901416251965674,
+    "stdMean": 0.11402890436322129,
+    "stdP99": 0.8032900546088191,
+    "orbit": 2.28182724421636,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": "default",
+     "rayTracing": false,
+     "probes": 7,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "ours-rt",
+    "mad": 24.166831470308505,
+    "bias": 24.164269112359314,
+    "stdMean": 0.15022846737349288,
+    "stdP99": 1.203290448104976,
+    "orbit": 2.452761027816199,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": "default",
+     "rayTracing": true,
+     "probes": 7,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "probes",
+    "mad": 30.2826689784297,
+    "bias": 30.282668978432582,
+    "stdMean": 1.171382775578092e-06,
+    "stdP99": 6.325959759436416e-06,
+    "orbit": 2.246624005355277,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": null,
+     "thickness": "default",
+     "rayTracing": false,
+     "probes": 7,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "three-raw",
+    "mad": 64.01126907832686,
+    "bias": 63.93534600428496,
+    "stdMean": 5.4016328210510265,
+    "stdP99": 30.24090437995109,
+    "orbit": 6.096704648144949,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 15,
+      "thickness": 0.1,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   },
+   {
+    "method": "three-denoise",
+    "mad": 64.76758466983271,
+    "bias": 64.76669500802886,
+    "stdMean": 0.28508728544911605,
+    "stdP99": 1.4703511662692046,
+    "orbit": 2.237908823750762,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 15,
+      "thickness": 0.1,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "temporalReproject": {
+      "maxFrames": 16,
+      "clampIntensity": 0.25,
+      "flickerSuppression": 1,
+      "hitPointReprojection": true
+     },
+     "recurrentDenoise": {
+      "lumaPhi": 0.75,
+      "depthPhi": 20,
+      "normalPhi": 0.3,
+      "roughnessPhi": 100,
+      "radius": 1.5,
+      "alphaPhi": 5,
+      "strength": 0.725,
+      "adapt": 0.5,
+      "smoothDisocclusions": true,
+      "flickerSuppression": 1,
+      "adaptiveTrust": 1
+     },
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   },
+   {
+    "method": "three-ffx",
+    "mad": 64.6735393604739,
+    "bias": 64.67328790032111,
+    "stdMean": 0.4071621469105621,
+    "stdP99": 2.3538422674093917,
+    "orbit": 2.220455253880412,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 15,
+      "thickness": 0.1,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "ffx": "ffxReflections defaults (roughnessThreshold 1, temporalStabilityFactor 0.7), SSR history = FFX output",
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   }
+  ],
+  "seconds": 2630.318100000009
+ },
+ "toyCar-measure": {
+  "scene": "toyCar",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 599,
+  "glossyPixels": 334950,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "ours-raw",
+    "mad": 16.434170118733327,
+    "bias": 16.373706430060952,
+    "stdMean": 0.45488812051350064,
+    "stdP99": 18.65700322425471,
+    "orbit": 0.6037519164854314,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": null,
+     "thickness": {
+      "depthBufferThickness": 0.019999999999999997,
+      "thicknessRoughnessFactor": 0.9999999999999999
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "ours-denoised",
+    "mad": 16.687241659266657,
+    "bias": 16.68681951907918,
+    "stdMean": 0.03703603260830826,
+    "stdP99": 1.137567610610762,
+    "orbit": 0.16632272912988605,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.019999999999999997,
+      "thicknessRoughnessFactor": 0.9999999999999999
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "ours-rt",
+    "mad": 16.386260231668057,
+    "bias": 16.38598686992923,
+    "stdMean": 0.04723761665027456,
+    "stdP99": 0.9291946243888182,
+    "orbit": 0.1818262863655722,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.019999999999999997,
+      "thicknessRoughnessFactor": 0.9999999999999999
+     },
+     "rayTracing": true,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "probes",
+    "mad": 19.357112006927302,
+    "bias": 19.357112006762193,
+    "stdMean": 2.247533099072619e-06,
+    "stdP99": 8.529922399520072e-06,
+    "orbit": 0.13696337269478878,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": null,
+     "thickness": {
+      "depthBufferThickness": 0.019999999999999997,
+      "thicknessRoughnessFactor": 0.9999999999999999
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "three-raw",
+    "mad": 5.203714142741089,
+    "bias": 4.627720648604329,
+    "stdMean": 2.6845965092208086,
+    "stdP99": 68.655258035617,
+    "orbit": 2.2783407072617314,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 19.999999999999996,
+      "thickness": 0.05999999999999999,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   },
+   {
+    "method": "three-denoise",
+    "mad": 5.295445526775768,
+    "bias": 5.294957891722847,
+    "stdMean": 0.10857430242741495,
+    "stdP99": 1.6050654942702336,
+    "orbit": 0.14952654151913064,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 19.999999999999996,
+      "thickness": 0.05999999999999999,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "temporalReproject": {
+      "maxFrames": 16,
+      "clampIntensity": 0.25,
+      "flickerSuppression": 1,
+      "hitPointReprojection": true
+     },
+     "recurrentDenoise": {
+      "lumaPhi": 0.75,
+      "depthPhi": 20,
+      "normalPhi": 0.3,
+      "roughnessPhi": 100,
+      "radius": 1.5,
+      "alphaPhi": 5,
+      "strength": 0.725,
+      "adapt": 0.5,
+      "smoothDisocclusions": true,
+      "flickerSuppression": 1,
+      "adaptiveTrust": 1
+     },
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   },
+   {
+    "method": "three-ffx",
+    "mad": 5.225703369980714,
+    "bias": 5.223114115288398,
+    "stdMean": 0.1972931676681907,
+    "stdP99": 3.6172090269111346,
+    "orbit": 0.2040238479649587,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 19.999999999999996,
+      "thickness": 0.05999999999999999,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "ffx": "ffxReflections defaults (roughnessThreshold 1, temporalStabilityFactor 0.7), SSR history = FFX output",
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   }
+  ],
+  "seconds": 3.94820000000298
+ },
+ "exp-car-r025-fast-spq4": {
+  "scene": "carConcept",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 249,
+  "glossyPixels": 367551,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.5,
+  "rows": [
+   {
+    "method": "ours-denoised",
+    "mad": 22.77431896066435,
+    "bias": 22.773700452454932,
+    "stdMean": 0.09645410799072347,
+    "stdP99": 0.9583149139917476,
+    "orbit": 1.2880735048282443,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 4,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.046,
+      "thicknessRoughnessFactor": 2.3
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   }
+  ],
+  "seconds": 17.12479999999702
+ },
+ "exp-car-r025-fast": {
+  "scene": "carConcept",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 201,
+  "glossyPixels": 367551,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.5,
+  "rows": [
+   {
+    "method": "probes",
+    "mad": 28.604621762254165,
+    "bias": 28.604621762239486,
+    "stdMean": 2.5703353787553166e-06,
+    "stdP99": 9.344061823971473e-06,
+    "orbit": 1.0440442094905211,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": null,
+     "thickness": {
+      "depthBufferThickness": 0.046,
+      "thicknessRoughnessFactor": 2.3
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "ours-denoised",
+    "mad": 23.37675038061609,
+    "bias": 23.37513920970591,
+    "stdMean": 0.1387405975333655,
+    "stdP99": 1.5173355923610898,
+    "orbit": 1.36201915230551,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.046,
+      "thicknessRoughnessFactor": 2.3
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "three-ffx",
+    "mad": 27.39161172531271,
+    "bias": 27.38589483160217,
+    "stdMean": 0.6465666316291305,
+    "stdP99": 3.286240233433458,
+    "orbit": 1.3575996493018592,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 46,
+      "thickness": 0.138,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "ffx": "ffxReflections defaults (roughnessThreshold 1, temporalStabilityFactor 0.7), SSR history = FFX output",
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   },
+   {
+    "method": "three-denoise",
+    "mad": 27.482508946603133,
+    "bias": 27.479316702535026,
+    "stdMean": 0.48521784304936605,
+    "stdP99": 3.004857469211446,
+    "orbit": 1.2771071297023473,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 46,
+      "thickness": 0.138,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "temporalReproject": {
+      "maxFrames": 16,
+      "clampIntensity": 0.25,
+      "flickerSuppression": 1,
+      "hitPointReprojection": true
+     },
+     "recurrentDenoise": {
+      "lumaPhi": 0.75,
+      "depthPhi": 20,
+      "normalPhi": 0.3,
+      "roughnessPhi": 100,
+      "radius": 1.5,
+      "alphaPhi": 5,
+      "strength": 0.725,
+      "adapt": 0.5,
+      "smoothDisocclusions": true,
+      "flickerSuppression": 1,
+      "adaptiveTrust": 1
+     },
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   }
+  ],
+  "seconds": 16.57740000000596
+ },
+ "exp-car-r025-spq4": {
+  "scene": "carConcept",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 220,
+  "glossyPixels": 367551,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "ours-raw",
+    "mad": 26.138059043718773,
+    "bias": 22.434666124565656,
+    "stdMean": 9.348859488121496,
+    "stdP99": 69.14036738244425,
+    "orbit": 10.375325173942555,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 4,
+     "hitColor": "final",
+     "denoiser": null,
+     "thickness": {
+      "depthBufferThickness": 0.046,
+      "thicknessRoughnessFactor": 2.3
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "ours-denoised",
+    "mad": 22.72295519867919,
+    "bias": 22.72233385639041,
+    "stdMean": 0.0965651943442835,
+    "stdP99": 0.9575493195519015,
+    "orbit": 0.30859895952913424,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 4,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.046,
+      "thicknessRoughnessFactor": 2.3
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   }
+  ],
+  "seconds": 15.763799999997019
+ },
+ "exp-car-r025": {
+  "scene": "carConcept",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 592,
+  "glossyPixels": 367551,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "probes",
+    "mad": 27.678101814441387,
+    "bias": 27.67810181444083,
+    "stdMean": 2.5703353787553166e-06,
+    "stdP99": 9.344061823971473e-06,
+    "orbit": 0.21959342858673558,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": null,
+     "thickness": {
+      "depthBufferThickness": 0.046,
+      "thicknessRoughnessFactor": 2.3
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "ours-raw",
+    "mad": 26.092515534110774,
+    "bias": 22.43168598258076,
+    "stdMean": 9.252365516868315,
+    "stdP99": 69.10869428344343,
+    "orbit": 10.270320073818791,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": null,
+     "thickness": {
+      "depthBufferThickness": 0.046,
+      "thicknessRoughnessFactor": 2.3
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "ours-denoised",
+    "mad": 22.566115116159956,
+    "bias": 22.564416995873874,
+    "stdMean": 0.13847582361115504,
+    "stdP99": 1.5135010513192968,
+    "orbit": 0.3265850297641474,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.046,
+      "thicknessRoughnessFactor": 2.3
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "ours-rt",
+    "mad": 19.817970697688242,
+    "bias": 19.814628134373372,
+    "stdMean": 0.18605313696879006,
+    "stdP99": 1.8681822448166345,
+    "orbit": 0.34761939888872445,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.046,
+      "thicknessRoughnessFactor": 2.3
+     },
+     "rayTracing": true,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "three-raw",
+    "mad": 35.52548441685084,
+    "bias": 29.883199400672098,
+    "stdMean": 20.569264105611193,
+    "stdP99": 78.1053466985255,
+    "orbit": 17.911508864814127,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 46,
+      "thickness": 0.138,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   },
+   {
+    "method": "three-ffx",
+    "mad": 27.895570076211587,
+    "bias": 27.890515845649222,
+    "stdMean": 0.646562801248375,
+    "stdP99": 3.2861380910720035,
+    "orbit": 0.3429418283398885,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 46,
+      "thickness": 0.138,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "ffx": "ffxReflections defaults (roughnessThreshold 1, temporalStabilityFactor 0.7), SSR history = FFX output",
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   },
+   {
+    "method": "three-denoise",
+    "mad": 28.03969656024547,
+    "bias": 28.03656315155331,
+    "stdMean": 0.4848294601266445,
+    "stdP99": 3.004468250788532,
+    "orbit": 0.355876461281462,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 46,
+      "thickness": 0.138,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "temporalReproject": {
+      "maxFrames": 16,
+      "clampIntensity": 0.25,
+      "flickerSuppression": 1,
+      "hitPointReprojection": true
+     },
+     "recurrentDenoise": {
+      "lumaPhi": 0.75,
+      "depthPhi": 20,
+      "normalPhi": 0.3,
+      "roughnessPhi": 100,
+      "radius": 1.5,
+      "alphaPhi": 5,
+      "strength": 0.725,
+      "adapt": 0.5,
+      "smoothDisocclusions": true,
+      "flickerSuppression": 1,
+      "adaptiveTrust": 1
+     },
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   }
+  ],
+  "seconds": 41.98160000000894
+ },
+ "exp-chess-base": {
+  "scene": "chess",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 266,
+  "glossyPixels": 373043,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "ours-denoised",
+    "mad": 14.112728040078723,
+    "bias": 14.112281319889613,
+    "stdMean": 0.03435433510841752,
+    "stdP99": 0.7140000030675105,
+    "orbit": 0.2550546695129797,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.01,
+      "thicknessRoughnessFactor": 0.5
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   },
+   {
+    "method": "three-ffx",
+    "mad": 3.7837503820250564,
+    "bias": 3.7815866457276774,
+    "stdMean": 0.14911766218140518,
+    "stdP99": 2.0289987206982585,
+    "orbit": 0.15714805304855683,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0.5,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 10,
+      "thickness": 0.03,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "ffx": "ffxReflections defaults (roughnessThreshold 1, temporalStabilityFactor 0.7), SSR history = FFX output",
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   }
+  ],
+  "seconds": 12.56270000000298
+ },
+ "exp-chess-hit-current": {
+  "scene": "chess",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 276,
+  "glossyPixels": 373043,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "ours-denoised",
+    "mad": 14.075151552023197,
+    "bias": 14.074688859592449,
+    "stdMean": 0.04058555734637568,
+    "stdP99": 0.7916203200368004,
+    "orbit": 0.26410703506544303,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "current",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.01,
+      "thicknessRoughnessFactor": 0.5
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   }
+  ],
+  "seconds": 11.8355
+ },
+ "exp-chess-mirrorBias0": {
+  "scene": "chess",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 267,
+  "glossyPixels": 373043,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "three-ffx",
+    "mad": 3.5950862233187424,
+    "bias": 3.589775117522542,
+    "stdMean": 0.2304338399336819,
+    "stdP99": 2.7998376232422943,
+    "orbit": 0.17583269510095417,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 10,
+      "thickness": 0.03,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "ffx": "ffxReflections defaults (roughnessThreshold 1, temporalStabilityFactor 0.7), SSR history = FFX output",
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   },
+   {
+    "method": "three-raw",
+    "mad": 4.701577326058173,
+    "bias": 3.8194333215832192,
+    "stdMean": 2.883026868986776,
+    "stdP99": 38.631531634272925,
+    "orbit": 2.4097522111133687,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "ssr": {
+      "quality": 0.25,
+      "mirrorBias": 0,
+      "intensity": 1,
+      "maxLuminance": 35,
+      "stepExponent": 3,
+      "screenEdgeFade": 0.2,
+      "maxDistance": 10,
+      "thickness": 0.03,
+      "environmentIntensity": 1,
+      "envMisses": true
+     },
+     "envSpecularInLighting": "off (the example patch)",
+     "probes": "none"
+    }
+   }
+  ],
+  "seconds": 12.41720000000298
+ },
+ "exp-chess-motion0.5": {
+  "scene": "chess",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 243,
+  "glossyPixels": 373043,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "ours-denoised",
+    "mad": 14.235323016845179,
+    "bias": 14.234963753058041,
+    "stdMean": 0.03416000389833923,
+    "stdP99": 0.7172796068355118,
+    "orbit": 0.25744119745153493,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.01,
+      "thicknessRoughnessFactor": 0.5
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   }
+  ],
+  "seconds": 11.25570000000298
+ },
+ "exp-chess-motion0": {
+  "scene": "chess",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 237,
+  "glossyPixels": 373043,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "ours-denoised",
+    "mad": 14.190098756503739,
+    "bias": 14.189692413695274,
+    "stdMean": 0.03410335172234175,
+    "stdP99": 0.7144529445896063,
+    "orbit": 0.2615406129431874,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.01,
+      "thicknessRoughnessFactor": 0.5
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   }
+  ],
+  "seconds": 10.99859999999404
+ },
+ "exp-chess-motion1": {
+  "scene": "chess",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 254,
+  "glossyPixels": 373043,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "ours-denoised",
+    "mad": 14.26932496165973,
+    "bias": 14.268958549458315,
+    "stdMean": 0.034086244313057595,
+    "stdP99": 0.710979798293021,
+    "orbit": 0.25510464861396065,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.01,
+      "thicknessRoughnessFactor": 0.5
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   }
+  ],
+  "seconds": 11.621600000008941
+ },
+ "exp-chess-motion2": {
+  "scene": "chess",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 224,
+  "glossyPixels": 373043,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "ours-denoised",
+    "mad": 14.284124780312778,
+    "bias": 14.283769146583555,
+    "stdMean": 0.03414208506043657,
+    "stdP99": 0.7123458602742959,
+    "orbit": 0.2533689385097074,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.01,
+      "thicknessRoughnessFactor": 0.5
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   }
+  ],
+  "seconds": 10.89979999999702
+ },
+ "exp-chess-spq4": {
+  "scene": "chess",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 278,
+  "glossyPixels": 373043,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "ours-denoised",
+    "mad": 14.087001504084071,
+    "bias": 14.086796824804606,
+    "stdMean": 0.027719353454759964,
+    "stdP99": 0.5380911467033733,
+    "orbit": 0.25171441379797055,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 4,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false
+     },
+     "thickness": {
+      "depthBufferThickness": 0.01,
+      "thicknessRoughnessFactor": 0.5
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   }
+  ],
+  "seconds": 12.0125
+ },
+ "exp-chess-tsf095": {
+  "scene": "chess",
+  "pose": "hero",
+  "size": [
+   960,
+   540
+  ],
+  "referenceSamples": 233,
+  "glossyPixels": 373043,
+  "units": "8-bit display (sRGB after AgX), 0-255",
+  "orbitDegPerFrame": 0.05,
+  "rows": [
+   {
+    "method": "ours-denoised",
+    "mad": 14.305427647319998,
+    "bias": 14.30514143141391,
+    "stdMean": 0.03260072476539425,
+    "stdP99": 0.6594704447524753,
+    "orbit": 0.25464634808184666,
+    "frames": 32,
+    "warmup": 48,
+    "info": {
+     "samplesPerQuad": 1,
+     "hitColor": "final",
+     "denoiser": {
+      "roughnessThreshold": 0.19980900000000001,
+      "timestamps": false,
+      "temporalStabilityFactor": 0.95
+     },
+     "thickness": {
+      "depthBufferThickness": 0.01,
+      "thicknessRoughnessFactor": 0.5
+     },
+     "rayTracing": false,
+     "probes": 1,
+     "varianceGuidedTracing": "off (the seam passes no variance back to the tracer)"
+    }
+   }
+  ],
+  "seconds": 11.19729999999702
+ }
+}
