@@ -120,6 +120,13 @@ export interface BakeOptions {
    */
   probes?: ReflectionProbe[];
   /**
+   * Objects hidden from the captures and restored after (not in #35046; Unity's culling mask, UE's
+   * "visible in reflection captures"). Put moving mirrors and other sharp reflectors here when baking
+   * live: a mirror captured into the probes reflects the probes back, and that loop flickers.
+   * Objects with `userData.reflectionProbeExclude = true` are hidden too.
+   */
+  exclude?: THREE.Object3D[];
+  /**
    * Compute each slot's L1 SH irradiance from its capture after the bake (core ProbeIrradiance), for
    * the re-fit (`frameIrradiance` lookup option). One small dispatch per slot. Default true.
    */
@@ -291,6 +298,12 @@ export class ReflectionProbes extends THREE.Object3D {
       device.queue.submit([encoder.finish()]);
     };
 
+    // hide excluded objects (the option plus userData.reflectionProbeExclude), restored in `finally`
+    const hidden: THREE.Object3D[] = [];
+    const hide = (o: THREE.Object3D) => { if (o.visible) { o.visible = false; hidden.push(o); } };
+    for (const o of options.exclude ?? []) hide(o);
+    scene.traverse((o) => { if (o.userData.reflectionProbeExclude) hide(o); });
+
     this.capturing = true;
     try {
       if (clearEnvironment) clearSlot(device, target, probes.length);
@@ -298,6 +311,7 @@ export class ReflectionProbes extends THREE.Object3D {
       if (captureEnvironment) captureSlot(environment, _position.set(0, 0, 0), probes.length);
       for (const probe of captured) captureSlot(scene, probeOrigin(probe, _position), probes.indexOf(probe));
     } finally {
+      for (const o of hidden) o.visible = true;
       for (const shadow of shadows) shadow.autoUpdate = true;
       this.capturing = false;
       scene.background = background;

@@ -22,7 +22,7 @@ scene.environmentNode = reflectionProbes(probes); // every physical material pic
 const radiance = sampleReflectionProbes(probes, positionWorld, direction, roughness);
 ```
 
-The probes are this library's: an engine-agnostic core (GGX prefilter, cube-array / 2D-array / octahedral layouts, a WGSL lookup with box projection and blending) under a three adapter. The adapter keeps the API of Ben Houston's three.js [#35046](https://github.com/mrdoob/three.js/pull/35046); the two were built side by side and have traded ideas and fixes the whole way, so code moves between them. On three r187 (the floor), which can't bind cube arrays yet, the adapter stores the cubes in a 2D array. Extensions over #35046: `sampleReflectionProbes`, `reflectionProbesLocal`, `originOffset`, live/time-sliced `bake`, `bake({ environment: false })`, `seamFix`, and irradiance re-fit.
+The probes are this library's: an engine-agnostic core (GGX prefilter, cube-array / 2D-array / octahedral layouts, a WGSL lookup with box projection and blending) under a three adapter. The adapter keeps the API of Ben Houston's three.js [#35046](https://github.com/mrdoob/three.js/pull/35046); the two were built side by side and have traded ideas and fixes the whole way, so code moves between them. On three r187 (the floor), which can't bind cube arrays yet, the adapter stores the cubes in a 2D array. Extensions over #35046: `sampleReflectionProbes`, `reflectionProbesLocal`, `originOffset`, live/time-sliced `bake`, `bake({ exclude })` (keep moving mirrors out of captures), `bake({ environment: false })`, `seamFix`, and irradiance re-fit.
 
 ## Packages
 

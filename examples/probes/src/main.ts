@@ -211,14 +211,11 @@ async function main() {
     device.queue.submit([encoder.finish()]);
   }
 
-  function capture(live = false) {
-    // keep helpers and test objects out of the reflections; a live capture keeps the moving object
-    probesHelper.visible = grid.visible = false;
-    dynamicObject.visible = live && params.dynamicObject !== 'None';
-    probes.bake(renderer, scene, { resolution: params.resolution, near: 0.05, far: 30 });
-    probesHelper.visible = params.showProbes;
-    grid.visible = params.showGrid;
-    dynamicObject.visible = params.dynamicObject !== 'None';
+  function capture() {
+    // keep helpers, the test grid and the moving mirror sphere out of the probes: a mirror captured
+    // into the probes reflects them back, and in a live capture that loop makes the room flicker.
+    // The spinning torus stays in (it is rough, so it can't feed back).
+    probes.bake(renderer, scene, { resolution: params.resolution, near: 0.05, far: 30, exclude: [probesHelper, grid, dynamicObject] });
     if (params.lookup === 'hw') copyToCubes();
   }
 
@@ -299,7 +296,7 @@ async function main() {
     const dt = timer.getDelta();
     if (!params.pause && params.dynamicObject !== 'None') { animationTime += dt; updateDynamicObject(animationTime); }
     if (!params.pause && params.animateScene) animateScene(dt);
-    if (params.liveCapture) capture(true);
+    if (params.liveCapture) capture();
     renderer.render(scene, camera);
   }
   renderer.setAnimationLoop(animate);
