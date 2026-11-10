@@ -12,19 +12,29 @@
 //           there; uv is scaled by (size - 1) / size per mip, which needs the two mips sampled
 //           separately (2 bilinear samples instead of 1 trilinear).
 //
-// Two ways in, one lookup:
+// Two ways in, two outputs, one lookup:
 //   reflectionProbes( probes )                     scene.environmentNode: every physical material
 //                                                  samples at its own fragment, reflection vector and
-//                                                  roughness (what #35046 offers).
+//                                                  roughness (#35046 as of 2026-10-16 to 10-22).
 //   sampleReflectionProbes( probes, P, dir, rough ) any world position, direction and roughness, in
 //                                                  any shader: a traced ray's miss, a full-screen
 //                                                  composite, a hit point (not in #35046).
-// Both are a ReflectionProbesNode; the second one just gets its inputs instead of reading them from
-// the material. Everything after that (influence, blending, priority, box projection, environment
-// fallback) is the same code.
+//   reflectionProbesLocal( probes ) and            the same lookups with the coverage output of
+//   sampleReflectionProbesLocal( ... )             #35046 head (77bbaaaa05): vec4( conditional probe
+//                                                  radiance, coverage ), no environment fallback. The
+//                                                  hybrid resolve composes SSR, probes and environment
+//                                                  from it.
+// All are a ReflectionProbesNode; the explicit ones get their inputs instead of reading them from
+// the material. Everything after that (influence, blending, priority, box projection) is the same
+// code; the vec3 form adds the environment slot for whatever weight is left.
+//
+// Uniforms live in three's shared `renderGroup`, not the default per-object group: r186/r187 re-upload
+// per-object uniforms only for render objects they see change, so probe moves, `boxProjection` and
+// the like never reached static meshes. A bake that replaces the texture bumps the node (see
+// ReflectionProbes.bake), and the texture id is in the cache key, so every render object rebinds.
 
 import * as THREE from 'three/webgpu';
-import { float, Fn, If, int, materialEnvRotation, min, mix, nodeObject, normalize, positionWorld, reflectVector, step, uniform, vec2, vec3, texture } from 'three/tsl';
+import { float, Fn, If, int, materialEnvRotation, min, mix, nodeObject, normalize, positionWorld, reflectVector, renderGroup, step, uniform, vec2, vec3, vec4, texture } from 'three/tsl';
 import { probeOrigin, type ReflectionProbes } from './ReflectionProbes';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -32,10 +42,28 @@ type N = any; // TSL's node typings are too strict for hand-written shader maths
 
 const _scale = new THREE.Vector3();
 
-interface Slot { position: N; origin: N; extent: N; fade: N; projectionSize: N; project: N }
+interface Slot { position: N; origin: N; extent: N; fade: N; projectionSize: N; projectionOffset: N }
+
+/** A uniform in the shared per-render group (see the file header). */
+const shared = (value: unknown): N => (uniform(value as never) as N).setGroup(renderGroup);
 
 /** Explicit lookup inputs (see {@link sampleReflectionProbes}); absent, the material provides them. */
 export interface ProbeLookupInputs { position: N; direction: N; roughness: N }
+
+/**
+ * Options of {@link ReflectionProbesNode}: #35046's `{ position, direction, roughness }` (each
+ * optional; a missing one comes from the material) plus `coverage`.
+ */
+export interface ProbeLookupOptions {
+  position?: N;
+  direction?: N;
+  roughness?: N;
+  /**
+   * Output `vec4( conditional probe radiance, coverage )` with no environment fallback, like
+   * #35046 head, instead of `vec3` radiance with the environment for the uncovered rest. Default false.
+   */
+  coverage?: boolean;
+}
 
 /**
  * Box-projected direction (Lagarde's BPCEM, the guarded form from #35046): where the ray from `P`
@@ -70,55 +98,67 @@ export const cubeFaceUV = /* @__PURE__ */ Fn(([dir]: N[]) => {
 }) as N;
 
 /**
- * Radiance from a baked {@link ReflectionProbes} set. Without `inputs` it is an environment node:
- * assign it to `scene.environmentNode`. With `inputs` it samples at the given world position,
- * direction and roughness (see {@link sampleReflectionProbes}). Bake the probes before creating it.
+ * Radiance from a baked {@link ReflectionProbes} set. Without inputs it is an environment node:
+ * assign it to `scene.environmentNode`. With inputs it samples at the given world position,
+ * direction and roughness (see {@link sampleReflectionProbes}). With `coverage: true` it returns
+ * `vec4( radiance, coverage )` without environment fallback (see {@link reflectionProbesLocal}).
+ * Bake the probes before creating it.
  */
 export class ReflectionProbesNode extends THREE.Node {
   static get type() { return 'ReflectionProbesNode'; }
   readonly probes: ReflectionProbes;
   protected readonly array: N;
-  protected readonly maxLod = uniform(0);
-  protected readonly size = uniform(128);
-  private readonly local = uniform(1);
+  protected readonly maxLod = shared(0);
+  protected readonly size = shared(128);
+  private readonly local = shared(1);
+  private readonly boxProjection = shared(1);
   private slots: Slot[] = [];
   private seamFix = 'warp';
-  /** Explicit lookup inputs, or null for the material's own (environment node). */
+  /** Explicit lookup inputs; null ones come from the material (environment node). */
   readonly positionNode: N = null;
   readonly directionNode: N = null;
   readonly roughnessNode: N = null;
+  /** Whether the output is `vec4( radiance, coverage )` without environment fallback. */
+  readonly coverage: boolean;
 
-  constructor(probes: ReflectionProbes, inputs: ProbeLookupInputs | null = null) {
-    super('vec3');
+  constructor(probes: ReflectionProbes, options: ProbeLookupOptions | null = null) {
+    super(options?.coverage === true ? 'vec4' : 'vec3');
     if (!probes.texture) throw new Error('ReflectionProbesNode: bake the probes first.');
     this.probes = probes;
-    if (inputs) {
-      this.positionNode = nodeObject(inputs.position);
-      this.directionNode = nodeObject(inputs.direction);
-      this.roughnessNode = nodeObject(inputs.roughness);
+    this.coverage = options?.coverage === true;
+    if (options) {
+      if (options.position != null) this.positionNode = nodeObject(options.position);
+      if (options.direction != null) this.directionNode = nodeObject(options.direction);
+      if (options.roughness != null) this.roughnessNode = nodeObject(options.roughness);
     }
     this.updateBeforeType = THREE.NodeUpdateType.RENDER;
     this.array = texture(probes.texture);
     this.array.mergeable = false;
+    probes.track(this);
   }
 
   customCacheKey() {
-    // the probe count and the seam handling are compiled into the shader
-    return this.probes.bakedProbes.length * 2 + (this.probes.bakedSeamFix === 'warp' ? 1 : 0);
+    // the probe count and the seam handling are compiled into the shader; the node's own id keeps
+    // separate probe sets from sharing a program (#35046 6837c32abc); the texture id makes render
+    // objects rebind after a bake that replaced the texture
+    const probes = this.probes;
+    return THREE.NodeUtils.hash(super.customCacheKey(), probes.bakedProbes.length, probes.bakedSeamFix === 'warp' ? 1 : 0, probes.texture?.id ?? 0);
   }
 
   updateBefore(): undefined {
     const probes = this.probes;
+    const tex = probes.texture!;
+    // a bake that changes the layout disposes the previous texture, so switch even before a recompile
+    this.array.value = tex;
+    this.maxLod.value = tex.mipmaps.length - 1;
+    this.size.value = (tex.image as { width: number }).width;
     if (probes.bakedProbes.length !== this.slots.length || probes.bakedSeamFix !== this.seamFix) {
       this.needsUpdate = true;
       return;
     }
-    const tex = probes.texture!;
-    this.array.value = tex;
-    this.maxLod.value = tex.mipmaps.length - 1;
-    this.size.value = (tex.image as { width: number }).width;
     // captures see only the environment, so baking doesn't feed back into itself
     this.local.value = probes.capturing ? 0 : 1;
+    this.boxProjection.value = probes.boxProjection ? 1 : 0;
     for (let i = 0; i < this.slots.length; i++) {
       const slot = this.slots[i];
       const probe = probes.bakedProbes[i];
@@ -127,8 +167,8 @@ export class ReflectionProbesNode extends THREE.Node {
       probe.getWorldScale(_scale);
       slot.extent.value.copy(probe.influenceSize).multiply(_scale).multiplyScalar(0.5);
       slot.fade.value = probe.blendDistance;
-      slot.project.value = probes.boxProjection ? 1 : 0;
       slot.projectionSize.value.copy(probe.projectionSize ?? probe.influenceSize).multiply(_scale);
+      slot.projectionOffset.value.copy(probe.projectionOffset).multiply(_scale);
     }
   }
 
@@ -150,28 +190,27 @@ export class ReflectionProbesNode extends THREE.Node {
   setup(builder: N) {
     const probes = this.probes;
     this.seamFix = probes.bakedSeamFix;
-    if (this.slots.length !== probes.bakedProbes.length) {
-      this.slots = probes.bakedProbes.map(() => ({
-        position: uniform(new THREE.Vector3()), origin: uniform(new THREE.Vector3()), extent: uniform(new THREE.Vector3()),
-        fade: uniform(0.5), projectionSize: uniform(new THREE.Vector3()), project: uniform(0),
-      }));
-    }
+    // keep the existing slots: every material program references the same uniforms (#35046 c4e4833e17)
+    this.slots = probes.bakedProbes.map((_, i) => this.slots[i] ?? {
+      position: shared(new THREE.Vector3()), origin: shared(new THREE.Vector3()), extent: shared(new THREE.Vector3()),
+      fade: shared(0.5), projectionSize: shared(new THREE.Vector3()), projectionOffset: shared(new THREE.Vector3()),
+    });
     this.updateBefore();
 
-    if (this.directionNode !== null) {
-      // explicit inputs: the environment slot is looked up along the same direction
-      return this.lookup(this.positionNode, this.directionNode, float(this.roughnessNode).clamp(), null);
-    }
-    // environment node: the material's fragment, reflection vector and roughness
+    // missing inputs come from the material: its fragment, reflection vector and roughness
     const { context } = builder;
-    const direction: N = context.getUV ? context.getUV(this, builder) : reflectVector;
-    const roughness: N = float(context.getTextureLevel ? context.getTextureLevel(this) : 0).clamp();
-    return this.lookup(positionWorld, direction, roughness, materialEnvRotation);
+    const position: N = this.positionNode ?? positionWorld;
+    const direction: N = this.directionNode ?? (context.getUV ? context.getUV(this, builder) : reflectVector);
+    const roughness: N = float(this.roughnessNode ?? (context.getTextureLevel ? context.getTextureLevel(this) : 0)).clamp();
+    // the environment slot is unrotated: the material's direction gets its environment rotation,
+    // an explicit direction is looked up as given
+    return this.lookup(position, direction, roughness, this.directionNode === null ? materialEnvRotation : null);
   }
 
   /**
    * The probe lookup itself: influence weights (smallest volume first, each taking what the
-   * previous ones left), box projection, and the environment for whatever weight is left.
+   * previous ones left), box projection, and the environment for whatever weight is left (or, with
+   * `coverage`, the probe radiance normalized by the weight it got, and that weight).
    * `envRotation` (a mat3, or null) rotates the direction for the environment slot.
    */
   protected lookup(position: N, direction: N, roughness: N, envRotation: N): N {
@@ -192,12 +231,18 @@ export class ReflectionProbesNode extends THREE.Node {
         const distance = d.x.min(d.y).min(d.z);
         const weight = distance.div(slot.fade.max(1e-6)).clamp().mul(remaining).toVar();
         If(weight.greaterThan(0), () => {
-          const insideProjection = local.abs().lessThanEqual(slot.projectionSize.mul(0.5)).all();
-          const projected = parallaxCorrect(P, dir, slot.projectionSize, slot.position, slot.origin);
-          const corrected = slot.project.greaterThan(0).and(insideProjection).select(projected, dir);
+          // the projection box is centred at position + projectionOffset; the capture point is origin
+          const insideProjection = local.sub(slot.projectionOffset).abs().lessThanEqual(slot.projectionSize.mul(0.5)).all();
+          const projected = parallaxCorrect(P, dir, slot.projectionSize, slot.position.add(slot.projectionOffset), slot.origin);
+          const corrected = this.boxProjection.greaterThan(0).and(insideProjection).select(projected, dir);
           radiance.addAssign(this.sampleProbe(i, corrected, lod).mul(weight));
         });
         remaining.subAssign(weight);
+      }
+      if (this.coverage) {
+        // #35046 head: conditional radiance and coverage; the caller composes any fallback
+        const coverage = float(this.local).sub(remaining).toVar();
+        return vec4(radiance.div(coverage.max(1e-6)), coverage);
       }
       const environmentWeight = remaining.add(this.local.oneMinus());
       const envDir = envRotation === null ? dir : envRotation.mul(dir);
@@ -218,3 +263,20 @@ export const reflectionProbes = (probes: ReflectionProbes) => nodeObject(new Ref
  */
 export const sampleReflectionProbes = (probes: ReflectionProbes, position: N, direction: N, roughness: N): N =>
   nodeObject(new ReflectionProbesNode(probes, { position, direction, roughness }));
+
+/**
+ * TSL function: local probe radiance and coverage, without environment fallback (what
+ * `reflectionProbes()` returns in #35046 head, 77bbaaaa05). rgb is the probes' radiance normalized
+ * by their total weight, a is that weight (0 outside every influence volume and during a bake, 1
+ * well inside one). Compose a fallback with the uncovered fraction, e.g.
+ * `mix( environment, local.rgb, local.a )`; `scene.environmentNode = local.rgb.mul( local.a )` is
+ * #35046's example. Material inputs, like {@link reflectionProbes}.
+ */
+export const reflectionProbesLocal = (probes: ReflectionProbes) => nodeObject(new ReflectionProbesNode(probes, { coverage: true }));
+
+/**
+ * TSL function: {@link reflectionProbesLocal} at an explicit world position, direction and roughness,
+ * like {@link sampleReflectionProbes}: `vec4( radiance, coverage )`, no environment fallback.
+ */
+export const sampleReflectionProbesLocal = (probes: ReflectionProbes, position: N, direction: N, roughness: N): N =>
+  nodeObject(new ReflectionProbesNode(probes, { position, direction, roughness, coverage: true }));
