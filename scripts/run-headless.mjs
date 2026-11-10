@@ -4,10 +4,12 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | ssr-rt | probe-core | probe-bench)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | ssr-rt | probe-core | probe-bench | ssr-bench)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
+//   pnpm check -- --only ssr-bench --ssr-bench   # the phase 3 gate bench: ours vs three's SSRNode (minutes); JSON to out/ssr-bench.json
+//                                    # (--ssr-scenes rooms,mirrorWall to narrow it)
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
 import { spawn } from 'node:child_process';
@@ -23,6 +25,7 @@ const OUT = process.env.OUT ?? path.join(ROOT, 'out');
 const args = process.argv.slice(2);
 const compareUrl = args.includes('--compare') ? args[args.indexOf('--compare') + 1] : null;
 const probeBenchFull = args.includes('--probe-bench');
+const ssrBenchFull = args.includes('--ssr-bench');
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
 const runs = (section) => !only || only === section;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -75,13 +78,13 @@ const savePng = (name, dataUrl) => {
 };
 
 /** Open `url` in a fresh headless Chrome; resolves once `window.__p` exists. */
-async function openPage(url) {
+async function openPage(url, extraArgs = []) {
   // Port 0: Chrome picks a free port and writes it to DevToolsActivePort. A random fixed port could
   // collide with another worktree's Chrome, and then this run drove that run's page (F2).
   const userDataDir = path.join(os.tmpdir(), `reflections-${Date.now()}-${process.pid}-${Math.floor(Math.random() * 1e9)}`);
   const chrome = spawn(CHROME, [
     '--headless=new', '--no-sandbox', '--use-angle=metal', '--enable-unsafe-webgpu',
-    '--enable-features=Vulkan', '--window-size=1100,900', '--remote-debugging-port=0',
+    '--enable-features=Vulkan', '--window-size=1100,900', '--remote-debugging-port=0', ...extraArgs,
     `--user-data-dir=${userDataDir}`, url,
   ], { stdio: 'ignore' });
   let port = null;
@@ -115,7 +118,18 @@ async function openPage(url) {
   }
   const T = (expr) => cdp.evalJs(`(async () => JSON.stringify(await (${expr})))()`).then((s) => (s === undefined ? undefined : JSON.parse(s)));
   const close = () => { try { ws.close(); } catch { /* noop */ } chrome.kill('SIGKILL'); };
-  return { cdp, T, close };
+  /** Load another URL in the same browser (same profile, so IndexedDB carries over); resolves once its `__p` exists. */
+  const navigate = async (next) => {
+    await cdp.send('Page.navigate', { url: next });
+    const until = Date.now() + 180_000;
+    while (Date.now() < until) {
+      if (await cdp.evalJs(`location.href === ${JSON.stringify(next)} && !!window.__p`, false).catch(() => false)) return;
+      await sleep(300);
+    }
+    const status = await cdp.evalJs("document.querySelector('#status')?.textContent", false).catch(() => '');
+    throw new Error(`page not ready: ${next}\n${status}`);
+  };
+  return { cdp, T, close, navigate };
 }
 
 // One fixed frame: loop stopped, no moving object, default camera.
@@ -569,8 +583,71 @@ async function ssrRtChecks(pages) {
     rows.map((r) => `${r.misses}: ${r.ms?.toFixed(3)} ms`).join(', '));
 }
 
+/**
+ * examples/ssr-bench (phase 3 gate, docs/research/ssr-gate.md). The smoke (section `ssr-bench`):
+ * every method renders on mirrorWall with finite output and no validation error; not a numbers gate.
+ */
+const SSR_BENCH_METHODS = ['ours', 'ours-accum', 'three-blur', 'three-stoch', 'three-denoise'];
+async function ssrBenchSmoke(pages) {
+  console.log('examples/ssr-bench (smoke):');
+  const url = (m) => `http://127.0.0.1:${PORT}/ssr-bench/?scene=mirrorWall&method=${m}`;
+  const s = await openPage(url('reference'));
+  pages.push(s);
+  for (const m of ['reference', ...SSR_BENCH_METHODS]) {
+    if (m !== 'reference') await s.navigate(url(m));
+    const r = await s.T('window.__p.smoke(3)');
+    check(`ssr-bench ${m}: renders, finite, no GPU errors`, r.nonFinite === 0 && r.gpuErrors === 0 && r.meanTone > 0.01, `mean tone ${r.meanTone.toFixed(3)}, ${r.nonFinite} non-finite`);
+  }
+}
+
+/** The full bench (`--ssr-bench`): references, metrics per scene and method, GPU ms at 1080p. */
+async function ssrBench() {
+  const scenes = args.includes('--ssr-scenes') ? args[args.indexOf('--ssr-scenes') + 1].split(',') : ['rooms', 'explainer', 'mirrorWall', 'roughnessRamp'];
+  const timingOnly = args.includes('--ssr-timing-only'); // repeat the 1080p timing without the metrics
+  const out = { started: new Date().toISOString(), scenes: {}, timing: [] };
+  const file = path.join(OUT, timingOnly ? 'ssr-bench-timing.json' : 'ssr-bench.json');
+  const save = () => { fs.mkdirSync(OUT, { recursive: true }); fs.writeFileSync(file, JSON.stringify(out, null, 1)); };
+  const page = await openPage(`http://127.0.0.1:${PORT}/ssr-bench/?scene=${scenes[0]}&method=reference`, ['--enable-webgpu-developer-features']);
+  try {
+    out.device = await page.cdp.evalJs('(async () => { const a = await navigator.gpu.requestAdapter(); return JSON.stringify({ ...a.info, ua: navigator.userAgent }); })()').then(JSON.parse);
+    for (const scene of scenes) {
+      const res = (out.scenes[scene] = { methods: {} });
+      const url = (m, extra = '') => `http://127.0.0.1:${PORT}/ssr-bench/?scene=${scene}&method=${m}${extra}`;
+      if (!timingOnly) {
+        await page.navigate(url('reference'));
+        res.reference = await page.T('window.__p.reference()');
+        console.log(`  ${scene} reference:`, JSON.stringify(res.reference));
+        savePng(`ssr-bench-${scene}-reference.png`, await page.T('window.__p.shot()'));
+        save();
+        for (const m of SSR_BENCH_METHODS) {
+          await page.navigate(url(m));
+          res.methods[m] = await page.T('window.__p.measure()');
+          const r = res.methods[m];
+          console.log(`  ${scene} ${m}: still bias ${r.still.bias.toFixed(4)} rmse ${r.still.rmse.toFixed(4)} std ${r.still.stdMean.toFixed(4)}/${r.still.stdP99.toFixed(4)} | orbit std ${r.orbit.stdMean.toFixed(4)}/${r.orbit.stdP99.toFixed(4)} |de| ${r.orbit.meanAbsDelta.toFixed(4)}`);
+          savePng(`ssr-bench-${scene}-${m}.png`, await page.T('window.__p.shot()'));
+          save();
+        }
+      }
+      // GPU ms at 1920x1080, loop stopped: each method, and each pipeline's own G-buffer + lit baseline
+      const runsT = [...SSR_BENCH_METHODS.map((m) => [m, '']), ['ours', '&base=1'], ['three-blur', '&base=1'], ['three-stoch', '&base=1']];
+      for (const [m, extra] of runsT) {
+        await page.navigate(url(m, `${extra}&w=1920&h=1080`));
+        const t = await page.T('window.__p.time(30)');
+        out.timing.push(t);
+        console.log(`  ${scene} ${m}${extra} 1080p: ${t.gpuMs?.toFixed(3)} ms (min ${t.gpuMin?.toFixed(3)}, p90 ${t.gpuP90?.toFixed(3)}, cpu ${t.cpuMs?.toFixed(2)})`);
+        save();
+      }
+    }
+    out.finished = new Date().toISOString();
+    save();
+    console.log('  saved', path.relative(process.cwd(), file));
+  } finally {
+    page.close();
+  }
+}
+
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull ? 3_600_000 : 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull || ssrBenchFull ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -731,6 +808,8 @@ async function main() {
     if (runs('sssr-core')) await sssrCoreChecks(pages);
     if (runs('ssr')) await ssrChecks(pages);
     if (runs('ssr-rt')) await ssrRtChecks(pages);
+    if (ssrBenchFull) await ssrBench();
+    else if (runs('ssr-bench')) await ssrBenchSmoke(pages);
 
     if (runs('probe-core')) {
       // examples/probe-core: the phase 2 probe core on a bare device (layouts x formats, CPU weights,
