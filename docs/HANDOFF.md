@@ -16,7 +16,7 @@ The working state of the project: who is on what, which interfaces the workstrea
 | id | stream | kind | owns | port | status | stuck on / next |
 |---|---|---|---|---|---|---|
 | R1 | Probe lineage: which of Ben's probe versions is latest, and what ours lacks | research | `docs/research/probe-lineage.md` | — | done | Latest is #35046 head `77bbaaaa05` (2026-11-09); the interior branch has more features but is older and needs r187-dev lighting hooks. Adoption → W5. |
-| R2 | Source survey: SSSR 1.5, idTech 8, Lumen, Frostbite, Pica Pica, CoD, HDRP, Godot | research | `docs/research/sources.md` | — | running | |
+| R2 | Source survey: SSSR 1.5, idTech 8, Lumen, Frostbite, Pica Pica, CoD, HDRP, Godot | research | `docs/research/sources.md` | — | done | 13 SPEC claims checked (S1–S13); fixes applied in SPEC draft 4. D40–D69 proposed. Gaps: Hobson 2019 (gated), UE mip mapping unverified. |
 | R3 | Demo scenes: what to test reflections on | research | `docs/research/demo-scenes.md` | — | done | Procedural rooms first; Khronos Sponza; ToyCar/CarConcept/ABeautifulGame on a mirror floor; Bistro (converted) for phases 4–5. |
 | W1 | Phase 1 layout × format bench | code | `packages/core/src/probes/layouts/`, `packages/core/src/probes/reference.ts`, `examples/probe-bench/`, `docs/research/probe-layouts.md` | 5371 | running | |
 | W2 | BC6H GPU encoder | code | `packages/core/src/encode/` , `examples/bc6h/` | 5372 | running | |
@@ -76,4 +76,5 @@ W3 develops on synthetic, analytic inputs written by compute (exact depth/normal
 
 ## Log
 
+- 2026-11-10: R1–R3 done. SPEC draft 4: miss list credited to FFX `hybridreflections`, ray-list packing 15+14+3, confidence instead of binary miss, thresholds in alpha, RT optional/off by default, Lagarde specular occlusion, L1-vs-SH9 re-fit noted. W3 told of the hybrid sample. W5 opened for probe parity.
 - 2026-11-10: Phase 0 done (`622985c`). SPEC drafts 2 and 3. Workstreams R1–R3, W1–W4 started in parallel. `REFLECTIONS_PORT` added so worktrees don't collide on 5370. `DIVERGES.md` seeded with D1–D11 from the SPEC.

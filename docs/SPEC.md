@@ -1,6 +1,6 @@
 # @pmndrs/reflections — spec
 
-Status: draft 3, 2026-11-10. Phase 0 (this repo's first commit) is done. Everything after it is a plan.
+Status: draft 4, 2026-11-10 (source claims corrected against `docs/research/sources.md`). Phase 0 (this repo's first commit) is done. Everything after it is a plan.
 
 ## What this is
 
@@ -144,8 +144,8 @@ It works as follows:
   - The layout is a parameter (next section).
 - **Capture stays in the adapter.** Rendering six faces is engine work. Core takes the six face textures and does everything after: prefilter, atlas write, environment slot.
 - **three upstream.** When three ships `CubeArrayTexture` sampling (#35053) and #35046, the three adapter can bake into three's texture for a `cube-array` layout. The API stays the same either way.
-- **Probe re-fit.** Normalize the probe radiance by irradiance, as idTech 8 does: `reflection × frameIrradiance / probeIrradiance`. Lazarov 2013 and Hobson 2019 describe the same normalization.
-  - `probeIrradiance` is the probe's L1 SH, taken from the same capture.
+- **Probe re-fit.** Normalize the probe radiance by irradiance, as idTech 8 does: `reflection × frameIrradiance / probeIrradiance`. Lazarov 2013 describes the same normalization (Hobson 2019 is cited for it too, but unverified: the slides are gated).
+  - `probeIrradiance` is the probe's L1 SH, taken from the same capture and evaluated at the shading normal, with the ratio clamped. Lazarov uses SH9 here; L1 is our cheaper choice and gets measured against SH9 (DIVERGES D60).
   - `frameIrradiance` comes from whatever GI the app has: three r187's `LightProbeGrid` (L2 SH), `@pmndrs/ddgi`'s irradiance volumes, VXGI, SSGI or a lightmap.
   - This is the main way reflections "work with GI tools". It removes glowing corners and picks up bounce colour that the probe's single capture point missed.
 
@@ -155,7 +155,7 @@ It works as follows:
 
 - The irradiance volumes are a DDGI-style atlas: 8×8 octahedral tiles with 10×10 borders, RGB9E5 colour plus RG16F visibility, 2560×1585 for 6 cascades plus up to 100 local volumes, about 0.08 ms to update.
 - Its reflection probes are still BC6H cube-map arrays: box-projected, GGX-prefiltered by their own baker, and re-fit as above.
-- Its specular order is "SSR when possible, then RT, with fallback to probes based on smoothness".
+- Its specular order is "SSR when possible, then RT, with fallback to probes based on smoothness" (p28). RT only runs on very smooth surfaces, at ½ or ¼ resolution, and shipped disabled on consoles (~2 ms). Probes are the baseline, not the last resort.
 
 Octahedral *reflection* probes are still worth testing. Our case differs from idTech's in three ways:
 
@@ -216,9 +216,9 @@ Three's `SSRNode` is tightly bound to three. Its stochastic march was also the r
 
 The port follows FidelityFX SSSR (SSSR 1.5 in the current GPUOpen manual). It keeps the host order of the SDK v1.1.4 sources that our denoiser port already follows:
 
-1. **Hierarchical depth:** an SPD-style single-pass downsample of depth to a 7-level min-depth pyramid (r32f).
+1. **Hierarchical depth:** an SPD-style single-pass downsample of depth to a 7-level pyramid (r32f; mip 0 a copy, 6 SPD levels): min for forward Z, max for reverse Z.
 2. **Tile classification.** This pass *reads* roughness; it doesn't compute it. Roughness is the frame contract's input: a G-buffer channel in a deferred engine, or an MRT output in three (`materialRoughness`, as our three-temporal pages already do). The pass exists for the GPU budget. It turns per-pixel decisions into compact work lists, so later passes launch threads only for pixels that trace.
-   - Pixels rougher than `roughnessThreshold` trace no ray and take the probe term.
+   - Pixels rougher than `roughnessThreshold` trace no ray and take the probe term. FFX compares in alpha (perceptual²): its default 0.2 is about 0.447 perceptual. We take thresholds in perceptual units and square them at the pass boundary (DIVERGES D43). The mirror test (always trace, start at mip 0, ignore the occupancy exit) is alpha < 0.0001.
    - `samplesPerQuad` sets the minimum rays per 2×2 quad (1, 2 or 4).
    - With variance-guided tracing, a quad gets more rays when last frame's variance is high.
    - The pass writes the ray list (one entry per tracing pixel, appended with an atomic counter), the denoiser tile list (8×8 tiles with at least one reflective pixel) and the ray counter.
@@ -228,9 +228,9 @@ The port follows FidelityFX SSSR (SSSR 1.5 in the current GPUOpen manual). It ke
 5. **Intersection:**
    - Hi-Z traversal, which uses coarser mips when that is safe and goes full-rate for mirrors and quarter-rate for glossy.
    - A hit writes radiance and hit distance.
-   - A miss is any of: the ray leaves the screen, it passes behind the depth buffer (fails the thickness test), or it runs out of steps.
-     - With a trace provider, a miss is appended to the **miss list** (see "Work lists and indirect dispatch").
-     - Without one, it takes the probe lookup inline, at the pixel's position and the ray's direction.
+   - A hit is not binary. FFX computes a **confidence**: a screen-border vignette times a squared falloff of the distance to the surface over the thickness, and zero for rays that leave the frustum, self-hit within 2 px, hit the background, or hit a back face. Radiance is `lerp(fallback, sceneColor, confidence)`.
+     - With a trace provider, a pixel with `confidence < ssrConfidenceThreshold` (FFX's hybrid sample: 0.9) is appended to the **miss list** (see "Work lists and indirect dispatch").
+     - Without one, the fallback is the probe lookup inline, at the pixel's position and the ray's direction.
 6. **Denoise** through the seam (`FfxReflectionDenoiser`).
 
 #### Work lists and indirect dispatch
@@ -239,11 +239,11 @@ Every pass after classification runs over a list, not over the screen. Each list
 
 | List | Written by | Entry | Read by |
 |---|---|---|---|
-| ray list | classify | packed pixel coordinate (u32: 16 + 16 bits) | intersect |
+| ray list | classify | packed pixel coordinate plus quad-copy flags (u32: FFX's 15-bit x, 14-bit y, 3 copy flags) | intersect |
 | denoiser tile list | classify | packed 8×8 tile coordinate | denoiser passes |
-| **miss list** (ours; FFX has none) | intersect | pixel coordinate + ray direction, octahedral-packed as 2 × 16-bit snorm (8 bytes) | ray-traced pass |
+| **miss list** (after FFX's `hybridreflections` sample; we add the direction and the per-tile cap) | intersect | pixel coordinate + ray direction, octahedral-packed as 2 × 16-bit snorm (8 bytes) | ray-traced pass |
 
-**The miss list is the second compaction.** FFX only needs the first, because its miss goes straight to the environment map. In the hybrid, whether screen space failed is only known after the intersect pass, so intersect appends its misses. The ray-traced pass then dispatches indirectly over exactly those pixels.
+**The miss list is the second compaction.** Plain SSSR only needs the first, because its miss blends to the environment map. In a hybrid, whether screen space failed is only known after the intersect pass, so intersect appends its low-confidence pixels. FFX SDK v1.1.4's `samples/hybridreflections` does the same with one wave-level atomic and its own indirect-args pass; we follow it. The ray-traced pass then dispatches indirectly over exactly those pixels.
 
 - **Same sample, same direction.** The traced ray reuses the direction the intersect pass marched, stored in the entry. Regenerating it from the blue-noise index would also work, but storing it keeps one source of truth.
 - **The traced ray starts at the surface**, offset along the normal. It does not start where the march left the screen: the march's free-space assumption is only valid where it found a hit.
@@ -298,13 +298,15 @@ The explainer page in the denoiser repo already does this one-off for one room: 
 
 **Per pixel:**
 
-- smoothness below the threshold → probe;
-- otherwise → SSSR hit, then traced hit, then probe, then environment.
+- roughness above the SSSR threshold → probe;
+- otherwise → SSSR hit; where its confidence is low, a traced hit (only if a trace provider is set and roughness is below the RT threshold; FFX's hybrid sample uses 0.22 alpha for both); then probe, then environment.
+
+The ray-traced layer is optional and off by default, as in what shipped: idTech 8 runs it only on very smooth surfaces and disabled it on consoles (DIVERGES D51).
 
 Edge cases:
 
 - **Screen-edge fade:** confidence goes to the next source down.
-- **Specular occlusion:** from the probe re-fit, or a cheap bent-normal / AO term.
+- **Specular occlusion:** the re-fit doesn't provide it. Apply Lagarde's term to the probe contribution from the app's AO, `saturate(pow(NdotV + AO, exp2(−16r − 1)) − 1 + AO)`; SSR and RT hits carry their own occlusion (DIVERGES D66).
 
 The composite uses the split-sum DFG term (`radiance × (F0 · A + B)`), the same one three's PBR uses, so a material looks the same lit by probes alone or by the hybrid.
 
