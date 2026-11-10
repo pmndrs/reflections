@@ -13,9 +13,10 @@
 //
 // The denoiser is not here (it lives in the denoiser repo); the outputs are what its seam takes.
 import { blueNoiseBytes } from './blueNoiseData';
+import { createDepthPyramidBuilder, createDepthPyramidTexture, depthPyramidMipCount } from './depthPyramid';
 import { mat4Invert, mat4Mul, type Mat4Like } from './math';
 import {
-  BLUE_NOISE_WGSL, classifyWgsl, CONSTANT_FALLBACK_WGSL, downsampleWgsl, ENVIRONMENT_FALLBACK_WGSL,
+  BLUE_NOISE_WGSL, classifyWgsl, CONSTANT_FALLBACK_WGSL, ENVIRONMENT_FALLBACK_WGSL,
   INDIRECT_ARGS_WGSL, intersectWgsl, MISS_ARGS_WGSL, PARAMS_SIZE, type Variant,
 } from './shaders';
 import { PassTimer } from './timer';
@@ -202,7 +203,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const useMissList = options.missList ?? false;
   const timer = options.timestamps && PassTimer.supported(device) ? new PassTimer(device) : undefined;
   // FFX: min(7, ceil(log2(max(w, h)))) -- a copy at mip 0 plus six reduced mips.
-  const mipCount = Math.min(7, Math.ceil(Math.log2(Math.max(W, H))));
+  const mipCount = depthPyramidMipCount(W, H);
   const tilesX = Math.ceil(W / 8), tilesY = Math.ceil(H / 8);
 
   // ---- resources
@@ -211,7 +212,8 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     device.createTexture({ label: `ssr ${label}`, size: [w, h], format, mipLevelCount: mips, usage: STex });
   const buf = (label: string, size: number, extra = 0) =>
     device.createBuffer({ label: `ssr ${label}`, size: Math.max(16, Math.ceil(size / 4) * 4), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST | extra });
-  const depthHierarchy = tex('depth hierarchy', 'r32float', W, H, mipCount);
+  const depthHierarchy = createDepthPyramidTexture(device, W, H, 'ssr depth hierarchy');
+  const pyramid = createDepthPyramidBuilder(device, { inverted });
   const radiance = tex('radiance', 'rgba16float');
   const hitDistance = tex('hit distance', 'r32float');
   const extractedRoughness = tex('extracted roughness', 'r32float');
@@ -229,8 +231,6 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const noiseTable = device.createBuffer({ label: 'ssr blue-noise table', size: 128 * 128 * 2, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   device.queue.writeBuffer(noiseTable, 0, blueNoiseBytes());
   const dummyVariance = device.createTexture({ label: 'ssr no variance', size: [1, 1], format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING });
-  const mipView = (m: number) => depthHierarchy.createView({ baseMipLevel: m, mipLevelCount: 1 });
-  const mipViews = Array.from({ length: mipCount }, (_, m) => mipView(m));
   const hierarchyView = depthHierarchy.createView();
 
   // ---- pipelines
@@ -240,34 +240,6 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     compute: { module: device.createShaderModule({ label: `ssr ${label}`, code }), entryPoint: 'main' },
   });
   const withFallback = (bgl: GPUBindGroupLayout) => (fallback.layout ? [bgl, fallback.layout] : [bgl]);
-
-  // depth downsample: pass A (copy + mips 1..3) per input kind, pass B (mips 4..6)
-  const levelsA = Math.min(3, mipCount - 1);
-  const levelsB = Math.max(0, mipCount - 4);
-  const downA: Partial<Record<'depth' | 'float', { pipe: GPUComputePipeline; bgl: GPUBindGroupLayout }>> = {};
-  const getDownA = (kind: 'depth' | 'float') => {
-    if (downA[kind]) return downA[kind]!;
-    const bgl = device.createBindGroupLayout({
-      label: `ssr downsample A (${kind})`,
-      entries: [texEntry(0, kind === 'depth' ? 'depth' : 'unfilterable-float'),
-        ...Array.from({ length: levelsA + 1 }, (_, i) => storageTexEntry(i + 1, 'r32float'))],
-    });
-    return (downA[kind] = { bgl, pipe: pipe(`downsample A (${kind})`, downsampleWgsl({ source: kind, copy: true, levels: levelsA, inverted }), [bgl]) });
-  };
-  let downB: { pipe: GPUComputePipeline; group: GPUBindGroup } | undefined;
-  if (levelsB > 0) {
-    const bgl = device.createBindGroupLayout({
-      label: 'ssr downsample B',
-      entries: [texEntry(0), ...Array.from({ length: levelsB }, (_, i) => storageTexEntry(i + 1, 'r32float'))],
-    });
-    downB = {
-      pipe: pipe('downsample B', downsampleWgsl({ source: 'float', copy: false, levels: levelsB, inverted }), [bgl]),
-      group: device.createBindGroup({
-        label: 'ssr downsample B', layout: bgl,
-        entries: [{ binding: 0, resource: mipViews[3] }, ...Array.from({ length: levelsB }, (_, i) => ({ binding: i + 1, resource: mipViews[4 + i] }))],
-      }),
-    };
-  }
 
   const classifyBgl = device.createBindGroupLayout({
     label: 'ssr classify',
@@ -364,13 +336,6 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     }
     if (fallback.layout && !inputs.fallbackBindGroup) throw new Error('ssr: the radiance fallback needs inputs.fallbackBindGroup');
     writeParams(inputs, settings);
-    const kind = inputs.depth.format.startsWith('depth') ? 'depth' : 'float';
-    const dA = getDownA(kind);
-    const depthView = kind === 'depth' ? inputs.depth.createView({ aspect: 'depth-only' }) : inputs.depth.createView();
-    const groupA = device.createBindGroup({
-      label: 'ssr downsample A', layout: dA.bgl,
-      entries: [{ binding: 0, resource: depthView }, ...Array.from({ length: levelsA + 1 }, (_, i) => ({ binding: i + 1, resource: mipViews[i] }))],
-    });
     const classifyGroup = device.createBindGroup({
       label: 'ssr classify', layout: classifyBgl,
       entries: [P(0),
@@ -407,15 +372,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
       fn(p);
       p.end();
     };
-    pass('depth downsample', (p) => {
-      p.setPipeline(dA.pipe); p.setBindGroup(0, groupA);
-      p.dispatchWorkgroups(Math.ceil(W / 64), Math.ceil(H / 64));
-      if (downB) {
-        const w3 = Math.max(1, W >> 3), h3 = Math.max(1, H >> 3);
-        p.setPipeline(downB.pipe); p.setBindGroup(0, downB.group);
-        p.dispatchWorkgroups(Math.ceil(w3 / 64), Math.ceil(h3 / 64));
-      }
-    });
+    pyramid.build(cmd, inputs.depth, depthHierarchy, timer?.pass('depth downsample'));
     pass('classify', (p) => {
       p.setPipeline(classifyPipe); p.setBindGroup(0, classifyGroup);
       if (fallback.layout) p.setBindGroup(1, inputs.fallbackBindGroup!);

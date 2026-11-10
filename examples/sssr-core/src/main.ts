@@ -4,7 +4,7 @@
 // floor; time(n) gives median GPU ms per pass with the loop stopped (there is no loop: frames render
 // on demand); shot() returns the canvas as a PNG data URL.
 import {
-  createScreenSpaceReflections, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs,
+  createScreenSpaceReflections, environmentRadianceFallback, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs,
   type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant,
 } from '@pmndrs/reflections/core';
 import { lookAt, perspective, SCENE_WGSL } from './scene';
@@ -159,9 +159,34 @@ async function main() {
   };
   const baseSettings: ScreenSpaceReflectionsSettings = { fallbackColor: [0.35, 0.45, 0.6] };
 
+  // ?env: the radiance-fallback seam with a cube environment (a procedural sky, 32 px, 6 mips)
+  // instead of the constant colour.
+  let radianceFallback: RadianceFallback | undefined;
+  if (q.has('env')) {
+    const env = environmentRadianceFallback(device);
+    const size = 32, mips = 6;
+    const cube = device.createTexture({ size: [size, size, 6], format: 'rgba16float', mipLevelCount: mips, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    const faceDir = (f: number, u: number, v: number) => [[1, -v, -u], [-1, -v, u], [u, 1, v], [u, -1, -v], [u, -v, 1], [-u, -v, -1]][f];
+    for (let m = 0; m < mips; m++) {
+      const s = size >> m, data = new Uint16Array(s * s * 4);
+      for (let f = 0; f < 6; f++) {
+        for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+          const d = faceDir(f, ((x + 0.5) / s) * 2 - 1, ((y + 0.5) / s) * 2 - 1);
+          const up = d[1] / Math.hypot(...d);
+          const sun = Math.max(0, (-0.4 * d[0] + 0.8 * d[1] + 0.5 * d[2]) / Math.hypot(...d)) ** 32 * 8 / (1 + m);
+          const c = up > 0 ? [0.3 + sun, 0.5 + sun, 1.0 + sun * 0.8] : [0.25, 0.2, 0.15];
+          data.set([...c, 1].map(half), (y * s + x) * 4);
+        }
+        device.queue.writeTexture({ texture: cube, mipLevel: m, origin: [0, 0, f] }, data, { bytesPerRow: s * 8 }, [s, s, 1]);
+      }
+    }
+    radianceFallback = env;
+    inputs.fallbackBindGroup = env.createBindGroup(cube.createView({ dimension: 'cube' }));
+  }
+
   // ---- tracers: the page's variant, plus the other one for parity when subgroups exist
   const make = (variant: ScreenSpaceVariant) => createScreenSpaceReflections(device, {
-    width: W, height: H, variant, depthInverted: reverse, missList: true, timestamps: true,
+    width: W, height: H, variant, depthInverted: reverse, missList: true, timestamps: true, radianceFallback,
   });
   const main: ScreenSpaceReflections = make(forced ?? (hasSubgroups ? 'subgroups' : 'workgroup'));
   let other: ScreenSpaceReflections | undefined;
@@ -370,6 +395,15 @@ async function main() {
     setMip: (m: number) => { pyramidMip = m; frame(); return true; },
     shot: async () => { await device.queue.onSubmittedWorkDone(); frame(); await device.queue.onSubmittedWorkDone(); return canvas.toDataURL('image/png'); },
   };
+}
+
+/** f32 -> f16 bits (round to nearest, no denormals; enough for a test sky). */
+function half(v: number): number {
+  const f = new Float32Array([v]), u = new Uint32Array(f.buffer)[0];
+  const sign = (u >>> 16) & 0x8000, e = ((u >>> 23) & 0xff) - 127 + 15, m = u & 0x7fffff;
+  if (e <= 0) return sign;
+  if (e >= 31) return sign | 0x7c00;
+  return sign | (e << 10) | ((m + 0x1000) >>> 13);
 }
 
 function invert(m: Float32Array): Float32Array {

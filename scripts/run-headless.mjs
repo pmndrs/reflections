@@ -157,6 +157,13 @@ async function sssrCoreChecks(pages) {
     check('sssr reverse-Z parity: lists and images', r.rayListSame && r.tileListSame && r.missListSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
       `radiance ${r.radianceDiffPixels} px`);
   }
+  // The radiance-fallback seam with a cube environment in @group(1).
+  const env = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?env`);
+  pages.push(env);
+  const se = await env.T('window.__p.stats()');
+  check('sssr cube-environment fallback: same rays and hits', se.rays === st.rays && Math.abs(se.mirrorHitFraction - st.mirrorHitFraction) < 1e-3,
+    `rays ${se.rays}, hit ${(se.mirrorHitFraction * 100).toFixed(1)}%`);
+  savePng('sssr-core-env.png', await env.T('window.__p.shot()'));
   // GPU ms at 1080p, informational (loop stopped: frames are submitted one at a time).
   const big = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?w=1920&h=1080`);
   pages.push(big);

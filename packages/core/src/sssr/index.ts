@@ -6,3 +6,7 @@ export {
   type ScreenSpaceReflectionsInputs, type ScreenSpaceReflectionsOutputs, type ScreenSpaceCamera,
   type ScreenSpaceVariant, type RadianceFallback,
 } from './sssr';
+export {
+  createDepthPyramidBuilder, createDepthPyramidTexture, depthPyramidMipCount,
+  type DepthPyramidBuilder, type DepthPyramidOptions,
+} from './depthPyramid';
