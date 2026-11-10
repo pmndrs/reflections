@@ -30,6 +30,7 @@ This is the API of three.js [#35046](https://github.com/mrdoob/three.js/pull/350
 |---|---|
 | `@pmndrs/reflections` / `/three` | three.js adapter: probes, TSL nodes |
 | `@pmndrs/reflections/core` | engine-agnostic WebGPU: the probe prefilter (more per the spec) |
+| `@pmndrs/reflections/babylon` | Babylon.js WebGPUEngine adapter (experimental): core SSR + probe set, frame-graph tasks (`examples/babylon`) |
 
 ## Develop
 
