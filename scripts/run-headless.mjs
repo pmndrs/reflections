@@ -1020,6 +1020,21 @@ async function main() {
         check("without the shim, layout 'cube-array' throws", typeof fb.forced === 'string' && fb.forced.includes('installCubeArraySupport'), String(fb.forced).slice(0, 90));
         check('shim is reversible and idempotent', fb.before === 10 && fb.after === 0 && fb.same && fb.ok && fb.again === 10 && fb.relayout === 'cube-array',
           `patched methods ${fb.before} -> ${fb.after} -> ${fb.again}, same promise ${fb.same}, re-install ${fb.ok}, layout ${fb.relayout}`);
+        // a failing self-test (read-back sabotaged) uninstalls and reports false; the next install works again
+        const st = await p.T(`(async () => {
+          const P = window.__p, R = P.renderer;
+          await P.setShim(false);
+          R.readRenderTargetPixelsAsync = async () => new Uint8Array(48 * 4);
+          let ok;
+          try { ok = await P.installShim(); } finally { delete R.readRenderTargetPixelsAsync; }
+          const failed = { ...P.cubeArray };
+          P.setLookup('auto'); P.capture();
+          const layout = P.cubeArray.bakedLayout;
+          const again = await P.setShim(true);
+          return { ok, failed, layout, again, relayout: P.cubeArray.bakedLayout };
+        })()`);
+        check('a failing self-test uninstalls the shim and reports false; auto falls back', st.ok === false && st.failed.mode === 'none' && st.layout === 'cube2d' && st.again === true && st.relayout === 'cube-array',
+          `${st.failed.reason}; then auto ${st.layout}, re-install ${st.again} (${st.relayout})`);
       }
       // phase 2: the package's lookup is core WGSL; the pre-phase-2 TSL lookup lives in examples/probes/src/legacy.ts
       for (const seam of ['warp', 'none']) {
@@ -1108,7 +1123,8 @@ async function main() {
       if (args.includes('--time-lookup')) {
         // lookup ms at 1080p, loop stopped: frame time with the probe node minus without it (no IBL),
         // the core lookup and the pre-phase-2 TSL node alternated in one page, grid on (432 spheres)
-        const t = await openPage(`http://127.0.0.1:${PORT}/probes/?w=1920&h=1080&grid`);
+        // (W20: also GPU timestamps, ?ts: render-pass ms per frame, median of 40, less exposed to a shared machine's wall-clock noise)
+        const t = await openPage(`http://127.0.0.1:${PORT}/probes/?w=1920&h=1080&grid&ts`);
         pages.push(t);
         await t.T(FREEZE);
         const rows = await t.T(`(async () => {
@@ -1116,13 +1132,14 @@ async function main() {
           for (let k = 0; k < 5; k++) for (const lookup of ['legacy-warp', 'warp', 'cube-array']) {
             P.setLookup(lookup); P.setGrid(true, 0.08);
             const on = await P.timeFrames(30, 7); P.setEnvNode(false); const off = await P.timeFrames(30, 7); P.setEnvNode(true);
-            out[lookup].push({ on: on.wall, off: off.wall, lookup: on.wall - off.wall });
+            out[lookup].push({ on: on.wall, off: off.wall, lookup: on.wall - off.wall, gpu: on.gpu - off.gpu, gpuOn: on.gpu });
           }
           return out;
         })()`);
         for (const [k, v] of Object.entries(rows)) {
           const med = (a) => [...a].sort((x, y) => x - y)[a.length >> 1];
           console.log(`  lookup ${k}: frame ${med(v.map((r) => r.on)).toFixed(3)} ms, without IBL ${med(v.map((r) => r.off)).toFixed(3)} ms, lookup ${med(v.map((r) => r.lookup)).toFixed(3)} ms (median of ${v.length}; each ${v.map((r) => r.lookup.toFixed(3)).join(' ')})`);
+          console.log(`    gpu: frame ${med(v.map((r) => r.gpuOn)).toFixed(3)} ms, lookup ${med(v.map((r) => r.gpu)).toFixed(3)} ms (each ${v.map((r) => r.gpu.toFixed(3)).join(' ')})`);
         }
       }
 
