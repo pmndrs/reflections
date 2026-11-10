@@ -7,13 +7,17 @@
 // with (`scene.environmentNode = reflectionProbes(probes)`) unless `?probes=0`; the composite then
 // reads them with `sampleReflectionProbesLocal` and falls back to `scene.environment` by coverage.
 //
+// `?rt=1` attaches a ray-traced fallback for the misses (three-mesh-bvh behind core's trace seam,
+// MeshBVHTraceProvider), rebuilt per scene and refitted per frame for animated scenes.
+//
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `ssr`).
 import * as THREE from 'three/webgpu';
 import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes, screenSpaceComposite,
+  MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes, screenSpaceComposite,
 } from '@pmndrs/reflections/three';
+import { HIT_WGSL } from '@pmndrs/reflections/core';
 import { SCENES, type KitScene } from '../../shared';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -22,10 +26,11 @@ const q = new URLSearchParams(location.search);
 const W = Number(q.get('w') ?? 960), H = Number(q.get('h') ?? 540);
 const manual = q.has('manual');
 const useProbes = q.get('probes') !== '0';
+const useRT = q.get('rt') === '1';
 
-const VIEWS = ['final', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'probeSpecular', 'grid'] as const;
+const VIEWS = ['final', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'probeSpecular', 'source', 'grid'] as const;
 type View = (typeof VIEWS)[number];
-const GRID: View[] = ['final', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'probeSpecular'];
+const GRID: View[] = ['final', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', useRT ? 'source' : 'probeSpecular'];
 
 // ---- GPU readback ------------------------------------------------------------------------------
 function halfToFloat(h: number) {
@@ -38,6 +43,7 @@ const FORMATS: Record<string, { bytes: number; channels: number; read: (dv: Data
   rgba16float: { bytes: 8, channels: 4, read: (dv, o, c) => halfToFloat(dv.getUint16(o + c * 2, true)) },
   rgba8unorm: { bytes: 4, channels: 4, read: (dv, o, c) => dv.getUint8(o + c) / 255 },
   r32float: { bytes: 4, channels: 1, read: (dv, o) => dv.getFloat32(o, true) },
+  rgba32float: { bytes: 16, channels: 4, read: (dv, o, c) => dv.getFloat32(o + c * 4, true) },
   depth32float: { bytes: 4, channels: 1, read: (dv, o) => dv.getFloat32(o, true) },
 };
 async function readTexture(device: GPUDevice, tex: GPUTexture) {
@@ -57,10 +63,10 @@ async function readTexture(device: GPUDevice, tex: GPUTexture) {
   buf.unmap(); buf.destroy();
   return out;
 }
-async function readU32(device: GPUDevice, b: GPUBuffer, size = 16) {
+async function readU32(device: GPUDevice, b: GPUBuffer, size = 16, offset = 0) {
   const r = device.createBuffer({ size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const enc = device.createCommandEncoder();
-  enc.copyBufferToBuffer(b, 0, r, 0, size);
+  enc.copyBufferToBuffer(b, offset, r, 0, size);
   device.queue.submit([enc.finish()]);
   await r.mapAsync(GPUMapMode.READ);
   const out = Array.from(new Uint32Array(r.getMappedRange().slice(0)));
@@ -201,6 +207,14 @@ async function main() {
         // traced = green, quad copy = yellow-green, neither = dimmed lit image
         case 'rays': return mask.r.greaterThan(0.5).select(vec3(0.1, 0.9, 0.2), mask.g.greaterThan(0.5).select(vec3(0.6, 0.8, 0.1), dim));
         case 'misses': return mask.b.greaterThan(0.5).select(vec3(1, 0.15, 0.1), mask.r.greaterThan(0.5).select(vec3(0.1, 0.35, 0.15), dim));
+        // source per pixel: SSR hit / traced hit / traced hit from the screen / traced miss / capped / probe
+        case 'source': {
+          const src = c.source.add(0.5).floor();
+          const probe = c.geometry.select(vec3(0.22).add(dim.mul(0.4)), vec3(0));
+          const ssrHit = c.confidence.greaterThanEqual(0.9).select(vec3(0.15, 0.85, 0.25), probe);
+          return src.equal(1).select(vec3(0.2, 0.4, 1), src.equal(4).select(vec3(0.2, 0.9, 0.95),
+            src.equal(2).select(vec3(0.95, 0.2, 0.85), src.equal(3).select(vec3(1, 0.55, 0.1), ssrHit))));
+        }
         default: return vec3(0);
       }
     };
@@ -219,6 +233,8 @@ async function main() {
   const controls = new OrbitControls(new THREE.PerspectiveCamera(), canvas);
   let kit: KitScene | null = null;
   let probes: ReflectionProbes | null = null;
+  let provider: MeshBVHTraceProvider | null = null;
+  let bvhInfo: { meshes: number; triangles: number; buildMs: number } | null = null;
   let time = 0, paused = false;
 
   async function load(id: string) {
@@ -248,6 +264,17 @@ async function main() {
       nextNodeFrame();
       kit.scene.environmentNode = reflectionProbes(probes) as N;
     }
+    if (useRT) {
+      // every visible mesh except helpers; one BVH per scene (BVHComputeData packs TLAS + BLAS)
+      const meshes: THREE.Mesh[] = [];
+      kit.scene.updateMatrixWorld(true);
+      kit.scene.traverseVisible((o) => { if ((o as THREE.Mesh).isMesh && !(o as N).isHelper && !o.userData.noTrace) meshes.push(o as THREE.Mesh); });
+      const t0 = performance.now();
+      (ssr.traced?.provider as MeshBVHTraceProvider | undefined)?.destroy();
+      provider = await MeshBVHTraceProvider.fromObjects(device, meshes);
+      bvhInfo = { meshes: meshes.length, triangles: provider.triangles, buildMs: performance.now() - t0 };
+      ssr.setTraceProvider(provider);
+    }
     ssr.gbuffer.resetHistory();
     buildDisplay();
     refreshUI();
@@ -267,6 +294,7 @@ async function main() {
     if (!kit) return;
     if (manual || !looping) nextNodeFrame();
     kit.camera.aspect = W / H; kit.camera.updateProjectionMatrix(); kit.camera.updateMatrixWorld();
+    if (provider && kit.update) { kit.scene.updateMatrixWorld(); provider.refit(); }
     ssr.render(kit.scene, kit.camera);
     updateMask();
     pipeline.render();
@@ -300,6 +328,11 @@ async function main() {
   const ssrBox = document.createElement('input'); ssrBox.type = 'checkbox'; ssrBox.checked = true;
   ssrBox.onchange = () => { composite!.amount.value = ssrBox.checked ? 1 : 0; if (!looping) frame(); };
   row('SSR', ssrBox);
+  if (useRT) {
+    const rtBox = document.createElement('input'); rtBox.type = 'checkbox'; rtBox.checked = true;
+    rtBox.onchange = () => { ssr.rayTracing = rtBox.checked; refreshUI(); if (!looping) frame(); };
+    row('Ray-traced misses', rtBox);
+  }
   const pauseBox = document.createElement('input'); pauseBox.type = 'checkbox'; pauseBox.onchange = () => { paused = pauseBox.checked; };
   row('Pause', pauseBox);
   function refreshUI() {
@@ -311,6 +344,7 @@ async function main() {
       `three r${THREE.REVISION} | ${kit!.title} | ${W}x${H}${manual ? ' | manual (loop stopped)' : ''}`,
       `variant ${ssr.variant ?? '(first frame pending)'} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
       `specular IBL term: ${probes ? `${probes.bakedProbes.length} probe(s) by coverage, then scene.environment` : 'scene.environment'}`,
+      useRT ? `ray-traced misses: ${ssr.rayTracing ? 'on' : 'off'} (three-mesh-bvh${bvhInfo ? `, ${bvhInfo.meshes} meshes, ${bvhInfo.triangles} triangles, built in ${bvhInfo.buildMs.toFixed(0)} ms` : ''})` : 'ray-traced misses: off (?rt=1)',
     ].join('\n');
   }
   function setView(v: View) {
@@ -335,6 +369,13 @@ async function main() {
       setPose, setView: (v: View) => setView(v),
       setSSR(on: boolean) { composite!.amount.value = on ? 1 : 0; },
       setSettings(s: N) { Object.assign(ssr.settings, s); },
+      setRT(on: boolean) { ssr.rayTracing = on; },
+      setTraceSettings(s: N) { ssr.traceSettings = { ...s }; },
+      traceStats: () => ssr.readTraceStats(),
+      get bvh() { return bvhInfo; },
+      tileCapCheck: () => tileCapCheck(),
+      rtOracle: (n?: number) => rtOracle(n),
+      hitShadingError: () => hitShadingError(),
       stop: stopLoop, start: startLoop,
       async step(n = 1) { for (let i = 0; i < n; i++) frame(); await idle(); },
       async shot() { frame(); const url = canvas.toDataURL('image/png'); await idle(); return url; },
@@ -382,6 +423,8 @@ async function main() {
     const isFar = (d: number) => (inverted ? d <= 0 : d >= 1);
     let geo = 0, confSum = 0, nonFinite = 0;
     let panel = 0, panelConf = 0, floorPx = 0, floorConf = 0;
+    let panelLum = 0, panelBright = 0, panelAnalytic = 0;
+    let panelErr: number[] = [];
     const pairs: [number, number][] = [];
     let wallPx = 0, wallConfident = 0, hitErr: number[] = [];
     const P = new THREE.Vector3(), Q = new THREE.Vector3(), d = new THREE.Vector3(), s = new THREE.Vector3();
@@ -393,7 +436,25 @@ async function main() {
       geo++; confSum += conf[i];
       const mirrorPx = am[i * 4 + 3] > 0.99 && nr[i * 4 + 3] < 0.03;
       if (!mirrorPx) continue;
-      if (nr[i * 4 + 2] > 0.99) { panel++; panelConf += conf[i]; }
+      if (nr[i * 4 + 2] > 0.99) {
+        panel++; panelConf += conf[i];
+        const L = lum(rad, i);
+        panelLum += L;
+        if (L > 1) panelBright++;
+        if (kit!.id === 'offscreen') {
+          // the wall mirror (z = -3.95, facing +z) reflects the blue wall behind the camera (z = 8)
+          P.set(((x + 0.5) / W) * 2 - 1, 1 - ((y + 0.5) / H) * 2, depth[i]).applyMatrix4(invVP);
+          d.copy(P).sub(eye).normalize(); d.z = -d.z;
+          if (d.z > 1e-4) {
+            const tb = (8 - P.z) / d.z;
+            Q.copy(P).addScaledVector(d, tb);
+            if (Math.abs(Q.x) < 6.9 && Q.y > 0.05 && Q.y < 4.95) {
+              panelAnalytic++;
+              if (hit[i] > 0) panelErr.push(Math.abs(hit[i] - tb) / tb);
+            }
+          }
+        }
+      }
       if (nr[i * 4 + 1] < 0.99) continue;
       floorPx++; floorConf += conf[i];
       if (kit!.id !== 'mirrorWall') continue;
@@ -424,7 +485,15 @@ async function main() {
       meanAbs = ad / n / Math.max(mb, 1e-6);
     }
     hitErr = hitErr.sort((a, b) => a - b);
+    panelErr = panelErr.sort((a, b) => a - b);
+    const rt = await ssr.readTraceStats();
     return {
+      rt: rt && ssr.rayTracing ? rt : null,
+      panel: {
+        meanLuminance: panel ? panelLum / panel : 0, brightFraction: panel ? panelBright / panel : 0, analyticPixels: panelAnalytic,
+        withHitDistance: panelErr.length, hitDistanceMedianRelErr: panelErr.length ? panelErr[panelErr.length >> 1] : NaN,
+        within2pc: panelErr.length ? panelErr.filter((e) => e < 0.02).length / panelAnalytic : 0,
+      },
       scene: kit!.id, variant: ssr.variant, rays: counter[1], tiles: counter[3], misses: missCounter[1],
       geometry: geo / (W * H), meanConfidence: geo ? confSum / geo : 0, nonFinite,
       mirrorFloorPixels: floorPx, mirrorFloorConfidence: floorPx ? floorConf / floorPx : 0,
@@ -434,6 +503,131 @@ async function main() {
         hitDistanceMedianRelErr: hitErr.length ? hitErr[hitErr.length >> 1] : NaN,
       } : null,
     };
+  }
+
+  /**
+   * Per-tile cap: every miss-list entry's source (traced or capped) from the RT source target,
+   * counted per 8x8 tile. Traced entries per tile must stay <= the frame's tile cap, and traced
+   * entries in all <= maxTracedRaysPerFrame.
+   */
+  async function tileCapCheck() {
+    await idle();
+    const core = ssr.tracer!, rt = ssr.traced!;
+    const stats = await rt.readStats();
+    const n = stats.misses;
+    const list = n ? await readU32(device, core.outputs.missList!, n * 8) : [];
+    const src = await readTexture(device, rt.source);
+    const perTile = new Map<number, number>();
+    let traced = 0, capped = 0, other = 0;
+    for (let k = 0; k < n; k++) {
+      const p = list[2 * k];
+      const x = p & 32767, y = (p >>> 15) & 16383;
+      const code = Math.round(src[y * W + x]);
+      if (code === 1 || code === 2 || code === 4) {
+        traced++;
+        const t = (y >> 3) * rt.tilesX + (x >> 3);
+        perTile.set(t, (perTile.get(t) ?? 0) + 1);
+      } else if (code === 3) capped++; else other++;
+    }
+    const maxPerTile = Math.max(0, ...perTile.values());
+    return { entries: n, traced, capped, other, tilesTraced: perTile.size, maxPerTile, stats };
+  }
+
+  /**
+   * Hit-shading error (D55): traced hits the camera also sees are shaded twice, once from the
+   * screen (scene colour, the reference) and once by the hit shading (reuse off); compare.
+   */
+  async function hitShadingError() {
+    const rt = ssr.traced!, core = ssr.tracer!;
+    const keep = ssr.traceSettings;
+    frame(); await idle();
+    const [srcA, radA] = await Promise.all([readTexture(device, rt.source), readTexture(device, core.outputs.radiance)]);
+    ssr.traceSettings = { ...keep, reuseOnScreenHits: false };
+    frame(); await idle();
+    const radB = await readTexture(device, core.outputs.radiance);
+    ssr.traceSettings = keep;
+    let n = 0, sa = 0, sb = 0, sabs = 0;
+    for (let i = 0; i < W * H; i++) {
+      if (Math.round(srcA[i]) !== 4) continue;
+      const a = (radA[i * 4] + radA[i * 4 + 1] + radA[i * 4 + 2]) / 3, b = (radB[i * 4] + radB[i * 4 + 1] + radB[i * 4 + 2]) / 3;
+      n++; sa += a; sb += b; sabs += Math.abs(a - b);
+    }
+    return { pixels: n, meanScreen: n ? sa / n : 0, meanShaded: n ? sb / n : 0, ratio: sa ? sb / sa : NaN, meanAbsRel: sa ? sabs / sa : NaN };
+  }
+
+  /**
+   * The provider against three's CPU raycaster on the same rays: n rays from the camera through a
+   * jittered pixel grid, first-hit distance on the GPU (traceFirstHit in a one-off kernel) vs
+   * THREE.Raycaster over the same meshes, double-sided like the BVH walk.
+   */
+  async function rtOracle(n = 4096) {
+    if (!provider) throw new Error('rtOracle needs ?rt=1');
+    const cam = kit!.camera;
+    cam.updateMatrixWorld();
+    const origins = new Float32Array(n * 4), dirs = new Float32Array(n * 4);
+    const o = new THREE.Vector3().setFromMatrixPosition(cam.matrixWorld), v = new THREE.Vector3();
+    const side = Math.ceil(Math.sqrt(n));
+    for (let i = 0; i < n; i++) {
+      const sx = ((i % side) + 0.37) / side, sy = (Math.floor(i / side) + 0.61) / side;
+      v.set(sx * 2 - 1, 1 - sy * 2, 0.5).unproject(cam).sub(o).normalize();
+      origins.set([o.x, o.y, o.z, 0], i * 4); dirs.set([v.x, v.y, v.z, 0], i * 4);
+    }
+    const code = `${HIT_WGSL}
+@group(0) @binding(0) var<storage, read> rayO: array<vec4f>;
+@group(0) @binding(1) var<storage, read> rayD: array<vec4f>;
+@group(0) @binding(2) var<storage, read_write> outT: array<vec4f>;
+${provider.code({ group: 1, firstBinding: 0 })}
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x >= arrayLength(&rayO)) { return; }
+  let h = traceFirstHit(rayO[id.x].xyz, rayD[id.x].xyz, 1000.0);
+  outT[id.x] = vec4f(h.t, f32(h.material), select(0.0, 1.0, h.frontFace), 0.0);
+}`;
+    const mk = (a: Float32Array<ArrayBuffer>, usage: number) => { const b = device.createBuffer({ size: a.byteLength, usage }); device.queue.writeBuffer(b, 0, a); return b; };
+    const S = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
+    const bo = mk(origins, S), bd = mk(dirs, S);
+    const bt = device.createBuffer({ size: n * 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    const bl0 = device.createBindGroupLayout({ entries: [0, 1, 2].map((binding) => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type: binding === 2 ? 'storage' as const : 'read-only-storage' as const } })) });
+    const bl1 = device.createBindGroupLayout({ entries: provider.entries.map((e, binding) => ({ ...e, binding } as GPUBindGroupLayoutEntry)) });
+    const pipe = device.createComputePipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bl0, bl1] }), compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(pipe);
+    pass.setBindGroup(0, device.createBindGroup({ layout: bl0, entries: [bo, bd, bt].map((buffer, binding) => ({ binding, resource: { buffer } })) }));
+    pass.setBindGroup(1, device.createBindGroup({ layout: bl1, entries: provider.resources().map((resource, binding) => ({ binding, resource })) }));
+    pass.dispatchWorkgroups(Math.ceil(n / 64));
+    pass.end();
+    const rb = device.createBuffer({ size: n * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    enc.copyBufferToBuffer(bt, 0, rb, 0, n * 16);
+    const t0 = performance.now();
+    device.queue.submit([enc.finish()]);
+    await rb.mapAsync(GPUMapMode.READ);
+    const gpuWallMs = performance.now() - t0;
+    const gpu = new Float32Array(rb.getMappedRange().slice(0));
+    rb.unmap(); [bo, bd, bt, rb].forEach((b) => b.destroy());
+    // CPU: three's raycaster, double-sided (the BVH walk has no face culling)
+    const meshes: THREE.Mesh[] = [];
+    kit!.scene.traverseVisible((m) => { if ((m as THREE.Mesh).isMesh && !(m as N).isHelper && !m.userData.noTrace) meshes.push(m as THREE.Mesh); });
+    const sides = new Map<THREE.Material, THREE.Side>();
+    for (const m of meshes) for (const mat of ([] as THREE.Material[]).concat(m.material)) { sides.set(mat, mat.side); mat.side = THREE.DoubleSide; }
+    const rc = new THREE.Raycaster();
+    rc.far = 1000;
+    let agree = 0, bothMiss = 0, gpuOnly = 0, cpuOnly = 0, maxRel = 0;
+    const errs: number[] = [];
+    for (let i = 0; i < n; i++) {
+      rc.set(new THREE.Vector3(origins[i * 4], origins[i * 4 + 1], origins[i * 4 + 2]), new THREE.Vector3(dirs[i * 4], dirs[i * 4 + 1], dirs[i * 4 + 2]));
+      const hit = rc.intersectObjects(meshes, false)[0];
+      const tg = gpu[i * 4];
+      if (!hit && tg < 0) { bothMiss++; agree++; continue; }
+      if (!hit) { gpuOnly++; continue; }
+      if (tg < 0) { cpuOnly++; continue; }
+      const rel = Math.abs(tg - hit.distance) / hit.distance;
+      errs.push(rel);
+      maxRel = Math.max(maxRel, rel);
+      if (rel < 1e-3) agree++;
+    }
+    for (const [mat, sd] of sides) mat.side = sd;
+    errs.sort((a, b) => a - b);
+    return { rays: n, agree, bothMiss, gpuOnly, cpuOnly, maxRel, p99Rel: errs.length ? errs[Math.floor(errs.length * 0.99)] : 0, gpuWallMs };
   }
 }
 

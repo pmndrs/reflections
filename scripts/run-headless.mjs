@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | probe-core | probe-bench)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | ssr-rt | probe-core | probe-bench)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
@@ -345,6 +345,86 @@ async function regressionChecks(pages) {
     `${o.validationError ?? o.outOfMemory ?? o.newUncapturedErrors[0] ?? 'ok'}; max rel err ${o.maxRelErr.toFixed(4)}`);
 }
 
+/**
+ * examples/ssr?rt=1: the ray-traced pass over the SSSR miss list (three-mesh-bvh provider).
+ *  - the provider agrees with three's CPU raycaster on camera rays (ray oracle);
+ *  - offscreen, view 'mirror': the wall mirror shows the wall behind the camera with RT on (confidence,
+ *    traced hit distance vs the analytic mirror distance, the emissive bars), and doesn't with RT off;
+ *  - GPU ms of the trace pass grows with the miss count (same frame, miss threshold varied);
+ *  - traced rays never exceed the per-tile cap or the frame budget.
+ */
+async function ssrRtChecks(pages) {
+  console.log('examples/ssr (?rt=1):');
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1`);
+  pages.push(p);
+  const before = results.logs.length;
+  await p.T("window.__p.load('offscreen')");
+  const bvh = await p.T('window.__p.bvh');
+  const oracle = await p.T('window.__p.rtOracle(4096)');
+  check('rt provider (three-mesh-bvh port) agrees with THREE.Raycaster', oracle.agree / oracle.rays > 0.995 && oracle.gpuOnly + oracle.cpuOnly <= oracle.rays * 0.003,
+    `${oracle.agree}/${oracle.rays} agree (${oracle.bothMiss} both miss), gpu-only ${oracle.gpuOnly}, cpu-only ${oracle.cpuOnly}, p99 rel ${oracle.p99Rel.toExponential(1)}, max rel ${oracle.maxRel.toExponential(1)}; BVH ${bvh.meshes} meshes, ${bvh.triangles} tris, ${bvh.buildMs.toFixed(0)} ms`);
+  await p.T("window.__p.setPose('mirror')");
+  await p.T('window.__p.setRT(false)');
+  await p.T('window.__p.step(2)');
+  const off = await p.T('window.__p.stats()');
+  await p.T('window.__p.setRT(true)');
+  await p.T('window.__p.step(2)');
+  const on = await p.T('window.__p.stats()');
+  const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+  check('rt offscreen: renders, no validation errors, finite outputs', errs.length === 0 && on.nonFinite === 0 && on.rt && on.rt.traced > 0,
+    errs.length ? errs.slice(0, 2).join(' | ') : `${on.misses} misses -> ${JSON.stringify(on.rt)}`);
+  check('rt offscreen: the wall mirror shows the wall behind the camera with RT on, not off',
+    on.facingPanelConfidence > 0.9 && off.facingPanelConfidence < 0.1 && on.panel.hitDistanceMedianRelErr < 0.02 && on.panel.within2pc > 0.8,
+    `confidence ${off.facingPanelConfidence.toFixed(3)} -> ${on.facingPanelConfidence.toFixed(3)} over ${on.facingPanelPixels} px; traced hit distance vs analytic: median rel err ${on.panel.hitDistanceMedianRelErr.toExponential(2)}, ${(on.panel.within2pc * 100).toFixed(1)}% of ${on.panel.analyticPixels} px within 2%`);
+  check('rt offscreen: the emissive bars behind the camera appear in the mirror', on.panel.brightFraction > 0.02 && off.panel.brightFraction < 0.005,
+    `panel px with luminance > 1: ${(off.panel.brightFraction * 100).toFixed(2)}% -> ${(on.panel.brightFraction * 100).toFixed(2)}%; mean panel radiance ${off.panel.meanLuminance.toFixed(3)} -> ${on.panel.meanLuminance.toFixed(3)}`);
+  savePng('ssr-rt-offscreen-mirror-grid.png', await p.T('window.__p.shot()'));
+  await p.T("window.__p.setView('final')");
+  savePng('ssr-rt-offscreen-mirror-final.png', await p.T('window.__p.shot()'));
+  await p.T("window.__p.setView('source')");
+  savePng('ssr-rt-offscreen-mirror-source.png', await p.T('window.__p.shot()'));
+  await p.T("window.__p.setView('grid')");
+
+  // per-tile cap: a budget far below the miss count, two frames so the tile feedback settles
+  await p.T('window.__p.setTraceSettings({ maxTracedRaysPerFrame: 3000 })');
+  await p.T('window.__p.step(3)');
+  const cap = await p.T('window.__p.tileCapCheck()');
+  check('rt cap: traced rays never exceed the per-tile cap or the frame budget',
+    cap.maxPerTile <= cap.stats.tileCap && cap.traced <= 3000 && cap.capped > 0 && cap.traced === cap.stats.traced && cap.other === 0,
+    `${cap.entries} misses: ${cap.traced} traced (budget 3000), ${cap.capped} capped; tile cap ${cap.stats.tileCap} over ${cap.stats.tilesWithMisses} tiles with misses, max traced in a tile ${cap.maxPerTile}, ${cap.tilesTraced} tiles traced`);
+  await p.T('window.__p.setTraceSettings({})');
+  savePng('ssr-rt-offscreen-capped.png', await p.T('window.__p.shot()'));
+
+  // the other scenes still render with RT on; hit-shading error on traced hits the camera also sees
+  for (const id of ['mirrorWall', 'contact', 'moving']) {
+    const b = results.logs.length;
+    await p.T(`window.__p.load(${JSON.stringify(id)})`);
+    await p.T('window.__p.step(2)');
+    const st = await p.T('window.__p.stats()');
+    const e = results.logs.slice(b).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    const extra = id === 'mirrorWall' ? `; wall: ${(st.wall.confidentFraction * 100).toFixed(1)}% confident, corr ${st.wall.lumCorrelation.toFixed(3)}` : '';
+    check(`rt ${id}: renders, finite, no validation errors`, e.length === 0 && st.nonFinite === 0, e.length ? e.slice(0, 2).join(' | ') : `${st.misses} misses -> ${JSON.stringify(st.rt)}${extra}`);
+    const hs = await p.T('window.__p.hitShadingError()');
+    console.log(`  rt ${id}: hit shading vs on-screen colour over ${hs.pixels} traced hits the camera sees: mean ${hs.meanShaded.toFixed(3)} vs ${hs.meanScreen.toFixed(3)} (ratio ${hs.ratio.toFixed(3)}), mean abs rel ${hs.meanAbsRel.toFixed(3)}`);
+  }
+
+  // GPU ms vs miss count at 1080p: the same frame, misses varied with the miss-list threshold
+  const big = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1&scene=offscreen&pose=mirror`);
+  pages.push(big);
+  const rows = [];
+  for (const thr of [0, 0.3, 0.9, 1.01]) {
+    await big.T(`window.__p.setSettings({ missConfidenceThreshold: ${thr} })`);
+    const t = await big.T('window.__p.time(20)');
+    await big.T('window.__p.step(1)');
+    const st = await big.T('window.__p.traceStats()');
+    rows.push({ thr, misses: st.misses, traced: st.traced, ms: t.ms['rt trace'] ?? NaN, total: t.ms.total });
+  }
+  console.log(`  rt GPU ms at 1920x1080 (offscreen 'mirror', median of 20): ${rows.map((r) => `threshold ${r.thr}: ${r.misses} misses, trace ${r.ms?.toFixed(3)} ms (all passes ${r.total?.toFixed(3)})`).join('; ')}`);
+  const [r0, , , rN] = rows;
+  check('rt GPU ms scales with the miss count', r0.misses === 0 && rN.misses > 10000 && rN.ms > 4 * Math.max(r0.ms, 0.01) && rows.every((r, i) => i === 0 || r.misses >= rows[i - 1].misses),
+    rows.map((r) => `${r.misses}: ${r.ms?.toFixed(3)} ms`).join(', '));
+}
+
 async function main() {
   setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull ? 3_600_000 : 600_000).unref();
   let server = null;
@@ -506,6 +586,7 @@ async function main() {
     if (runs('scenes')) pages.push(...(await checkScenes()));
     if (runs('sssr-core')) await sssrCoreChecks(pages);
     if (runs('ssr')) await ssrChecks(pages);
+    if (runs('ssr-rt')) await ssrRtChecks(pages);
 
     if (runs('probe-core')) {
       // examples/probe-core: the phase 2 probe core on a bare device (layouts x formats, CPU weights,

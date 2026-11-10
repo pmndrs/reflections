@@ -29,6 +29,9 @@ importers:
       three:
         specifier: ^0.187.0
         version: 0.187.0
+      three-mesh-bvh:
+        specifier: ^0.9.18
+        version: 0.9.18(three@0.187.0)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -53,6 +56,9 @@ importers:
       three:
         specifier: ^0.187.0
         version: 0.187.0
+      three-mesh-bvh:
+        specifier: ^0.9.18
+        version: 0.9.18(three@0.187.0)
 
 packages:
 
@@ -572,6 +578,11 @@ packages:
   strip-literal@3.1.0:
     resolution: {integrity: sha512-8r3mkIM/2+PpjHoOtiAW8Rg3jJLHaV7xPwG+YRGrv6FP0wwk/toTpATxWYOW0BKdWwl82VT2tFYi5DlROa0Mxg==}
 
+  three-mesh-bvh@0.9.18:
+    resolution: {integrity: sha512-S76hOBnsSG4jsuEyCu98K63klONG4NwJANabPY1LUD5l7oUgu2xtKC0IwnX/XyPzo4YZ1D7ZU+gHVA479UdQmA==}
+    peerDependencies:
+      three: '>= 0.159.0'
+
   three@0.187.0:
     resolution: {integrity: sha512-Qiu7R+Cmh8CstZsY1uJOSWnVlfo7ZtNLV7mF8Jltk3LB3AtDu9cRZlcnRKkAk8Y4z6KKw35z7Y7Urd7jWY8etA==}
 
@@ -1089,6 +1100,10 @@ snapshots:
   strip-literal@3.1.0:
     dependencies:
       js-tokens: 9.0.1
+
+  three-mesh-bvh@0.9.18(three@0.187.0):
+    dependencies:
+      three: 0.187.0
 
   three@0.187.0: {}
 

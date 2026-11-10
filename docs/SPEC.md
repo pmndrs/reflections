@@ -91,6 +91,8 @@ The resolve takes any object shaped like `denoiser-core`'s `TemporalDenoiser<Spe
 
 A trace provider is a WGSL snippet plus a bind group. The snippet provides `fn traceFirstHit(origin, dir, tMax) -> Hit`, where `Hit` holds distance, triangle id, barycentrics and a material index.
 
+As built (W8, `packages/core/src/trace/`): the provider has the shape of @pmndrs/ddgi's `WgslModule` (`code(slot)`, `entries`, `resources()`, `version`, `storageBufferCount`), so the pass places its bindings and the @pmndrs/bvh trace module wraps without changes. `Hit` also carries an optional world normal and the instance. The exact interface and what @pmndrs/bvh still lacks are in `docs/HANDOFF.md`, "Trace seam".
+
 Hit shading belongs to the resolve, not the provider. It looks up the probes at the hit point, plus whatever cheap material evaluation the engine exposes.
 
 - **Core provider: `@pmndrs/bvh`** (pmndrs/bvh, WIP; split out of webgpu-ddgi on 2026-11-10). This is ours, and it is the target.

@@ -19,6 +19,11 @@ Copyright (c) 2015 Krzysztof Narkowicz, dual-licensed public domain / MIT (used 
   - packages/core/src/probes/prefilter.ts and probes/layouts/prefilter.ts: WGSL kernels vendored
     from src/sky/pmrem/kernels.ts.
 
+three-mesh-bvh 0.9.18 (https://github.com/gkjohnson/three-mesh-bvh), Copyright (c) 2018 Garrett Johnson, MIT.
+  - packages/three/src/trace/MeshBVHTraceProvider.ts: a WGSL port of the WebGPU ray walk
+    (src/webgpu/shapecastFns/getShapecastFn.js, getRaycastFirstHitFn.js, rayShapecastUtils.js and
+    intersectRayTriangle in src/webgpu/tsl/fns.js) over BVHComputeData's packed buffers.
+
 FidelityFX SDK v1.1.4 (https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK),
 Copyright (C) 2024 Advanced Micro Devices, Inc., MIT.
   - packages/core/src/sssr/*: a WGSL port of the stochastic screen-space reflection tracer
@@ -26,6 +31,8 @@ Copyright (C) 2024 Advanced Micro Devices, Inc., MIT.
     sdk/src/components/sssr/ffx_sssr.cpp) and of the miss handling in samples/hybridreflections.
   - packages/core/src/sssr/blueNoiseData.ts: derived from the SDK's blue-noise sampler tables
     (samplerBlueNoiseErrorDistribution_128x128_OptimizedFor_2d2d2d2d_1spp.cpp).
+  - packages/core/src/trace/shaders.ts: the ray origin offset and ray length cap of the
+    traced pass follow samples/hybridreflections (its hybrid intersect).
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files(the "Software"), to deal

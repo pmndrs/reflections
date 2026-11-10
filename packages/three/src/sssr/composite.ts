@@ -18,6 +18,10 @@
 // clearcoat / sheen / iridescence / specular colour are not modelled), hit radiance has no
 // specular (scene colour without it, D400), and there is no denoiser here (rule 7), so glossy SSR
 // is one noisy sample per quad.
+//
+// With the ray-traced pass on (ScreenSpaceReflectionsPass `trace`), traced hits arrive here as
+// confidence 1 and their shaded radiance, and traced misses / capped rays as confidence 0 (or the
+// screen-space value), so the same formula composes them: no RT-specific branch.
 import * as THREE from 'three/webgpu';
 import {
   DFGLUT, float, getViewPosition, mix, normalize, pmremTexture, reflect, texture, uniform, uv, vec3, vec4,
@@ -66,6 +70,8 @@ export interface ScreenSpaceComposite {
   geometry: N;
   /** 0..1: blend SSR in (1, default) or not (0). */
   amount: N;
+  /** What the ray-traced pass did per pixel (`ScreenSpaceReflectionsPass.source`, core RT_SOURCE codes); 0 without it. */
+  source: N;
 }
 
 /**
@@ -118,5 +124,6 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
   return {
     final, lit, weight, probeSpecular, specular, confidence, ssr: ssrRadiance, geometry, amount,
     hitDistance: texture(ssr.hitDistance, at).x,
+    source: texture(ssr.source, at).x,
   };
 }

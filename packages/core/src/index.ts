@@ -26,3 +26,6 @@ export {
   FrameCameraHistory, mat4Multiply,
   type Mat4, type TextureChannel, type FrameTextures, type FrameConventions, type FrameCamera, type FrameInputs,
 } from './frame/contract';
+
+// Trace seam + ray-traced reflections over the SSSR miss list (SPEC "Trace seam", section 4).
+export * from './trace';
