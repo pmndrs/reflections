@@ -30,7 +30,12 @@ export function mirrorWall(opts: SceneOptions = {}): KitScene {
   // an emissive strip along the wall's top: a bright, sharp feature to reflect
   add(scene, new THREE.Mesh(new THREE.BoxGeometry(9, 0.08, 0.05), glow(0xfff0d8, 4)), [0, 3.85, -2.95]);
   studioLights(scene, [3, 6, 6], 2.2);
-  const views = { default: { pos: [0, 1.5, 5.5] as Vec3, target: [0, 1.0, -3] as Vec3 } };
+  const views = {
+    default: { pos: [0, 1.5, 5.5] as Vec3, target: [0, 1.0, -3] as Vec3 },
+    // low across the mirror floor toward the yellow sphere: the floor reflects the wall behind it,
+    // which screen space can't see (the sphere covers it), so those pixels fall back to the probe (W12)
+    low: { pos: [-1.1, 0.28, 2.6] as Vec3, target: [-1.6, 0.35, -1.2] as Vec3 },
+  };
   return {
     id: 'mirrorWall', title: 'Mirror floor facing a patterned wall', scene, camera: makeCamera(views.default, opts.aspect),
     target: new THREE.Vector3(...views.default.target), views,
