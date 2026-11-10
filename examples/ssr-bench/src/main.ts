@@ -34,7 +34,7 @@ import { ssr as threeSSR } from 'three/addons/tsl/display/SSRNode.js';
 import { temporalReproject } from 'three/addons/tsl/display/TemporalReprojectNode.js';
 import { recurrentDenoise } from 'three/addons/tsl/display/RecurrentDenoiseNode.js';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes, screenSpaceComposite,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes, reflectionsRequiredLimits, screenSpaceComposite,
 } from '@pmndrs/reflections/three';
 import { HIT_WGSL } from '@pmndrs/reflections/core';
 import { SCENES, type KitScene } from '../../shared';
@@ -261,7 +261,7 @@ async function main() {
   if (!navigator.gpu) { status.textContent = 'WebGPU is not available in this browser.'; return; }
   const adapter = await navigator.gpu.requestAdapter();
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { maxColorAttachmentBytesPerSample: maxBytes } } as N);
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { ...(adapter ? reflectionsRequiredLimits(adapter) : {}), maxColorAttachmentBytesPerSample: maxBytes } } as N);
   renderer.setPixelRatio(1);
   renderer.setSize(W, H, false);
   renderer.shadowMap.enabled = true;

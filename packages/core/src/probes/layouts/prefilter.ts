@@ -13,6 +13,7 @@
 // then is copied into a slot of the target. Other storage formats pack from that scratch
 // (./formats).
 
+import { downsamplerFor } from '../../downsample';
 import { lodToRoughness } from '../lod';
 import type { ProbeLayout } from './types';
 
@@ -151,21 +152,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocation_
   if (inside) { textureStore(dst, id.xy, id.z, vec4(acc.rgb / acc.w, 1.0)); }
 }`;
 
-const DOWNSAMPLE_WGSL = /* wgsl */ `
-@group(0) @binding(0) var src: texture_2d_array<f32>;
-@group(0) @binding(1) var dst: texture_storage_2d_array<rgba16float, write>;
-@group(0) @binding(2) var<uniform> size: vec4<u32>;
-@compute @workgroup_size(8, 8, 1)
-fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-  if (id.x >= size.x || id.y >= size.x) { return; }
-  let p = vec2<i32>(id.xy) * 2; let f = i32(id.z);
-  let c = textureLoad(src, p, f, 0) + textureLoad(src, p + vec2(1, 0), f, 0)
-        + textureLoad(src, p + vec2(0, 1), f, 0) + textureLoad(src, p + vec2(1, 1), f, 0);
-  textureStore(dst, id.xy, id.z, c * 0.25);
-}`;
-
 interface Pass { pipe: GPUComputePipeline; group: GPUBindGroup; wg: [number, number, number] }
-interface Pipes { down: GPUComputePipeline; fis: GPUComputePipeline; integ: GPUComputePipeline; tiled: GPUComputePipeline }
+interface Pipes { fis: GPUComputePipeline; integ: GPUComputePipeline; tiled: GPUComputePipeline }
 
 const _pipes = new WeakMap<GPUDevice, Map<string, Pipes>>();
 
@@ -179,7 +167,7 @@ function pipesFor(device: GPUDevice, layout: ProbeLayout): Pipes {
       layout: 'auto',
       compute: { module: device.createShaderModule({ code, label: `${layout.id}.${label}` }), entryPoint: 'main' },
     });
-    p = { down: make(DOWNSAMPLE_WGSL, 'down'), fis: make(fisWgsl(layout.wgsl), 'fis'), integ: make(integWgsl(layout.wgsl), 'integ'), tiled: make(tiledWgsl(layout.wgsl), 'tiled') };
+    p = { fis: make(fisWgsl(layout.wgsl), 'fis'), integ: make(integWgsl(layout.wgsl), 'integ'), tiled: make(tiledWgsl(layout.wgsl), 'tiled') };
     byDevice.set(layout.wgsl, p);
   }
   return p;
@@ -224,10 +212,6 @@ export class LayoutPrefilter {
     const srcCube = this.src.createView({ dimension: 'cube' });
     const srcInteg = level(this.src, Math.log2(sourceSize / INTEGRATION_SIZE));
 
-    for (let m = 1; m < srcMips; m++) {
-      const s = sourceSize >> m;
-      this.add(pipes.down, [Math.ceil(s / 8), Math.ceil(s / 8), 6], [level(this.src, m - 1), level(this.src, m), { buffer: this.uniform(new Uint32Array([s, 0, 0, 0]).buffer) }]);
-    }
     for (let lod = 0; lod <= this.maxLod; lod++) {
       const s = Math.max(size >> lod, 1);
       const r = lodToRoughness(lod, this.maxLod);
@@ -253,6 +237,9 @@ export class LayoutPrefilter {
     const n = this.sourceSize;
     encoder.copyTextureToTexture({ texture: source, mipLevel: 0 }, { texture: this.src, mipLevel: 0 }, [n, n, 6]);
     const pass = encoder.beginComputePass({ label: `LayoutPrefilter.${this.layout.id}`, timestampWrites });
+    // Box-filtered source chain (2x2 average per level, the 6 faces as array layers) by downsampler,
+    // up to six levels per dispatch, in this pass ahead of the GGX dispatches that sample it.
+    downsamplerFor(this.device).encodePass(pass, this.src);
     for (const p of this.passes) {
       pass.setPipeline(p.pipe);
       pass.setBindGroup(0, p.group);

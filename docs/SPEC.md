@@ -218,7 +218,7 @@ Three's `SSRNode` is tightly bound to three. Its stochastic march was also the r
 
 The port follows FidelityFX SSSR (SSSR 1.5 in the current GPUOpen manual). It keeps the host order of the SDK v1.1.4 sources that our denoiser port already follows:
 
-1. **Hierarchical depth:** an SPD-style single-pass downsample of depth to a 7-level pyramid (r32f; mip 0 a copy, 6 SPD levels): min for forward Z, max for reverse Z.
+1. **Hierarchical depth:** an SPD-style downsample of depth to a 7-level pyramid (r32f; mip 0 a copy, 6 reduced levels): min for forward Z, max for reverse Z. Built by the maintainer's `downsampler` since W13 (odd footprints include the extra row/column, D1600; up to six levels per dispatch, D1601).
 2. **Tile classification.** This pass *reads* roughness; it doesn't compute it. Roughness is the frame contract's input: a G-buffer channel in a deferred engine, or an MRT output in three (`materialRoughness`, as our three-temporal pages already do). The pass exists for the GPU budget. It turns per-pixel decisions into compact work lists, so later passes launch threads only for pixels that trace.
    - Pixels rougher than `roughnessThreshold` trace no ray and take the probe term. FFX compares in alpha (perceptual²): its default 0.2 is about 0.447 perceptual. We take thresholds in perceptual units and square them at the pass boundary (DIVERGES D43). The mirror test (always trace, start at mip 0, ignore the occupancy exit) is alpha < 0.0001.
    - `samplesPerQuad` sets the minimum rays per 2×2 quad (1, 2 or 4).

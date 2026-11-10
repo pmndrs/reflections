@@ -19,7 +19,7 @@ import * as THREE from 'three/webgpu';
 import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes, reflectionsRequiredLimits,
 } from '@pmndrs/reflections/three';
 import { HIT_WGSL } from '@pmndrs/reflections/core';
 import { SCENES, type KitScene } from '../../shared';
@@ -130,7 +130,7 @@ async function main() {
   const adapter = await navigator.gpu.requestAdapter();
   // the composite needs the G-buffer's `lit` target: 36 bytes/sample
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { maxColorAttachmentBytesPerSample: maxBytes } } as N);
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { ...(adapter ? reflectionsRequiredLimits(adapter) : {}), maxColorAttachmentBytesPerSample: maxBytes } } as N);
   renderer.setPixelRatio(1);
   renderer.setSize(W, H, false);
   renderer.shadowMap.enabled = true;

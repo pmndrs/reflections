@@ -5,7 +5,7 @@
 // on demand); shot() returns the canvas as a PNG data URL.
 import {
   createScreenSpaceReflections, DEFAULT_ROUGHNESS_THRESHOLD, environmentRadianceFallback, screenSpaceInputsFromFrame, type FrameInputs, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs,
-  type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant,
+  type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant, reflectionsRequiredLimits,
 } from '@pmndrs/reflections/core';
 import { lookAt, perspective, SCENE_WGSL } from './scene';
 
@@ -118,7 +118,7 @@ async function main() {
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) throw new Error('no adapter');
   const want = (['subgroups', 'timestamp-query'] as GPUFeatureName[]).filter((f) => adapter.features.has(f));
-  const device = await adapter.requestDevice({ requiredFeatures: want });
+  const device = await adapter.requestDevice({ requiredFeatures: want, requiredLimits: reflectionsRequiredLimits(adapter) });
   device.addEventListener('uncapturederror', (e) => console.error('WebGPU uncaptured error:', (e as GPUUncapturedErrorEvent).error.message));
   const hasSubgroups = device.features.has('subgroups' as GPUFeatureName);
 

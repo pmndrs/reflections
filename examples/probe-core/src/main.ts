@@ -9,7 +9,7 @@
 //             bit; a structured capture must change the fallback pixels
 import {
   ProbeSet, createScreenSpaceReflections, createTracedReflections, constantRadianceFallback, type TraceProvider, type TracedReflectionsStats, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
-  type FrameInputs, type ProbeLayoutId, type ProbeSetFormat, type ProbeVolume, type ScreenSpaceReflectionsInputs,
+  type FrameInputs, type ProbeLayoutId, type ProbeSetFormat, type ProbeVolume, type ScreenSpaceReflectionsInputs, reflectionsRequiredLimits,
 } from '@pmndrs/reflections/core';
 import { lookAt, perspective, SCENE_WGSL } from '../../sssr-core/src/scene';
 
@@ -66,7 +66,7 @@ async function main() {
   const adapter = await navigator.gpu?.requestAdapter();
   if (!adapter) throw new Error('WebGPU unavailable');
   const want = (['subgroups'] as GPUFeatureName[]).filter((f) => adapter.features.has(f));
-  const device = await adapter.requestDevice({ requiredFeatures: want });
+  const device = await adapter.requestDevice({ requiredFeatures: want, requiredLimits: reflectionsRequiredLimits(adapter) });
   device.addEventListener('uncapturederror', (e) => console.error('WebGPU uncaptured error:', (e as GPUUncapturedErrorEvent).error.message));
   const U = GPUBufferUsage;
 

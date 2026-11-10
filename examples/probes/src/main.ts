@@ -16,7 +16,7 @@ import { LightProbeGrid } from 'three/addons/lighting/LightProbeGrid.js';
 import { lightProbeGridIrradiance } from 'three/addons/tsl/lighting/LightProbeGridNode.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, reflectionProbes, type SeamFix,
+  ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, reflectionProbes, reflectionsRequiredLimits, type SeamFix,
 } from '@pmndrs/reflections/three';
 import { makeChecks, type Page } from './checks';
 import { LegacyProbesNode } from './legacy';
@@ -107,7 +107,8 @@ async function main() {
     scene.add(light);
   }
 
-  const renderer = new THREE.WebGPURenderer({ canvas, trackTimestamp: q.has('ts') });
+  const adapter = await navigator.gpu?.requestAdapter();
+  const renderer = new THREE.WebGPURenderer({ canvas, trackTimestamp: q.has('ts'), requiredLimits: adapter ? reflectionsRequiredLimits(adapter) : {} } as ConstructorParameters<typeof THREE.WebGPURenderer>[0]);
   renderer.setPixelRatio(1);
   renderer.setSize(W, H, false);
   renderer.shadowMap.enabled = true;

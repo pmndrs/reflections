@@ -453,6 +453,14 @@ function f2Checks(r) {
     check('probes: a zero-scale parent gives a zero (disabled) volume', z.centre < 1e-6 && z.near < 1e-6,
       `coverage at the centre ${z.centre.toFixed(3)}, 0.3 off ${z.near.toFixed(3)}`);
   }
+  const hz = section('hiZLimits');
+  if (hz) {
+    const f = (x) => `${x.mips} mips: ${x.differ} texels differ between devices, copy ${x.copyDiffer}, vs CPU fold ${x.oracleDiffer}; odd footprints change ${x.oddWider} texels vs a plain 2x2`;
+    for (const k of ['forward', 'reverse']) {
+      check(`depth pyramid (${k} Z, 1917x1079): same on ${hz.storageTextures[0]} and ${hz.storageTextures[1]} storage textures per stage; mip 0 a copy; mips = CPU fold incl. odd rows/columns`,
+        hz[k].differ === 0 && hz[k].copyDiffer === 0 && hz[k].oracleDiffer === 0 && hz[k].oddWider > 0 && hz.errors.length === 0, `${f(hz[k])}${hz.errors.length ? `; ${hz.errors[0]}` : ''}`);
+    }
+  }
   const pz = section('probeSourceSize');
   if (pz) {
     const d = (x) => x.ok ? 'ok' : `"${x.error}"`;

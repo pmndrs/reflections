@@ -6,7 +6,14 @@
 //              createPipelineLayout; a device with the limit raised builds the same pipeline.
 //  probeEnvDominant  the dominant direction bends the environment sample too (inside a volume,
 //              in its fade band and outside it agree).
-import { ProbeSet, createTracedReflections, probeRadianceFallback, type TraceProvider } from '@pmndrs/reflections/core';
+//  hiZLimits   the depth pyramid (built by downsampler) is the same bit for bit on a default-limit
+//              device (4 storage textures: more dispatches) and on one created with
+//              reflectionsRequiredLimits (6), forward and reverse Z, at an odd size; mip 0 is a copy
+//              and every other mip matches a CPU fold of the mip below it, odd row/column included (D1600).
+import {
+  ProbeSet, createDepthPyramidBuilder, createDepthPyramidTexture, createTracedReflections, probeRadianceFallback, reflectionsRequiredLimits,
+  type TraceProvider,
+} from '@pmndrs/reflections/core';
 import { readBufferF32 } from './util';
 
 const C = 0x4; // GPUShaderStage.COMPUTE
@@ -75,6 +82,81 @@ export async function rtLimitChecks() {
     raised.destroy();
   } else out.raised = { skipped: `adapter allows ${max}` };
   device.destroy();
+  return out;
+}
+
+// ---- depth pyramid ------------------------------------------------------------------------------
+
+async function readMips(device: GPUDevice, tex: GPUTexture): Promise<Float32Array[]> {
+  const out: Float32Array[] = [];
+  for (let m = 0; m < tex.mipLevelCount; m++) {
+    const w = Math.max(1, tex.width >> m), h = Math.max(1, tex.height >> m), bpr = Math.ceil((w * 4) / 256) * 256;
+    const buf = device.createBuffer({ size: bpr * h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const e = device.createCommandEncoder();
+    e.copyTextureToBuffer({ texture: tex, mipLevel: m }, { buffer: buf, bytesPerRow: bpr }, [w, h]);
+    device.queue.submit([e.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const rows = new Float32Array(buf.getMappedRange());
+    const mip = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) mip.set(rows.subarray((y * bpr) / 4, (y * bpr) / 4 + w), y * w);
+    out.push(mip);
+    buf.unmap(); buf.destroy();
+  }
+  return out;
+}
+
+async function pyramidOn(device: GPUDevice, W: number, H: number, depthData: Float32Array<ArrayBuffer>, inverted: boolean) {
+  const depth = device.createTexture({ size: [W, H], format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+  device.queue.writeTexture({ texture: depth }, depthData, { bytesPerRow: W * 4 }, [W, H]);
+  const pyramid = createDepthPyramidTexture(device, W, H);
+  const e = device.createCommandEncoder();
+  createDepthPyramidBuilder(device, { inverted }).build(e, depth, pyramid);
+  device.queue.submit([e.finish()]);
+  const mips = await readMips(device, pyramid);
+  depth.destroy(); pyramid.destroy();
+  return mips;
+}
+
+export async function hiZLimitChecks() {
+  const W = 1917, H = 1079; // odd at every level that matters
+  const data = new Float32Array(W * H);
+  let seed = 12345;
+  for (let i = 0; i < data.length; i++) { seed = (seed * 1664525 + 1013904223) >>> 0; data[i] = seed / 2 ** 32; }
+  const a = await newDevice();
+  const b = await newDevice(reflectionsRequiredLimits(a.adapter));
+  const out: Record<string, unknown> = {
+    storageTextures: [a.device.limits.maxStorageTexturesPerShaderStage, b.device.limits.maxStorageTexturesPerShaderStage],
+  };
+  const errors: string[] = [];
+  for (const d of [a.device, b.device]) d.addEventListener('uncapturederror', (ev) => errors.push((ev as GPUUncapturedErrorEvent).error.message));
+  for (const inverted of [false, true]) {
+    const pa = await pyramidOn(a.device, W, H, data, inverted);
+    const pb = await pyramidOn(b.device, W, H, data, inverted);
+    let differ = 0, oracleDiffer = 0, copyDiffer = 0, oddWider = 0;
+    for (let m = 0; m < pa.length; m++) for (let i = 0; i < pa[m].length; i++) if (pa[m][i] !== pb[m][i]) differ++;
+    for (let i = 0; i < data.length; i++) if (pb[0][i] !== data[i]) copyDiffer++;
+    // CPU fold of mip m-1 over each output's footprint per axis: 2x..2x+1, plus 2x+2 where the size
+    // below is odd (downsampler's conservative rule); oddWider counts texels where that differs from
+    // the plain 2x2 rule (the pyramid this replaced).
+    const red = inverted ? Math.max : Math.min;
+    for (let m = 1; m < pb.length; m++) {
+      const pw = Math.max(1, W >> (m - 1)), ph = Math.max(1, H >> (m - 1)), w = Math.max(1, W >> m), h = Math.max(1, H >> m);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let v = inverted ? -Infinity : Infinity, v2 = v;
+        const y1 = Math.min(2 * y + 1 + (ph & 1), ph - 1), x1 = Math.min(2 * x + 1 + (pw & 1), pw - 1);
+        for (let j = Math.min(2 * y, ph - 1); j <= y1; j++) for (let i = Math.min(2 * x, pw - 1); i <= x1; i++) {
+          const below = pb[m - 1][j * pw + i];
+          v = red(v, below);
+          if (j <= 2 * y + 1 && i <= 2 * x + 1) v2 = red(v2, below);
+        }
+        if (pb[m][y * w + x] !== v) oracleDiffer++;
+        if (v !== v2) oddWider++;
+      }
+    }
+    out[inverted ? 'reverse' : 'forward'] = { mips: pa.length, differ, copyDiffer, oracleDiffer, oddWider };
+  }
+  out.errors = errors;
+  a.device.destroy(); b.device.destroy();
   return out;
 }
 
