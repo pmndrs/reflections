@@ -26,9 +26,9 @@ Machine: Apple Silicon (M-series, `metal-3`), Chrome 157 headless, WebGPU throug
 | `octa` default | matches `cube2d-warp` error at ≤ memory | `octa@320` (1066 KiB, 1.04× the 128 cube's 1023 KiB) matches or beats warp at every r > 0 (p99 3.6/3.2/1.9/2.7 vs 4.0/3.0/1.6/2.4). It loses at the mirror mip: mean 0.73 vs 0.41, p99 19.9 vs 12.7. `octa@256` (0.67× memory) is worse at r = 0 (p99 24.2) and r = 1 (4.0 vs 2.4). | **fails** (the mirror mip) |
 | | costs no more per frame | 0.97–1.11× `cube-hw` and 0.75–0.85× `cube2d-warp` with 1 lookup/px; 0.84–0.88× `cube-hw` with 8/px; 1.2–1.36× `cube-hw` when scattered | passes (coherent) |
 | | **`octa` stays an option, not the default.** | | |
-| BC6H opt-in | p99 within 2× the layout's own, at ≥ 128 px | `cube-hw@128`, `fast`, p99 per mip r = 0/.13/.29/.5/1: 1.2/4.6/3.8/3.1/5.4 vs `rgba16float` 0.0/3.9/3.0/1.6/2.0. That is ≤ 1.3× at r ≤ 0.29, 1.94× at r = 0.5 and **2.7× at r = 1**. At 256 px: 2.07× at r = 0.55, **2.6× at r = 1**. | **fails** on the roughest mip(s) |
-| | sampling no slower | 0.93–1.07× coherent, 0.35–0.41× scattered | passes |
-| | **BC6H stays off. Revisit after the encoder fix** (see "BC6H" below). | | |
+| BC6H opt-in | p99 within 2× the layout's own, at ≥ 128 px | **Re-run 9 (G1, after F1's anchor fix D203), `normal`:** `cube-hw@128` p99 per mip r = 0/.13/.29/.5/1: 1.3/4.6/3.7/2.8/4.1 vs `rgba16float` 0.0/3.9/3.0/1.6/2.0, so 1.18× / 1.23× / 1.71× / **2.05×** (r = 0: 1.3 / 255 against an exact mirror mip). At 256 px: ≤ 1.21× to r = 0.37, 1.81× at r = 0.55, **2.20× at r = 1**. `fast` is worse at the rough end (2.72× / 2.57× at r = 1). | **fails**, by a hair at 128 px, on the roughest mip only |
+| | sampling no slower | 0.92–1.06× coherent, 0.35–0.38× scattered (run 9) | passes |
+| | **BC6H stays off as a whole-texture format.** The fix changed no error cell at the reported precision (the overflow was one texel per hit block, 128 of 7315 blocks). BC6H on the sharp mips with an uncompressed rough tail would pass (see "BC6H split" below), but needs a two-texture lookup. | | |
 
 The format default stays `rgba16float`. The cheapest lossless-looking option is **`rgb9e5ufloat`**: half the memory, at most +0.05 mean / 255 of extra error, and no slower to sample.
 
@@ -116,10 +116,25 @@ At 128 px, r = 0.05 maps to lod 0.39 under `lod = maxLod · r(2 − r)`. Triline
 | rgb9e5ufloat | 4 | 0.1 (0.05) | 3.9 (1.04) | 1.6 (0.50) | 2.0 (0.51) | 0.0 / 2.1 |
 | rg11b10ufloat | 4 | 0.4 (0.19) | 4.0 (1.08) | 1.7 (0.56) | 2.1 (0.58) | 0.2 / 2.1 |
 | bc6h `fast` | 1 | 1.2 (0.31) | 4.6 (1.28) | 3.1 (1.07) | 5.4 (1.52) | 1.5 / 2.7 |
-| bc6h `normal` (pre-fix, anchor overflow) | 1 | 1.3 (0.41) | 4.6 (1.29) | 2.8 (0.98) | 4.1 (1.22) | 1.4 / 2.7 |
+| bc6h `normal` (run 9, after the anchor fix) | 1 | 1.3 (0.41) | 4.6 (1.29) | 2.8 (0.98) | 4.1 (1.22) | 1.4 / 2.7 |
 
 - **rg11b10 (D61).** Under this tone map it shows no banding on bright sources: its bright p99 equals rgba16float's. What it does add is a uniform offset: +0.07 to +0.19 mean, which is its 5-bit blue mantissa (a slight colour shift). rgb9e5 costs the same 4 bytes and adds about a quarter of that. **Prefer rgb9e5 for baked probes.** rg11b10 is only worth it where a render pass must write the probe directly, which needs the `rg11b10ufloat-renderable` feature.
-- **BC6H.** Fine at the sharp mips (≤ 1.3× at r ≤ 0.29). It degrades on the roughest mips, which are 8 px faces of 2×2 blocks holding smooth gradients. In absolute terms that is p99 5.4 / 255 at r = 1. The `normal` numbers are pre-fix: a reviewer found that an anchor index can overflow into the next texel in modes 2/6 (F1 is fixing it in `encode/bc6h.ts`). The verdict above uses `fast` only.
+- **BC6H.** Fine at the sharp mips (≤ 1.3× at r ≤ 0.29). It degrades on the roughest mips, which are 8 px faces of 2×2 blocks holding smooth gradients. In absolute terms that is p99 4.1 (`normal`) / 5.4 (`fast`) / 255 at r = 1.
+  - **Run 9 (G1, 2026-11-10, main at `89ed133` with F1's anchor clamp `ea4bfcd`, D203):** the full bench re-run reproduced every `normal` error cell of run 8 to the shown precision, at 128 and 256 px and for every layout. F1 predicted this: the overflow corrupted one texel in 128 of 7315 two-subset blocks, too little to move a mean or a p99. So the pre-fix `normal` numbers were already right, and the verdict now uses `normal` (the better preset at the rough end): 2.05× at r = 1, 128 px; 2.20× at 256 px. Still a fail, but only on the last mip.
+
+#### BC6H split: sharp mips compressed, rough tail uncompressed (computed from run 9, nothing implemented)
+
+One texture has one format, so this is two textures per probe set (BC6H for lods 0..n−k, `rgba16float` for the last k) and a lookup that picks the texture by lod and blends the two across the boundary. Error per mip is then BC6H `normal`'s above the split and `rgba16float`'s below it; memory per probe, every mip and face:
+
+| capture | split | KiB / probe | vs all-BC6H / all-rgba16f | p99 per mip (r: BC6H `normal`, then rgba16f) | worst ratio to rgba16f |
+|---|---|---|---|---|---|
+| 128 (5 mips) | last mip (8 px, r = 1) rgba16f | 130.5 | 127.9 / 1023 | .13: 4.6 · .29: 3.7 · .5: 2.8 · 1: **2.0** | **1.71×** (r = 0.5): passes |
+| 128 | last 2 mips (16 + 8 px) rgba16f | 141.0 | | .13: 4.6 · .29: 3.7 · .5: **1.6** · 1: **2.0** | 1.23× |
+| 128 | last mip rgb9e5 | 129.0 | | as the rgba16f tail (rgb9e5 is within 1.01× of it) | 1.71× |
+| 256 (6 mips) | last mip (8 px, r = 1) rgba16f | 514.5 | 511.9 / 4095 | .11: 4.0 · .23: 4.7 · .37: 2.9 · .55: 2.6 · 1: **2.0** | **1.81×** (r = 0.55): passes |
+| 256 | last 2 mips rgba16f | 525.0 | | ... · .55: **1.4** · 1: **2.0** | 1.21× |
+
+The rough tail is tiny (the 8 px mip is 384 texels of 130,944 at 128 px), so leaving it uncompressed costs 2.6 KiB per probe (+2 %) and brings every mip inside the 2× gate. The price is in the lookup, not the memory: a second texture binding, and two samples where the lod falls between the last BC6H mip and the first uncompressed one. Whether that is worth it next to `rgb9e5ufloat` (4 B/texel everywhere, ≤ 1.02× error, one texture) is a phase-2 follow-up, not decided here.
 
 ### Bake (GPU ms per probe, prefilter → + rgba16f / + rgb9e5 / + bc6h fast)
 
@@ -130,7 +145,7 @@ At 128 px, r = 0.05 maps to lod 0.39 under `lod = maxLod · r(2 − r)`. Triline
 | octa@256 / @512 | 0.42 → 0.42 / 0.43 / 0.44 | 0.96 → 0.97 / 0.98 / 0.99 |
 | octa@320 / @640 | 0.46 → 0.46 / 0.47 / 0.48 | 1.11 → 1.14 / 1.16 / 1.20 |
 
-Format conversion is nearly free: the compute pack plus `copyBufferToTexture` adds about 0.01 ms. BC6H `fast` adds about 0.03 ms per probe. `normal` adds 0.24 ms at 128 px and 0.5 ms at 256 px, pre-fix. `octa` at equal memory bakes about 1.2× slower than the cube, because it has more texels at the sharp mips.
+Format conversion is nearly free: the compute pack plus `copyBufferToTexture` adds about 0.01 ms. BC6H `fast` adds about 0.03 ms per probe. `normal` adds 0.24 ms at 128 px and 0.5 ms at 256 px (run 9, after the anchor fix: 0.25 / 0.48 ms). `octa` at equal memory bakes about 1.2× slower than the cube, because it has more texels at the sharp mips.
 
 ### Lookup (1920×1080, ms; ratio to `cube-hw` `rgba16float`)
 
@@ -160,13 +175,13 @@ The probe count (1, 3 or 16) makes no difference in the coherent pattern. Each s
 
 - **A real capture** (bake in `examples/probes`, dump the faces). The procedural sky is harsher than most rooms at the folds and edges, and softer than a sunlit exterior.
 - **`octa-hemi`.**
-- **BC6H after F1's anchor fix.** Re-run `normal`. It already beats `fast` at r = 1 pre-fix (4.1 vs 5.4), so it might pass the 2× gate at 128 px. Also test a 16 px floor for BC6H (whole 4×4 blocks per face at the last mip).
+- ~~**BC6H after F1's anchor fix.**~~ Done (run 9, G1): `normal` unchanged, 2.05× at r = 1, still a fail; the split above passes. Still open: a 16 px floor for BC6H (whole 4×4 blocks per face at the last mip), and the split's two-texture lookup cost.
 - **The r < 0.2 mapping experiment (D101).**
 - **Phase 2.** Switch `ProbePrefilter` to wrap `LayoutPrefilter`. Parity is already proven bit for bit.
 
 ## Appendix: run 8, full tables
 
-Generated by `node examples/probe-bench/report.mjs` from `out/probe-bench.json`. In it, "bc6h" means the encoder's `normal` preset, **pre-fix (anchor overflow)**, and "bc6h fast" means mode 11.
+Generated by `node examples/probe-bench/report.mjs` from `out/probe-bench.json`. In it, "bc6h" means the encoder's `normal` preset, **pre-fix (anchor overflow)**, and "bc6h fast" means mode 11. Run 9 (after the fix, G1) reproduced every "bc6h" error cell below to the shown precision; its lookup and bake timings moved within run-to-run noise, so the tables are left as run 8.
 
 Device: {"vendor":"apple","architecture":"metal-3","description":"","features":["timestamp-query","texture-compression-bc"],"userAgent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36"}
 Directions: 65536. Run time 66 s.
