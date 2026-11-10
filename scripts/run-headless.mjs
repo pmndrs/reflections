@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | ssr-rt-bvh | probe-core | probe-bench | ssr-bench)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | ssr-rt-bvh | probe-core | probe-bench | ssr-bench | showcase)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
@@ -304,7 +304,49 @@ async function hybridChecks(pages) {
     const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
     check(`hybrid ${id}: denoised composite renders, no validation errors`, errs.length === 0, errs.slice(0, 2).join(' | '));
   }
+  // W12: mirrorWall 'low', where the floor reflects the wall behind the sphere and screen space
+  // can't see it. Those px fall back to the probe; they were dark (the floor sat in the probe box's
+  // blend fade at coverage 0.2, the rest a dim environment): hole/wall 0.55, now ~0.8.
+  await p.T("window.__p.load('mirrorWall')");
+  await p.T("window.__p.setPose('low')");
+  await p.T('window.__p.step(24)');
+  const shots = {};
+  for (const v of ['final', 'noSSR', 'source']) {
+    await p.T(`window.__p.setView('${v}')`);
+    shots[v] = await p.T('window.__p.shot()');
+  }
+  await p.T("window.__p.setView('final')");
+  savePng('hybrid-mirrorWall-low-final.png', shots.final);
+  const hole = await p.T(`(${HOLE_STATS})(${JSON.stringify(shots.final)}, ${JSON.stringify(shots.noSSR)}, ${JSON.stringify(shots.source)})`);
+  check('hybrid mirrorWall low: the probe fallback behind the sphere is not dark', hole.px > 500 && hole.final > 0.7 * hole.wall && hole.final > 0.8 * hole.noSSR,
+    `${hole.px} fallback px around the sphere's reflection: mean ${hole.final.toFixed(1)} / 255 (probes-only ${hole.noSSR.toFixed(1)}), wall ${hole.wall.toFixed(1)}`);
 }
+
+/**
+ * W12: mean sRGB (0-255) of `final` and `noSSR` over the probe / environment fallback px (source
+ * view orange or magenta) in the box around mirrorWall 'low''s sphere reflection, and of `final` on
+ * a patch of the wall above. Boxes in fractions of the frame.
+ */
+const HOLE_STATS = `async (fin, noSSR, src) => {
+  const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return { w: i.width, h: i.height, d: g.getImageData(0, 0, i.width, i.height).data }; };
+  const F = await px(fin), N = await px(noSSR), S = await px(src);
+  const { w, h } = F;
+  const box = (x0, x1, y0, y1) => [Math.floor(x0 * w), Math.floor(x1 * w), Math.floor(y0 * h), Math.floor(y1 * h)];
+  const lum = (d, k) => (d[k] + d[k + 1] + d[k + 2]) / 3;
+  let n = 0, f = 0, q = 0;
+  const [ax, bx, ay, by] = box(380 / 960, 580 / 960, 300 / 540, 420 / 540);
+  for (let y = ay; y < by; y++) for (let x = ax; x < bx; x++) {
+    const k = (y * w + x) * 4, r = S.d[k], g = S.d[k + 1], b = S.d[k + 2];
+    const fallback = (r > 230 && g > 115 && g < 165 && b < 60) || (r > 190 && r < 240 && g < 100 && b > 150);
+    if (!fallback) continue;
+    n++; f += lum(F.d, k); q += lum(N.d, k);
+  }
+  let wl = 0, wn = 0;
+  const [cx, dx, cy, dy] = box(600 / 960, 800 / 960, 150 / 540, 200 / 540);
+  for (let y = cy; y < dy; y++) for (let x = cx; x < dx; x++) { wl += lum(F.d, (y * w + x) * 4); wn++; }
+  return { px: n, final: n ? f / n : 0, noSSR: n ? q / n : 0, wall: wl / wn };
+}`;
 
 async function ssrChecks(pages) {
   console.log('examples/ssr:');
@@ -452,6 +494,14 @@ function f2Checks(r) {
       `coverage at the centre ${m.centre.toFixed(3)}, 1.5 along x ${m.inside.toFixed(3)}, 2.5 along x ${m.outside.toFixed(3)}`);
     check('probes: a zero-scale parent gives a zero (disabled) volume', z.centre < 1e-6 && z.near < 1e-6,
       `coverage at the centre ${z.centre.toFixed(3)}, 0.3 off ${z.near.toFixed(3)}`);
+  }
+  const hz = section('hiZLimits');
+  if (hz) {
+    const f = (x) => `${x.mips} mips: ${x.differ} texels differ between devices, copy ${x.copyDiffer}, vs CPU fold ${x.oracleDiffer}; odd footprints change ${x.oddWider} texels vs a plain 2x2`;
+    for (const k of ['forward', 'reverse']) {
+      check(`depth pyramid (${k} Z, 1917x1079): same on ${hz.storageTextures[0]} and ${hz.storageTextures[1]} storage textures per stage; mip 0 a copy; mips = CPU fold incl. odd rows/columns`,
+        hz[k].differ === 0 && hz[k].copyDiffer === 0 && hz[k].oracleDiffer === 0 && hz[k].oddWider > 0 && hz.errors.length === 0, `${f(hz[k])}${hz.errors.length ? `; ${hz.errors[0]}` : ''}`);
+    }
   }
   const pz = section('probeSourceSize');
   if (pz) {
@@ -763,6 +813,38 @@ async function ssrBench() {
   }
 }
 
+/**
+ * examples/showcase (smoke): every downloaded asset scene renders with reflections on and off, then
+ * with the ray-traced fallback on, with no GPU errors and a non-black image. Screenshots go to
+ * out/showcase-<scene>-{on,off,rt}.png. Skipped when `pnpm assets` hasn't been run. Not a pixel check.
+ */
+async function showcaseChecks(pages) {
+  console.log('examples/showcase:');
+  const p = await openPage(`http://127.0.0.1:${PORT}/showcase/?manual&w=1280&h=720`);
+  pages.push(p);
+  const ids = await p.T('window.__p.entries()');
+  if (!ids.length) { console.log('  (no assets downloaded: showcase skipped; `pnpm assets` fetches them)'); return; }
+  const tone = `(async (url) => { const img = new Image(); img.src = url; await img.decode(); const c = document.createElement('canvas'); c.width = 160; c.height = 90;
+    const g = c.getContext('2d'); g.drawImage(img, 0, 0, 160, 90); const d = g.getImageData(0, 0, 160, 90).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i] + d[i + 1] + d[i + 2]; return s / (d.length / 4) / 3; })`;
+  for (const id of ids) {
+    const before = results.logs.length;
+    const info = await p.T(`window.__p.load(${JSON.stringify(id)})`);
+    const shots = {};
+    for (const [name, setup] of [['on', "window.__p.setView('final')"], ['off', "window.__p.setView('off')"], ['rt', "(window.__p.setView('final'), window.__p.setSources({ rt: true }))"]]) {
+      await p.T(setup);
+      await p.T('window.__p.step(8)'); // a few frames of denoiser history
+      shots[name] = await p.T('window.__p.shot()');
+      savePng(`showcase-${id}-${name}.png`, shots[name]);
+    }
+    const s = await p.T('window.__p.info()');
+    await p.T('window.__p.setSources({ rt: false })');
+    const lum = await p.T(`(${tone})(${JSON.stringify(shots.on)})`);
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    check(`showcase ${id}: renders on / off / rt, no GPU errors`, s.gpuErrors === 0 && errs.length === 0 && lum > 8 && !!s.bvh,
+      `${info.probes} probes (${info.bakeMs.toFixed(0)} ms), denoiser ${s.denoiser ?? 'none'}, mean ${lum.toFixed(0)}/255, BVH ${s.bvh?.triangles} tris; reflections ${(s.timings.total ?? NaN).toFixed(2)} ms${errs.length ? '; ' + errs[0] : ''}`);
+  }
+}
+
 async function main() {
   setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull || ssrBenchFull ? 3_600_000 : 600_000).unref();
   let server = null;
@@ -929,6 +1011,7 @@ async function main() {
     if (runs('ssr-rt-bvh')) await ssrRtBvhChecks(pages);
     if (ssrBenchFull) await ssrBench();
     else if (runs('ssr-bench')) await ssrBenchSmoke(pages);
+    if (runs('showcase')) await showcaseChecks(pages);
 
     if (runs('probe-core')) {
       // examples/probe-core: the phase 2 probe core on a bare device (layouts x formats, CPU weights,

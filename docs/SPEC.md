@@ -103,7 +103,7 @@ Hit shading belongs to the resolve, not the provider. It looks up the probes at 
   - The GPU builders need the `subgroups` feature. Without it, `createMeshLayoutBuilder` falls back to tinybvh on its own.
   - Because it lives in core, babylon, pixi and raw WebGPU all get rays, not only three.
   - It is an optional peer: the pixel paths that don't trace never load it.
-  - As built (W14): `createPmndrsBvhTraceProvider` in `packages/core/src/trace/pmndrsBvh.ts`, linked as `link:../bvh` (a sibling checkout on bvh's `reflections-integration` branch, which adds `GiHit.normal` and a per-instance `GiHit.material`); three builds it with `createPmndrsBvhTraceProviderFromObjects`. Opt-in in `examples/ssr` (`&bvh=pmndrs`); the gate numbers are in `docs/HANDOFF.md`, W14.
+  - As built (W14): `createPmndrsBvhTraceProvider` in `packages/core/src/trace/pmndrsBvh.ts`, linked as `link:` to `../bvh-worktrees/reflections-integration` (bvh's `reflections-integration` branch in a worktree next to this repo, which adds `GiHit.normal` and a per-instance `GiHit.material`); three builds it with `createPmndrsBvhTraceProviderFromObjects`. Opt-in in `examples/ssr` (`&bvh=pmndrs`); the gate numbers are in `docs/HANDOFF.md`, W14.
 - **three stopgap:** wraps `three-mesh-bvh/webgpu` (`BVHComputeData`, `raycastFirstHit`), which the explainer pages already use. It stays until `@pmndrs/bvh` passes its own oracle on our scenes. After that, it remains only for apps that already have a three-mesh-bvh tree.
 
 ## Sources
@@ -219,7 +219,7 @@ Three's `SSRNode` is tightly bound to three. Its stochastic march was also the r
 
 The port follows FidelityFX SSSR (SSSR 1.5 in the current GPUOpen manual). It keeps the host order of the SDK v1.1.4 sources that our denoiser port already follows:
 
-1. **Hierarchical depth:** an SPD-style single-pass downsample of depth to a 7-level pyramid (r32f; mip 0 a copy, 6 SPD levels): min for forward Z, max for reverse Z.
+1. **Hierarchical depth:** an SPD-style downsample of depth to a 7-level pyramid (r32f; mip 0 a copy, 6 reduced levels): min for forward Z, max for reverse Z. Built by the maintainer's `downsampler` since W13 (odd footprints include the extra row/column, D1600; up to six levels per dispatch, D1601).
 2. **Tile classification.** This pass *reads* roughness; it doesn't compute it. Roughness is the frame contract's input: a G-buffer channel in a deferred engine, or an MRT output in three (`materialRoughness`, as our three-temporal pages already do). The pass exists for the GPU budget. It turns per-pixel decisions into compact work lists, so later passes launch threads only for pixels that trace.
    - Pixels rougher than `roughnessThreshold` trace no ray and take the probe term. FFX compares in alpha (perceptual²): its default 0.2 is about 0.447 perceptual. We take thresholds in perceptual units and square them at the pass boundary (DIVERGES D43). The mirror test (always trace, start at mip 0, ignore the occupancy exit) is alpha < 0.0001.
    - `samplesPerQuad` sets the minimum rays per 2×2 quad (1, 2 or 4).

@@ -22,7 +22,7 @@ import * as THREE from 'three/webgpu';
 import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes, reflectionsRequiredLimits,
   createPmndrsBvhTraceProviderFromObjects, type ThreePmndrsBvhTraceProvider,
 } from '@pmndrs/reflections/three';
 import { HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
@@ -51,7 +51,7 @@ const bvhKind: BvhKind = q.get('bvh') === 'pmndrs' ? 'pmndrs' : 'three-mesh-bvh'
 const bvhBuilder = (q.get('bvhBuilder') ?? 'auto') as BvhBuilderPreference;
 const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
 
-const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'source', 'rtSource', 'grid'] as const;
+const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'coverage', 'source', 'rtSource', 'grid'] as const;
 type View = (typeof VIEWS)[number];
 const GRID: View[] = ['final', 'raw', 'noSSR', 'confidence', 'hitDistance', 'misses', 'specular', 'signal', useRT ? 'rtSource' : 'source'];
 
@@ -140,7 +140,7 @@ async function main() {
   const adapter = await navigator.gpu.requestAdapter();
   // the composite needs the G-buffer's `lit` target: 36 bytes/sample
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { maxColorAttachmentBytesPerSample: maxBytes } } as N);
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { ...(adapter ? reflectionsRequiredLimits(adapter) : {}), maxColorAttachmentBytesPerSample: maxBytes } } as N);
   renderer.setPixelRatio(1);
   renderer.setSize(W, H, false);
   renderer.shadowMap.enabled = true;
@@ -250,6 +250,8 @@ async function main() {
         case 'ssr': return tone(c.ssr);
         case 'specular': return tone(c.specular);
         case 'probeSpecular': return tone(c.probeSpecular);
+        // local probe coverage (0 = environment only), on geometry
+        case 'coverage': return c.geometry.select(vec3(c.coverage), vec3(0.02, 0.03, 0.08));
         case 'confidence': return c.geometry.select(vec3(c.confidence), vec3(0.02, 0.03, 0.08));
         case 'hitDistance': { const d = c.hitDistance; return d.greaterThan(0).select((vec3(1, 0.8, 0.5) as N).mul(d.div(d.add(2))), vec3(0)); }
         // traced = green, quad copy = yellow-green, neither = dimmed lit image
@@ -327,6 +329,7 @@ async function main() {
         p.position.set(...v.position);
         if (v.projectionSize) p.projectionSize = new THREE.Vector3(...v.projectionSize);
         if (v.originOffset) p.originOffset.set(...v.originOffset);
+        if (v.projectionOffset) p.projectionOffset.set(...v.projectionOffset);
         if (v.blendDistance !== undefined) p.blendDistance = v.blendDistance;
         probes.add(p);
       }

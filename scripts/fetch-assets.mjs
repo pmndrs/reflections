@@ -27,6 +27,9 @@ export const ASSETS = [
   { dir: 'EnvironmentTest',   khronos: 'EnvironmentTest',   variant: 'glTF',        file: 'EnvironmentTest.gltf',   license: 'Adobe Stock (see its LICENSE.md)', devOnly: true },
   { dir: 'ToyCar',            khronos: 'ToyCar',            variant: 'glTF-Binary', file: 'ToyCar.glb',             license: 'CC0' },
   { dir: 'CarConcept',        khronos: 'CarConcept',        variant: 'glTF-Binary', file: 'CarConcept.glb',         license: 'CC-BY 4.0' },
+  // HDR environments for examples/showcase (Poly Haven, CC0): a plain file at `url`
+  { dir: 'hdri', url: 'https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_09_1k.hdr', file: 'studio_small_09_1k.hdr', license: 'CC0 (Poly Haven)' },
+  { dir: 'hdri', url: 'https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloofendal_48d_partly_cloudy_puresky_1k.hdr', file: 'kloofendal_48d_partly_cloudy_puresky_1k.hdr', license: 'CC0 (Poly Haven)' },
   // TODO Bistro (Amazon Lumberyard, CC-BY 4.0): ships as FBX; needs an FBX -> glTF conversion step before it can be a row.
 ];
 
@@ -79,13 +82,14 @@ async function fetchKhronos(asset, dest) {
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
   const rows = only.length ? ASSETS.filter((a) => only.includes(a.dir)) : ASSETS;
-  if (only.length && rows.length !== only.length) console.warn('unknown:', only.filter((o) => !ASSETS.some((a) => a.dir === o)).join(', '));
+  if (only.some((o) => !ASSETS.some((a) => a.dir === o))) console.warn('unknown:', only.filter((o) => !ASSETS.some((a) => a.dir === o)).join(', '));
   let failed = 0;
   for (const a of rows) {
     const dest = path.join(OUT, a.dir);
-    if (!force && fs.existsSync(path.join(dest, a.file))) { console.log(`  have ${a.dir}`); continue; }
+    if (!force && fs.existsSync(path.join(dest, a.file))) { console.log(`  have ${a.dir}/${a.file}`); continue; }
     try {
       if (a.local && fs.existsSync(a.local) && copyLocal(a, dest)) { console.log(`  copied ${a.dir} from ${a.local}`); continue; }
+      if (a.url) { await download(a.url, path.join(dest, a.file)); console.log(`  fetched ${a.dir}/${a.file} (${a.license})`); continue; }
       const n = await fetchKhronos(a, dest);
       console.log(`  fetched ${a.dir} (${n} file${n > 1 ? 's' : ''}, ${a.license}${a.devOnly ? ', dev only' : ''})`);
     } catch (e) {

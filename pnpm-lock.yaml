@@ -9,8 +9,8 @@ importers:
   .:
     devDependencies:
       '@pmndrs/bvh':
-        specifier: link:../bvh
-        version: link:../bvh
+        specifier: link:../bvh-worktrees/reflections-integration
+        version: link:../bvh-worktrees/reflections-integration
       '@pmndrs/reflections-core':
         specifier: workspace:*
         version: link:packages/core
@@ -46,10 +46,14 @@ importers:
         version: 3.2.7
 
   packages/core:
+    dependencies:
+      downsampler:
+        specifier: link:../../../downsampler-reflections
+        version: link:../../../downsampler-reflections
     devDependencies:
       '@pmndrs/bvh':
-        specifier: link:../../../bvh
-        version: link:../../../bvh
+        specifier: link:../../../bvh-worktrees/reflections-integration
+        version: link:../../../bvh-worktrees/reflections-integration
 
   packages/three:
     dependencies:

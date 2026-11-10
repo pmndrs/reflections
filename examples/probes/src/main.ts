@@ -1,4 +1,5 @@
-// examples/probes: Ben Houston's reflection probes (three.js PR #35046) on three r187.
+// examples/probes: @pmndrs/reflections' reflection probes on three r187 (API-compatible with three.js #35046,
+// built alongside Ben Houston's PR; the scene is the PR example's two rooms).
 //
 // A port of three's webgpu_reflection_probes.html from that PR (same two rooms, lights, probes,
 // test grid and camera), running @pmndrs/reflections/three instead of the PR's
@@ -16,7 +17,7 @@ import { LightProbeGrid } from 'three/addons/lighting/LightProbeGrid.js';
 import { lightProbeGridIrradiance } from 'three/addons/tsl/lighting/LightProbeGridNode.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, reflectionProbes, type SeamFix,
+  ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, reflectionProbes, reflectionsRequiredLimits, type SeamFix,
 } from '@pmndrs/reflections/three';
 import { makeChecks, type Page } from './checks';
 import { LegacyProbesNode } from './legacy';
@@ -32,7 +33,7 @@ type Lookup = SeamFix | 'hw' | 'legacy-warp' | 'legacy-none';
 const params = {
   lookup: (q.get('lookup') ?? 'warp') as Lookup, resolution: Number(q.get('res') ?? 128),
   showProbes: false, showGrid: q.has('grid'), gridResolution: 6, gridSize: 0.12,
-  boxProjection: true, refit: q.has('refit'), dynamicObject: (q.get('obj') ?? 'Sphere') as 'None' | 'Sphere', pause: q.has('pause'), liveCapture: false,
+  boxProjection: true, refit: q.has('refit'), dynamicObject: (q.get('obj') ?? 'Sphere') as 'None' | 'Sphere', pause: q.has('pause'), liveCapture: !q.has('static'), animateScene: !q.has('static'),
 };
 
 /**
@@ -93,12 +94,15 @@ async function main() {
 
   // right room: pedestal with a torus knot, tall cone
   add(new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.2, 0.8), whiteMat)).position.set(4, 0.6, 0);
-  add(new THREE.Mesh(new THREE.TorusKnotGeometry(0.3, 0.1, 64, 16), new THREE.MeshStandardMaterial({ color: 0xff44aa, metalness: 0.2, roughness: 0.5 }))).position.set(4, 1.65, 0);
+  const knot = add(new THREE.Mesh(new THREE.TorusKnotGeometry(0.3, 0.1, 64, 16), new THREE.MeshStandardMaterial({ color: 0xff44aa, metalness: 0.2, roughness: 0.5 })));
+  knot.position.set(4, 1.65, 0);
   add(new THREE.Mesh(new THREE.ConeGeometry(0.4, 2.5, 5), whiteMat)).position.set(6.5, 1.25, -1.5);
 
   // warm point light in the left room, cool in the right
+  const roomLights: THREE.PointLight[] = [];
   for (const [color, x] of [[0xffaa44, -4], [0x88bbff, 4]]) {
     const light = new THREE.PointLight(color, 30);
+    roomLights.push(light);
     light.position.set(x, 4.5, 0);
     light.castShadow = true;
     light.shadow.mapSize.setScalar(256);
@@ -107,7 +111,8 @@ async function main() {
     scene.add(light);
   }
 
-  const renderer = new THREE.WebGPURenderer({ canvas, trackTimestamp: q.has('ts') });
+  const adapter = await navigator.gpu?.requestAdapter();
+  const renderer = new THREE.WebGPURenderer({ canvas, trackTimestamp: q.has('ts'), requiredLimits: adapter ? reflectionsRequiredLimits(adapter) : {} } as ConstructorParameters<typeof THREE.WebGPURenderer>[0]);
   renderer.setPixelRatio(1);
   renderer.setSize(W, H, false);
   renderer.shadowMap.enabled = true;
@@ -207,14 +212,11 @@ async function main() {
     device.queue.submit([encoder.finish()]);
   }
 
-  function capture(live = false) {
-    // keep helpers and test objects out of the reflections; a live capture keeps the moving object
-    probesHelper.visible = grid.visible = false;
-    dynamicObject.visible = live && params.dynamicObject !== 'None';
-    probes.bake(renderer, scene, { resolution: params.resolution, near: 0.05, far: 30 });
-    probesHelper.visible = params.showProbes;
-    grid.visible = params.showGrid;
-    dynamicObject.visible = params.dynamicObject !== 'None';
+  function capture() {
+    // keep helpers, the test grid and the moving mirror sphere out of the probes: a mirror captured
+    // into the probes reflects them back, and in a live capture that loop makes the room flicker.
+    // The spinning torus stays in (it is rough, so it can't feed back).
+    probes.bake(renderer, scene, { resolution: params.resolution, near: 0.05, far: 30, exclude: [probesHelper, grid, dynamicObject] });
     if (params.lookup === 'hw') copyToCubes();
   }
 
@@ -264,7 +266,8 @@ async function main() {
   };
   select('Lookup', ['warp', 'none', 'hw', 'legacy-warp', 'legacy-none'], params.lookup, (v) => { params.lookup = v as Lookup; install(); });
   select('Capture resolution', ['64', '128', '256', '512'], String(params.resolution), (v) => { params.resolution = Number(v); install(); });
-  check('Live capture', params.liveCapture, (v) => { params.liveCapture = v; });
+  check('Animate scene (torus, light colour)', params.animateScene, (v) => { params.animateScene = v; if (!v) { resetScene(); if (!params.liveCapture) capture(); } });
+  check('Live capture (re-bake every frame)', params.liveCapture, (v) => { params.liveCapture = v; if (!v) capture(); });
   check('Box projection', params.boxProjection, (v) => { probes.boxProjection = v; });
   check('Re-fit (LightProbeGrid)', params.refit, (v) => { params.refit = v; install(); });
   select('Object', ['None', 'Sphere'], params.dynamicObject, (v) => { params.dynamicObject = v as 'None' | 'Sphere'; dynamicObject.visible = v !== 'None'; });
@@ -274,13 +277,27 @@ async function main() {
   slider('Grid roughness', gridMaterial.roughness, (v) => { gridMaterial.roughness = v; });
   check('Probes', params.showProbes, (v) => { params.showProbes = probesHelper.visible = v; });
 
+  // Scene animation, so the live probes visibly change: the torus knot spins (its reflection moves in
+  // the right room's floor and walls) and the left room's light cycles through hues (its walls, and
+  // so every reflection of them, change colour). Off with ?static or the checkbox.
+  const warm = roomLights[0], warmColor = warm.color.clone();
+  let sceneTime = 0;
+  function animateScene(dt: number) {
+    sceneTime += dt;
+    knot.rotation.set(sceneTime * 0.6, sceneTime * 0.9, 0);
+    warm.color.setHSL((sceneTime * 0.08) % 1, 0.85, 0.6);
+  }
+  function resetScene() { sceneTime = 0; knot.rotation.set(0, 0, 0); warm.color.copy(warmColor); }
+
   // ---- loop --------------------------------------------------------------------------------
   const timer = new THREE.Timer();
   let animationTime = 0;
   function animate() {
     timer.update();
-    if (!params.pause && params.dynamicObject !== 'None') { animationTime += timer.getDelta(); updateDynamicObject(animationTime); }
-    if (params.liveCapture) capture(true);
+    const dt = timer.getDelta();
+    if (!params.pause && params.dynamicObject !== 'None') { animationTime += dt; updateDynamicObject(animationTime); }
+    if (!params.pause && params.animateScene) animateScene(dt);
+    if (params.liveCapture) capture();
     renderer.render(scene, camera);
   }
   renderer.setAnimationLoop(animate);
@@ -295,7 +312,7 @@ async function main() {
       // setAnimationLoop(null) leaves three's internal rAF running, which keeps advancing the node
       // frame at times that depend on load; stop it too, so a stopped page only advances when told
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      stop() { renderer.setAnimationLoop(null); (renderer as any)._animation.stop(); },
+      stop() { renderer.setAnimationLoop(null); (renderer as any)._animation.stop(); params.animateScene = params.liveCapture = false; resetScene(); capture(); },
       start() { renderer.setAnimationLoop(animate); },
       setLookup(v: Lookup) { params.lookup = v; install(); },
       setRefit(on: boolean, clamp?: number) { params.refit = on; if (clamp !== undefined) probes.refitClamp = clamp; install(); },

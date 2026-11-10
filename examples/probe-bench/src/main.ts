@@ -17,7 +17,7 @@
 
 import {
   GGXReference, LayoutPrefilter, ProbeFormatWriter, ProbePrefilter, createBC6HEncoder, createProbeLayout, lodToRoughness,
-  maxLodFor, octaGutter, probeBytes, referenceModeFor, type ProbeFormat, type ProbeLayout, type ProbeLayoutId,
+  maxLodFor, octaGutter, probeBytes, referenceModeFor, reflectionsRequiredLimits, type ProbeFormat, type ProbeLayout, type ProbeLayoutId,
 } from '@pmndrs/reflections/core';
 import { ENV_CUBE_WGSL, ENV_WGSL } from './env';
 import { cubeEdgeTexels, errorStats, fibonacciDirs, median, octaFoldTexels } from './stats';
@@ -67,7 +67,7 @@ async function init() {
   if (!adapter) throw new Error('WebGPU unavailable');
   const want: GPUFeatureName[] = ['timestamp-query', 'texture-compression-bc'];
   const requiredFeatures = want.filter((f) => adapter.features.has(f));
-  device = await adapter.requestDevice({ requiredFeatures });
+  device = await adapter.requestDevice({ requiredFeatures, requiredLimits: reflectionsRequiredLimits(adapter) });
   device.addEventListener('uncapturederror', (e) => console.error('uncaptured WebGPU error:', (e as GPUUncapturedErrorEvent).error.message));
   device.lost.then((i) => console.error('device lost:', i.message));
   hasTimestamps = device.features.has('timestamp-query') && !q.has('nots');

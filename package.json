@@ -63,7 +63,7 @@
     }
   },
   "devDependencies": {
-    "@pmndrs/bvh": "link:../bvh",
+    "@pmndrs/bvh": "link:../bvh-worktrees/reflections-integration",
     "@pmndrs/reflections-core": "workspace:*",
     "@pmndrs/reflections-three": "workspace:*",
     "@types/three": "^0.187.0",

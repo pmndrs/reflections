@@ -10,6 +10,9 @@
     ".": "./src/index.ts",
     "./*": "./src/*.ts"
   },
+  "dependencies": {
+    "downsampler": "link:../../../downsampler-reflections"
+  },
   "peerDependencies": {
     "@pmndrs/bvh": "*"
   },
@@ -19,6 +22,6 @@
     }
   },
   "devDependencies": {
-    "@pmndrs/bvh": "link:../../../bvh"
+    "@pmndrs/bvh": "link:../../../bvh-worktrees/reflections-integration"
   }
 }
