@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | probe-bench)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | probe-core | probe-bench)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
 //
@@ -482,6 +482,28 @@ async function main() {
     if (runs('scenes')) pages.push(...(await checkScenes()));
     if (runs('sssr-core')) await sssrCoreChecks(pages);
     if (runs('ssr')) await ssrChecks(pages);
+
+    if (runs('probe-core')) {
+      // examples/probe-core: the phase 2 probe core on a bare device (layouts x formats, CPU weights,
+      // re-fit, specular occlusion, the SSSR radiance-fallback seam)
+      console.log('examples/probe-core:');
+      const pc = await openPage(`http://127.0.0.1:${PORT}/probe-core/`);
+      pages.push(pc);
+      const r = await pc.T('window.__p.run()');
+      const L = r.layouts;
+      check('probe core: coverage matches the CPU volume weights', L.coverageErr < 1e-5 && L.inside > 0 && L.outside > 0 && L.fade > 0 && L.composeErr === 0,
+        `max err ${L.coverageErr.toExponential(2)}; ${L.inside} inside, ${L.fade} in a fade, ${L.outside} outside`);
+      for (const l of L.layouts) {
+        const name = `${l.layout}${l.size ? '@' + l.size : ''} ${l.format}`;
+        // same captures, same plan: only layout / format error (phase 1: mean <= 1, octa's mirror mip p99 ~20)
+        check(`probe core: ${name} agrees with cube-hw rgba16float`, l.full.mean < 2 && Number.isFinite(l.full.max), `mean ${l.full.mean.toFixed(3)}, p99 ${l.full.p99.toFixed(2)}, max ${l.full.max.toFixed(1)} / 255`);
+      }
+      check('probe core: a constant capture looks up as that constant', r.refit.constErr < 2e-3, `max rel err ${r.refit.constErr.toExponential(2)}`);
+      check('probe core: re-fit by 2x the probe L1 irradiance doubles the lookup', r.refit.refitErr < 2e-2, `max rel err ${r.refit.refitErr.toExponential(2)}`);
+      check("probe core: Lagarde's specular occlusion", r.refit.soErr < 1e-4, `max err ${r.refit.soErr.toExponential(2)}`);
+      check('sssr probe fallback: constant probes = constant fallback (to one f16 step)', r.sssr.constantVsProbes === 0, `${r.sssr.constantVsProbes} px differ`);
+      check('sssr probe fallback: structured probes reach the fallback pixels', r.sssr.structuredVsConstant > r.sssr.pixels * 0.05, `${r.sssr.structuredVsConstant} of ${r.sssr.pixels} px`);
+    }
 
     if (runs('probe-bench')) {
       // examples/probe-bench: smoke run (or the full bench with --probe-bench). Not a numbers gate:
