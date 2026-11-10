@@ -1,6 +1,6 @@
 # @pmndrs/reflections — spec
 
-Status: draft 2, 2026-11-10. Phase 0 (this repo's first commit) is done. Everything after it is a plan.
+Status: draft 3, 2026-11-10. Phase 0 (this repo's first commit) is done. Everything after it is a plan.
 
 ## What this is
 
@@ -217,17 +217,66 @@ Three's `SSRNode` is tightly bound to three. Its stochastic march was also the r
 The port follows FidelityFX SSSR (SSSR 1.5 in the current GPUOpen manual). It keeps the host order of the SDK v1.1.4 sources that our denoiser port already follows:
 
 1. **Hierarchical depth:** an SPD-style single-pass downsample of depth to a 7-level min-depth pyramid (r32f).
-2. **Tile classification:**
+2. **Tile classification.** This pass *reads* roughness; it doesn't compute it. Roughness is the frame contract's input: a G-buffer channel in a deferred engine, or an MRT output in three (`materialRoughness`, as our three-temporal pages already do). The pass exists for the GPU budget. It turns per-pixel decisions into compact work lists, so later passes launch threads only for pixels that trace.
    - Pixels rougher than `roughnessThreshold` trace no ray and take the probe term.
    - `samplesPerQuad` sets the minimum rays per 2×2 quad (1, 2 or 4).
    - With variance-guided tracing, a quad gets more rays when last frame's variance is high.
-   - The pass writes the ray list, the denoiser tile list and the ray counter.
+   - The pass writes the ray list (one entry per tracing pixel, appended with an atomic counter), the denoiser tile list (8×8 tiles with at least one reflective pixel) and the ray counter.
+   - Mirror-smooth pixels are flagged so the denoiser skips them.
 3. **Blue noise:** a 128×128 texture per frame from the frame index (Sobol + scrambling tables, or our own).
 4. **Indirect arguments** from the ray counter.
 5. **Intersection:**
    - Hi-Z traversal, which uses coarser mips when that is safe and goes full-rate for mirrors and quarter-rate for glossy.
-   - A miss, or a hit outside the screen, goes to the trace seam (if present) and then to the probe lookup at the pixel.
+   - A hit writes radiance and hit distance.
+   - A miss is any of: the ray leaves the screen, it passes behind the depth buffer (fails the thickness test), or it runs out of steps.
+     - With a trace provider, a miss is appended to the **miss list** (see "Work lists and indirect dispatch").
+     - Without one, it takes the probe lookup inline, at the pixel's position and the ray's direction.
 6. **Denoise** through the seam (`FfxReflectionDenoiser`).
+
+#### Work lists and indirect dispatch
+
+Every pass after classification runs over a list, not over the screen. Each list is a storage buffer plus an atomic counter. A one-workgroup pass turns each counter into `dispatchWorkgroupsIndirect` arguments.
+
+| List | Written by | Entry | Read by |
+|---|---|---|---|
+| ray list | classify | packed pixel coordinate (u32: 16 + 16 bits) | intersect |
+| denoiser tile list | classify | packed 8×8 tile coordinate | denoiser passes |
+| **miss list** (ours; FFX has none) | intersect | pixel coordinate + ray direction, octahedral-packed as 2 × 16-bit snorm (8 bytes) | ray-traced pass |
+
+**The miss list is the second compaction.** FFX only needs the first, because its miss goes straight to the environment map. In the hybrid, whether screen space failed is only known after the intersect pass, so intersect appends its misses. The ray-traced pass then dispatches indirectly over exactly those pixels.
+
+- **Same sample, same direction.** The traced ray reuses the direction the intersect pass marched, stored in the entry. Regenerating it from the blue-noise index would also work, but storing it keeps one source of truth.
+- **The traced ray starts at the surface**, offset along the normal. It does not start where the march left the screen: the march's free-space assumption is only valid where it found a hit.
+- **A traced miss**, where the ray leaves the scene, takes the probe or environment lookup inline in the ray-traced pass. There is no third list.
+- **Output.** Traced hits write the same radiance and hit-distance targets as screen-space hits, so the denoiser sees one signal whichever source filled each pixel.
+- **Ray cap.** `maxTracedRaysPerFrame` caps the miss list's length.
+  - Entries past the cap take the probe lookup inline.
+  - Atomic append order isn't spatially fair, so a capped frame could starve the same region every frame. To avoid that, the cap is applied per 8×8 tile (an atomic counter per tile in a storage buffer, since intersect runs over the ray list and its workgroups don't line up with tiles), not globally.
+  - Overflow counts go to a debug readback.
+
+#### Subgroups and the fallback
+
+FFX leans on wave intrinsics in three places:
+
+| Place | What FFX does |
+|---|---|
+| classify | a wave-wide ballot and prefix count, so each wave does one atomic add instead of one per pixel |
+| quad ray sharing | quad reads, so a pixel that shoots no ray copies a neighbour's |
+| Hi-Z downsample (SPD) | wave reductions |
+
+WGSL's `subgroups` feature covers all three: `subgroupBallot`, `subgroupExclusiveAdd`, `subgroupBroadcast`, and the quad operations (`quadBroadcast`, `quadSwapX` / `Y` / `Diagonal`).
+
+- **With `subgroups`:** the subgroup variant of each pass.
+- **Without it:** the same passes with workgroup memory.
+  - Compaction does a workgroup prefix sum, then one `atomicAdd` per workgroup.
+  - Quad sharing maps each 2×2 quad into an 8×8 workgroup tile and exchanges through workgroup memory.
+  - The Hi-Z downsample reduces in workgroup memory, as SPD's non-wave path does.
+
+**Rules:**
+
+- Never assume a subgroup size. It is 32 on Apple and NVIDIA, 32 or 64 on AMD, and 8 to 32 on Intel. Read it from the device or the builtin.
+- The variant is picked once, at init, from `device.features.has('subgroups')`. The `@pmndrs/bvh` GPU builders need the same feature, so the adapter requests it once for both.
+- **Parity.** Both variants must produce the same lists, compared after sorting, since append order differs. A test page runs both on one frame and diffs them. The images must match bit for bit.
 
 **Inputs:** the frame contract. SSSR wants scene colour without specular, so the adapter renders specular off, or composites probe specular after.
 
@@ -239,7 +288,7 @@ The port follows FidelityFX SSSR (SSSR 1.5 in the current GPUOpen manual). It ke
 
 ### 4. Ray-traced fallback (phase 4)
 
-- Rays go only to pixels that screen space failed: off-screen, behind an occluder, or past the thickness test. The budget is set per tile.
+- Rays go only to pixels that screen space failed: off-screen, behind an occluder, or past the thickness test. They are dispatched indirectly from the miss list, capped per tile (see "Work lists and indirect dispatch").
 - The ray origin and direction reuse the SSSR sample, so the denoiser sees one lobe sample per pixel whichever source produced it. `ggxLobeSample` (moved in phase 0) already keeps SSR hits, traced hits and probe lookups on the same weights.
 - **Hit shading:** probes at the hit point (`sampleReflectionProbes(probes, hitP, dir, 1)`) plus the engine's cheap direct-light term. A radiance cache is out of scope until the hybrid is measured.
 
@@ -291,8 +340,8 @@ Debug views:
 | 0 ✅ | Repo, monorepo layout, probes + prefilter + sampling moved, probes example, headless check, this spec | Typecheck, tests, build; example pixel-identical to the source |
 | 1 | Layout bench: `octa` / `cube2d-warp` / `cube2d-none` / `cube-hw`, brute-force reference | The decision above, written up in `docs/research/probe-layouts.md` |
 | 2 | Probe core: layout-generic prefilter, atlas, WGSL lookup in core, three node on top, re-fit with an irradiance input | Rooms example on the core path, identical or better; lookup ms not worse |
-| 3 | SSSR port in core + three adapter node | No boiling on the rooms and G1; flicker and GPU ms at or below three `SSRNode` + its denoise |
-| 4 | Trace seam; `@pmndrs/bvh` provider in core (three-mesh-bvh as the three stopgap); hit shading through probes | Off-screen scenario matches the reference; rays only where SSR failed; the `@pmndrs/bvh` walk agrees with three-mesh-bvh on the same rays |
+| 3 | SSSR port in core (subgroup and workgroup-memory variants) + three adapter node | Subgroup and fallback variants produce identical lists and images; no boiling on the rooms and G1; flicker and GPU ms at or below three `SSRNode` + its denoise |
+| 4 | Trace seam; `@pmndrs/bvh` provider in core (three-mesh-bvh as the three stopgap); hit shading through probes | Off-screen scenario matches the reference; rays dispatched from the miss list only, with the GPU ms scaling with the miss count; the `@pmndrs/bvh` walk agrees with three-mesh-bvh on the same rays |
 | 5 | Hybrid resolve + denoise seam; the denoiser repo's reflection pages switch to the package | Explainer and rooms pages run on `@pmndrs/reflections` with no local copies |
 | 6 | babylon / pixi adapters; publish 0.1 | Packed-subpath checks like the upscaler's `verify:packed-subpaths` |
 
