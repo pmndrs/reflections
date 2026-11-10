@@ -37,6 +37,34 @@ The working state of the project: who is on what, which interfaces the workstrea
 
 - **three floor: r187** (raised from r186 on 2026-11-10; `three@^0.187.0`, peer `>=0.187.0`). r187 still can't bind `texture_cube_array` in TSL. Its PMREMGenerator writes cube mips (#34585). In r187 a render target's cube texture lists every level in `mipmaps`, base included; r186 listed only the levels past 0.
 
+## Fine-tune backlog
+
+For the fine-tune pass once the phases are built and running. Nothing here blocks a phase or a decision; if one starts to, promote it. One line each, with a pointer.
+
+**Correctness polish (not visible yet)**
+- The 75/255 point-light highlight flake on instanced lit spheres (about 430 px, below our code, likely Dawn/Metal). D1 row; repro in `docs/research/d1/`. Clue: only the warm light's highlights change. Draft upstream report in the D1 row.
+- About 1,800 extra forward-Z misses on the sssr-core glossy floor (W9 row).
+- Reflected sphere stripe ratio still 8.0 (cube 1.7) after D1000; streaks behind objects 4.6% with the hybrid thickness (D1001).
+- RT hit shading about 15% bright (no shadows at hit points, one colour per mesh; D902/D903).
+- Skinned meshes repeat motion on a second `render()` in one frame (D700).
+- One shader can't mix `warp` and `none` probe sets (D805).
+- Probe captures after a layout and environment change: fixed by a second capture pass; revisit the cost.
+
+**Quality experiments**
+- Lookups below r = 0.2: the opt-in `'alpha'` lod mapping cuts p99 from 44.5 to 19.7/255; try an extra mip (D101, D806).
+- BC6H split: compress the sharp mips, keep the rough tail uncompressed. Passes the gate on paper (1.71×, 130.5 KiB/probe); needs a two-texture lookup (ssr-gate.md / probe-layouts.md).
+- Re-fit basis SH9 vs L1 (D60). `octa-hemi` layout. A real capture in the probe bench (W1).
+- Probe resolution default 128 vs Lagarde's 256 (D23, D62). Unreal's roughness-to-mip mapping unverified (D3).
+
+**Performance**
+- Probe lookup 0.117 → 0.127 ms after the core move (noise level). Bake is CPU-encode bound at 128–256 px.
+- Time the G-buffer, copies and composite in the three SSR adapter (W6).
+- The RT pass sits at 8 storage buffers per stage (the default limit); pack buffers or request the limit before adding one (the guard throws clearly).
+
+**Test robustness**
+- Probe parity checks compare full lit images, so the flake above can fail them under load; compare atlas texels and the probe term alone (F3's plan, stopped).
+- W7's scatter tolerance in the time-slice checks.
+
 ## Agreed interfaces between streams
 
 These are the seams the streams code against before the others land. Change one only by updating it here in the same commit.
