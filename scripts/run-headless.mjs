@@ -943,6 +943,9 @@ async function pixi3dChecks(pages) {
       const cc = await p.T('window.__p.cameraCheck()');
       check("pixi3d: the contract's camera lands on pixi-3d's pixels; G-buffer normals agree with the depth", cc.meanPixelError < 0.05 && cc.meanNormalDot > 0.95,
         `${cc.pixels} px, mean reprojection error ${cc.meanPixelError.toFixed(4)} px; ${cc.normals} px, mean N·N(depth) ${cc.meanNormalDot.toFixed(4)}`);
+      const sc = await p.T('window.__p.sceneColorCheck()');
+      check("pixi3d: the scene-colour bit takes the environment's specular out", sc.without > 0.05 && sc.withBit < 0.15 * sc.without,
+        `green under a white sky: ${sc.withBit.toFixed(4)} with the bit, ${sc.without.toFixed(4)} without`);
       const o = await p.T('window.__p.orientation()');
       check('pixi3d: probe captures (six pixi-3d cameras) sample as world directions', o.ok,
         o.ok ? `${o.rows.length} directions` : o.rows.filter((r) => !r.ok).slice(0, 4).map((r) => `${r.dir.join(',')}: got ${r.got.join('')} want ${r.expect.join('')}`).join('; '));

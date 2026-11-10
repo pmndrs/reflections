@@ -15,10 +15,10 @@
 //     reflections.render(...)                 (unpack, core SSR + probes fallback, repack)
 //     pixi stage render                       (view sprite + ReflectionsFilter, inset + filter, HUD)
 import {
-  ContainerTexture, CubeGeometry, CylinderGeometry, DepthOutputPass, DirectionalLight, MotionVectorPass, Mesh3D, PlaneGeometry, SphereGeometry, TorusGeometry, View3D,
+  ContainerTexture, CubeGeometry, CylinderGeometry, DepthOutputPass, DirectionalLight, Material3D, MotionVectorPass, Mesh3D, PlaneGeometry, SphereGeometry, TorusGeometry, View3D,
   writeHemisphere, type Geometry3D, type Hemisphere, type Material3DOptions,
 } from '@pixi/3d';
-import { Application, Container, Graphics, Sprite, Text, UPDATE_PRIORITY, type WebGPURenderer } from 'pixi.js';
+import { Application, Container, Graphics, RenderTexture, Sprite, Text, UPDATE_PRIORITY, type WebGPURenderer } from 'pixi.js';
 import {
   PixiProbeSet, REFLECTION_VIEWS, ReflectionsFilter, ReflectionsView, getDevice, getGPUTexture, requestReflectionsDevice, type ReflectionViewName,
 } from '@pmndrs/reflections/pixi';
@@ -491,6 +491,37 @@ async function main() {
   }
 
   /**
+   * Does REFLECTIONS_SCENE_COLOR_BIT take the environment's specular out (D2102)? Two white metal
+   * planes (roughness 0.1, no lights, a white hemisphere: all they show is the environment's
+   * specular) face the camera, the left with the bit, the right without. The left must
+   * keep only a sliver of the right (the multiple-scattering term the bit leaves in).
+   */
+  async function sceneColorCheck() {
+    const white: Hemisphere = { skyColor: 0xffffff, groundColor: 0xffffff };
+    const test = new View3D({ environment: white, background: null, toneMapping: 'custom' });
+    test.setSize(64, 32);
+    const opts: Material3DOptions = { baseColor: 0xffffff, roughness: 0.1, metallic: 1 };
+    const geometry = new PlaneGeometry({ width: 1, height: 1 });
+    const left = new Mesh3D({ geometry, material: reflectiveMaterial(opts) });
+    const right = new Mesh3D({ geometry, material: new Material3D(opts) });
+    left.position.set(-0.55, 0, 0);
+    right.position.set(0.55, 0, 0);
+    test.root.addChild(left, right);
+    test.camera.fov = 60;
+    test.camera.position.set(0, 0, 1.2);
+    test.camera.lookAt({ x: 0, y: 0, z: 0 });
+    const target = RenderTexture.create({ width: 64, height: 32, resolution: 1, format: 'rgba16float', antialias: false });
+    renderer.render({ container: test, target, clearColor: [0, 0, 0, 0] });
+    await idle();
+    const px = await readTexture(getGPUTexture(renderer, target));
+    const at = (x: number) => px.data[(16 * 64 + x) * 4 + 1];
+    const result = { withBit: at(16), without: at(48) };
+    target.destroy(true);
+    test.destroy({ children: true });
+    return result;
+  }
+
+  /**
    * Motion-vector convention check (frame.ts: pixi-3d's NDC motion unpacked to uv, motionVectorScale
    * [1, 1]): render, move the camera and the torus, render again, and reproject this frame's scene
    * colour into the last one through the motion texture under each candidate scale. [1, 1] must give
@@ -563,7 +594,7 @@ async function main() {
         const med = (arr: number[]) => { const s = [...arr].sort((x, y) => x - y); return s[s.length >> 1]; };
         return Object.fromEntries(Object.entries(per).map(([key, v]) => [key, Number(med(v).toFixed(4))]));
       },
-      stats, orientation, motionCheck, cameraCheck,
+      stats, orientation, motionCheck, cameraCheck, sceneColorCheck,
     },
   });
 }
