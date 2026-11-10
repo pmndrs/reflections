@@ -41,7 +41,7 @@ const HIT_MODES: HitColorMode[] = ['current', 'lit', 'final'];
 const useRT = q.get('rt') === '1';
 const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
 
-const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'source', 'rtSource', 'grid'] as const;
+const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'coverage', 'source', 'rtSource', 'grid'] as const;
 type View = (typeof VIEWS)[number];
 const GRID: View[] = ['final', 'raw', 'noSSR', 'confidence', 'hitDistance', 'misses', 'specular', 'signal', useRT ? 'rtSource' : 'source'];
 
@@ -240,6 +240,8 @@ async function main() {
         case 'ssr': return tone(c.ssr);
         case 'specular': return tone(c.specular);
         case 'probeSpecular': return tone(c.probeSpecular);
+        // local probe coverage (0 = environment only), on geometry
+        case 'coverage': return c.geometry.select(vec3(c.coverage), vec3(0.02, 0.03, 0.08));
         case 'confidence': return c.geometry.select(vec3(c.confidence), vec3(0.02, 0.03, 0.08));
         case 'hitDistance': { const d = c.hitDistance; return d.greaterThan(0).select((vec3(1, 0.8, 0.5) as N).mul(d.div(d.add(2))), vec3(0)); }
         // traced = green, quad copy = yellow-green, neither = dimmed lit image
@@ -298,6 +300,7 @@ async function main() {
         p.position.set(...v.position);
         if (v.projectionSize) p.projectionSize = new THREE.Vector3(...v.projectionSize);
         if (v.originOffset) p.originOffset.set(...v.originOffset);
+        if (v.projectionOffset) p.projectionOffset.set(...v.projectionOffset);
         if (v.blendDistance !== undefined) p.blendDistance = v.blendDistance;
         probes.add(p);
       }

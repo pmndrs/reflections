@@ -6,7 +6,8 @@
 // colour by metalness), and `radiance` is the environment node sampled along the roughness-bent
 // reflection vector at three's roughness. So, per pixel,
 //
-//   probeEnv = mix(environment, probeLocal.rgb, probeLocal.a) x environmentIntensity
+//   probeEnv = reflectionProbes lookup (volumes by coverage, then the atlas's environment slot)
+//              x environmentIntensity; without probes, pmremTexture(environment) x intensity
 //   specular = mix(probeEnv, ssrHit, confidence) = ssrRadiance + (1 - confidence) x probeEnv
 //   final    = lit - weight x probeEnv + weight x specular
 //            = lit + weight x (ssrRadiance - confidence x probeEnv)
@@ -31,7 +32,7 @@ import * as THREE from 'three/webgpu';
 import {
   DFGLUT, float, getViewPosition, mix, normalize, pmremTexture, reflect, texture, uniform, uv, vec3, vec4,
 } from 'three/tsl';
-import { sampleReflectionProbesLocal } from '../probes/ReflectionProbesNode';
+import { sampleReflectionProbes, sampleReflectionProbesLocal } from '../probes/ReflectionProbesNode';
 import type { ReflectionProbes } from '../probes/ReflectionProbes';
 import type { ScreenSpaceReflectionsPass } from './ScreenSpaceReflectionsPass';
 
@@ -41,11 +42,15 @@ type N = any;
 export interface ScreenSpaceCompositeOptions {
   /**
    * Probes the scene lights with (`scene.environmentNode = reflectionProbes(probes)`). The composite
-   * reads them with `sampleReflectionProbesLocal` and falls back to `environment` by coverage. Only
+   * reads them with the same lookup (`sampleReflectionProbes`: volumes by coverage, then the atlas's
+   * environment slot), so its estimate of three's term matches it outside the volumes too. Only
    * pass probes the lit image used, or the subtraction removes a term that was never added.
    */
   probes?: ReflectionProbes | null;
-  /** The environment three lit with (usually `scene.environment`). Null: black. */
+  /**
+   * The environment three lit with (usually `scene.environment`), used only without `probes` (with
+   * probes, the atlas's environment slot stands in for it, as in three's lit term). Null: black.
+   */
   environment?: THREE.Texture | null;
   /** `scene.environmentIntensity` (a number or a node). Default 1. */
   environmentIntensity?: number | N;
@@ -139,13 +144,17 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
 
   const intensity: N = typeof options.environmentIntensity === 'number' || options.environmentIntensity === undefined
     ? uniform(options.environmentIntensity ?? 1) : options.environmentIntensity;
-  const environment: N = options.environment ? (pmremTexture as N)(options.environment, R, roughness).rgb : vec3(0);
-  let probeSpecular: N = environment;
+  let probeSpecular: N;
   let coverage: N = float(0);
   if (options.probes) {
-    const local: N = sampleReflectionProbesLocal(options.probes, P, R, roughness).toVar();
-    probeSpecular = mix(environment, local.rgb, local.a);
-    coverage = local.a;
+    // the same lookup three lit with (reflectionProbes()): the volumes by coverage, then the atlas's
+    // environment slot, not pmremTexture(environment). The two environments differ (capture vs PMREM,
+    // and the slot is what the bake saw), and a mismatch shows wherever coverage < 1 (W12, D1501).
+    // Coverage alone is a second lookup, compiled only where a debug view reads it.
+    probeSpecular = (sampleReflectionProbes as N)(options.probes, P, R, roughness);
+    coverage = sampleReflectionProbesLocal(options.probes, P, R, roughness).a;
+  } else {
+    probeSpecular = options.environment ? (pmremTexture as N)(options.environment, R, roughness).rgb : vec3(0);
   }
   probeSpecular = probeSpecular.mul(intensity).toVar();
 

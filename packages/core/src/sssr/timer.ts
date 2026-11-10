@@ -9,6 +9,11 @@ export class PassTimer {
   private names: string[] = [];
   private capacity: number;
   private pending: Promise<void> = Promise.resolve();
+  // the readback buffer of the last end() whose callback hasn't run yet (W12: callers that only read
+  // timings now and then dropped those callbacks, and each frame allocated a new buffer that was
+  // never mapped, so never freed); the next end() reuses it, and a stale callback is a no-op
+  private unread: GPUBuffer | null = null;
+  private generation = 0;
 
   constructor(private device: GPUDevice, maxPasses = 16) {
     this.capacity = maxPasses * 2;
@@ -32,10 +37,14 @@ export class PassTimer {
     const n = this.names.length;
     if (!n) return undefined;
     const names = this.names.slice();
-    const read = this.free.pop() ?? this.device.createBuffer({ size: this.capacity * 8, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const read = this.unread ?? this.free.pop() ?? this.device.createBuffer({ size: this.capacity * 8, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    this.unread = read;
+    const generation = ++this.generation;
     encoder.resolveQuerySet(this.querySet, 0, n * 2, this.resolve, 0);
     encoder.copyBufferToBuffer(this.resolve, 0, read, 0, n * 16);
     return () => {
+      if (generation !== this.generation || this.unread !== read) return; // superseded by a later end()
+      this.unread = null;
       this.pending = read.mapAsync(GPUMapMode.READ, 0, n * 16).then(() => {
         const t = new BigInt64Array(read.getMappedRange(0, n * 16));
         let total = 0;
@@ -58,5 +67,6 @@ export class PassTimer {
     this.querySet.destroy();
     this.resolve.destroy();
     for (const b of this.free) b.destroy();
+    this.unread?.destroy();
   }
 }

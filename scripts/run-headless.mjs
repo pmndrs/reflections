@@ -304,7 +304,49 @@ async function hybridChecks(pages) {
     const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
     check(`hybrid ${id}: denoised composite renders, no validation errors`, errs.length === 0, errs.slice(0, 2).join(' | '));
   }
+  // W12: mirrorWall 'low', where the floor reflects the wall behind the sphere and screen space
+  // can't see it. Those px fall back to the probe; they were dark (the floor sat in the probe box's
+  // blend fade at coverage 0.2, the rest a dim environment): hole/wall 0.55, now ~0.8.
+  await p.T("window.__p.load('mirrorWall')");
+  await p.T("window.__p.setPose('low')");
+  await p.T('window.__p.step(24)');
+  const shots = {};
+  for (const v of ['final', 'noSSR', 'source']) {
+    await p.T(`window.__p.setView('${v}')`);
+    shots[v] = await p.T('window.__p.shot()');
+  }
+  await p.T("window.__p.setView('final')");
+  savePng('hybrid-mirrorWall-low-final.png', shots.final);
+  const hole = await p.T(`(${HOLE_STATS})(${JSON.stringify(shots.final)}, ${JSON.stringify(shots.noSSR)}, ${JSON.stringify(shots.source)})`);
+  check('hybrid mirrorWall low: the probe fallback behind the sphere is not dark', hole.px > 500 && hole.final > 0.7 * hole.wall && hole.final > 0.8 * hole.noSSR,
+    `${hole.px} fallback px around the sphere's reflection: mean ${hole.final.toFixed(1)} / 255 (probes-only ${hole.noSSR.toFixed(1)}), wall ${hole.wall.toFixed(1)}`);
 }
+
+/**
+ * W12: mean sRGB (0-255) of `final` and `noSSR` over the probe / environment fallback px (source
+ * view orange or magenta) in the box around mirrorWall 'low''s sphere reflection, and of `final` on
+ * a patch of the wall above. Boxes in fractions of the frame.
+ */
+const HOLE_STATS = `async (fin, noSSR, src) => {
+  const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return { w: i.width, h: i.height, d: g.getImageData(0, 0, i.width, i.height).data }; };
+  const F = await px(fin), N = await px(noSSR), S = await px(src);
+  const { w, h } = F;
+  const box = (x0, x1, y0, y1) => [Math.floor(x0 * w), Math.floor(x1 * w), Math.floor(y0 * h), Math.floor(y1 * h)];
+  const lum = (d, k) => (d[k] + d[k + 1] + d[k + 2]) / 3;
+  let n = 0, f = 0, q = 0;
+  const [ax, bx, ay, by] = box(380 / 960, 580 / 960, 300 / 540, 420 / 540);
+  for (let y = ay; y < by; y++) for (let x = ax; x < bx; x++) {
+    const k = (y * w + x) * 4, r = S.d[k], g = S.d[k + 1], b = S.d[k + 2];
+    const fallback = (r > 230 && g > 115 && g < 165 && b < 60) || (r > 190 && r < 240 && g < 100 && b > 150);
+    if (!fallback) continue;
+    n++; f += lum(F.d, k); q += lum(N.d, k);
+  }
+  let wl = 0, wn = 0;
+  const [cx, dx, cy, dy] = box(600 / 960, 800 / 960, 150 / 540, 200 / 540);
+  for (let y = cy; y < dy; y++) for (let x = cx; x < dx; x++) { wl += lum(F.d, (y * w + x) * 4); wn++; }
+  return { px: n, final: n ? f / n : 0, noSSR: n ? q / n : 0, wall: wl / wn };
+}`;
 
 async function ssrChecks(pages) {
   console.log('examples/ssr:');
