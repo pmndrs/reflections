@@ -146,8 +146,9 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     label: 'rt trace',
     entries: [buf(0, 'uniform'), tex(1), tex(2), tex(3), tex(4),
       buf(5, 'read-only-storage'), buf(6, 'read-only-storage'), buf(7, 'storage'),
-      sto(8, 'rgba16float'), sto(9, 'r32float'), sto(10, 'r32float'), sto(11, 'r32float')],
+      sto(8, 'rgba16float'), sto(9, 'r32float'), sto(10, 'r32float'), sto(11, 'r32float'), tex(12), tex(13)],
   });
+  const noHistory = device.createTexture({ label: 'rt no history', size: [1, 1], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING });
   const providerBgl = device.createBindGroupLayout({
     label: `rt provider ${provider.name}`,
     entries: provider.entries.map((e, i) => ({ ...e, binding: i } as GPUBindGroupLayoutEntry)),
@@ -206,6 +207,9 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     f[50] = s.iblFactor ?? 1;
     const fc = s.fallbackColor ?? [0, 0, 0];
     f[52] = fc[0]; f[53] = fc[1]; f[54] = fc[2]; f[55] = 1;
+    const mvs = frame.inputs.motionVectorScale ?? [1, 1];
+    f[56] = mvs[0]; f[57] = mvs[1];
+    u[58] = frame.inputs.history && frame.inputs.motion ? 1 : 0;
     device.queue.writeBuffer(params, 0, data);
   }
 
@@ -232,6 +236,9 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
         { binding: 9, resource: out.hitDistance.createView() },
         { binding: 10, resource: out.confidence.createView() },
         { binding: 11, resource: source.createView() },
+        // the SSSR tracer's last-frame colour, when it was given one (hitColor 'history', D1002)
+        { binding: 12, resource: (inputs.history && inputs.motion ? inputs.history : noHistory).createView() },
+        { binding: 13, resource: (inputs.history && inputs.motion ? inputs.motion : noHistory).createView() },
       ],
     });
     timer?.begin();
@@ -277,7 +284,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
       return timer.timings;
     },
     destroy() {
-      source.destroy(); state.destroy(); params.destroy(); statsRead.destroy();
+      source.destroy(); state.destroy(); params.destroy(); statsRead.destroy(); noHistory.destroy();
       timer?.destroy();
     },
   };

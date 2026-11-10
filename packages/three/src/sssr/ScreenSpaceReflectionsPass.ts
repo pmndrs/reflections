@@ -114,6 +114,16 @@ export class ScreenSpaceReflectionsPass {
     cameraWorld: uniform(new THREE.Matrix4()),
     cameraPosition: uniform(new THREE.Vector3()),
   };
+  /**
+   * With `settings.hitColor = 'history'`: the texture holding last frame's image (rgba16float,
+   * render size), e.g. a render target the app draws the composite's `final` into after each frame,
+   * so a mirror seen in a mirror shows its own reflection (one bounce deeper per frame). Null
+   * (default): the G-buffer's `lit` target of the previous frame (three's lighting with its
+   * specular IBL, without our SSR).
+   */
+  historySource: THREE.Texture | null = null;
+  private history: GPUTexture | null = null;
+  private historyValid = false;
   private readonly ownsGBuffer: boolean;
   private readonly options: ScreenSpaceReflectionsPassOptions;
   private core: CoreTracer | null = null;
@@ -184,10 +194,20 @@ export class ScreenSpaceReflectionsPass {
     const device = this.device;
     this.ensure(frame.width, frame.height, frame.conventions.depthInverted);
     const core = this.core!;
-    const inputs = screenSpaceInputsFromFrame(frame, core);
-    const cmd = device.createCommandEncoder({ label: 'ssr (three)' });
-    const out = core.dispatch(cmd, inputs, { frameIndex: frame.frameIndex, ...this.settings, fallbackColor: [0, 0, 0] });
     const size = [frame.width, frame.height];
+    const cmd = device.createCommandEncoder({ label: 'ssr (three)' });
+    // Hit colour from last frame (D69): an app texture is copied before the trace (it still holds
+    // last frame's image); the G-buffer's lit target after it (it already holds this frame's).
+    const wantHistory = this.settings.hitColor === 'history';
+    const source = wantHistory ? (this.historySource ? this.gpu(this.historySource) : frame.textures.lit) : undefined;
+    if (wantHistory && !source) throw new Error("ScreenSpaceReflectionsPass: hitColor 'history' needs historySource or the G-buffer's lit target");
+    const history = source ? this.historyTexture(source.format, frame.width, frame.height) : undefined;
+    if (source && this.historySource) { cmd.copyTextureToTexture({ texture: source }, { texture: history! }, size); this.historyValid = true; }
+    const useHistory = !!history && this.historyValid;
+    const inputs = screenSpaceInputsFromFrame(frame, core, { history: useHistory ? history : undefined });
+    const out = core.dispatch(cmd, inputs, {
+      frameIndex: frame.frameIndex, ...this.settings, hitColor: useHistory ? 'history' : 'current', fallbackColor: [0, 0, 0],
+    });
     if (this.rt && this.rayTracing) {
       // traced misses take black like the tracer's fallback: the composite adds probes /
       // environment for 1 - confidence, exactly the term three's lit image already has
@@ -198,6 +218,8 @@ export class ScreenSpaceReflectionsPass {
       cmd.beginRenderPass({ colorAttachments: [{ view: this.gpu(this.source).createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end();
       this.sourceDirty = false;
     }
+    // after both traces read it: this frame's lit image becomes next frame's history
+    if (source && !this.historySource) { cmd.copyTextureToTexture({ texture: source }, { texture: history! }, size); this.historyValid = true; }
     cmd.copyTextureToTexture({ texture: out.radiance }, { texture: this.gpu(this.radiance) }, size);
     cmd.copyTextureToTexture({ texture: out.hitDistance }, { texture: this.gpu(this.hitDistance) }, size);
     cmd.copyTextureToTexture({ texture: out.confidence }, { texture: this.gpu(this.confidence) }, size);
@@ -207,6 +229,19 @@ export class ScreenSpaceReflectionsPass {
     this.uniforms.projectionInverse.value.copy(cam.projectionMatrixInverse);
     this.uniforms.cameraWorld.value.copy(cam.matrixWorld);
     this.uniforms.cameraPosition.value.setFromMatrixPosition(cam.matrixWorld);
+  }
+
+  /** Forget last frame's colour (camera cut, scene switch); the next frame's hits use this frame's scene colour. */
+  resetHistory() { this.historyValid = false; }
+
+  private historyTexture(format: GPUTextureFormat, w: number, h: number): GPUTexture {
+    const t = this.history;
+    if (t && t.format === format && t.width === w && t.height === h) return t;
+    t?.destroy();
+    this.historyValid = false;
+    return (this.history = this.device.createTexture({
+      label: 'ssr hit-colour history', size: [w, h], format, usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+    }));
   }
 
   /** With `timestamps`: ms per core pass for the last traced frame ('rt begin', 'rt trace' with `trace`; 'total' sums all). */
@@ -311,6 +346,8 @@ export class ScreenSpaceReflectionsPass {
   dispose() {
     this.core?.destroy();
     this.core = null;
+    this.history?.destroy();
+    this.history = null;
     this.rt?.destroy();
     this.rt = null;
     this.hitShading?.destroy();

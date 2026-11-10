@@ -209,6 +209,39 @@ export function boxRoom(opts: SceneOptions = {}): KitScene {
   };
 }
 
+/**
+ * Two wall mirrors facing each other across a small stage. Each reflects the other, so with hit
+ * colour from the current frame's scene colour (no specular) the mirror seen in the mirror is
+ * black; with last frame's lit colour (D69) it shows a reflection, one bounce deeper per frame.
+ */
+export function facingMirrors(opts: SceneOptions = {}): KitScene {
+  const scene = newScene();
+  scene.environment = gradientEnvironment();
+  scene.environmentIntensity = 0.3;
+  floor(scene, std(0x6b6660, 0.85), 16);
+  add(scene, new THREE.Mesh(new THREE.PlaneGeometry(8, 4), std(0xffffff, 0.8, 0, { map: patternTexture({ cells: [8, 4], size: [800, 400] }) })), [0, 2, -4]);
+  for (const side of [-1, 1]) {
+    // dark frame behind, mirror in front, both facing the other side
+    add(scene, new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.6, 7.7), std(0x222226, 0.5)), [side * 1.83, 1.45, -0.25]);
+    add(scene, new THREE.Mesh(new THREE.PlaneGeometry(7.5, 2.4), mirror(0)), [side * 1.79, 1.45, -0.25], -side * Math.PI / 2);
+  }
+  add(scene, new THREE.Mesh(new THREE.SphereGeometry(0.4, 48, 24), std(0xe63946, 0.35)), [-0.7, 0.4, -1.6]);
+  add(scene, new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), std(0x2a9d8f, 0.6)), [0.8, 0.35, -2.2], 0.4);
+  add(scene, new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 1.2, 40), std(0xf4a261, 0.4)), [0.2, 0.6, -0.4]);
+  add(scene, new THREE.Mesh(new THREE.BoxGeometry(3, 0.08, 0.08), glow(0x9fd8ff, 5)), [0, 2.9, -2.5]).castShadow = false;
+  studioLights(scene, [1, 6, 5], 2.0);
+  const views = {
+    // down the corridor: each mirror, seen at a grazing angle, reflects the other's far end, on screen
+    default: { pos: [0.3, 1.5, 6.5] as Vec3, target: [0, 1.3, -2] as Vec3 },
+    left: { pos: [0.6, 1.5, 3.6] as Vec3, target: [-1.6, 1.2, -1.6] as Vec3 },
+  };
+  return {
+    id: 'facingMirrors', title: 'Two facing mirrors (mirror seen in a mirror)', scene, camera: makeCamera(views.default, opts.aspect),
+    target: new THREE.Vector3(...views.default.target), views,
+    probes: [{ position: [0, 1.6, 0], influenceSize: [3.6, 3.2, 8], projectionSize: [3.6, 4, 8] }],
+  };
+}
+
 /** mirrorWall with a sliding, turning knot and a bouncing ball (object motion), for motion vectors. */
 export function moving(opts: SceneOptions = {}): KitScene {
   const base = mirrorWall(opts);

@@ -26,6 +26,13 @@ const q = new URLSearchParams(location.search);
 const W = Number(q.get('w') ?? 960), H = Number(q.get('h') ?? 540);
 const manual = q.has('manual');
 const useProbes = q.get('probes') !== '0';
+/**
+ * Hit colour (D69): 'current' = this frame's scene colour without specular (FFX, default); 'lit' =
+ * last frame's G-buffer lit target (three's lighting incl. its probe/env specular); 'final' = last
+ * frame's composite (SSR included), so reflections of reflections deepen one bounce per frame.
+ */
+type HitColorMode = 'current' | 'lit' | 'final';
+const HIT_MODES: HitColorMode[] = ['current', 'lit', 'final'];
 const useRT = q.get('rt') === '1';
 
 const VIEWS = ['final', 'noSSR', 'ssr', 'confidence', 'hitDistance', 'rays', 'misses', 'specular', 'probeSpecular', 'source', 'grid'] as const;
@@ -185,6 +192,21 @@ async function main() {
   const pipeline = new THREE.RenderPipeline(renderer);
   pipeline.outputColorTransform = false;
   let composite: ReturnType<typeof screenSpaceComposite> | null = null;
+  // last frame's composite (linear HDR) for hitColor 'final'
+  const historyRT = new THREE.RenderTarget(W, H, { type: THREE.HalfFloatType, depthBuffer: false });
+  historyRT.texture.name = 'ssr example final history';
+  const historyMaterial = new THREE.MeshBasicNodeMaterial();
+  historyMaterial.toneMapped = false;
+  const historyQuad = new THREE.QuadMesh(historyMaterial);
+  let hitMode: HitColorMode = (q.get('hit') as HitColorMode) ?? 'current';
+  function setHitColor(m: HitColorMode) {
+    if (!HIT_MODES.includes(m)) throw new Error(`hit colour ${m}?`);
+    hitMode = m;
+    ssr.settings.hitColor = m === 'current' ? 'current' : 'history';
+    ssr.historySource = m === 'final' ? historyRT.texture : null;
+    ssr.resetHistory();
+  }
+  setHitColor(hitMode);
   function buildDisplay() {
     // one composite, sampled at the full-screen uv or at a grid cell's local uv
     const gridUV = uv().mul(3);
@@ -226,6 +248,10 @@ async function main() {
     const local = gridUV.fract();
     grid = local.x.lessThan(0.004).or(local.y.lessThan(0.006)).select(vec3(0.15), grid);
     pipeline.outputNode = vec4(uGrid.equal(1).select(grid, full) as N, 1);
+    historyMaterial.colorNode = screenSpaceComposite(ssr, {
+      probes: useProbes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity,
+    }).final;
+    historyMaterial.needsUpdate = true;
     pipeline.needsUpdate = true;
   }
 
@@ -276,6 +302,7 @@ async function main() {
       ssr.setTraceProvider(provider);
     }
     ssr.gbuffer.resetHistory();
+    ssr.resetHistory();
     buildDisplay();
     refreshUI();
     return { id: kit.id, views: Object.keys(kit.views), probes: probes?.bakedProbes.length ?? 0, animated: !!kit.update };
@@ -298,6 +325,12 @@ async function main() {
     ssr.render(kit.scene, kit.camera);
     updateMask();
     pipeline.render();
+    if (hitMode === 'final') {
+      const prev = renderer.getRenderTarget();
+      renderer.setRenderTarget(historyRT);
+      historyQuad.render(renderer);
+      renderer.setRenderTarget(prev);
+    }
   }
 
   let looping = false;
@@ -328,6 +361,11 @@ async function main() {
   const ssrBox = document.createElement('input'); ssrBox.type = 'checkbox'; ssrBox.checked = true;
   ssrBox.onchange = () => { composite!.amount.value = ssrBox.checked ? 1 : 0; if (!looping) frame(); };
   row('SSR', ssrBox);
+  const hitSel = document.createElement('select');
+  for (const m of HIT_MODES) hitSel.append(new Option(m, m));
+  hitSel.value = hitMode;
+  hitSel.onchange = () => { setHitColor(hitSel.value as HitColorMode); refreshUI(); if (!looping) frame(); };
+  row('Hit colour', hitSel);
   if (useRT) {
     const rtBox = document.createElement('input'); rtBox.type = 'checkbox'; rtBox.checked = true;
     rtBox.onchange = () => { ssr.rayTracing = rtBox.checked; refreshUI(); if (!looping) frame(); };
@@ -342,7 +380,7 @@ async function main() {
     if (kit!.views[pose]) poseSel.value = pose;
     status.textContent = [
       `three r${THREE.REVISION} | ${kit!.title} | ${W}x${H}${manual ? ' | manual (loop stopped)' : ''}`,
-      `variant ${ssr.variant ?? '(first frame pending)'} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
+      `variant ${ssr.variant ?? '(first frame pending)'} | hit colour ${hitMode} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
       `specular IBL term: ${probes ? `${probes.bakedProbes.length} probe(s) by coverage, then scene.environment` : 'scene.environment'}`,
       useRT ? `ray-traced misses: ${ssr.rayTracing ? 'on' : 'off'} (three-mesh-bvh${bvhInfo ? `, ${bvhInfo.meshes} meshes, ${bvhInfo.triangles} triangles, built in ${bvhInfo.buildMs.toFixed(0)} ms` : ''})` : 'ray-traced misses: off (?rt=1)',
     ].join('\n');
@@ -369,6 +407,7 @@ async function main() {
       setPose, setView: (v: View) => setView(v),
       setSSR(on: boolean) { composite!.amount.value = on ? 1 : 0; },
       setSettings(s: N) { Object.assign(ssr.settings, s); },
+      setHitColor: (m: HitColorMode) => setHitColor(m),
       setRT(on: boolean) { ssr.rayTracing = on; },
       setTraceSettings(s: N) { ssr.traceSettings = { ...s }; },
       traceStats: () => ssr.readTraceStats(),
@@ -426,8 +465,13 @@ async function main() {
     let panelLum = 0, panelBright = 0, panelAnalytic = 0;
     let panelErr: number[] = [];
     const pairs: [number, number][] = [];
-    let wallPx = 0, wallConfident = 0, hitErr: number[] = [];
+    let wallPx = 0, wallConfident = 0, hitErr: number[] = [], behindPx = 0, behindConfident = 0;
     const P = new THREE.Vector3(), Q = new THREE.Vector3(), d = new THREE.Vector3(), s = new THREE.Vector3();
+    // everything but the floor and the wall can sit between a floor point and its wall reflection
+    const blockers: THREE.Object3D[] = [];
+    kit!.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh && (o as THREE.Mesh).geometry.type !== 'PlaneGeometry') blockers.push(o); });
+    const occluder = new THREE.Raycaster();
+    occluder.near = 1e-3;
     const lum = (a: Float32Array, i: number) => (a[i * 4] + a[i * 4 + 1] + a[i * 4 + 2]) / 3;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const i = y * W + x;
@@ -468,7 +512,16 @@ async function main() {
       const sx = Math.floor((s.x * 0.5 + 0.5) * W), sy = Math.floor((0.5 - s.y * 0.5) * H);
       if (sx < 0 || sy < 0 || sx >= W || sy >= H) continue;
       const j = sy * W + sx;
-      if (Math.abs(depth[j] - s.z) > 2e-4) continue; // the wall point is hidden (posts, objects)
+      occluder.set(P, d);
+      occluder.far = tw - 1e-3;
+      if (occluder.intersectObjects(blockers, false).length) continue; // the reflected ray meets an object before the wall
+      if (Math.abs(depth[j] - s.z) > 2e-4) {
+        // The wall point is hidden from the camera (posts, objects) and the ray passes behind them:
+        // screen space can't know the answer. A confident hit here is a streak (thickness too large).
+        behindPx++;
+        if (conf[i] >= 0.5) behindConfident++;
+        continue;
+      }
       wallPx++;
       if (conf[i] < 0.9) continue;
       wallConfident++;
@@ -485,6 +538,8 @@ async function main() {
       meanAbs = ad / n / Math.max(mb, 1e-6);
     }
     hitErr = hitErr.sort((a, b) => a - b);
+    const objects = kit!.id === 'mirrorWall' ? stripeStats(depth, nr, am, sc, rad, conf, invVP, eye) : null;
+    const facing = kit!.id === 'facingMirrors' ? mirrorInMirror(depth, nr, am, rad, conf, invVP, eye) : null;
     panelErr = panelErr.sort((a, b) => a - b);
     const rt = await ssr.readTraceStats();
     return {
@@ -501,8 +556,108 @@ async function main() {
       wall: kit!.id === 'mirrorWall' ? {
         pixels: wallPx, confidentFraction: wallPx ? wallConfident / wallPx : 0, lumCorrelation: corr, meanAbsRelative: meanAbs,
         hitDistanceMedianRelErr: hitErr.length ? hitErr[hitErr.length >> 1] : NaN,
+        behindPixels: behindPx, streakFraction: behindPx ? behindConfident / behindPx : NaN,
       } : null,
+      objects,
+      facing,
     };
+  }
+
+  /**
+   * facingMirrors: pixels of the left mirror (normal +x) whose exact reflection ray reaches the
+   * right mirror (plane x = 1.79, its 7.5 x 2.4 rectangle) with no object in between (raycast). The
+   * hit colour there (radiance / confidence, confident px only) is a mirror's own colour: black with
+   * this frame's specular-free scene colour, the right mirror's reflection with last frame's colour.
+   * `black` = fraction of confident px with hit luminance < 0.02; `meanLum` over confident px.
+   */
+  function mirrorInMirror(depth: Float32Array, nr: Float32Array, am: Float32Array, rad: Float32Array, conf: Float32Array,
+    invVP: THREE.Matrix4, eye: THREE.Vector3) {
+    const blockers: THREE.Object3D[] = [];
+    kit!.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh && (o as THREE.Mesh).geometry.type !== 'PlaneGeometry') blockers.push(o); });
+    const ray = new THREE.Raycaster();
+    ray.near = 1e-3;
+    const P = new THREE.Vector3(), d = new THREE.Vector3();
+    let px = 0, confident = 0, black = 0, lumSum = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (depth[i] >= 1 || depth[i] <= 0) continue;
+      if (!(am[i * 4 + 3] > 0.99 && nr[i * 4 + 3] < 0.03 && nr[i * 4] > 0.99)) continue;
+      P.set(((x + 0.5) / W) * 2 - 1, 1 - ((y + 0.5) / H) * 2, depth[i]).applyMatrix4(invVP);
+      d.copy(P).sub(eye).normalize(); d.x = -d.x;
+      if (d.x <= 1e-4) continue;
+      const t = (1.79 - P.x) / d.x;
+      const hy = P.y + d.y * t, hz = P.z + d.z * t;
+      if (Math.abs(hy - 1.45) > 1.15 || Math.abs(hz + 0.25) > 3.7) continue;
+      ray.set(P, d); ray.far = t - 1e-2;
+      if (ray.intersectObjects(blockers, false).length) continue;
+      px++;
+      if (conf[i] < 0.5) continue;
+      confident++;
+      const l = (rad[i * 4] + rad[i * 4 + 1] + rad[i * 4 + 2]) / 3 / conf[i];
+      lumSum += l;
+      if (l < 0.02) black++;
+    }
+    return { pixels: px, confident: px ? confident / px : NaN, black: confident ? black / confident : NaN, meanLum: confident ? lumSum / confident : NaN };
+  }
+
+  /**
+   * Striping in reflected objects (mirrorWall's sphere and cube). For each object:
+   * - reflected mask: mirror-floor pixels whose exact planar reflection ray (three's raycaster
+   *   against the object meshes) hits the object;
+   * - direct mask: non-mirror pixels whose depth-reconstructed position lies on the object (local bbox);
+   * - `hf`: mean of |L - mean(left, right)| + |L - mean(up, down)| over mask-interior pixels, divided
+   *   by the mean L, with L = SSR radiance luminance (confidence x hit colour) in the reflection and
+   *   scene-colour luminance where the object is seen directly. Striping (rows or columns of
+   *   rejected hits) shows as reflected hf far above the direct one; `stripeRatio` = reflected / direct.
+   * - `confident`: fraction of the reflected mask with confidence >= 0.9.
+   */
+  function stripeStats(depth: Float32Array, nr: Float32Array, am: Float32Array, sc: Float32Array, rad: Float32Array, conf: Float32Array,
+    invVP: THREE.Matrix4, eye: THREE.Vector3) {
+    const meshes: THREE.Mesh[] = [];
+    kit!.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const g = m.geometry as N;
+      if (g.type === 'SphereGeometry' || (g.type === 'BoxGeometry' && g.parameters.width === g.parameters.height)) meshes.push(m);
+    });
+    const ray = new THREE.Raycaster();
+    const P = new THREE.Vector3(), d = new THREE.Vector3(), L = new THREE.Vector3();
+    const reflected = meshes.map(() => new Uint8Array(W * H)), direct = meshes.map(() => new Uint8Array(W * H));
+    const boxes = meshes.map((m) => { m.geometry.computeBoundingBox(); return m.geometry.boundingBox!.clone().expandByScalar(2e-3); });
+    const inv = meshes.map((m) => m.matrixWorld.clone().invert());
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (depth[i] >= 1 || depth[i] <= 0) continue;
+      P.set(((x + 0.5) / W) * 2 - 1, 1 - ((y + 0.5) / H) * 2, depth[i]).applyMatrix4(invVP);
+      const mirrorPx = am[i * 4 + 3] > 0.99 && nr[i * 4 + 3] < 0.03;
+      if (mirrorPx && nr[i * 4 + 1] > 0.99) {
+        d.copy(P).sub(eye).normalize(); d.y = -d.y;
+        ray.set(P, d);
+        const hit = ray.intersectObjects(meshes, false)[0];
+        if (hit) reflected[meshes.indexOf(hit.object as THREE.Mesh)][i] = 1;
+      } else if (!mirrorPx) {
+        meshes.forEach((_, k) => { if (boxes[k].containsPoint(L.copy(P).applyMatrix4(inv[k]))) direct[k][i] = 1; });
+      }
+    }
+    const lum = (a: Float32Array, i: number) => (a[i * 4] + a[i * 4 + 1] + a[i * 4 + 2]) / 3;
+    const hf = (mask: Uint8Array, img: Float32Array) => {
+      let s = 0, m = 0, n = 0;
+      for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+        const i = y * W + x;
+        if (!(mask[i] && mask[i - 1] && mask[i + 1] && mask[i - W] && mask[i + W])) continue;
+        const v = lum(img, i);
+        s += Math.abs(v - 0.5 * (lum(img, i - 1) + lum(img, i + 1))) + Math.abs(v - 0.5 * (lum(img, i - W) + lum(img, i + W)));
+        m += v; n++;
+      }
+      return { hf: n ? s / Math.max(m, 1e-9) : NaN, pixels: n };
+    };
+    return Object.fromEntries(meshes.map((m, k) => {
+      const r = hf(reflected[k], rad), dd = hf(direct[k], sc);
+      let n = 0, c = 0;
+      for (let i = 0; i < W * H; i++) if (reflected[k][i]) { n++; if (conf[i] >= 0.9) c++; }
+      const name = (m.geometry as N).type === 'SphereGeometry' ? 'sphere' : 'cube';
+      return [name, { reflectedPixels: r.pixels, directPixels: dd.pixels, hfReflected: r.hf, hfDirect: dd.hf, stripeRatio: r.hf / dd.hf, confident: n ? c / n : NaN }];
+    }));
   }
 
   /**

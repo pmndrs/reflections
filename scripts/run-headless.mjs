@@ -283,6 +283,13 @@ async function ssrChecks(pages) {
         const w = st.wall;
         check(`${tag}: mirror floor shows the wall`, w.confidentFraction > 0.6 && w.lumCorrelation > 0.8 && w.hitDistanceMedianRelErr < 0.05,
           `${w.pixels} floor px reflect a visible wall point; ${(w.confidentFraction * 100).toFixed(1)}% with confidence >= 0.9; luminance correlation ${w.lumCorrelation.toFixed(3)}, mean abs rel diff ${w.meanAbsRelative.toFixed(3)}; hit distance median rel err ${w.hitDistanceMedianRelErr.toFixed(4)}`);
+        // W9: striping on reflected objects. Before D1000 (FFX's mip-1 surface depth in the hit
+        // test) every other column of the cube's reflection was rejected: cube ratio 69, sphere 331;
+        // with D1000 and the constant 0.015 thickness: 2.1 and 43 (sphere 79% confident); hybrid (D1001): 1.7, 8.0 (92%).
+        const o = st.objects;
+        const fmt = (k) => `${k} hf ${o[k].hfReflected.toFixed(3)} vs direct ${o[k].hfDirect.toFixed(4)} (ratio ${o[k].stripeRatio.toFixed(1)}), ${(o[k].confident * 100).toFixed(1)}% of ${o[k].reflectedPixels} px confident`;
+        check(`${tag}: reflected sphere and cube not striped`, o.cube.stripeRatio < 4 && o.cube.confident > 0.9 && o.sphere.stripeRatio < 20 && o.sphere.confident > 0.85,
+          `${fmt('cube')}; ${fmt('sphere')}`);
         if (variant === 'auto') {
           savePng('ssr-mirrorWall-grid.png', await p.T('window.__p.shot()'));
           await p.T("window.__p.setView('final')");
@@ -291,6 +298,22 @@ async function ssrChecks(pages) {
           savePng('ssr-mirrorWall-noSSR.png', await p.T('window.__p.shot()'));
           await p.T("window.__p.setView('grid')");
         }
+      }
+      if (id === 'facingMirrors' && variant === 'auto') {
+        // W9 (D69 / D1002): a mirror seen in a mirror. Hit colour from this frame's specular-free
+        // scene colour is black; last frame's composite ('final') shows the reflection, a bounce per frame.
+        await p.T("window.__p.setView('final')");
+        const f = {};
+        for (const m of ['current', 'lit', 'final']) {
+          await p.T(`window.__p.setHitColor('${m}')`);
+          await p.T('window.__p.step(6)');
+          f[m] = (await p.T('window.__p.stats()')).facing;
+          savePng(`ssr-facingMirrors-${m}.png`, await p.T('window.__p.shot()'));
+        }
+        await p.T("(window.__p.setHitColor('current'), window.__p.setView('grid'))");
+        const fm = (k) => `${k}: ${(f[k].black * 100).toFixed(1)}% black, mean lum ${f[k].meanLum.toFixed(3)}`;
+        check(`${tag}: mirror seen in a mirror is not black with last frame's colour`, f.current.pixels > 1000 && f.current.black > 0.9 && f.final.black < 0.1 && f.lit.black < 0.1,
+          `${f.current.pixels} left-mirror px reflect the right mirror (${(f.current.confident * 100).toFixed(1)}% confident); ${fm('current')}; ${fm('lit')}; ${fm('final')}`);
       }
       if (id === 'offscreen') {
         await p.T("window.__p.setPose('mirror')");

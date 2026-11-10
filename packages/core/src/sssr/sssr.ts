@@ -24,6 +24,15 @@ import type { FrameInputs } from '../frame/contract';
 
 export type ScreenSpaceVariant = Variant;
 
+/**
+ * The hybrid-reflections sample's thickness (FFX SDK v1.1.4): 0.2 + 10 alpha + 0.01 x ray length.
+ * The default (DIVERGES D42, D1001): on mirrorWall it fills reflections of curved objects that
+ * the constant leaves partly rejected, for a small rise in hits accepted behind objects.
+ */
+export const THICKNESS_HYBRID = Object.freeze({ depthBufferThickness: 0.2, thicknessRoughnessFactor: 10, thicknessLengthFactor: 0.01 });
+/** FFX SSSR's constant 0.015 thickness (view-space units), no roughness or length terms. */
+export const THICKNESS_CONSTANT = Object.freeze({ depthBufferThickness: 0.015, thicknessRoughnessFactor: 0, thicknessLengthFactor: 0 });
+
 /** Default `roughnessThreshold`, perceptual: sqrt of FFX's 0.2 alpha, rounded. */
 export const DEFAULT_ROUGHNESS_THRESHOLD = 0.447;
 
@@ -95,8 +104,17 @@ export interface ScreenSpaceReflectionsSettings {
   maxTraversalIntersections?: number;
   /** Glossy rays stop once this few invocations of their subgroup (workgroup in the fallback) still march. Mirrors ignore it. Default 4. */
   minTraversalOccupancy?: number;
-  /** Hit acceptance thickness (view-space units). Default 0.015. */
+  /**
+   * Hit acceptance thickness (view-space units, = world units when the view matrix has no scale).
+   * The full thickness is
+   * `depthBufferThickness + thicknessRoughnessFactor * alpha + thicknessLengthFactor * worldRayLength`.
+   * Defaults: {@link THICKNESS_HYBRID} (0.2, 10, 0.01); {@link THICKNESS_CONSTANT} is FFX SSSR's 0.015.
+   */
   depthBufferThickness?: number;
+  /** Thickness added per unit of alpha (linear roughness) of the reflecting pixel. Default 10. */
+  thicknessRoughnessFactor?: number;
+  /** Thickness added per world unit of ray length. Default 0.01. */
+  thicknessLengthFactor?: number;
   /** Pyramid mip glossy rays start on (mirrors always use 0). Default 0. */
   mostDetailedMip?: number;
   /** Trace extra quad pixels where last frame's variance > varianceThreshold. Needs `inputs.variance`. Default true. */
@@ -113,6 +131,12 @@ export interface ScreenSpaceReflectionsSettings {
   missConfidenceThreshold?: number;
   /** Miss list: only rays with perceptual roughness <= this (squared like `roughnessThreshold`). Default 1 (all traced rays). The hybrid sample's 0.22 alpha is 0.469. */
   missRoughnessThreshold?: number;
+  /**
+   * Where a screen-space hit takes its colour: 'current' (default) = `inputs.color`, this frame's
+   * scene colour without specular (FFX); 'history' = `inputs.history`, last frame's lit colour
+   * reprojected through `inputs.motion` (FFX's hybrid sample, PICA, SSSR 2015; D69).
+   */
+  hitColor?: 'current' | 'history';
   /** Override the frame index (blue-noise rotation). Default: increments per dispatch. */
   frameIndex?: number;
 }
@@ -141,8 +165,16 @@ export interface ScreenSpaceReflectionsInputs {
   roughnessIsPerceptual?: boolean;
   /** Lit scene colour without specular (the radiance a hit returns). */
   color: GPUTexture;
-  /** Motion vectors: unused by the tracer, carried for the denoise seam. */
+  /** Motion vectors (uv-space current - previous, times `motionVectorScale`): read only with `hitColor: 'history'`; carried for the denoise seam. */
   motion?: GPUTexture;
+  /** Scale that turns a `motion` texel into uv-space current - previous. Default [1, 1]. */
+  motionVectorScale?: readonly [number, number];
+  /**
+   * Last frame's lit colour (any float format, render size), for `hitColor: 'history'`: hits load it
+   * at the hit reprojected through `motion`, so a mirror seen in a mirror shows its reflection
+   * instead of the specular-free scene colour (D69).
+   */
+  history?: GPUTexture;
   /** Last frame's reflection variance (denoiser output), for variance-guided tracing. */
   variance?: GPUTexture;
   camera: ScreenSpaceCamera;
@@ -212,7 +244,7 @@ export interface ScreenSpaceReflections {
  */
 export function screenSpaceInputsFromFrame(
   frame: FrameInputs, tracer: Pick<ScreenSpaceReflections, 'depthInverted'>,
-  extra: Pick<ScreenSpaceReflectionsInputs, 'variance' | 'fallbackBindGroup'> = {},
+  extra: Pick<ScreenSpaceReflectionsInputs, 'variance' | 'fallbackBindGroup' | 'history'> = {},
 ): ScreenSpaceReflectionsInputs {
   const { textures: t, conventions: c } = frame;
   if (c.depthLinear) throw new Error('ssr: linear depth is not supported; pass hardware (device) depth');
@@ -226,6 +258,7 @@ export function screenSpaceInputsFromFrame(
     roughnessIsPerceptual: c.roughnessIsPerceptual,
     color: t.sceneColor,
     motion: t.motion,
+    motionVectorScale: c.motionVectorScale,
     camera: frame.camera,
     ...extra,
   };
@@ -284,6 +317,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const noiseTable = device.createBuffer({ label: 'ssr blue-noise table', size: 128 * 128 * 2, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   device.queue.writeBuffer(noiseTable, 0, blueNoiseBytes());
   const dummyVariance = device.createTexture({ label: 'ssr no variance', size: [1, 1], format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING });
+  const dummyHistory = device.createTexture({ label: 'ssr no history', size: [1, 1], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING });
   const hierarchyView = depthHierarchy.createView();
 
   // ---- pipelines
@@ -323,7 +357,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     entries: [uniformEntry(0), texEntry(1), texEntry(2), texEntry(3), texEntry(4), texEntry(5),
       bufEntry(6, 'read-only-storage'), bufEntry(7, 'read-only-storage'),
       storageTexEntry(8, 'rgba16float'), storageTexEntry(9, 'r32float'), storageTexEntry(10, 'r32float'),
-      ...(useMissList ? [bufEntry(11), bufEntry(12)] : [])],
+      ...(useMissList ? [bufEntry(11), bufEntry(12)] : []), texEntry(13), texEntry(14)],
   });
   const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList), withFallback(intersectBgl));
 
@@ -346,7 +380,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   let afterSubmit: (() => void) | undefined;
   const P = (b: number) => ({ binding: b, resource: { buffer: params } });
 
-  function writeParams(inputs: ScreenSpaceReflectionsInputs, s: ScreenSpaceReflectionsSettings) {
+  function writeParams(inputs: ScreenSpaceReflectionsInputs, s: ScreenSpaceReflectionsSettings, useHistory: boolean) {
     const cam = inputs.camera;
     const V = cam.view, Pm = cam.projection;
     const VP = mat4Mul(Pm, V);
@@ -365,7 +399,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[103] = inputs.roughnessIsPerceptual ?? true ? 1 : 0;
     f[104] = s.iblFactor ?? 1;
     f[105] = s.temporalStabilityFactor ?? 0.7;
-    f[106] = s.depthBufferThickness ?? 0.015;
+    f[106] = s.depthBufferThickness ?? THICKNESS_HYBRID.depthBufferThickness;
     f[107] = (s.roughnessThreshold ?? DEFAULT_ROUGHNESS_THRESHOLD) ** 2; // perceptual -> alpha (D43)
     f[108] = s.varianceThreshold ?? 0;
     u[109] = s.frameIndex ?? frameIndex;
@@ -380,6 +414,11 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[120] = missCapacity;
     f[121] = s.missConfidenceThreshold ?? 0.9;
     f[122] = (s.missRoughnessThreshold ?? 1) ** 2;
+    f[123] = s.thicknessRoughnessFactor ?? THICKNESS_HYBRID.thicknessRoughnessFactor;
+    f[124] = s.thicknessLengthFactor ?? THICKNESS_HYBRID.thicknessLengthFactor;
+    u[125] = useHistory ? 1 : 0;
+    const mvs = inputs.motionVectorScale ?? [1, 1];
+    f[128] = mvs[0]; f[129] = mvs[1];
     device.queue.writeBuffer(params, 0, data);
   }
 
@@ -388,7 +427,10 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
       if (t.width !== W || t.height !== H) throw new Error(`ssr: ${k} is ${t.width}x${t.height}, expected ${W}x${H}`);
     }
     if (fallback.layout && !inputs.fallbackBindGroup) throw new Error('ssr: the radiance fallback needs inputs.fallbackBindGroup');
-    writeParams(inputs, settings);
+    const useHistory = (settings.hitColor ?? 'current') === 'history';
+    if (useHistory && (!inputs.history || !inputs.motion)) throw new Error("ssr: hitColor 'history' needs inputs.history and inputs.motion");
+    if (inputs.history && (inputs.history.width !== W || inputs.history.height !== H)) throw new Error(`ssr: history is ${inputs.history.width}x${inputs.history.height}, expected ${W}x${H}`);
+    writeParams(inputs, settings, useHistory);
     const classifyGroup = device.createBindGroup({
       label: 'ssr classify', layout: classifyBgl,
       entries: [P(0),
@@ -418,7 +460,9 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
         { binding: 8, resource: radiance.createView() },
         { binding: 9, resource: hitDistance.createView() },
         { binding: 10, resource: confidence.createView() },
-        ...(useMissList ? [{ binding: 11, resource: { buffer: missList! } }, { binding: 12, resource: { buffer: missCounter! } }] : [])],
+        ...(useMissList ? [{ binding: 11, resource: { buffer: missList! } }, { binding: 12, resource: { buffer: missCounter! } }] : []),
+        { binding: 13, resource: (useHistory ? inputs.history! : dummyHistory).createView() },
+        { binding: 14, resource: (useHistory ? inputs.motion! : dummyHistory).createView() }],
     });
 
     timer?.begin();
@@ -456,7 +500,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
       return timer.timings;
     },
     destroy() {
-      for (const t of [depthHierarchy, radiance, hitDistance, confidence, extractedRoughness, blueNoise, dummyVariance]) t.destroy();
+      for (const t of [depthHierarchy, radiance, hitDistance, confidence, extractedRoughness, blueNoise, dummyVariance, dummyHistory]) t.destroy();
       for (const b of [rayList, denoiserTileList, tileFlags, rayCounter, indirectArgs, missList, missCounter, missArgs, params, noiseTable]) b?.destroy();
       timer?.destroy();
     },

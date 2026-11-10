@@ -52,6 +52,9 @@ struct RtParams {
   iblFactor: f32,
   _pad0: u32,
   fallbackColor: vec4f,
+  motionVectorScale: vec2f,
+  useHistory: u32,
+  _pad1: u32,
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
@@ -94,6 +97,8 @@ ${RT_PARAMS_WGSL}
 @group(0) @binding(9) var o_hit: texture_storage_2d<r32float, write>;
 @group(0) @binding(10) var o_confidence: texture_storage_2d<r32float, write>;
 @group(0) @binding(11) var o_source: texture_storage_2d<r32float, write>;
+@group(0) @binding(12) var t_history: texture_2d<f32>;
+@group(0) @binding(13) var t_motion: texture_2d<f32>;
 
 ${HIT_WGSL}
 ${parts.fallbackWgsl}
@@ -164,6 +169,14 @@ fn onScreenRadiance(hitP: vec3f, hitN: vec3f, out_color: ptr<function, vec3f>) -
   if (abs(dHit - dSeen) > P.onScreenDepthTolerance * dHit) { return false; }
   if (dot(loadNormal(c), hitN) < 0.5) { return false; }
   *out_color = textureLoad(t_color, c, 0).rgb;
+  // With the SSSR tracer's hitColor 'history' (D1002), on-screen hits take last frame's colour too,
+  // reprojected through motion; off screen last frame keeps this frame's scene colour.
+  if (P.useHistory != 0u) {
+    let prev = (vec2f(c) + 0.5) * P.inverseRenderSize - textureLoad(t_motion, c, 0).xy * P.motionVectorScale;
+    if (all(prev >= vec2f(0.0)) && all(prev < vec2f(1.0))) {
+      *out_color = textureLoad(t_history, vec2i(prev * vec2f(textureDimensions(t_history))), 0).rgb;
+    }
+  }
   return true;
 }
 
