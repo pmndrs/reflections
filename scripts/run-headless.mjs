@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | probe-core | probe-bench | ssr-bench)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | probe-core | probe-bench | ssr-bench | showcase)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
@@ -674,6 +674,38 @@ async function ssrBench() {
   }
 }
 
+/**
+ * examples/showcase (smoke): every downloaded asset scene renders with reflections on and off, then
+ * with the ray-traced fallback on, with no GPU errors and a non-black image. Screenshots go to
+ * out/showcase-<scene>-{on,off,rt}.png. Skipped when `pnpm assets` hasn't been run. Not a pixel check.
+ */
+async function showcaseChecks(pages) {
+  console.log('examples/showcase:');
+  const p = await openPage(`http://127.0.0.1:${PORT}/showcase/?manual&w=1280&h=720`);
+  pages.push(p);
+  const ids = await p.T('window.__p.entries()');
+  if (!ids.length) { console.log('  (no assets downloaded: showcase skipped; `pnpm assets` fetches them)'); return; }
+  const tone = `(async (url) => { const img = new Image(); img.src = url; await img.decode(); const c = document.createElement('canvas'); c.width = 160; c.height = 90;
+    const g = c.getContext('2d'); g.drawImage(img, 0, 0, 160, 90); const d = g.getImageData(0, 0, 160, 90).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i] + d[i + 1] + d[i + 2]; return s / (d.length / 4) / 3; })`;
+  for (const id of ids) {
+    const before = results.logs.length;
+    const info = await p.T(`window.__p.load(${JSON.stringify(id)})`);
+    const shots = {};
+    for (const [name, setup] of [['on', "window.__p.setView('final')"], ['off', "window.__p.setView('off')"], ['rt', "(window.__p.setView('final'), window.__p.setSources({ rt: true }))"]]) {
+      await p.T(setup);
+      await p.T('window.__p.step(8)'); // a few frames of denoiser history
+      shots[name] = await p.T('window.__p.shot()');
+      savePng(`showcase-${id}-${name}.png`, shots[name]);
+    }
+    const s = await p.T('window.__p.info()');
+    await p.T('window.__p.setSources({ rt: false })');
+    const lum = await p.T(`(${tone})(${JSON.stringify(shots.on)})`);
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    check(`showcase ${id}: renders on / off / rt, no GPU errors`, s.gpuErrors === 0 && errs.length === 0 && lum > 8 && !!s.bvh,
+      `${info.probes} probes (${info.bakeMs.toFixed(0)} ms), denoiser ${s.denoiser ?? 'none'}, mean ${lum.toFixed(0)}/255, BVH ${s.bvh?.triangles} tris; reflections ${(s.timings.total ?? NaN).toFixed(2)} ms${errs.length ? '; ' + errs[0] : ''}`);
+  }
+}
+
 async function main() {
   setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull || ssrBenchFull ? 3_600_000 : 600_000).unref();
   let server = null;
@@ -839,6 +871,7 @@ async function main() {
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (ssrBenchFull) await ssrBench();
     else if (runs('ssr-bench')) await ssrBenchSmoke(pages);
+    if (runs('showcase')) await showcaseChecks(pages);
 
     if (runs('probe-core')) {
       // examples/probe-core: the phase 2 probe core on a bare device (layouts x formats, CPU weights,
