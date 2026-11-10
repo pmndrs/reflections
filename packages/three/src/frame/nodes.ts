@@ -16,22 +16,37 @@ interface Builder { material?: N; renderer: N }
  * leave it at zero, which is what they render (plus emissive) anyway. Materials that don't light
  * (`lights === false`: backgrounds, unlit node materials), basic materials, and materials with a
  * custom `fragmentNode` / `outputNode` write their output colour, which has no specular to remove.
+ * Except basic materials with an environment (`envMap` / `envNode`): BasicLightingModel.finish adds
+ * the env reflection to the output after `totalDiffuse` (= diffuse colour × AO × light map) is set,
+ * and an env map always runs the lighting context, so those take `totalDiffuse` too.
  */
 export const sceneColorNoSpecular = /*@__PURE__*/ (Fn((builder: Builder) => {
   const m = builder.material;
   const custom = !m || m.fragmentNode != null || m.outputNode != null;
   // builder.material is the app's material (e.g. a MeshStandardMaterial, which has no `lights`
   // field); its node twin has lights = true. Basic materials have no specular lobe to remove.
-  const unlit = custom || m.lights === false || m.isMeshBasicMaterial === true || builder.renderer.lighting?.enabled === false;
-  const lit = !unlit;
-  if (!lit) return (output as N).rgb;
+  const lighting = builder.renderer.lighting?.enabled !== false;
+  const basicWithEnv = m && (m.isMeshBasicMaterial === true || m.isMeshBasicNodeMaterial === true) && (m.envMap != null || m.envNode != null);
+  const unlit = custom || m.lights === false || (m.isMeshBasicMaterial === true && !basicWithEnv) || !lighting;
+  if (unlit) return (output as N).rgb;
   return (property('vec3', 'totalDiffuse') as N).add(emissive);
 }) as N)();
 
 const has = (m: N, key: string) => m != null && typeof m[key] === 'number';
 
-/** Perceptual roughness: the material's (map included) or 1 for materials without one. */
-export const gbufferRoughness = /*@__PURE__*/ (Fn((builder: Builder) => (has(builder.material, 'roughness') ? materialRoughness : float(1))) as N)();
+// A node material's roughnessNode / metalnessNode replaces the scalar and map (as in
+// MeshStandardNodeMaterial.setupVariants), before three's geometry-roughness adjustment (D403).
 
-/** Metalness: the material's (map included) or 0. */
-export const gbufferMetalness = /*@__PURE__*/ (Fn((builder: Builder) => (has(builder.material, 'metalness') ? materialMetalness : float(0))) as N)();
+/** Perceptual roughness: the material's `roughnessNode`, else its scalar × map, else 1. */
+export const gbufferRoughness = /*@__PURE__*/ (Fn((builder: Builder) => {
+  const m = builder.material;
+  if (m?.roughnessNode != null) return float(m.roughnessNode);
+  return has(m, 'roughness') ? materialRoughness : float(1);
+}) as N)();
+
+/** Metalness: the material's `metalnessNode`, else its scalar × map, else 0. */
+export const gbufferMetalness = /*@__PURE__*/ (Fn((builder: Builder) => {
+  const m = builder.material;
+  if (m?.metalnessNode != null) return float(m.metalnessNode);
+  return has(m, 'metalness') ? materialMetalness : float(0);
+}) as N)();
