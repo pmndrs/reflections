@@ -31,6 +31,16 @@ The probes are this library's: an engine-agnostic core (GGX prefilter, cube-arra
 | `@pmndrs/reflections` / `/three` | three.js adapter: probes, TSL nodes |
 | `@pmndrs/reflections/core` | engine-agnostic WebGPU: the probe prefilter (more per the spec) |
 
+## Examples
+
+```bash
+pnpm install
+pnpm assets      # Khronos sample models + two Poly Haven HDRIs into examples/assets/ (not committed)
+pnpm examples    # then open http://127.0.0.1:5370/showcase/
+```
+
+[`examples/showcase`](examples/showcase/) is the one to open first. Pick a scene (a car concept, a toy car and a chess set on a mirror floor in a studio HDRI, or Sponza with its rough floor swapped for a polished one) and switch the sources on and off: reflection probes (baked per scene, one box per room or region), screen-space reflections, the ray-traced fallback (three-mesh-bvh, built on first use) and the denoiser (denoiser/ffx, when the sibling `Denoiser` repo is checked out). "Off" shows the scene without image-based reflections. The debug views show which source filled each pixel, the screen-space confidence and the raw-versus-denoised split; the panel reads GPU ms per pass. Every other page is listed in [`examples/index.html`](examples/index.html).
+
 ## Develop
 
 ```bash
