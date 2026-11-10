@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | probe-core | probe-bench | ssr-bench)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | probe-core | probe-bench | ssr-bench)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p, core vs the pre-phase-2 TSL node
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
@@ -674,6 +674,56 @@ async function ssrBench() {
   }
 }
 
+/**
+ * examples/babylon (W15, SPEC phase 6): the mirrorWall scene on Babylon's WebGPUEngine through
+ * @pmndrs/reflections/babylon. Smoke: renders, no validation errors, finite outputs, rays traced;
+ * the mirror floor shows the wall (confident SSR); Babylon's cube captures sample as world directions
+ * under core's plain cube lookup (the adapter's no-remap assumption, probes.ts). Screenshots of the
+ * final image, SSR off (probes + environment only), probes off, and the debug views.
+ */
+async function babylonChecks(pages) {
+  console.log('examples/babylon:');
+  for (const variant of ['auto', 'workgroup']) {
+    const before = results.logs.length;
+    const p = await openPage(`http://127.0.0.1:${PORT}/babylon/?manual${variant === 'workgroup' ? '&variant=workgroup' : ''}`);
+    pages.push(p);
+    await p.T('window.__p.step(2)');
+    const st = await p.T('window.__p.stats()');
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    const fails = [];
+    if (st.nonFinite) fails.push(`${st.nonFinite} non-finite values`);
+    if (!(st.rays > 0)) fails.push('no rays');
+    if (st.gpuErrors) fails.push(`${st.gpuErrors} GPU errors`);
+    if (errs.length) fails.push(errs.slice(0, 2).join(' | '));
+    const tag = `babylon (${st.variant})`;
+    check(`${tag}: renders, no validation errors, finite outputs`, fails.length === 0,
+      fails.length ? fails.join('; ') : `${st.rays} rays, mean confidence ${st.meanConfidence.toFixed(3)} on geometry`);
+    check(`${tag}: mirror floor reflects the scene (confident SSR)`, st.mirrorPixels > 1000 && st.mirrorConfident > 0.3,
+      `${st.mirrorPixels} mirror px, ${(st.mirrorConfident * 100).toFixed(1)}% with confidence >= 0.9`);
+    if (variant === 'auto') {
+      const o = await p.T('window.__p.orientation()');
+      check('babylon: cube captures sample as world directions (no remap in core)', o.ok,
+        o.ok ? `${o.rows.length} directions` : o.rows.filter((r) => !r.ok).slice(0, 4).map((r) => `${r.dir.join(',')}: got ${r.got.join('')} want ${r.expect.join('')}`).join('; '));
+      const shot = async (name) => savePng(`babylon-${name}.png`, await p.T('window.__p.shot()'));
+      await shot('final');
+      await p.T('window.__p.setSSR(false)');
+      await shot('ssr-off');
+      await p.T('window.__p.setProbes(false)');
+      await shot('ssr-off-probes-off');
+      await p.T('window.__p.setSSR(true)');
+      await shot('probes-off');
+      await p.T('window.__p.setProbes(true)');
+      for (const v of ['lit', 'reflection', 'radiance', 'confidence', 'normal', 'roughness']) {
+        await p.T(`window.__p.setView(${JSON.stringify(v)})`);
+        await shot(`view-${v}`);
+      }
+      await p.T("window.__p.setView('final')");
+      const t = await p.T('window.__p.time(20)').catch(() => null);
+      if (t) console.log(`  babylon tracer GPU ms (960x540, loop stopped): ${Object.entries(t).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+    }
+  }
+}
+
 async function main() {
   setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull || ssrBenchFull ? 3_600_000 : 600_000).unref();
   let server = null;
@@ -837,6 +887,7 @@ async function main() {
     if (runs('ssr')) await ssrChecks(pages);
     if (runs('hybrid')) await hybridChecks(pages);
     if (runs('ssr-rt')) await ssrRtChecks(pages);
+    if (runs('babylon')) await babylonChecks(pages);
     if (ssrBenchFull) await ssrBench();
     else if (runs('ssr-bench')) await ssrBenchSmoke(pages);
 

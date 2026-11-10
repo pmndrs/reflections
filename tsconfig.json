@@ -18,7 +18,8 @@
     "paths": {
       "@pmndrs/reflections": ["src/index.ts"],
       "@pmndrs/reflections/three": ["src/three.ts"],
-      "@pmndrs/reflections/core": ["src/core.ts"]
+      "@pmndrs/reflections/core": ["src/core.ts"],
+      "@pmndrs/reflections/babylon": ["src/babylon.ts"]
     }
   },
   "include": ["src", "packages/*/src", "examples", "test"],

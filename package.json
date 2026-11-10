@@ -31,6 +31,10 @@
     "./core": {
       "types": "./dist/core.d.ts",
       "import": "./dist/core.js"
+    },
+    "./babylon": {
+      "types": "./dist/babylon.d.ts",
+      "import": "./dist/babylon.js"
     }
   },
   "main": "./dist/index.js",
@@ -41,16 +45,20 @@
     "examples:build": "vite build --config examples/vite.config.ts",
     "check": "node scripts/run-headless.mjs",
     "assets": "node scripts/fetch-assets.mjs",
-    "build": "vite build && rollup -c rollup.dts.config.mjs",
+    "build": "vite build && node --max-old-space-size=8192 node_modules/rollup/dist/bin/rollup -c rollup.dts.config.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "peerDependencies": {
+    "@babylonjs/core": ">=9.35.0 <10",
     "three": ">=0.187.0",
     "three-mesh-bvh": ">=0.9.18"
   },
   "peerDependenciesMeta": {
+    "@babylonjs/core": {
+      "optional": true
+    },
     "three": {
       "optional": true
     },
@@ -59,6 +67,8 @@
     }
   },
   "devDependencies": {
+    "@babylonjs/core": "9.35.0",
+    "@pmndrs/reflections-babylon": "workspace:*",
     "@pmndrs/reflections-core": "workspace:*",
     "@pmndrs/reflections-three": "workspace:*",
     "@types/three": "^0.187.0",
