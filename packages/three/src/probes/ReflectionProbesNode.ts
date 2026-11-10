@@ -35,7 +35,7 @@ import {
   PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludesWgsl,
   probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
 } from '@pmndrs/reflections-core';
-import { probeOrigin, type ReflectionProbes } from './ReflectionProbes';
+import { probeOrigin, probeWorldScale, type ReflectionProbes } from './ReflectionProbes';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any; // TSL's node typings are too strict for hand-written shader maths
@@ -124,7 +124,7 @@ function volumeList(probes: ReflectionProbes): ProbeVolume[] {
   return probes.bakedProbes.map((probe, slot) => {
     probe.getWorldPosition(_p);
     probeOrigin(probe, _o);
-    probe.getWorldScale(_s);
+    probeWorldScale(probe, _s);
     const half = probe.influenceSize.clone().multiply(_s).multiplyScalar(0.5);
     const projection = (probe.projectionSize ?? probe.influenceSize).clone().multiply(_s);
     const offset = probe.projectionOffset.clone().multiply(_s);

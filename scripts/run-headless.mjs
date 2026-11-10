@@ -399,6 +399,14 @@ function f2Checks(r) {
     check('probes: two computeIrradiance() calls in one encoder keep their own slots', pi.err0 < 0.01 && pi.err1 < 0.01,
       `slot 0 L00 ${f(pi.slot0)} (expected ${f(pi.expected0)}, rel err ${pi.err0.toExponential(2)}); slot 1 ${f(pi.slot1)} (expected ${f(pi.expected1)}, rel err ${pi.err1.toExponential(2)})`);
   }
+  const ps = section('probeScale');
+  if (ps) {
+    const m = ps.mirrored, z = ps.zeroScale;
+    check('probes: a mirrored parent keeps a positive volume (scale -2, 1, 1)', m.centre > 0.999 && m.inside > 0.999 && m.outside < 1e-6,
+      `coverage at the centre ${m.centre.toFixed(3)}, 1.5 along x ${m.inside.toFixed(3)}, 2.5 along x ${m.outside.toFixed(3)}`);
+    check('probes: a zero-scale parent gives a zero (disabled) volume', z.centre < 1e-6 && z.near < 1e-6,
+      `coverage at the centre ${z.centre.toFixed(3)}, 0.3 off ${z.near.toFixed(3)}`);
+  }
   const rh = section('rtHistory');
   if (rh) {
     check("rt on-screen reuse ignores inputs.history unless hitColor 'history'", rh.current.onScreen > 100 && rh.current.stale === 0 && rh.history.onScreen > 100 && rh.history.stale > 0.5 * rh.history.onScreen,

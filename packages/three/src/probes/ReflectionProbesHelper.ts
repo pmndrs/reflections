@@ -5,7 +5,7 @@
 // (The sphere sits at the capture point, which differs from the box centre with `originOffset`.)
 
 import * as THREE from 'three/webgpu';
-import { probeOrigin, type ReflectionProbe, type ReflectionProbes } from './ReflectionProbes';
+import { probeOrigin, probeWorldScale, type ReflectionProbe, type ReflectionProbes } from './ReflectionProbes';
 
 const _position = new THREE.Vector3();
 const _size = new THREE.Vector3();
@@ -39,7 +39,7 @@ export class ReflectionProbesHelper extends THREE.Object3D {
       const probe = child as ReflectionProbe;
       if (probe.isReflectionProbe !== true) continue;
       probe.getWorldPosition(_position);
-      probe.getWorldScale(_scale);
+      probeWorldScale(probe, _scale);
       const sphere = new THREE.Mesh(this.geometry, this.material);
       probeOrigin(probe, sphere.position); // the capture point (the box centre unless originOffset is set)
       _size.copy(probe.influenceSize).multiply(_scale);
