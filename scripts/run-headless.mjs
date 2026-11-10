@@ -129,7 +129,11 @@ async function sssrCoreChecks(pages) {
   console.log('  stats', JSON.stringify(st));
   check('sssr: rays traced, denoiser tiles listed', st.rays > 0 && st.tiles > 0, `${st.rays} rays, ${st.tiles} tiles, ${st.misses} misses`);
   check('sssr: sane hit fraction on the mirror floor', st.mirrorHitFraction > 0.5 && st.mirrorHitFraction < 1, `${(st.mirrorHitFraction * 100).toFixed(1)}% of ${st.mirrorPixels} px`);
-  check('sssr: no ray above the roughness threshold', st.maxTracedRoughness < 0.2, `max traced alpha ${st.maxTracedRoughness.toFixed(4)}`);
+  // roughnessThreshold is perceptual (D43): the tracer squares it, so every traced pixel has alpha below
+  // threshold^2 and every untraced ramp pixel is at or above it (both sides, so a missing or doubled square fails).
+  check('sssr: no ray above the roughness threshold (perceptual, squared at the pass)',
+    st.maxTracedRoughness < st.thresholdAlpha && st.minUntracedRampRoughness >= st.thresholdAlpha && Math.abs(st.thresholdAlpha - 0.2) < 1e-3,
+    `max traced alpha ${st.maxTracedRoughness.toFixed(4)} < ${st.thresholdAlpha.toFixed(4)} <= min untraced ramp alpha ${st.minUntracedRampRoughness.toFixed(4)}`);
   check('sssr: roughness ramp partly traced', st.rampTracedFraction > 0.2 && st.rampTracedFraction < 0.9, `${(st.rampTracedFraction * 100).toFixed(1)}%`);
   savePng('sssr-core-grid.png', await s.T('window.__p.shot()'));
   const hasSubgroups = await s.T('window.__p.hasSubgroups');

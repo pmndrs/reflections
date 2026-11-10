@@ -165,6 +165,7 @@ ${commonWgsl(inverted)}
 @group(0) @binding(9) var o_radiance: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(10) var o_hit: texture_storage_2d<r32float, write>;
 @group(0) @binding(11) var o_roughness: texture_storage_2d<r32float, write>;
+@group(0) @binding(12) var o_confidence: texture_storage_2d<r32float, write>;
 ${fallbackWgsl}
 
 var<workgroup> g_TileCount: atomic<u32>;
@@ -273,6 +274,7 @@ ${sg ? `
   if (on_screen) {
     textureStore(o_radiance, dispatch_thread_id, intersection_output);
     textureStore(o_hit, dispatch_thread_id, vec4f(0.0));
+    textureStore(o_confidence, dispatch_thread_id, vec4f(0.0)); // port addition: intersect overwrites traced pixels
     // Extract only the roughness channel so later passes load one value.
     textureStore(o_roughness, dispatch_thread_id, vec4f(roughness));
   }
@@ -363,8 +365,9 @@ ${commonWgsl(inverted)}
 @group(0) @binding(7) var<storage, read> rayCounter: array<u32, 4>;
 @group(0) @binding(8) var o_radiance: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(9) var o_hit: texture_storage_2d<r32float, write>;
-${missList ? `@group(0) @binding(10) var<storage, read_write> missList: array<vec2u>;
-@group(0) @binding(11) var<storage, read_write> missCounter: array<atomic<u32>, 4>;` : ''}
+@group(0) @binding(10) var o_confidence: texture_storage_2d<r32float, write>;
+${missList ? `@group(0) @binding(11) var<storage, read_write> missList: array<vec2u>;
+@group(0) @binding(12) var<storage, read_write> missCounter: array<atomic<u32>, 4>;` : ''}
 ${fallbackWgsl}
 
 const M_PI: f32 = 3.14159265358979;
@@ -539,13 +542,17 @@ fn octEncode(n: vec3f) -> vec2f {
   return p;
 }
 
-fn storeRadiance(packed: u32, coords: vec2u, value: vec4f, hit_distance: f32) {
+fn storePixel(c: vec2u, value: vec4f, hit_distance: f32, confidence: f32) {
+  textureStore(o_radiance, c, value);
+  textureStore(o_hit, c, vec4f(hit_distance));
+  textureStore(o_confidence, c, vec4f(confidence));
+}
+fn storeRadiance(packed: u32, coords: vec2u, value: vec4f, hit_distance: f32, confidence: f32) {
   let copy_target = coords ^ vec2u(1u);
-  textureStore(o_radiance, coords, value);
-  textureStore(o_hit, coords, vec4f(hit_distance));
-  if (((packed >> 29u) & 1u) != 0u) { let c = vec2u(copy_target.x, coords.y); textureStore(o_radiance, c, value); textureStore(o_hit, c, vec4f(hit_distance)); }
-  if (((packed >> 30u) & 1u) != 0u) { let c = vec2u(coords.x, copy_target.y); textureStore(o_radiance, c, value); textureStore(o_hit, c, vec4f(hit_distance)); }
-  if (((packed >> 31u) & 1u) != 0u) { textureStore(o_radiance, copy_target, value); textureStore(o_hit, copy_target, vec4f(hit_distance)); }
+  storePixel(coords, value, hit_distance, confidence);
+  if (((packed >> 29u) & 1u) != 0u) { storePixel(vec2u(copy_target.x, coords.y), value, hit_distance, confidence); }
+  if (((packed >> 30u) & 1u) != 0u) { storePixel(vec2u(coords.x, copy_target.y), value, hit_distance, confidence); }
+  if (((packed >> 31u) & 1u) != 0u) { storePixel(copy_target, value, hit_distance, confidence); }
 }
 
 struct Ray {
@@ -597,7 +604,7 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
   let environment_lookup = sampleRadianceFallback(world_space_origin, world_space_reflected_direction, 0.0);
   reflection_radiance = mix(environment_lookup, reflection_radiance, confidence);
-  storeRadiance((*r).packed, (*r).coords, vec4f(reflection_radiance, world_ray_length), select(0.0, world_ray_length, confidence > 0.0));
+  storeRadiance((*r).packed, (*r).coords, vec4f(reflection_radiance, world_ray_length), select(0.0, world_ray_length, confidence > 0.0), confidence);
   // Hybrid sample: low confidence, not marched into the background, and not too rough to trace.
   return confidence < P.missConfidenceThreshold && !isBackground(hit.z) && (*r).roughness <= P.missRoughnessThreshold;
 }

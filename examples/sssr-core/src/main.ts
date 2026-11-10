@@ -4,7 +4,7 @@
 // floor; time(n) gives median GPU ms per pass with the loop stopped (there is no loop: frames render
 // on demand); shot() returns the canvas as a PNG data URL.
 import {
-  createScreenSpaceReflections, environmentRadianceFallback, screenSpaceInputsFromFrame, type FrameInputs, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs,
+  createScreenSpaceReflections, DEFAULT_ROUGHNESS_THRESHOLD, environmentRadianceFallback, screenSpaceInputsFromFrame, type FrameInputs, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs,
   type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant,
 } from '@pmndrs/reflections/core';
 import { lookAt, perspective, SCENE_WGSL } from './scene';
@@ -252,7 +252,7 @@ async function main() {
     p = enc.beginComputePass(); p.setPipeline(markPipe); p.setBindGroup(0, markGroup); p.dispatchWorkgroups(n); p.end();
     const vu = new ArrayBuffer(32), vf = new Float32Array(vu), vi = new Uint32Array(vu);
     vi[0] = W; vi[1] = H; vi[2] = viewIndex === 0 ? 99 : viewIndex - 1; vi[3] = Math.min(pyramidMip, main.mipCount - 1);
-    vf[4] = canvas.width; vf[5] = canvas.height; vf[6] = settings.roughnessThreshold ?? 0.2; vf[7] = reverse ? 1 : 0;
+    vf[4] = canvas.width; vf[5] = canvas.height; vf[6] = (settings.roughnessThreshold ?? DEFAULT_ROUGHNESS_THRESHOLD) ** 2; // alpha, as the tracer compares vf[7] = reverse ? 1 : 0;
     device.queue.writeBuffer(displayU, 0, vu);
     const rp = enc.beginRenderPass({ colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }] });
     rp.setPipeline(displayPipe); rp.setBindGroup(0, displayGroup); rp.draw(3); rp.end();
@@ -355,18 +355,27 @@ async function main() {
       if ((r >>> 30) & 1) traced[(y ^ 1) * W + x] = 1;
       if ((r >>> 31) & 1) traced[(y ^ 1) * W + (x ^ 1)] = 1;
     }
-    let maxRough = 0;
+    let maxRough = 0, minUntraced = Infinity;
     for (let i = 0; i < W * H; i++) {
       const id = mat[i * 4 + 3];
       if (id === 1) { mirror++; if (hit[i] > 0) mirrorHit++; }
       if (id === 2) { ramp++; if (traced[i]) rampTraced++; }
       if (traced[i]) maxRough = Math.max(maxRough, rough[i]);
+      else if (id === 2) {
+        // only the quad's base pixel (FFX's spq-1 base ray, x and y even), and only in quads that are all
+        // ramp: a glossy pixel whose base pixel is rough or another surface gets no ray to share (as in FFX)
+        const x = i % W, y = Math.floor(i / W);
+        const allRamp = x + 1 < W && y + 1 < H && mat[(i + 1) * 4 + 3] === 2 && mat[(i + W) * 4 + 3] === 2 && mat[(i + W + 1) * 4 + 3] === 2;
+        if ((x & 1) === 0 && (y & 1) === 0 && allRamp) minUntraced = Math.min(minUntraced, rough[i]);
+      }
     }
     return {
       variant: main.variant, size: [W, H], mipCount: main.mipCount, rays: A.counter[1], tiles: A.counter[3],
       misses: A.missCounter[1], missDropped: A.missCounter[2],
       mirrorPixels: mirror, mirrorHitFraction: mirror ? mirrorHit / mirror : 0,
       rampPixels: ramp, rampTracedFraction: ramp ? rampTraced / ramp : 0, maxTracedRoughness: maxRough,
+      /** The threshold in the tracer's units (alpha), and the smallest untraced reflective alpha above it. */
+      thresholdAlpha: (settings.roughnessThreshold ?? DEFAULT_ROUGHNESS_THRESHOLD) ** 2, minUntracedRampRoughness: minUntraced,
     };
   }
 
