@@ -13,7 +13,7 @@ import * as THREE from 'three/webgpu';
 import { uniform } from 'three/tsl';
 import {
   createScreenSpaceReflections, screenSpaceInputsFromFrame,
-  type FrameInputs, type ScreenSpaceReflections as CoreTracer, type ScreenSpaceReflectionsSettings,
+  type FrameInputs, type ScreenSpaceReflections as CoreTracer, type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant,
 } from '@pmndrs/reflections-core';
 import { FrameGBuffer, getDevice, getGPUTexture, type FrameGBufferOptions } from '../frame/FrameGBuffer';
 
@@ -95,7 +95,7 @@ export class ScreenSpaceReflectionsPass {
   get tracer(): CoreTracer | null { return this.core; }
   get device(): GPUDevice { return getDevice(this.renderer); }
   /** 'subgroups' or 'workgroup' once the first frame ran. */
-  get variant() { return this.core?.variant ?? null; }
+  get variant(): ScreenSpaceVariant | null { return this.core?.variant ?? null; }
 
   /** Render the G-buffer and trace. Returns the frame's contract inputs. */
   render(scene: THREE.Scene, camera: THREE.Camera, opts: { jitter?: readonly [number, number] } = {}): FrameInputs {

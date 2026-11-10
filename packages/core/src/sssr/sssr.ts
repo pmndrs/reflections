@@ -17,7 +17,7 @@ import { createDepthPyramidBuilder, createDepthPyramidTexture, depthPyramidMipCo
 import { mat4Invert, mat4Mul, type Mat4Like } from './math';
 import {
   BLUE_NOISE_WGSL, classifyWgsl, CONSTANT_FALLBACK_WGSL, ENVIRONMENT_FALLBACK_WGSL,
-  INDIRECT_ARGS_WGSL, intersectWgsl, MISS_ARGS_WGSL, PARAMS_SIZE, type Variant,
+  INDIRECT_ARGS_WGSL, intersectWgsl, missArgsWgsl, PARAMS_SIZE, type Variant,
 } from './shaders';
 import { PassTimer } from './timer';
 import type { FrameInputs } from '../frame/contract';
@@ -173,13 +173,17 @@ export interface ScreenSpaceReflectionsOutputs {
   tileFlags: GPUBuffer;
   /** [0] next frame's ray counter, [1] rays this frame, [2] next frame's tile counter, [3] tiles this frame. */
   rayCounter: GPUBuffer;
-  /** Indirect args: intersect at byte 0, denoiser (one group per tile) at byte 12. */
+  /**
+   * Indirect args: intersect at byte 0, denoiser (one group per tile) at byte 12. 2-D groups
+   * (x = min(n, 65535), y = ceil(n / x)): index a group as wg.y * nwg.x + wg.x and bounds-check
+   * against rayCounter[1] / [3] (D601; FFX writes 1-D, which overflows at 4K).
+   */
   indirectArgs: GPUBuffer;
   /** vec2u per miss: packed ray coords (as rayList), oct-encoded world direction (2 x snorm16). */
   missList?: GPUBuffer;
-  /** [0] append counter (reset after intersect), [1] misses this frame, [2] dropped past capacity. */
+  /** [0] append counter (reset after intersect), [1] misses listed this frame, [2] overflow append counter (reset), [3] dropped past capacity this frame. */
   missCounter?: GPUBuffer;
-  /** Indirect args for a ray-traced pass over the miss list (64 per group). */
+  /** Indirect args for a ray-traced pass over the miss list: 64 per group, 2-D groups (index (wg.y * nwg.x + wg.x) * 64 + local, bounds-check against missCounter[1]). */
   missArgs?: GPUBuffer;
 }
 
@@ -267,7 +271,12 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const tileFlags = buf('tile flags', tilesX * tilesY * 4);
   const rayCounter = buf('ray counter', 16);
   const indirectArgs = buf('indirect args', 24, GPUBufferUsage.INDIRECT);
-  const missCapacity = W * H;
+  // Buffers must fit one storage binding (default limit 128 MiB): the ray list is W*H*4 bytes, so
+  // above ~33.5 Mpx (8K) the tracer can't run; the miss list (8 B per entry) is capped instead and
+  // counts what it drops (missCounter[3]). The per-tile cap (D9) will bound it further.
+  const maxBinding = device.limits.maxStorageBufferBindingSize;
+  if (W * H * 4 > maxBinding) throw new Error(`ssr: ${W}x${H} needs a ${W * H * 4} B ray list; the device's maxStorageBufferBindingSize is ${maxBinding}`);
+  const missCapacity = Math.min(W * H, Math.floor(maxBinding / 8));
   const missList = useMissList ? buf('miss list', missCapacity * 8) : undefined;
   const missCounter = useMissList ? buf('miss counter', 16) : undefined;
   const missArgs = useMissList ? buf('miss args', 12, GPUBufferUsage.INDIRECT) : undefined;
@@ -321,7 +330,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   let missArgsPipe: GPUComputePipeline | undefined, missArgsGroup: GPUBindGroup | undefined;
   if (useMissList) {
     const bgl = device.createBindGroupLayout({ label: 'ssr miss args', entries: [bufEntry(0), bufEntry(1)] });
-    missArgsPipe = pipe('miss args', MISS_ARGS_WGSL, [bgl]);
+    missArgsPipe = pipe('miss args', missArgsWgsl(missCapacity), [bgl]);
     missArgsGroup = device.createBindGroup({
       label: 'ssr miss args', layout: bgl,
       entries: [{ binding: 0, resource: { buffer: missCounter! } }, { binding: 1, resource: { buffer: missArgs! } }],

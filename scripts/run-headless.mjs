@@ -148,6 +148,11 @@ async function sssrCoreChecks(pages) {
         r.radianceDiffPixels === 0 && r.hitDiffPixels === 0 && r.roughnessDiffPixels === 0 && r.pyramidDiffTexels === 0 && r.blueNoiseDiff === 0,
         `differing px: radiance ${r.radianceDiffPixels}, hit ${r.hitDiffPixels}, roughness ${r.roughnessDiffPixels}, pyramid ${r.pyramidDiffTexels}`);
     }
+    // Miss counts are exact only at occupancy 0: with the occupancy exit, which rays share a subgroup
+    // depends on atomic append order, so the count varies run to run (as in FFX).
+    const m1 = await s.T('window.__p.parity({ minTraversalOccupancy: 0 })');
+    const m2 = await s.T('window.__p.parity({ minTraversalOccupancy: 0 })');
+    check('sssr: miss count deterministic at occupancy 0', m1.misses[0] === m2.misses[0] && m1.misses[1] === m2.misses[1], `${m1.misses.join(', ')} then ${m2.misses.join(', ')}`);
     // Default occupancy (4) counts per subgroup vs per workgroup, so images may differ (D3xx); lists must not.
     const r = await s.T('window.__p.parity({})');
     check('sssr parity (default occupancy): lists', r.rayListSame && r.tileListSame && r.tileFlagsSame, `rays ${r.rays}`);
@@ -171,6 +176,14 @@ async function sssrCoreChecks(pages) {
   check('sssr cube-environment fallback: same rays and hits', se.rays === st.rays && Math.abs(se.mirrorHitFraction - st.mirrorHitFraction) < 1e-3,
     `rays ${se.rays}, hit ${(se.mirrorHitFraction * 100).toFixed(1)}%`);
   savePng('sssr-core-env.png', await env.T('window.__p.shot()'));
+  // 4K, every surface a mirror: more than 65535 x 64 rays, so the intersect args must be 2-D
+  // (D601). A 1-D dispatch over the limit is skipped without a validation error: radiance stays 0.
+  const uhd = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?w=3840&h=2160&allmirror`);
+  pages.push(uhd);
+  const su = await uhd.T('window.__p.stats()');
+  check('sssr 3840x2160 all-mirror: intersect runs past 65535 x 64 rays', su.rays > 65535 * 64 && su.mirrorHitFraction > 0.5 && su.tiles > 65535,
+    `${su.rays} rays, ${su.tiles} tiles, mirror floor hit ${(su.mirrorHitFraction * 100).toFixed(1)}%`);
+  uhd.close();
   // GPU ms at 1080p, informational (loop stopped: frames are submitted one at a time).
   const big = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?w=1920&h=1080`);
   pages.push(big);
