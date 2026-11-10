@@ -115,8 +115,8 @@ Hit shading belongs to the resolve, not the provider. It looks up the probes at 
 
 It works as follows:
 
-- It uses the API of three.js #35046, running on r186.
-- r186 can't bind `texture_cube_array`, so the cubes live in a 2D array of 6 × N layers, and the node picks the face itself.
+- It uses the API of three.js #35046. The three floor is r187 (raised from r186 on 2026-11-10).
+- r187 still can't bind `texture_cube_array` (#35045 was merged then reverted; #35053 is open; r187's `wgslFn` accepts the type, but no texture creates a cube-array view), so the cubes live in a 2D array of 6 × N layers, and the node picks the face itself.
 - The prefilter is a raw-WebGPU compute pass, now in core (`probes/prefilter.ts`). It implements r187's cube-PMREM plan: lod 0 copy, 256-sample filtered importance sampling, and the last three levels as full 16 px integrals. Roughness maps to lod by `lod = maxLod · r · (2 − r)`.
 - `seamFix: 'warp'` centres the edge texels on the cube edges. Measured against the hardware cube sampler on the same bake, it differs by a mean of 0.05 / 255 and at most 3 / 255. It costs about 0.06 ms per 1080p frame for 3 probes.
 
@@ -159,7 +159,7 @@ It works as follows:
 
 Octahedral *reflection* probes are still worth testing. Our case differs from idTech's in three ways:
 
-- r186 has no cube arrays.
+- three (r187) can't bind cube arrays yet.
 - We have no BC6H on every platform.
 - We want one layout that babylon, pixi and raw WebGPU can all sample.
 
@@ -324,7 +324,7 @@ Debug views:
   - the probes example bakes 3 probes;
   - it renders lit;
   - `warp` matches the hardware cube sampler (mean 0.05, max 3 / 255);
-  - with `--compare <url>`, it is pixel-identical (max 0 / 255) to the denoiser repo's `reflection-probes.html`.
+  - with `--compare <url>`, it is pixel-identical (max 0 / 255) to the denoiser repo's `reflection-probes.html`. That held on r186; on r187 the denoiser page (still r186) differs slightly (mean luminance 33.8 → 33.7), so the comparison is now informational.
 - **Scenes:**
   - Ben's two rooms (probes, live capture, a mirror ball);
   - the explainer room, with its scenarios: mirror, off-screen, moving, contact, rough;

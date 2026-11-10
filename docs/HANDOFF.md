@@ -24,6 +24,10 @@ The working state of the project: who is on what, which interfaces the workstrea
 | W5 | Probe parity with #35046 head + fork features (shadow reuse in bake, `projectionOffset`, coverage node, cache key, time-sliced bake, env versioning, world-space helper) | code | `packages/three/src/probes/` (not `prefilter.ts`) | 5375 | running | |
 | W4 | Frame contract G-buffer (three) + scene kit for demos | code | `packages/three/src/frame/`, `examples/shared/`, `examples/scenes/`, `scripts/fetch-assets.mjs` | 5374 | running | |
 
+## Platform
+
+- **three floor: r187** (raised from r186 on 2026-11-10; `three@^0.187.0`, peer `>=0.187.0`). r187 still can't bind `texture_cube_array` in TSL. Its PMREMGenerator writes cube mips (#34585). In r187 a render target's cube texture lists every level in `mipmaps`, base included; r186 listed only the levels past 0.
+
 ## Agreed interfaces between streams
 
 These are the seams the streams code against before the others land. Change one only by updating it here in the same commit.
@@ -76,5 +80,6 @@ W3 develops on synthetic, analytic inputs written by compute (exact depth/normal
 
 ## Log
 
+- 2026-11-10: three floor raised to r187 (maintainer's call). `pnpm check` all green after one fix (cube render-target mip count in examples/probes).
 - 2026-11-10: R1–R3 done. SPEC draft 4: miss list credited to FFX `hybridreflections`, ray-list packing 15+14+3, confidence instead of binary miss, thresholds in alpha, RT optional/off by default, Lagarde specular occlusion, L1-vs-SH9 re-fit noted. W3 told of the hybrid sample. W5 opened for probe parity.
 - 2026-11-10: Phase 0 done (`622985c`). SPEC drafts 2 and 3. Workstreams R1–R3, W1–W4 started in parallel. `REFLECTIONS_PORT` added so worktrees don't collide on 5370. `DIVERGES.md` seeded with D1–D11 from the SPEC.
