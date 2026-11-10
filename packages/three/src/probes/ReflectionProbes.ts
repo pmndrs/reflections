@@ -159,7 +159,7 @@ export class ReflectionProbes extends THREE.Object3D {
 
   /**
    * Registers a node that samples this set. A bake that replaces the texture (a new layout) marks it
-   * for rebuild, so static meshes rebind the new texture on the next frame; r186 doesn't rebind
+   * for rebuild, so static meshes rebind the new texture on the next frame; r186/r187 don't rebind
    * unchanged render objects on its own. Called by {@link ReflectionProbesNode}.
    */
   track(node: THREE.Node) {

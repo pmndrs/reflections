@@ -28,8 +28,8 @@
 // the material. Everything after that (influence, blending, priority, box projection) is the same
 // code; the vec3 form adds the environment slot for whatever weight is left.
 //
-// Uniforms live in three's shared `renderGroup`, not the default per-object group: r186 re-uploads
-// per-object uniforms only for render objects it sees change, so probe moves, `boxProjection` and
+// Uniforms live in three's shared `renderGroup`, not the default per-object group: r186/r187 re-upload
+// per-object uniforms only for render objects they see change, so probe moves, `boxProjection` and
 // the like never reached static meshes. A bake that replaces the texture bumps the node (see
 // ReflectionProbes.bake), and the texture id is in the cache key, so every render object rebinds.
 
