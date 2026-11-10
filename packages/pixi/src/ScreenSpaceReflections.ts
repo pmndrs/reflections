@@ -14,11 +14,17 @@
 // storage textures instead:
 //   reflection  rgb = core radiance, a = confidence
 //   aux         r = world hit distance, g = world ray length (radiance.w), b = alpha roughness, a = 1
+//
+// Denoising (SPEC "Denoise seam", rule 7: it lives in the denoiser repo): pass any denoiser-core
+// shaped `TemporalDenoiser<SpecularInputs>` (e.g. `FfxReflectionDenoiser` from denoiser/ffx, created
+// on pixi's device) as `denoiser`; core's seam feeds it the frame contract, and the repack then reads
+// the denoised radiance instead of the raw one. The seam submits its own work, so `dispatch()`
+// submits too (the tracer's command buffer, the seam's, then the repack).
 import type { Renderer, Texture } from 'pixi.js';
 import {
-  constantRadianceFallback, createScreenSpaceReflections, probeRadianceFallback, screenSpaceInputsFromFrame,
+  constantRadianceFallback, createReflectionDenoiseSeam, createScreenSpaceReflections, probeRadianceFallback, screenSpaceInputsFromFrame,
   type FrameInputs, type RadianceFallback, type ScreenSpaceReflections as CoreTracer,
-  type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant,
+  type ReflectionDenoiseSeam, type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant, type SpecularInputs, type TemporalDenoiser,
 } from '@pmndrs/reflections-core';
 import { createPixiTarget, getDevice } from './internal/pixiWebGPU';
 import type { PixiProbeSet } from './probes';
@@ -51,6 +57,11 @@ export interface ScreenSpaceReflectionsOptions {
   settings?: ScreenSpaceReflectionsSettings;
   /** Per-pass GPU timestamps (`readTimings()`); needs 'timestamp-query'. */
   timestamps?: boolean;
+  /**
+   * A denoiser-core `TemporalDenoiser<SpecularInputs>` on pixi's device (optional peer, never a
+   * dependency). Gate it at the tracer's threshold (FFX compares alpha: `roughnessThreshold: 0.447 ** 2`).
+   */
+  denoiser?: TemporalDenoiser<SpecularInputs> | null;
 }
 
 export class ScreenSpaceReflections {
@@ -60,6 +71,11 @@ export class ScreenSpaceReflections {
   settings: ScreenSpaceReflectionsSettings;
   /** Trace rays. Off: every reflective pixel takes the fallback at its own roughness (probes / environment only). */
   enabled = true;
+  /** Denoise the traced signal when a denoiser was given. */
+  denoise = true;
+  /** The denoise seam (null without a denoiser). */
+  readonly seam: ReflectionDenoiseSeam | null;
+  private denoisedGroup: { texture: GPUTexture; group: GPUBindGroup } | null = null;
   private readonly variantOption: 'auto' | ScreenSpaceVariant;
   private readonly fallback: RadianceFallback;
   private readonly timestamps: boolean;
@@ -76,6 +92,7 @@ export class ScreenSpaceReflections {
     this.variantOption = options.variant ?? 'auto';
     this.timestamps = options.timestamps ?? false;
     this.fallback = this.probes ? probeRadianceFallback(this.probes.set) : constantRadianceFallback();
+    this.seam = options.denoiser ? createReflectionDenoiseSeam(this.device, { denoiser: options.denoiser }) : null;
     const C = GPUShaderStage.COMPUTE;
     this.packLayout = this.device.createBindGroupLayout({
       label: 'pixi reflections: pack',
@@ -105,13 +122,24 @@ export class ScreenSpaceReflections {
     }));
     const reflection = createPixiTarget(this.renderer, 'reflections: radiance + confidence', width, height, 'rgba16float', true);
     const aux = createPixiTarget(this.renderer, 'reflections: hit distance, ray length, roughness', width, height, 'rgba16float', true);
-    const o = tracer.outputs;
-    const group = this.device.createBindGroup({
-      label: 'pixi reflections: pack', layout: this.packLayout,
-      entries: [o.radiance, o.confidence, o.hitDistance, o.extractedRoughness, reflection.gpu, aux.gpu].map((t, binding) => ({ binding, resource: t.createView() })),
-    });
-    this.packed = { reflection, aux, group };
+    this.packed = { reflection, aux, group: this.packGroup(tracer.outputs.radiance, reflection.gpu, aux.gpu) };
+    this.denoisedGroup = null;
+    this.seam?.resetHistory();
   }
+
+  private packGroup(radiance: GPUTexture, reflection: GPUTexture, aux: GPUTexture) {
+    const o = this.tracer!.outputs;
+    return this.device.createBindGroup({
+      label: 'pixi reflections: pack', layout: this.packLayout,
+      entries: [radiance, o.confidence, o.hitDistance, o.extractedRoughness, reflection, aux].map((t, binding) => ({ binding, resource: t.createView() })),
+    });
+  }
+
+  /** True when this frame's radiance goes through the denoiser. */
+  get denoising() { return !!this.seam && this.denoise && this.enabled; }
+
+  /** Forget the denoiser's history (camera cut). */
+  resetHistory() { this.seam?.resetHistory(); }
 
   private out() {
     if (!this.packed) throw new Error('ScreenSpaceReflections: call configure(width, height) first');
@@ -122,19 +150,37 @@ export class ScreenSpaceReflections {
   /** rgba16float pixi texture: r world hit distance (0: no hit), g world ray length, b alpha roughness. */
   get aux(): Texture { return this.out().aux.texture; }
 
-  /** Records core's passes and the repack into `encoder` (submit it before pixi samples the outputs). */
+  /**
+   * Records core's passes into `encoder` and submits it (with whatever the caller recorded before,
+   * e.g. the G-buffer), then denoises (when set) and repacks into the pixi textures. pixi's next
+   * render samples the results.
+   */
   dispatch(encoder: GPUCommandEncoder, frame: FrameInputs) {
     const tracer = this.tracer;
-    if (!tracer || !this.packed) throw new Error('ScreenSpaceReflections: call configure(width, height) first');
+    const packed = this.packed;
+    if (!tracer || !packed) throw new Error('ScreenSpaceReflections: call configure(width, height) first');
     const inputs = screenSpaceInputsFromFrame(frame, tracer, { fallbackBindGroup: this.probes?.set.bindGroup });
     const settings: ScreenSpaceReflectionsSettings = { ...this.settings, frameIndex: frame.frameIndex };
     if (!this.enabled) settings.roughnessThreshold = 0;
     tracer.dispatch(encoder, inputs, settings);
-    const pass = encoder.beginComputePass({ label: 'pixi reflections: pack' });
+    let group = packed.group;
+    let packEncoder = encoder;
+    if (this.seam && this.denoising) {
+      this.device.queue.submit([encoder.finish()]);
+      const o = tracer.outputs;
+      const denoised = this.seam.dispatch(frame, { radiance: o.radiance, hitDistance: o.hitDistance });
+      if (this.denoisedGroup?.texture !== denoised) {
+        this.denoisedGroup = { texture: denoised, group: this.packGroup(denoised, packed.reflection.gpu, packed.aux.gpu) };
+      }
+      group = this.denoisedGroup.group;
+      packEncoder = this.device.createCommandEncoder({ label: 'pixi reflections: pack' });
+    }
+    const pass = packEncoder.beginComputePass({ label: 'pixi reflections: pack' });
     pass.setPipeline(this.packPipe);
-    pass.setBindGroup(0, this.packed.group);
+    pass.setBindGroup(0, group);
     pass.dispatchWorkgroups(Math.ceil(tracer.width / 8), Math.ceil(tracer.height / 8));
     pass.end();
+    this.device.queue.submit([packEncoder.finish()]);
   }
 
   readTimings(): Promise<ReadonlyMap<string, number>> {
@@ -149,5 +195,8 @@ export class ScreenSpaceReflections {
     this.tracer = null;
   }
 
-  dispose() { this.disposeTracer(); }
+  dispose() {
+    this.disposeTracer();
+    this.seam?.destroy();
+  }
 }

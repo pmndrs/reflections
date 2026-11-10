@@ -16,6 +16,7 @@ import {
   GBufferRenderer, Geometry, PixiProbeSet, REFLECTION_VIEWS, ReflectionCamera, ReflectionMaterial, ReflectionMesh, ReflectionScene,
   ReflectionsFilter, ReflectionsView, getDevice, getGPUTexture, requestReflectionsDevice, type ReflectionViewName,
 } from '@pmndrs/reflections/pixi';
+import { createReflectionDenoiser, denoiserAvailable } from '../../shared/denoiser';
 
 const q = new URLSearchParams(location.search);
 const manual = q.has('manual');
@@ -183,7 +184,7 @@ panel(signRT, 4.4, 2.2, [0, 1.62, -4.3], 0, 3.2);
 panel(eqRT, 1.6, 2.0, [-3.5, 1.25, -3.0], 0.55, 2.6);
 panel(sunRT, 1.6, 2.0, [3.5, 1.25, -3.0], -0.55, 2.6);
 
-mesh(Geometry.sphere(0.55), new ReflectionMaterial({ color: [0.95, 0.95, 0.97], metalness: 1, roughness: 0.03 }), [-1.35, 0.55, -1.3]);
+mesh(Geometry.sphere(0.55), new ReflectionMaterial({ color: [0.95, 0.95, 0.97], metalness: 1, roughness: 0 }), [-1.35, 0.55, -1.3]);
 const torus = mesh(Geometry.torus(0.42, 0.14), new ReflectionMaterial({ color: [1, 0.72, 0.3], metalness: 1, roughness: 0.22 }), [1.45, 0.82, -1.1]);
 mesh(Geometry.box(0.8, 0.2, 0.8), new ReflectionMaterial({ color: [0.7, 0.7, 0.75], roughness: 0.55 }), [1.45, 0.1, -1.1]);
 mesh(Geometry.box(0.6, 0.6, 0.6), new ReflectionMaterial({ color: [0.75, 0.05, 0.12], roughness: 0.3 }), [-2.7, 0.3, 0.3], yAxis(0.5));
@@ -216,11 +217,14 @@ const bakeMs = performance.now() - t0;
 probes.enabled = q.get('probes') !== '0';
 
 const variant = q.get('variant') === 'workgroup' ? 'workgroup' : 'auto';
+// the FFX reflection denoiser through core's denoise seam, when the sibling Denoiser repo is there
+const denoiser = denoiserAvailable ? createReflectionDenoiser(device) : null;
 const view = new ReflectionsView({
-  renderer, scene, camera, width: W, height: H, probes, variant, timestamps: true,
+  renderer, scene, camera, width: W, height: H, probes, variant, timestamps: true, denoiser,
   composite: { view: (q.get('view') as ReflectionViewName) ?? 'final', exposure: 1.25 },
 });
 view.ssrEnabled = q.get('ssr') !== '0';
+view.ssr.denoise = q.get('denoise') !== '0';
 app.stage.addChild(view);
 
 // Debug inset: the same texture on a second sprite with its own composite filter.
@@ -250,7 +254,7 @@ function update(dt: number) {
   // the signs animate: refresh the probe every 20 frames (one capture + prefilter, queued, not awaited)
   if (animate && frames % 20 === 19) void probes.bake(scene);
   view.render();
-  hud.text = `@pmndrs/reflections × pixi.js ${renderer.name ?? ''}  ·  SSR ${view.ssrEnabled ? 'on' : 'off'}  ·  probes ${probes.enabled ? 'on' : 'off'}  ·  ${view.debugView}`;
+  hud.text = `@pmndrs/reflections × pixi.js ${renderer.name ?? ''}  ·  SSR ${view.ssrEnabled ? 'on' : 'off'}  ·  probes ${probes.enabled ? 'on' : 'off'}  ·  denoise ${view.ssr.denoising ? 'on' : 'off'}  ·  ${view.debugView}`;
   frames++;
 }
 const frame = () => { update(1 / 60); app.render(); };
@@ -276,6 +280,8 @@ const box = (label: string, on: boolean, change: (on: boolean) => void) => {
 };
 const ssrBox = box('SSR', view.ssrEnabled, (on) => { view.ssrEnabled = on; });
 const probesBox = box('Probes', probes.enabled, (on) => { probes.enabled = on; });
+const denoiseBox = box(denoiser ? 'Denoise (FFX)' : 'Denoise (no denoiser found)', view.ssr.denoising, (on) => { view.ssr.denoise = on; });
+denoiseBox.disabled = !denoiser;
 box('Animate', !manual, (on) => (on ? startLoop() : stopLoop()));
 const select = (label: string, value: string, change: (v: ReflectionViewName) => void) => {
   const s = document.createElement('select');
@@ -292,7 +298,7 @@ function refreshUI() {
   status.textContent = [
     `pixi.js WebGPURenderer | ${view.pixelWidth}x${view.pixelHeight} | ${manual ? 'manual (loop stopped)' : 'running'} | probe bake ${bakeMs.toFixed(0)} ms`,
     `tracer variant ${view.ssr.variant} | SSR ${view.ssrEnabled ? 'on' : 'off (probes / environment only)'} | probes ${probes.enabled ? 'on (1 probe + sky)' : 'off (sky only)'}`,
-    `view ${view.debugView} | frames ${frames} | GPU errors ${gpuErrors.length}`,
+    `denoise ${denoiser ? (view.ssr.denoising ? `on (${denoiser.name})` : 'off') : 'unavailable (no sibling Denoiser repo)'} | view ${view.debugView} | frames ${frames} | GPU errors ${gpuErrors.length}`,
   ].join('\n');
 }
 setInterval(refreshUI, 500);
@@ -485,6 +491,8 @@ Object.assign(window, {
     setView(v: ReflectionViewName) { view.debugView = v; viewSel.value = v; },
     setSSR(on: boolean) { view.ssrEnabled = on; ssrBox.checked = on; },
     setProbes(on: boolean) { probes.enabled = on; probesBox.checked = on; },
+    setDenoise(on: boolean) { view.ssr.denoise = on; denoiseBox.checked = view.ssr.denoising; },
+    get denoiserName() { return denoiser?.name ?? null; },
     async shot() { frame(); const url = (app.canvas as HTMLCanvasElement).toDataURL('image/png'); await idle(); return url; },
     /** Median GPU ms per core pass over `k` frames (loop stopped). */
     async time(k = 30) {

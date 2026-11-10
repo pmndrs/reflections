@@ -817,7 +817,8 @@ async function babylonChecks(pages) {
  * composite as a pixi Filter). Smoke: renders, no validation errors, finite outputs, rays traced; the
  * glossy floor tiles reflect the signs (confident SSR); the adapter's cube captures sample as world
  * directions under core's plain cube lookup; the motion texture reprojects with motionVectorScale
- * [1, 1]. Screenshots of the final image, SSR off, probes off and the debug views.
+ * [1, 1]. Screenshots of the final image (denoised when the sibling Denoiser repo is there, and raw),
+ * SSR off, probes off and the debug views.
  */
 async function pixiChecks(pages) {
   console.log('examples/pixi:');
@@ -848,6 +849,9 @@ async function pixiChecks(pages) {
         `${mc.pixels} px; mean colour error ${mc.rows.map((r) => `[${r.scale}] ${r.meanError.toFixed(4)}`).join(', ')}`);
       const shot = async (name) => savePng(`pixi-${name}.png`, await p.T('window.__p.shot()'));
       await shot('final');
+      const denoiser = await p.T('window.__p.denoiserName');
+      console.log(`  denoiser: ${denoiser ?? 'none (no sibling Denoiser repo): raw signal'}`);
+      if (denoiser) { await p.T('window.__p.setDenoise(false)'); await shot('raw'); await p.T('window.__p.setDenoise(true)'); }
       await p.T('window.__p.setSSR(false)');
       await shot('ssr-off');
       await p.T('window.__p.setProbes(false)');

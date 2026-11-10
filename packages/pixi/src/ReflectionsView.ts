@@ -17,7 +17,7 @@ import { getDevice } from './internal/pixiWebGPU';
 import { mat4Mul } from './math';
 import type { PixiProbeSet } from './probes';
 import { ReflectionsFilter, type ReflectionsFilterOptions, type ReflectionViewName } from './ReflectionsFilter';
-import { ScreenSpaceReflections } from './ScreenSpaceReflections';
+import { ScreenSpaceReflections, type ScreenSpaceReflectionsOptions } from './ScreenSpaceReflections';
 import type { ReflectionCamera, ReflectionScene } from './scene';
 
 export interface ReflectionsViewOptions {
@@ -39,6 +39,8 @@ export interface ReflectionsViewOptions {
   /** Composite options (live: `view.composite`). */
   composite?: ReflectionsFilterOptions;
   timestamps?: boolean;
+  /** A denoiser-core `TemporalDenoiser<SpecularInputs>` on pixi's device (see ScreenSpaceReflections). */
+  denoiser?: ScreenSpaceReflectionsOptions['denoiser'];
 }
 
 export class ReflectionsView extends Sprite {
@@ -64,7 +66,7 @@ export class ReflectionsView extends Sprite {
     this.camera = o.camera;
     this.viewResolution = o.resolution ?? o.renderer.resolution;
     this.gbuffer = new GBufferRenderer(o.renderer);
-    this.ssr = new ScreenSpaceReflections({ renderer: o.renderer, probes: o.probes, variant: o.variant, settings: o.settings, timestamps: o.timestamps });
+    this.ssr = new ScreenSpaceReflections({ renderer: o.renderer, probes: o.probes, variant: o.variant, settings: o.settings, timestamps: o.timestamps, denoiser: o.denoiser });
     this.gtargets = this.allocate(o.width, o.height);
     this.composite = new ReflectionsFilter(this.filterSources(), o.composite);
     this.filters = [this.composite];
@@ -108,6 +110,7 @@ export class ReflectionsView extends Sprite {
   resetHistory() {
     this.prevViewProj = null;
     this.frame.resetHistory();
+    this.ssr.resetHistory();
     this.gbuffer.resetHistory(this.scene);
   }
 
@@ -129,8 +132,7 @@ export class ReflectionsView extends Sprite {
     this.gbuffer.render(encoder, this.scene, view, projection, eye, t, this.prevViewProj ?? undefined);
     const frame = this.frame.build(t, { view, projection, eye, near: this.camera.near, far: this.camera.far });
     this.lastFrame = frame;
-    this.ssr.dispatch(encoder, frame);
-    this.device.queue.submit([encoder.finish()]);
+    this.ssr.dispatch(encoder, frame); // submits (and denoises when a denoiser is set)
     this.gbuffer.commitHistory(this.scene);
     this.prevViewProj = mat4Mul(projection, view);
   }

@@ -18,7 +18,7 @@
 import type { Renderer, Texture } from 'pixi.js';
 import { VERTEX_STRIDE } from './geometry';
 import { createPixiTarget, getDevice, getGPUTexture } from './internal/pixiWebGPU';
-import { mat4FromBasis, mat4Invert, mat4LookAt, mat4Mul, mat4Ortho, mat4Perspective, mat4Transpose, normalize3, type Vec3 } from './math';
+import { CUBE_FACE_BASES, mat4FromBasis, mat4Invert, mat4LookAt, mat4Mul, mat4Ortho, mat4Perspective, mat4Transpose, normalize3, type Vec3 } from './math';
 import type { ReflectionCamera, ReflectionMaterial, ReflectionMesh, ReflectionScene } from './scene';
 
 const FRAME_SLOT = 512; // bytes per frame-uniform slot (dynamic offset)
@@ -235,18 +235,6 @@ export class GBufferTargets {
     this.depth.destroy();
   }
 }
-
-// WebGPU cube faces (+X, -X, +Y, -Y, +Z, -Z): the view basis that puts texel (u, v) of face f on the
-// direction a texture_cube lookup maps it to (u along `right`, v along -`up`). Left-handed bases, so
-// captures draw without culling.
-const CUBE_FACES: { right: Vec3; up: Vec3; forward: Vec3 }[] = [
-  { right: [0, 0, -1], up: [0, 1, 0], forward: [1, 0, 0] },
-  { right: [0, 0, 1], up: [0, 1, 0], forward: [-1, 0, 0] },
-  { right: [1, 0, 0], up: [0, 0, -1], forward: [0, 1, 0] },
-  { right: [1, 0, 0], up: [0, 0, 1], forward: [0, -1, 0] },
-  { right: [1, 0, 0], up: [0, 1, 0], forward: [0, 0, 1] },
-  { right: [-1, 0, 0], up: [0, 1, 0], forward: [0, 0, -1] },
-];
 
 interface MaterialBinding { key: string; group: GPUBindGroup }
 
@@ -536,7 +524,7 @@ export class GBufferRenderer {
     this.prepare(scene);
     const shadowVP = options.skyOnly ? undefined : this.renderShadow(encoder, scene);
     const proj = mat4Perspective(Math.PI / 2, 1, options.near ?? 0.05, options.far ?? 100);
-    CUBE_FACES.forEach((face, f) => {
+    CUBE_FACE_BASES.forEach((face, f) => {
       const back: Vec3 = [-face.forward[0], -face.forward[1], -face.forward[2]];
       this.writeFrame(SLOT_FACE0 + f, scene, mat4FromBasis(position, face.right, face.up, back), proj, position, undefined, shadowVP);
       const pass = encoder.beginRenderPass({

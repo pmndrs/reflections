@@ -122,3 +122,17 @@ export function mat4Compose(position: Vec3, rotation: Vec3, scale: Vec3, out: Ma
   out.set(m);
   return out;
 }
+
+/**
+ * WebGPU cube faces (+X, -X, +Y, -Y, +Z, -Z): the view basis that puts texel (u, v) of face f on the
+ * direction a `texture_cube` lookup maps it to (u along `right`, v along -`up`, rows top-down).
+ * The bases are left-handed (a cube map is), so captures draw without culling.
+ */
+export const CUBE_FACE_BASES: readonly { right: Vec3; up: Vec3; forward: Vec3 }[] = [
+  { right: [0, 0, -1], up: [0, 1, 0], forward: [1, 0, 0] },
+  { right: [0, 0, 1], up: [0, 1, 0], forward: [-1, 0, 0] },
+  { right: [1, 0, 0], up: [0, 0, -1], forward: [0, 1, 0] },
+  { right: [1, 0, 0], up: [0, 0, 1], forward: [0, -1, 0] },
+  { right: [1, 0, 0], up: [0, 1, 0], forward: [0, 0, 1] },
+  { right: [-1, 0, 0], up: [0, 1, 0], forward: [0, 0, -1] },
+];
