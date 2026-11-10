@@ -1,0 +1,326 @@
+# @pmndrs/reflections — spec
+
+Status: draft 1, 2026-11-10. Phase 0 (this repo's first commit) is done. Everything after it is a plan.
+
+## What this is
+
+One library for specular reflections on WebGPU. It covers the three sources real-time engines combine:
+
+- **Reflection probes:** baked or live captures, prefiltered by roughness, box-projected, blended by volume.
+- **Screen-space reflections:** a hierarchical-depth stochastic tracer, a port of FidelityFX SSSR.
+- **Ray-traced fallback:** BVH rays for what screen space can't see.
+
+A **hybrid resolve** picks among these sources per pixel. It also hands the noisy part to a temporal denoiser and composites the result into the frame.
+
+The core is engine-agnostic: WGSL passes on a bare `GPUDevice`. Engines plug in through adapters. three.js `WebGPURenderer` is the first adapter, as it was in the sibling libraries `denoiser` and `@pmndrs/upscaler`.
+
+### Why a separate project
+
+Until now, the reflection work lived in the denoiser repo. The FFX reflection denoiser was in the package, and the probes, SSR wiring and ray-traced reflections were inside its `three-temporal` examples. Ben Houston's probe work was split between those examples and a three.js fork.
+
+Apart from the denoiser itself, none of that was denoiser work. The probes were example code that nobody could import.
+
+This repo gives the reflection sources a home. The siblings keep their own jobs:
+
+| Library | Job here |
+|---|---|
+| `denoiser` | Denoises the noisy reflection signal (`ffxReflections` / `FfxReflectionDenoiser`). It plugs in through the denoise seam (below). Its examples become consumers of this package. |
+| `@pmndrs/upscaler` | Runs after composition, as it does for any frame. Reflection passes can run at a reduced resolution and are upscaled by their own resolve, not by the upscaler. |
+| three.js | The first vendor. The probes keep the API of three.js #35046 (Ben Houston's `ReflectionProbes`), so code can move between this repo and three. |
+| three-mesh-bvh / three-gpu-pathtracer | BVH tracing for the ray-traced source, behind a trace seam (below). |
+
+### Non-goals
+
+- **No WebGL.** WebGPU only, like the siblings. The octahedral probe layout below does happen to be WebGL2-friendly, which keeps a door open.
+- **No diffuse GI.** Irradiance volumes, DDGI, SSGI and VXGI are out of scope. Reflections *consume* irradiance from those tools; see "Probe re-fit".
+- **No denoiser implementation.** Denoising stays in `denoiser`. This repo defines the inputs and outputs the denoiser sees.
+- **No scene management.** The engine owns meshes, materials and the capture render. The core owns textures, passes and lookups.
+
+## Package layout
+
+This is the same shape as `@pmndrs/upscaler`: pnpm workspaces, private engine packages, and one published package that bundles them.
+
+```
+@pmndrs/reflections            published; root package.json, src/{index,core,three}.ts, built by vite + rollup-plugin-dts
+  .                            the three.js surface (same as ./three)
+  ./three                      three.js WebGPURenderer adapter
+  ./core                       engine-agnostic, bare GPUDevice
+packages/core   @pmndrs/reflections-core    private: WGSL passes, layouts, math, contracts
+packages/three  @pmndrs/reflections-three   private: ReflectionProbes, TSL nodes, three-mesh-bvh trace provider
+(later) packages/babylon, packages/pixi     as in the upscaler, once the core contract holds
+examples/<name>/index.html                  `pnpm examples` -> http://127.0.0.1:5370/<name>/
+scripts/run-headless.mjs                    `pnpm check`: Chrome + WebGPU over CDP, no puppeteer
+```
+
+**Rules:**
+
+- `core` never imports an engine.
+- An adapter never re-implements core math. It gets textures and a device from its engine, calls core, and wraps the core lookups in the engine's shading system (TSL nodes for three).
+- The public API carries no AMD product marks, as in the upscaler. Attribution stays in `NOTICE` and in file headers.
+
+## Frame contract
+
+Every screen-space and hybrid pass reads the same inputs. Adapters fill them; core never guesses at conventions, so each choice is an explicit flag.
+
+| Input | Format / convention | Notes |
+|---|---|---|
+| depth | the engine's depth texture, or r32f linear | `depthInverted` flag (reverse-Z) |
+| normal | world space, rgba16f or packed | unpack mul/add like FFX's `normalUnPackMul/Add` |
+| roughness | a channel of a material texture | `roughnessIsPerceptual` (three: true) |
+| metalness / F0 / albedo | material texture | used for the lobe weight and composition |
+| motion | uv-space velocity | `motionVectorScale` maps engine conventions |
+| scene color | HDR, direct + diffuse lighting only | SSSR's hit radiance; last frame's color is allowed (reprojected) |
+| camera | view, projection, previous view-projection, jitter | the same struct the denoiser's `FrameCamera` uses |
+
+**Output:**
+
+- specular radiance (rgba16f) plus hit distance (r16f), at full or half resolution;
+- per-pixel source and confidence (debug and resolve);
+- the denoised result once the denoise seam has run.
+
+### Denoise seam
+
+The resolve takes any object shaped like `denoiser-core`'s `TemporalDenoiser<SpecularInputs>`. That covers radiance, hit distance, guides (depth, normal, roughness, motion) and the camera.
+
+`FfxReflectionDenoiser` from `denoiser/ffx` fits it as is. On three, `ffxReflections()` from `denoiser/three` is the matching node.
+
+`denoiser` is an optional peer, never a dependency. With no denoiser, the resolve falls back to the probe term for rough pixels and to the raw trace for mirrors.
+
+### Trace seam
+
+A trace provider is a WGSL snippet plus a bind group. The snippet provides `fn traceFirstHit(origin, dir, tMax) -> Hit`, where `Hit` holds distance, triangle id, barycentrics and a material index.
+
+Hit shading belongs to the resolve, not the provider. It looks up the probes at the hit point, plus whatever cheap material evaluation the engine exposes.
+
+- **three adapter:** wraps `three-mesh-bvh/webgpu` (`BVHComputeData`, `raycastFirstHit`), which the explainer pages already use.
+- **Core-native BVH:** open question 1.
+
+## Sources
+
+### 1. Probes (moved here in phase 0)
+
+**State today.** Phase 0 moved this code from the denoiser repo, unchanged except for imports:
+
+- `ReflectionProbe` / `ReflectionProbes` / `ReflectionProbesHelper`
+- `reflectionProbes()` and `sampleReflectionProbes(probes, P, dir, roughness)`
+- the GGX prefilter
+
+It works as follows:
+
+- It uses the API of three.js #35046, running on r186.
+- r186 can't bind `texture_cube_array`, so the cubes live in a 2D array of 6 × N layers, and the node picks the face itself.
+- The prefilter is a raw-WebGPU compute pass, now in core (`probes/prefilter.ts`). It implements r187's cube-PMREM plan: lod 0 copy, 256-sample filtered importance sampling, and the last three levels as full 16 px integrals. Roughness maps to lod by `lod = maxLod · r · (2 − r)`.
+- `seamFix: 'warp'` centres the edge texels on the cube edges. Measured against the hardware cube sampler on the same bake, it differs by a mean of 0.05 / 255 and at most 3 / 255. It costs about 0.06 ms per 1080p frame for 3 probes.
+
+**Measured numbers (denoiser repo, M-series):**
+
+| Case | Time |
+|---|---|
+| Bake, 3 probes at 128 px | 2.2 ms (loop stopped, ~1.8 ms of it CPU encoding) |
+| Bake, one 256 px probe | ~1.8 ms timed, ~1.05 ms in bursts |
+| Frame at 960×540, probes only | ~2.9 ms |
+| Frame at 960×540, probes with live capture | ~4.7 ms |
+
+**Extensions over #35046:**
+
+- `sampleReflectionProbes`: any shader can look up the probes, such as a traced ray's miss, a composite or a hit point.
+- `originOffset`
+- `bake({ environment: false })`
+- `seamFix`
+
+**Where it goes:**
+
+- **Layout-generic atlas in core.** The probe texture, the volume table (influence, projection, blend, priority) and the lookup become core.
+  - The lookup is a WGSL function plus a bind group layout.
+  - The three node becomes a thin TSL wrapper over it.
+  - The layout is a parameter (next section).
+- **Capture stays in the adapter.** Rendering six faces is engine work. Core takes the six face textures and does everything after: prefilter, atlas write, environment slot.
+- **three upstream.** When three ships `CubeArrayTexture` sampling (#35053) and #35046, the three adapter can bake into three's texture for a `cube-array` layout. The API stays the same either way.
+- **Probe re-fit.** Normalize the probe radiance by irradiance, as idTech 8 does: `reflection × frameIrradiance / probeIrradiance`. Lazarov 2013 and Hobson 2019 describe the same normalization.
+  - `probeIrradiance` is the probe's L1 SH, taken from the same capture.
+  - `frameIrradiance` comes from whatever GI the app has: three r187's `LightProbeGrid` (L2 SH), VXGI, SSGI or a lightmap.
+  - This is the main way reflections "work with GI tools". It removes glowing corners and picks up bounce colour that the probe's single capture point missed.
+
+### 2. Octahedral probes vs PMREM (phase 1 research)
+
+**Correcting the premise.** idTech 8 (Sousa, Advances in Real-Time Rendering, SIGGRAPH 2025) uses octahedral maps for its *irradiance* volumes, not for its reflection probes:
+
+- The irradiance volumes are a DDGI-style atlas: 8×8 octahedral tiles with 10×10 borders, RGB9E5 colour plus RG16F visibility, 2560×1585 for 6 cascades plus up to 100 local volumes, about 0.08 ms to update.
+- Its reflection probes are still BC6H cube-map arrays: box-projected, GGX-prefiltered by their own baker, and re-fit as above.
+- Its specular order is "SSR when possible, then RT, with fallback to probes based on smoothness".
+
+Octahedral *reflection* probes are still worth testing. Our case differs from idTech's in three ways:
+
+- r186 has no cube arrays.
+- We have no BC6H on every platform.
+- We want one layout that babylon, pixi and raw WebGPU can all sample.
+
+**PMREM and octahedral are different axes**, so they can work together:
+
+- PMREM is a *prefilter plan*: which roughness goes in which mip, and how each mip is integrated.
+- Octahedral is a *parameterization*: how directions map to texels.
+
+The core prefilter will take the layout as two functions, `dirForTexel(layout, texel)` and `texelForDir(layout, dir)`. That way the same GGX plan (r187's, with the same roughness-to-lod mapping) writes any layout. Three's own PMREM output for `scene.environment` can then be resampled into the probe atlas's environment slot.
+
+**Layouts to compare:**
+
+| id | Layout | Lookup |
+|---|---|---|
+| `cube2d-warp` | today: 6 layers per probe, edge-centred texels | face pick + 2 bilinear samples |
+| `cube2d-none` | 6 layers per probe, plain texels | face pick + 1 trilinear sample (edge creases) |
+| `cube-hw` | one cube texture per probe (stands in for a cube array) | 1 hardware sample, seamless |
+| `octa` | 1 layer per probe, full-sphere octahedral, a gutter at each mip | 1 trilinear sample |
+| `octa-hemi` (maybe) | hemi-octahedral for probes on a wall | 1 sample, half the texels |
+
+**Metrics.** Each is measured per roughness level, on the same captures, on two scenes: the two rooms and the explainer room.
+
+- **Error** against a brute-force GGX reference: a compute pass integrating mip 0 with thousands of samples per texel direction. Reported as mean and p99, split into face-edge or fold texels versus the rest.
+- **Seam visibility** after tone mapping.
+- **Memory per probe** at equal p99 error.
+- **Bake time** (prefilter only, then full).
+- **Lookup cost**: ms per 1080p frame for 1, 3 and 16 probes.
+- **Engine fit**: what babylon, pixi and raw WebGPU need in order to sample it.
+
+**Gate.** `octa` becomes the default if both of these hold:
+
+- it matches `cube2d-warp` error at less than or equal memory;
+- it costs no more per frame.
+
+Otherwise it stays an option. The `cube-hw` path remains the reference for "what a cube array would give".
+
+### 3. Screen-space: SSSR port (phase 3)
+
+Three's `SSRNode` is tightly bound to three. Its stochastic march was also the root cause of the boiling we chased in Ben's scenes; see the denoiser repo's `REFLECT-BENCH.md`.
+
+The port follows FidelityFX SSSR (SSSR 1.5 in the current GPUOpen manual). It keeps the host order of the SDK v1.1.4 sources that our denoiser port already follows:
+
+1. **Hierarchical depth:** an SPD-style single-pass downsample of depth to a 7-level min-depth pyramid (r32f).
+2. **Tile classification:**
+   - Pixels rougher than `roughnessThreshold` trace no ray and take the probe term.
+   - `samplesPerQuad` sets the minimum rays per 2×2 quad (1, 2 or 4).
+   - With variance-guided tracing, a quad gets more rays when last frame's variance is high.
+   - The pass writes the ray list, the denoiser tile list and the ray counter.
+3. **Blue noise:** a 128×128 texture per frame from the frame index (Sobol + scrambling tables, or our own).
+4. **Indirect arguments** from the ray counter.
+5. **Intersection:**
+   - Hi-Z traversal, which uses coarser mips when that is safe and goes full-rate for mirrors and quarter-rate for glossy.
+   - A miss, or a hit outside the screen, goes to the trace seam (if present) and then to the probe lookup at the pixel.
+6. **Denoise** through the seam (`FfxReflectionDenoiser`).
+
+**Inputs:** the frame contract. SSSR wants scene colour without specular, so the adapter renders specular off, or composites probe specular after.
+
+**Verification:**
+
+- Pass-level parity with the SDK's HLSL is checked through WGSL text review plus image parity on scenes where screen space sees everything (a mirror floor facing a lit wall).
+- The scene images are checked against an accumulated reference.
+- It is compared against three's `SSRNode` on the same scenes: flicker, bias, GPU ms.
+
+### 4. Ray-traced fallback (phase 4)
+
+- Rays go only to pixels that screen space failed: off-screen, behind an occluder, or past the thickness test. The budget is set per tile.
+- The ray origin and direction reuse the SSSR sample, so the denoiser sees one lobe sample per pixel whichever source produced it. `ggxLobeSample` (moved in phase 0) already keeps SSR hits, traced hits and probe lookups on the same weights.
+- **Hit shading:** probes at the hit point (`sampleReflectionProbes(probes, hitP, dir, 1)`) plus the engine's cheap direct-light term. A radiance cache is out of scope until the hybrid is measured.
+
+The explainer page in the denoiser repo already does this one-off for one room: rays at 4.5 ms against SSR's 3.9 and the hybrid's 4.2 per 960×540 frame. Phase 4 turns that into the package.
+
+### 5. Hybrid resolve (phase 5)
+
+**Per pixel:**
+
+- smoothness below the threshold → probe;
+- otherwise → SSSR hit, then traced hit, then probe, then environment.
+
+Edge cases:
+
+- **Screen-edge fade:** confidence goes to the next source down.
+- **Specular occlusion:** from the probe re-fit, or a cheap bent-normal / AO term.
+
+The composite uses the split-sum DFG term (`radiance × (F0 · A + B)`), the same one three's PBR uses, so a material looks the same lit by probes alone or by the hybrid.
+
+Debug views:
+
+- source per pixel;
+- confidence;
+- ray budget;
+- hit distance;
+- probe volume weights (a version of `ReflectionProbesHelper` for each layout).
+
+## Benches and verification
+
+- **`pnpm check`** loads every example in headless Chrome with WebGPU and fails on validation errors or exceptions. Phase 0 checks:
+  - the probes example bakes 3 probes;
+  - it renders lit;
+  - `warp` matches the hardware cube sampler (mean 0.05, max 3 / 255);
+  - with `--compare <url>`, it is pixel-identical (max 0 / 255) to the denoiser repo's `reflection-probes.html`.
+- **Scenes:**
+  - Ben's two rooms (probes, live capture, a mirror ball);
+  - the explainer room, with its scenarios: mirror, off-screen, moving, contact, rough;
+  - the reflection bench's G1 steampunk scene (the denoiser cleanroom branch) for the screen-space and denoise stages.
+- **Metrics:** the five-number style of the denoiser scorecard: bias and RMSE against an accumulated reference, still and orbit flicker, and GPU ms per pass from timestamp queries.
+- **Measurement rules carried over from the siblings:**
+  - Measure with the loop stopped (`?manual`).
+  - Never compare worktree absolutes against repo-run absolutes.
+  - Never trust "it builds".
+
+## Roadmap
+
+| Phase | What | Gate |
+|---|---|---|
+| 0 ✅ | Repo, monorepo layout, probes + prefilter + sampling moved, probes example, headless check, this spec | Typecheck, tests, build; example pixel-identical to the source |
+| 1 | Layout bench: `octa` / `cube2d-warp` / `cube2d-none` / `cube-hw`, brute-force reference | The decision above, written up in `docs/research/probe-layouts.md` |
+| 2 | Probe core: layout-generic prefilter, atlas, WGSL lookup in core, three node on top, re-fit with an irradiance input | Rooms example on the core path, identical or better; lookup ms not worse |
+| 3 | SSSR port in core + three adapter node | No boiling on the rooms and G1; flicker and GPU ms at or below three `SSRNode` + its denoise |
+| 4 | Trace seam, three-mesh-bvh provider, hit shading through probes | Off-screen scenario matches the reference; rays only where SSR failed |
+| 5 | Hybrid resolve + denoise seam; the denoiser repo's reflection pages switch to the package | Explainer and rooms pages run on `@pmndrs/reflections` with no local copies |
+| 6 | babylon / pixi adapters; publish 0.1 | Packed-subpath checks like the upscaler's `verify:packed-subpaths` |
+
+## Moving from the denoiser repo
+
+**Copied here in phase 0** from denoiser@`0ff604c`, with the denoiser untouched:
+
+| Denoiser path | Here |
+|---|---|
+| `examples/three-temporal/src/probes/prefilter.ts` | `packages/core/src/probes/prefilter.ts` |
+| `examples/three-temporal/src/probes/ReflectionProbes{,Node,Helper}.ts` | `packages/three/src/probes/` |
+| `examples/three-temporal/src/reflections/common.ts` | `packages/three/src/sampling.ts` |
+| `examples/three-temporal/{reflection-probes.html,src/reflection-probes.ts}` | `examples/probes/` |
+
+**Stays in the denoiser repo:**
+
+- the FFX reflection denoiser (`denoiser-ffx/src/reflections.ts`, its shaders, `ffxReflections`);
+- the track R / reflection-bench / scorecard research, which measures denoisers;
+- the explainer, rooms and SSR pages, which are examples.
+
+From now on, the denoiser's copies are frozen and changes land here. Once this package is installable (published, or linked through the workspace), the denoiser's `three-temporal` swaps its imports to `@pmndrs/reflections/three` and deletes `src/probes/` and `src/reflections/common.ts`.
+
+**The three.js fork work** stays the user's call to upstream:
+
+- compute `PMREMGenerator`;
+- `CubeArrayTexture` probes, target reuse and live-capture fixes on `pmrem-compute-probes`.
+
+This repo stays API-compatible with #35046 either way.
+
+## Provenance and licences
+
+See `NOTICE`:
+
+- the probes port three.js #35046 (MIT, three.js authors; Ben Houston);
+- the prefilter kernels come from `@pmndrs/sky` 0.6.0 (MIT, Dennis Smolek), implementing three r187's PMREM plan;
+- the SSSR port, when it lands, is from the FidelityFX SDK (MIT, AMD), with its notice carried as in `denoiser-ffx`.
+
+## Open questions
+
+1. **Which BVH is "ours" for the core trace provider?** The options are `three-mesh-bvh/webgpu` (three-bound, used today), the three-gpu-pathtracer fork, or a core-native BVH so babylon and pixi get rays too.
+2. **When does the repo go public, and is `@pmndrs/reflections` the npm name?**
+3. **pnpm**, matching the upscaler (the denoiser uses yarn 4). Chosen here; say if the denoiser's toolchain should win.
+4. **Should SSSR's intersect pass trace at half resolution by default** (idTech's RT runs at ½ or ¼), or follow FFX's full-rate mirrors and quarter-rate glossy?
+
+## References
+
+- Sousa, *idTech 8 Global Illumination*, Advances in Real-Time Rendering, SIGGRAPH 2025.
+- AMD GPUOpen, *FidelityFX Stochastic Screen-Space Reflections 1.5* manual; FidelityFX SDK v1.1.4 sources (`ffx_sssr`, `ffx_denoiser`).
+- Stachowiak, *Stochastic Screen-Space Reflections*, SIGGRAPH 2015.
+- Engelhardt & Dachsbacher, *Octahedron Environment Maps*, 2008.
+- Majercik et al., *Dynamic Diffuse Global Illumination with Ray-Traced Irradiance Fields*, JCGT 2019.
+- Lazarov, *Getting More Physical in Call of Duty: Black Ops II*, 2013 (probe normalization).
+- three.js PRs #35046 (ReflectionProbes), #35053 (CubeArrayTexture), #35045 (cube-array sampling).

@@ -1,0 +1,18 @@
+@pmndrs/reflections
+Copyright (c) 2026 Dennis Smolek. MIT licensed (see LICENSE).
+
+This project includes or adapts code from the following MIT-licensed works.
+
+three.js (https://github.com/mrdoob/three.js), Copyright (c) 2010-2026 three.js authors, MIT.
+  - packages/three/src/probes/*: a port of ReflectionProbes / ReflectionProbesNode /
+    ReflectionProbesHelper from three.js pull request #35046 (Ben Houston), adapted to r186.
+  - packages/core/src/probes/prefilter.ts: implements the prefilter plan of three.js r187's
+    cube PMREMGenerator.
+  - packages/three/src/sampling.ts: uses three's SpecularHelpers.ggxReflectionSample.
+
+@pmndrs/sky 0.6.0 (https://github.com/pmndrs/sky), Copyright (c) Dennis Smolek, MIT.
+  - packages/core/src/probes/prefilter.ts: WGSL kernels vendored from src/sky/pmrem/kernels.ts.
+
+Planned (docs/SPEC.md): the screen-space tracer will be a WGSL port of AMD FidelityFX SSSR
+(FidelityFX SDK, Copyright (C) 2024 Advanced Micro Devices, Inc., MIT). Its notice will be
+reproduced here when that code lands.

@@ -1,0 +1,68 @@
+{
+  "name": "@pmndrs/reflections",
+  "version": "0.0.0",
+  "description": "Reflections for WebGPU: reflection probes (box-projected, prefiltered), screen-space reflections and ray-traced fallbacks, composed into one hybrid. Engine-agnostic core, three.js adapter.",
+  "author": "Dennis Smolek <dennis@smolek.dev>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pmndrs/reflections.git"
+  },
+  "homepage": "https://github.com/pmndrs/reflections#readme",
+  "bugs": {
+    "url": "https://github.com/pmndrs/reflections/issues"
+  },
+  "keywords": ["three", "threejs", "webgpu", "wgsl", "tsl", "reflections", "reflection-probes", "ssr", "sssr", "ray-tracing", "pmrem", "octahedral"],
+  "type": "module",
+  "sideEffects": false,
+  "packageManager": "pnpm@10.33.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./three": {
+      "types": "./dist/three.d.ts",
+      "import": "./dist/three.js"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "examples": "vite --config examples/vite.config.ts",
+    "examples:build": "vite build --config examples/vite.config.ts",
+    "check": "node scripts/run-headless.mjs",
+    "build": "vite build && rollup -c rollup.dts.config.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build"
+  },
+  "peerDependencies": {
+    "three": ">=0.186.0"
+  },
+  "peerDependenciesMeta": {
+    "three": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@pmndrs/reflections-core": "workspace:*",
+    "@pmndrs/reflections-three": "workspace:*",
+    "@types/three": "^0.186.0",
+    "@webgpu/types": "^0.1.71",
+    "rollup": "^4.62.2",
+    "rollup-plugin-dts": "^6.2.1",
+    "three": "^0.186.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.1.0",
+    "vitest": "^3.0.0"
+  }
+}
