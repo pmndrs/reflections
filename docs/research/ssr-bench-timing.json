@@ -1,0 +1,503 @@
+{
+ "started": "2026-11-10T09:05:04.093Z",
+ "scenes": {
+  "rooms": {
+   "methods": {}
+  },
+  "explainer": {
+   "methods": {}
+  },
+  "mirrorWall": {
+   "methods": {}
+  },
+  "roughnessRamp": {
+   "methods": {}
+  }
+ },
+ "timing": [
+  {
+   "method": "ours",
+   "base": false,
+   "scene": "rooms",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 2.238906,
+   "gpuMin": 2.064779,
+   "gpuP90": 3.160557,
+   "cpuMs": 0.7999999970197678
+  },
+  {
+   "method": "ours-accum",
+   "base": false,
+   "scene": "rooms",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 2.351541,
+   "gpuMin": 2.230405,
+   "gpuP90": 2.927812,
+   "cpuMs": 0.7000000029802322
+  },
+  {
+   "method": "three-blur",
+   "base": false,
+   "scene": "rooms",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 2.612888,
+   "gpuMin": 2.308044,
+   "gpuP90": 2.888573,
+   "cpuMs": 0.7000000029802322
+  },
+  {
+   "method": "three-stoch",
+   "base": false,
+   "scene": "rooms",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 2.78308,
+   "gpuMin": 2.659296,
+   "gpuP90": 3.736188,
+   "cpuMs": 0.6000000089406967
+  },
+  {
+   "method": "three-denoise",
+   "base": false,
+   "scene": "rooms",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 6.089555,
+   "gpuMin": 5.794964,
+   "gpuP90": 6.581473,
+   "cpuMs": 0.7999999970197678
+  },
+  {
+   "method": "ours",
+   "base": true,
+   "scene": "rooms",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.483675,
+   "gpuMin": 1.299402,
+   "gpuP90": 1.803891,
+   "cpuMs": 0.6000000089406967
+  },
+  {
+   "method": "three-blur",
+   "base": true,
+   "scene": "rooms",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.638575,
+   "gpuMin": 1.473093,
+   "gpuP90": 1.804848,
+   "cpuMs": 0.5
+  },
+  {
+   "method": "three-stoch",
+   "base": true,
+   "scene": "rooms",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.521463,
+   "gpuMin": 1.134087,
+   "gpuP90": 1.679528,
+   "cpuMs": 0.5999999940395355
+  },
+  {
+   "method": "ours",
+   "base": false,
+   "scene": "explainer",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.679111,
+   "gpuMin": 1.396101,
+   "gpuP90": 2.471986,
+   "cpuMs": 0.4000000059604645
+  },
+  {
+   "method": "ours-accum",
+   "base": false,
+   "scene": "explainer",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.928586,
+   "gpuMin": 1.668572,
+   "gpuP90": 2.403035,
+   "cpuMs": 0.5
+  },
+  {
+   "method": "three-blur",
+   "base": false,
+   "scene": "explainer",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 2.72825,
+   "gpuMin": 2.389078,
+   "gpuP90": 3.654485,
+   "cpuMs": 0.5
+  },
+  {
+   "method": "three-stoch",
+   "base": false,
+   "scene": "explainer",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 2.24276,
+   "gpuMin": 2.004295,
+   "gpuP90": 2.537646,
+   "cpuMs": 0.5999999940395355
+  },
+  {
+   "method": "three-denoise",
+   "base": false,
+   "scene": "explainer",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 4.17062,
+   "gpuMin": 4.018421,
+   "gpuP90": 4.874287,
+   "cpuMs": 0.5999999940395355
+  },
+  {
+   "method": "ours",
+   "base": true,
+   "scene": "explainer",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 0.788833,
+   "gpuMin": 0.667138,
+   "gpuP90": 0.981478,
+   "cpuMs": 0.4000000059604645
+  },
+  {
+   "method": "three-blur",
+   "base": true,
+   "scene": "explainer",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 0.915445,
+   "gpuMin": 0.743962,
+   "gpuP90": 1.072843,
+   "cpuMs": 0.30000001192092896
+  },
+  {
+   "method": "three-stoch",
+   "base": true,
+   "scene": "explainer",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.070094,
+   "gpuMin": 0.903362,
+   "gpuP90": 1.636408,
+   "cpuMs": 0.5
+  },
+  {
+   "method": "ours",
+   "base": false,
+   "scene": "mirrorWall",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.632533,
+   "gpuMin": 1.51713,
+   "gpuP90": 2.096401,
+   "cpuMs": 0.4000000059604645
+  },
+  {
+   "method": "ours-accum",
+   "base": false,
+   "scene": "mirrorWall",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.785392,
+   "gpuMin": 1.696819,
+   "gpuP90": 1.988538,
+   "cpuMs": 0.5
+  },
+  {
+   "method": "three-blur",
+   "base": false,
+   "scene": "mirrorWall",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 3.555408,
+   "gpuMin": 3.436175,
+   "gpuP90": 4.47131,
+   "cpuMs": 0.4000000059604645
+  },
+  {
+   "method": "three-stoch",
+   "base": false,
+   "scene": "mirrorWall",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.304277,
+   "gpuMin": 1.245075,
+   "gpuP90": 1.711067,
+   "cpuMs": 0.29999999701976776
+  },
+  {
+   "method": "three-denoise",
+   "base": false,
+   "scene": "mirrorWall",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 2.752373,
+   "gpuMin": 2.662921,
+   "gpuP90": 3.435883,
+   "cpuMs": 0.4000000059604645
+  },
+  {
+   "method": "ours",
+   "base": true,
+   "scene": "mirrorWall",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 0.49878,
+   "gpuMin": 0.409039,
+   "gpuP90": 0.671845,
+   "cpuMs": 0.20000000298023224
+  },
+  {
+   "method": "three-blur",
+   "base": true,
+   "scene": "mirrorWall",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 0.679427,
+   "gpuMin": 0.57973,
+   "gpuP90": 0.779334,
+   "cpuMs": 0.20000000298023224
+  },
+  {
+   "method": "three-stoch",
+   "base": true,
+   "scene": "mirrorWall",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 0.464825,
+   "gpuMin": 0.322175,
+   "gpuP90": 0.5484,
+   "cpuMs": 0.20000000298023224
+  },
+  {
+   "method": "ours",
+   "base": false,
+   "scene": "roughnessRamp",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.575915,
+   "gpuMin": 1.214204,
+   "gpuP90": 1.957249,
+   "cpuMs": 0.4000000059604645
+  },
+  {
+   "method": "ours-accum",
+   "base": false,
+   "scene": "roughnessRamp",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.636742,
+   "gpuMin": 1.45522,
+   "gpuP90": 1.840345,
+   "cpuMs": 0.5
+  },
+  {
+   "method": "three-blur",
+   "base": false,
+   "scene": "roughnessRamp",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 2.505816,
+   "gpuMin": 2.334024,
+   "gpuP90": 3.136975,
+   "cpuMs": 0.5
+  },
+  {
+   "method": "three-stoch",
+   "base": false,
+   "scene": "roughnessRamp",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 2.101664,
+   "gpuMin": 1.961624,
+   "gpuP90": 2.304151,
+   "cpuMs": 0.4000000059604645
+  },
+  {
+   "method": "three-denoise",
+   "base": false,
+   "scene": "roughnessRamp",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 3.959967,
+   "gpuMin": 3.814642,
+   "gpuP90": 4.602636,
+   "cpuMs": 0.5
+  },
+  {
+   "method": "ours",
+   "base": true,
+   "scene": "roughnessRamp",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 0.757379,
+   "gpuMin": 0.642181,
+   "gpuP90": 0.868448,
+   "cpuMs": 0.29999999701976776
+  },
+  {
+   "method": "three-blur",
+   "base": true,
+   "scene": "roughnessRamp",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 1.181957,
+   "gpuMin": 0.987853,
+   "gpuP90": 1.381145,
+   "cpuMs": 0.29999999701976776
+  },
+  {
+   "method": "three-stoch",
+   "base": true,
+   "scene": "roughnessRamp",
+   "size": [
+    1920,
+    1080
+   ],
+   "frames": 30,
+   "spin": 0,
+   "gpuMs": 0.992144,
+   "gpuMin": 0.812871,
+   "gpuP90": 1.270906,
+   "cpuMs": 0.4000000059604645
+  }
+ ],
+ "device": {
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36"
+ },
+ "finished": "2026-11-10T09:05:18.386Z"
+}
