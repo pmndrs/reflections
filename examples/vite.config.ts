@@ -2,7 +2,7 @@ import { resolve } from 'path';
 import { readdirSync, existsSync } from 'fs';
 import { defineConfig } from 'vite';
 
-// Examples dev server: http://127.0.0.1:5370/<name>/ for each examples/<name>/index.html.
+// Examples dev server: http://127.0.0.1:5370/<name>/ ($REFLECTIONS_PORT overrides; worktrees use their own) for each examples/<name>/index.html.
 // The package is resolved to its source, so edits under packages/ show up without a build.
 const root = __dirname;
 const pages = Object.fromEntries(
@@ -13,7 +13,7 @@ const pages = Object.fromEntries(
 
 export default defineConfig({
   root,
-  server: { port: 5370, strictPort: true, host: '127.0.0.1' },
+  server: { port: Number(process.env.REFLECTIONS_PORT ?? 5370), strictPort: true, host: '127.0.0.1' },
   resolve: {
     alias: [
       { find: /^@pmndrs\/reflections\/three$/, replacement: resolve(root, '../src/three.ts') },
