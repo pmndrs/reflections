@@ -988,6 +988,23 @@ async function main() {
       const stats = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots.warp)}, ${JSON.stringify(shots.hw)})`);
       check('image is lit', stats.lum > 10, `mean luminance ${stats.lum.toFixed(1)}`);
       check("'warp' lookup matches the hardware cube sampler", stats.mean < 1, `mean ${stats.mean.toFixed(3)}, max ${stats.max} / 255`);
+      // phase 2: the package's lookup is core WGSL; the pre-phase-2 TSL lookup lives in examples/probes/src/legacy.ts
+      for (const seam of ['warp', 'none']) {
+        await p.T(`(window.__p.setLookup('legacy-${seam}'), window.__p.capture(), true)`);
+        const legacy = await p.T('window.__p.shot()');
+        const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots[seam])}, ${JSON.stringify(legacy)})`);
+        check(`core lookup matches the pre-phase-2 TSL node ('${seam}')`, d.max <= 1, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
+      }
+      {
+        // the probe grid (every sphere box-projected in its own volume) and the mirror sphere in the doorway
+        const scene = (lookup) => p.T(`(async () => { const P = window.__p; P.setLookup('${lookup}'); P.setGrid(true, 0.05); P.setObject('Sphere', [0, 1.4, 1.2], 0); P.capture();
+          for (let i = 0; i < 3; i++) await P.shot(); const s = await P.shot(); P.setGrid(false); P.setObject('None'); return s; })()`);
+        const core = await scene('warp'), legacy = await scene('legacy-warp');
+        savePng('probes-grid-core.png', core);
+        const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(core)}, ${JSON.stringify(legacy)})`);
+        check('core lookup matches the pre-phase-2 TSL node (grid + mirror sphere)', d.max <= 1, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
+      }
+      // W20 checks after the 2D-array parity checks above, so those run in the same order as before W20
       {
         // W20: the cube array is what 'hw' emulates (hardware cube sampling of cube2d-none's texels)
         const cs = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots['cube-array'])}, ${JSON.stringify(shots.hw)})`);
@@ -1035,22 +1052,6 @@ async function main() {
         })()`);
         check('a failing self-test uninstalls the shim and reports false; auto falls back', st.ok === false && st.failed.mode === 'none' && st.layout === 'cube2d' && st.again === true && st.relayout === 'cube-array',
           `${st.failed.reason}; then auto ${st.layout}, re-install ${st.again} (${st.relayout})`);
-      }
-      // phase 2: the package's lookup is core WGSL; the pre-phase-2 TSL lookup lives in examples/probes/src/legacy.ts
-      for (const seam of ['warp', 'none']) {
-        await p.T(`(window.__p.setLookup('legacy-${seam}'), window.__p.capture(), true)`);
-        const legacy = await p.T('window.__p.shot()');
-        const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots[seam])}, ${JSON.stringify(legacy)})`);
-        check(`core lookup matches the pre-phase-2 TSL node ('${seam}')`, d.max <= 1, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
-      }
-      {
-        // the probe grid (every sphere box-projected in its own volume) and the mirror sphere in the doorway
-        const scene = (lookup) => p.T(`(async () => { const P = window.__p; P.setLookup('${lookup}'); P.setGrid(true, 0.05); P.setObject('Sphere', [0, 1.4, 1.2], 0); P.capture();
-          for (let i = 0; i < 3; i++) await P.shot(); const s = await P.shot(); P.setGrid(false); P.setObject('None'); return s; })()`);
-        const core = await scene('warp'), legacy = await scene('legacy-warp');
-        savePng('probes-grid-core.png', core);
-        const d = await p.T(`(${IMAGE_STATS})(${JSON.stringify(core)}, ${JSON.stringify(legacy)})`);
-        check('core lookup matches the pre-phase-2 TSL node (grid + mirror sphere)', d.max <= 1, `mean ${d.mean.toFixed(4)}, max ${d.max} / 255`);
       }
       // W20: the feature checks run on one storage: 'auto' (the cube array through the shim, default) or the 2D array
       const probesLayout = args.includes('--probes-layout') ? args[args.indexOf('--probes-layout') + 1] : 'cube-array';
