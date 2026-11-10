@@ -15,7 +15,8 @@
   <body>
     <h1>Regression checks</h1>
     <p>
-      GPU repros for fixed bugs (G-buffer motion history, BC6H anchor indices, BC6H scratch limits), driven by
+      GPU repros for fixed bugs (G-buffer motion history, BC6H anchor indices, BC6H scratch limits; F2: SSR history,
+      RT tile share / limits / history / stats, probe lookup, irradiance, scale, rebake), driven by
       <code>pnpm check -- --only regressions</code>. <code>await __p.run()</code> returns every result.
     </p>
     <canvas id="view" width="320" height="160"></canvas>

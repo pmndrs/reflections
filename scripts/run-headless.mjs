@@ -76,12 +76,19 @@ const savePng = (name, dataUrl) => {
 
 /** Open `url` in a fresh headless Chrome; resolves once `window.__p` exists. */
 async function openPage(url) {
-  const port = 9300 + Math.floor(Math.random() * 500);
+  // Port 0: Chrome picks a free port and writes it to DevToolsActivePort. A random fixed port could
+  // collide with another worktree's Chrome, and then this run drove that run's page (F2).
+  const userDataDir = path.join(os.tmpdir(), `reflections-${Date.now()}-${process.pid}-${Math.floor(Math.random() * 1e9)}`);
   const chrome = spawn(CHROME, [
     '--headless=new', '--no-sandbox', '--use-angle=metal', '--enable-unsafe-webgpu',
-    '--enable-features=Vulkan', '--window-size=1100,900', `--remote-debugging-port=${port}`,
-    `--user-data-dir=${path.join(os.tmpdir(), `reflections-${Date.now()}-${port}`)}`, url,
+    '--enable-features=Vulkan', '--window-size=1100,900', '--remote-debugging-port=0',
+    `--user-data-dir=${userDataDir}`, url,
   ], { stdio: 'ignore' });
+  let port = null;
+  for (const deadline = Date.now() + 30_000; port === null && Date.now() < deadline; await sleep(100)) {
+    try { port = Number(fs.readFileSync(path.join(userDataDir, 'DevToolsActivePort'), 'utf8').split('\n')[0]) || null; } catch { /* not written yet */ }
+  }
+  if (port === null) throw new Error(`Chrome did not report a DevTools port (${userDataDir})`);
   const targets = await httpJson(`http://127.0.0.1:${port}/json`);
   const tab = targets.find((t) => t.type === 'page' && t.webSocketDebuggerUrl);
   const ws = new WebSocket(tab.webSocketDebuggerUrl);
