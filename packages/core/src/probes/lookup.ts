@@ -18,9 +18,11 @@
 // the rest to the next; inside its projection box the direction is box-projected (Lagarde's BPCEM,
 // the guarded form of #35046) and sampled from the capture point. What is left over goes to the
 // environment slot (or, for the coverage form, the radiance is normalized by the weight it got).
-// lod = maxLod * r * (2 - r) (three r187's PMREM mapping, D3), r perceptual roughness.
+// lod: three r187's PMREM mapping `maxLod * r * (2 - r)` (D3), r perceptual roughness, except
+// between the sharp mips (both below r = 0.3), where the default 'alpha' mapping blends linearly in
+// r^2 (D101, decided 2026-11-11); `lodMapping: 'r187'` keeps r187's mapping everywhere.
 //
-// Options, each off by default:
+// Options, each off by default (the re-fit: on when the module gets a frame irradiance provider, D803):
 //   dominantDirection  Lagarde 2014's specular dominant direction, mix(N, R, s * (sqrt(s) + a)),
 //                      s = 1 - a, a = perceptual^2 (Frostbite's `roughness`), D57. Needs N. The probe
 //                      volumes and the environment slot sample the same bent direction (F2).
@@ -46,9 +48,10 @@ import type { ProbeLayout } from './layouts/types';
 
 /**
  * How roughness maps to the atlas mip. 'r187': three r187's `maxLod * r * (2 - r)` (D3), so a
- * lookup between two mips blends them linearly in lod. 'alpha': the same mips (each exact at the
- * roughness it was prefiltered for), but between neighbouring mips that are both below r = 0.3 the
- * blend is linear in alpha = r^2, the lobe width, instead of in lod (D101 experiment, W7).
+ * lookup between two mips blends them linearly in lod. 'alpha' (the default, D101 / D806): the
+ * same mips (each exact at the roughness it was prefiltered for), but between neighbouring mips that
+ * are both below r = 0.3 the blend is linear in alpha = r^2, the lobe width, instead of in lod
+ * (W7: p99 against the GGX reference at r .05 44.5 -> 19.7 / 255 at 128 px); above, r187's.
  */
 export type ProbeLodMapping = 'r187' | 'alpha';
 
@@ -58,7 +61,13 @@ export interface ProbeLookupOptions {
   mirrorX?: boolean;
   /** Lagarde's dominant direction (D57). Default false. */
   dominantDirection?: boolean;
-  /** Re-fit by frame irradiance (SPEC "Probe re-fit", D60). Default false. */
+  /**
+   * Re-fit by frame irradiance (SPEC "Probe re-fit", D60, D803). Default: on when the lookup has a
+   * frame irradiance provider ({@link ProbeLookupModuleOptions.frameIrradianceWgsl}), else off; the
+   * function form ({@link probeLookupFunctionWgsl}) has no provider option, so there the default is
+   * off and the caller decides (a negative `frameIrr` also switches it off at run time). An explicit
+   * value wins.
+   */
   refit?: boolean;
   /**
    * Lagarde 2014's distance-based roughness on box-projected volumes (Listing 25, D53): the
@@ -71,7 +80,7 @@ export interface ProbeLookupOptions {
    * (Appendix F, D53, D2700). Default false.
    */
   roughnessLerp?: boolean;
-  /** Roughness to mip. Default 'r187'. */
+  /** Roughness to mip. Default 'alpha' (D101); 'r187' is three r187's PMREM mapping everywhere. */
   lodMapping?: ProbeLodMapping;
   /**
    * Unroll the volume loop for exactly this many volumes (the table's count is then ignored). An
@@ -81,8 +90,11 @@ export interface ProbeLookupOptions {
   count?: number;
 }
 
-/** WGSL roughness -> lod for a mapping (`r` perceptual, clamped). */
-export function lodWgsl(mapping: ProbeLodMapping = 'r187') {
+/** The default {@link ProbeLodMapping} (D101, decided 2026-11-11). */
+export const DEFAULT_PROBE_LOD_MAPPING: ProbeLodMapping = 'alpha';
+
+/** WGSL roughness -> lod for a mapping (`r` perceptual, clamped), in terms of `r` and `maxLod`. */
+export function lodWgsl(mapping: ProbeLodMapping = DEFAULT_PROBE_LOD_MAPPING) {
   switch (mapping) {
     case 'r187': return 'maxLod * r * (2.0 - r)';
     case 'alpha': return 'pr_lodAlpha(r, maxLod)';
@@ -90,10 +102,9 @@ export function lodWgsl(mapping: ProbeLodMapping = 'r187') {
 }
 
 /**
- * Helpers every flavour shares (no bindings). Names are prefixed `pr_`. They depend only on the layout,
- * `mirrorX` and `lodMapping`, so lookups with different dominant-direction / re-fit / distance-roughness /
- * roughness-lerp / count options
- * can share one include in a shader module.
+ * Helpers every flavour shares (no bindings). Names are prefixed `pr_`. They depend only on the layout
+ * and `mirrorX`, so lookups with different lod-mapping / dominant-direction / re-fit /
+ * distance-roughness / roughness-lerp / count options can share one include in a shader module.
  */
 const helpersWgsl = (o: ProbeLookupOptions) => /* wgsl */ `
 const PR_HEADER_ROWS: u32 = ${PROBE_HEADER_ROWS}u;
@@ -110,9 +121,14 @@ fn pr_lodAlpha(r: f32, maxLod: f32) -> f32 {
   if (rh > 0.3) { return maxLod * r * (2.0 - r); }
   return l + clamp((r * r - rl * rl) / max(rh * rh - rl * rl, 1e-6), 0.0, 1.0);
 }
-fn pr_lod(roughness: f32, maxLod: f32) -> f32 {
+// roughness -> lod, one function per ProbeLodMapping (the lookup body picks one)
+fn pr_lod_r187(roughness: f32, maxLod: f32) -> f32 {
   let r = clamp(roughness, 0.0, 1.0);
-  return ${lodWgsl(o.lodMapping)};
+  return ${lodWgsl('r187')};
+}
+fn pr_lod_alpha(roughness: f32, maxLod: f32) -> f32 {
+  let r = clamp(roughness, 0.0, 1.0);
+  return ${lodWgsl('alpha')};
 }
 // World direction to the layout's texture space.
 fn pr_texDir(d: vec3f) -> vec3f { return select(d, vec3f(-d.x, d.y, d.z), PR_MIRROR_X); }
@@ -169,6 +185,7 @@ fn pr_shIrradiance(a: vec4f, b: vec4f, c: vec4f, N: vec3f) -> vec3f {
  */
 const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: string, samp: string) => {
   const unroll = o.count;
+  const lodFn = `pr_lod_${o.lodMapping ?? DEFAULT_PROBE_LOD_MAPPING}`;
   // box projection; with Lagarde's seam options (D53) pr_parallax with its distance t kept (App. F)
   const seam = o.distanceRoughness === true || o.roughnessLerp === true;
   const projection = !seam
@@ -176,7 +193,7 @@ const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: stri
     : [
       '        let t = pr_parallaxDistance(P, dir, r3.xyz, r0.xyz + r2.xyz);',
       '        corrected = P + normalize(dir) * t - r4.xyz;',
-      ...(o.distanceRoughness === true ? ['        vlod = pr_lod(pr_distanceRoughness(t, length(corrected), rough), hdr.y);'] : []),
+      ...(o.distanceRoughness === true ? [`        vlod = ${lodFn}(pr_distanceRoughness(t, length(corrected), rough), hdr.y);`] : []),
       ...(o.roughnessLerp === true ? ['        corrected = mix(normalize(corrected), normalize(dir), rough);'] : []),
     ].join('\n') + '\n';
   const volume = /* wgsl */ `    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
@@ -212,7 +229,7 @@ ${projection}      }
   let hdr = ${row('0u')};
   let count = u32(hdr.x);
   let rough = clamp(roughness, 0.0, 1.0);
-  let lod = pr_lod(rough, hdr.y);
+  let lod = ${lodFn}(rough, hdr.y);
   let enabled = hdr.z;
   let envSlot = hdr.w;
   let irr = ${row('1u')};
@@ -320,7 +337,7 @@ export interface ProbeLookupModuleOptions extends ProbeLookupOptions {
   binding?: number;
   /**
    * WGSL defining `fn frameIrradiance(P: vec3f, N: vec3f) -> vec3f`, the frame's irradiance from
-   * the app's GI, for `refit`. Default: none (re-fit then uses each probe's own irradiance, a no-op).
+   * the app's GI, for `refit`; given, the re-fit is on unless `refit: false` (D803). Default: none.
    */
   frameIrradianceWgsl?: string;
 }
@@ -343,7 +360,9 @@ export interface ProbeLookupModuleOptions extends ProbeLookupOptions {
  * `roughness` is perceptual. Without N (the first two), N = R: no dominant-direction bend, and the
  * re-fit evaluates irradiance about R.
  */
-export function probeLookupWgsl(options: ProbeLookupModuleOptions): string {
+export function probeLookupWgsl(moduleOptions: ProbeLookupModuleOptions): string {
+  // the re-fit defaults on with a frame irradiance provider, off without (D803); explicit wins
+  const options = { ...moduleOptions, refit: moduleOptions.refit ?? moduleOptions.frameIrradianceWgsl !== undefined };
   const g = options.group ?? 0, b = options.binding ?? 0;
   const frame = options.refit ? (options.frameIrradianceWgsl ?? '') : '';
   // without a provider, a negative frame irradiance switches the re-fit off

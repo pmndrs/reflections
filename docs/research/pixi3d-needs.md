@@ -12,7 +12,7 @@ Screen-space reflections read a small G-buffer (the "frame contract": depth, nor
 | depth | `DepthOutputPass` | view-sized, standard Z. depth24plus-stencil8 is fine: we bind a depth-only view and copy it |
 | motion | `MotionVectorPass` | NDC delta, unjittered, per object. Reprojects correctly (GPU-checked) |
 | camera | `Camera3D.view`, `unjitteredProjection`, `near`, `far`, `jitter` | GL clip z, which we remap. Lands on pixi-3d's pixels to 0.001 px |
-| probe faces | `Camera3D({ renderTexture })` + `MeshPass({ name: 'opaque', camera })` | six of them make a cube capture |
+| probe faces | `Camera3D({ renderTexture })` + `BackgroundPass({ camera })` + `MeshPass({ name: 'opaque', camera })` | six of them make a cube capture, sky included (the BackgroundPass from a `'beforeOpaque'` Pass3D listed before the MeshPass, as the `PortalPass` docs show) |
 | material hook | `Material3D({ extraBits })` | how we take the environment's specular out of the colour |
 
 ## What's missing, most important first
@@ -39,9 +39,11 @@ Reflections replace the environment's specular reflection (screen-space where po
 
 ### 3. A cube capture
 
-**What we do now:** six 90-degree cameras with render textures and six `MeshPass`es, then a compute pass that mirrors x as it stacks the faces into a cube (a cube face is the mirror image of a camera's view). A `MeshPass` doesn't draw the background, so the probe sees black where the sky is.
+**What we do now:** six 90-degree cameras with render textures, each drawn by a `BackgroundPass({ camera })` (added from a `'beforeOpaque'` Pass3D) and then a `MeshPass({ name: 'opaque', camera })`, and a compute pass that mirrors x as it stacks the faces into a cube (a cube face is the mirror image of a camera's view). The sky comes out equal to the Hemisphere formula texel for texel, so this works with public API. (Until W33 we drew only the `MeshPass`, and the probe saw black where the sky is.)
 
-**Ask:** a cube camera / `CubeRenderTexture` capture that draws the full view (background included) into the six faces of a cube texture in WebGPU's orientation. The same thing pixi-3d's own reflection probes would want.
+**Ask:** a cube camera / `CubeRenderTexture` capture that draws the full view (background included) into the six faces of a cube texture in WebGPU's orientation, in one call. The same thing pixi-3d's own reflection probes would want. Not a blocker any more: it would replace twelve passes and our stacking pass.
+
+**Seen along the way:** a `View3D` with no mesh at all draws nothing, not even its background (`View3DPipeGpu` returns before the graph runs when `_meshSlots.count === 0`). A probe captured in an empty view (or a sky-only test) stays black; we add a sub-texel speck in our check. Drawing the background for an empty view would be the expected behaviour.
 
 ### 4. Smaller things
 
@@ -52,4 +54,4 @@ Reflections replace the environment's specular reflection (screen-space where po
 
 ## How it's verified on our side
 
-`pnpm check -- --only pixi3d` in pmndrs/reflections, with the beta unpacked into `examples/pixi3d/vendor/`. It checks that the contract's camera reprojects onto pixi-3d's pixels, that G-buffer normals agree with normals derived from the depth, that the probe captures sample as world directions, that the motion reprojects, and that the glossy floor reflects confidently.
+`pnpm check -- --only pixi3d` in pmndrs/reflections, with the beta unpacked into `examples/pixi3d/vendor/`. It checks that the contract's camera reprojects onto pixi-3d's pixels, that G-buffer normals agree with normals derived from the depth, that the probe captures sample as world directions and see the view's sky, that the motion reprojects, and that the glossy floor reflects confidently.

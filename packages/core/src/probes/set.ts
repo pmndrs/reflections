@@ -31,7 +31,10 @@ export interface ProbeSetOptions {
   layout?: ProbeLayoutId;
   /** Default 'rgba16float'. */
   format?: ProbeSetFormat;
-  /** Capture face size, a power of two >= 64. Default 128. */
+  /**
+   * Capture face size, a power of two >= 64. Default 256 (D23 / D62: mirror-grade; 128 for many
+   * probes or mobile, see the three adapter's `BakeOptions.resolution` for sizing).
+   */
   sourceSize?: number;
   /** Atlas size (mip 0 face, or octa side). Default `sourceSize`. */
   size?: number;
@@ -41,12 +44,14 @@ export interface ProbeSetOptions {
   mirrorX?: boolean;
   /** Lookup options (./lookup.ts). */
   dominantDirection?: boolean;
+  /** Re-fit by `frameIrradianceWgsl` (D803). Default: on when `frameIrradianceWgsl` is given, else off. */
   refit?: boolean;
   /** Lagarde's distance-based roughness and roughness lerp on box-projected volumes (D53). Default false. */
   distanceRoughness?: boolean;
   roughnessLerp?: boolean;
-  /** `fn frameIrradiance(P: vec3f, N: vec3f) -> vec3f` for `refit`. */
+  /** `fn frameIrradiance(P: vec3f, N: vec3f) -> vec3f` for `refit` (turns the re-fit on unless `refit: false`). */
   frameIrradianceWgsl?: string;
+  /** Roughness to mip. Default 'alpha' (D101); 'r187' for three r187's PMREM mapping everywhere. */
   lodMapping?: ProbeLodMapping;
   /** Shader stages the bind group is visible to. Default COMPUTE | FRAGMENT. */
   visibility?: number;
@@ -86,7 +91,7 @@ export class ProbeSet {
     this.options = options;
     this.capacity = options.capacity;
     this.format = options.format ?? 'rgba16float';
-    this.sourceSize = options.sourceSize ?? 128;
+    this.sourceSize = options.sourceSize ?? 256;
     this.size = options.size ?? this.sourceSize;
     this.maxLod = maxLodFor(this.sourceSize);
     this.layout = createProbeLayout(options.layout ?? 'cube-hw', { maxLod: this.maxLod });

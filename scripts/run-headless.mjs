@@ -6,6 +6,7 @@
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p: core on the 2D array (warp), core on the cube array, the pre-phase-2 TSL node
+//   pnpm check -- --only mirror-bias --mirror-bias   # W32 / D49: mirrorBias noise / bias sweep (minutes), JSON to out/mirror-bias.json
 //   pnpm check -- --only seam        # W26 / D53: the SSR-to-probe seam sweep (Lagarde's options off / on), JSON to out/seam.json (SEAM_SHOTS=1: images)
 //   pnpm check -- --only probes --probes-layout cube2d   # run the probe feature checks on the 2D array (default: 'auto', a cube array through the shim)
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
@@ -29,6 +30,7 @@ const args = process.argv.slice(2);
 const compareUrl = args.includes('--compare') ? args[args.indexOf('--compare') + 1] : null;
 const probeBenchFull = args.includes('--probe-bench');
 const ssrBenchFull = args.includes('--ssr-bench');
+const mirrorBiasFull = args.includes('--mirror-bias'); // W32 (D49): the full mirrorBias noise / bias sweep
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
 const runs = (section) => !only || only === section;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -499,6 +501,57 @@ async function ssrChecks(pages) {
   pages.push(big);
   const t = await big.T('window.__p.time(30)');
   console.log(`  GPU ms ${t.size.join('x')} through the three adapter (${t.variant}, mirrorWall, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
+  await mirrorBiasChecks(pages);
+}
+
+/**
+ * W32 (D49): `settings.mirrorBias`, examples/ssr `mirrorBiasStats` (8-bit luma of the final image,
+ * static camera: temporal std, flicker, bias against the mean of many bias-0 frames). The check:
+ * the knob is not a silent no-op, 0 is the default path, and 0.5 cuts the raw noise on the
+ * roughnessRamp strips (r 0.2-0.4). `--mirror-bias` runs the full sweep (roughnessRamp strips and
+ * the mirrorWall floor at r 0.2 / 0.3 / 0.4, bias 0 / 0.25 / 0.5 / 0.75, denoise off and on) into out/mirror-bias.json.
+ */
+async function mirrorBiasChecks(pages) {
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0`);
+  pages.push(p);
+  await p.T("window.__p.load('roughnessRamp')");
+  await p.T("window.__p.setPose('strips')");
+  // occupancy 0: with the occupancy exit, which rays share a subgroup (atomic list order) changes the output run to run (D301)
+  await p.T('window.__p.setSettings({ minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false })');
+  await p.T('window.__p.step(4)');
+  const h = {};
+  for (const [k, b] of [['unset', null], ['unset again', null], ['0', 0], ['0.5', 0.5]]) {
+    await p.T(b === null ? '(delete window.__p.ssr.settings.mirrorBias, true)' : `window.__p.setSettings({ mirrorBias: ${b} })`);
+    h[k] = await p.T('window.__p.radianceHash(7)');
+  }
+  await p.T('(["mirrorBias", "minTraversalOccupancy", "temporalVarianceGuidedTracing"].forEach((k) => delete window.__p.ssr.settings[k]), true)');
+  check('ssr mirrorBias: 0 is the default path, 0.5 changes the rays', h.unset === h['unset again'] && h.unset === h['0'] && h['0'] !== h['0.5'], JSON.stringify(h));
+  const q = await p.T('window.__p.mirrorBiasStats({ biases: [0, 0.5], bins: [0.2, 0.3, 0.4], frames: 16, refFrames: 32, denoise: [false] })');
+  const [b0, b5] = q.results;
+  const ratio = b0.bins.map((b, k) => b5.bins[k].std / b.std);
+  check('ssr mirrorBias 0.5: less raw noise on the roughnessRamp strips (r 0.2-0.4)', ratio.every((r) => r < 0.9) && b0.bins.every((b) => b.px > 1000),
+    b0.bins.map((b, k) => `r ${b.roughness}: std ${b.std.toFixed(2)} -> ${b5.bins[k].std.toFixed(2)} (${b.px} px)`).join('; '));
+  if (!mirrorBiasFull) return;
+  const all = [];
+  const cases = [
+    { scene: 'roughnessRamp', pose: 'strips', bins: [0.1, 0.2, 0.3, 0.4] },
+    ...[0.2, 0.3, 0.4].map((r) => ({ scene: 'mirrorWall', pose: 'default', floor: r, bins: [r] })),
+  ];
+  const p2 = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1`);
+  pages.push(p2);
+  for (const c of cases) {
+    await p2.T(`window.__p.load('${c.scene}')`);
+    await p2.T(`window.__p.setPose('${c.pose}')`);
+    if (c.floor !== undefined) await p2.T(`window.__p.setFloorRoughness(${c.floor})`);
+    const r = await p2.T(`window.__p.mirrorBiasStats({ bins: ${JSON.stringify(c.bins)} })`);
+    all.push({ ...c, ...r });
+    console.log(`  mirrorBias ${c.scene}${c.floor !== undefined ? ` floor r ${c.floor}` : ''} (${r.seconds.toFixed(0)} s, ${r.frames} frames vs a ${r.refFrames}-frame bias-0 raw reference; 8-bit luma):`);
+    for (const row of r.results) {
+      console.log(`    denoise ${row.denoise ? 'on ' : 'off'} bias ${row.mirrorBias.toFixed(2)}: ${row.bins.map((b) => `r ${b.roughness} std ${b.std.toFixed(2)} flicker ${b.flicker.toFixed(2)} bias ${b.bias.toFixed(2)} (signed ${b.signed.toFixed(2)}, added ${b.added?.toFixed(2) ?? '-'}) rmse ${b.rmse.toFixed(2)}`).join(' | ')}`);
+    }
+  }
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, 'mirror-bias.json'), JSON.stringify(all, null, 1));
 }
 
 /** examples/regressions, stream F2 (SSR / RT and probe-core review). Each check failed before its fix. */
@@ -1046,6 +1099,31 @@ async function showcaseChecks(pages) {
     check(`showcase ${id}: renders on / off / rt, no GPU errors`, s.gpuErrors === 0 && errs.length === 0 && lum > 8 && !!s.bvh,
       `${info.probes} probes (${info.layout}, ${info.bakeMs.toFixed(0)} ms), denoiser ${s.denoiser ?? 'none'}, mean ${lum.toFixed(0)}/255, BVH ${s.bvh?.triangles} tris; reflections ${(s.timings.total ?? NaN).toFixed(2)} ms${errs.length ? '; ' + errs[0] : ''}`);
   }
+  // W40 (D3500): reflections at rest stay still. Consecutive frames of a still camera, 8-bit display luma:
+  // share of pixels whose mean |frame - previous| is over 1/255. Without TAA the denoised mirror floor
+  // keeps a 1-3/255 shimmer (about 1% of the frame, 9% of the floor's reflection of the car).
+  if (ids.includes('carConcept')) {
+    await p.T(`window.__p.load('carConcept')`);
+    const still = `(async (on) => {
+      const P = window.__p; P.setView('final'); P.setTAA(on); await P.step(90);
+      const c = document.createElement('canvas'); const g = c.getContext('2d', { willReadFrequently: true });
+      let prev = null, acc = null, n = 0;
+      for (let k = 0; k < 9; k++) {
+        const img = new Image(); img.src = await P.shot(); await img.decode();
+        c.width = img.width; c.height = img.height; g.drawImage(img, 0, 0);
+        const d = g.getImageData(0, 0, img.width, img.height).data;
+        const l = new Float32Array(d.length / 4); for (let i = 0; i < l.length; i++) l[i] = 0.2126 * d[4 * i] + 0.7152 * d[4 * i + 1] + 0.0722 * d[4 * i + 2];
+        if (prev) { acc ??= new Float32Array(l.length); for (let i = 0; i < l.length; i++) acc[i] += Math.abs(l[i] - prev[i]); n++; }
+        prev = l;
+      }
+      let over = 0; for (let i = 0; i < acc.length; i++) if (acc[i] / n > 1) over++;
+      return over / acc.length * 100;
+    })`;
+    const off = await p.T(`(${still})(false)`);
+    const on = await p.T(`(${still})(true)`);
+    check('showcase carConcept: still camera, reflections settle under TAA (< 0.3% of pixels flicker > 1/255)', on < 0.3,
+      `TAA on ${on.toFixed(2)}%, off ${off.toFixed(2)}% of pixels with mean |frame - previous| > 1/255`);
+  }
 }
 
 /**
@@ -1182,7 +1260,8 @@ async function babylonChecks(pages) {
  * page is a setup notice, and the check asserts that the notice renders. With it: renders, no
  * validation errors, finite outputs, rays traced; the glossy floor reflects the signs (confident SSR);
  * the G-buffer carries the material values; the contract's camera reprojects onto pixi-3d's own
- * pixels and its normals agree with the depth; the probe captures sample as world directions; the
+ * pixels and its normals agree with the depth; the probe captures sample as world directions and
+ * draw the view's sky behind the geometry (W33: black-sky texels and the composite's change logged); the
  * motion texture reprojects with motionVectorScale [1, 1]. Screenshots of the final image (denoised
  * when the sibling Denoiser repo is there, and raw), SSR off, probes off and the debug views.
  */
@@ -1224,6 +1303,17 @@ async function pixi3dChecks(pages) {
       const o = await p.T('window.__p.orientation()');
       check('pixi3d: probe captures (six pixi-3d cameras) sample as world directions', o.ok,
         o.ok ? `${o.rows.length} directions` : o.rows.filter((r) => !r.ok).slice(0, 4).map((r) => `${r.dir.join(',')}: got ${r.got.join('')} want ${r.expect.join('')}`).join('; '));
+      // W33 (D2104): the capture cameras draw the view's background behind the geometry
+      const ps = await p.T('window.__p.probeSkyCheck()');
+      check("pixi3d: probe faces draw the view's sky, equal to the environment slot's", ps.sky.maxError < 2e-3 * Math.max(1, ps.sky.maxValue),
+        `${ps.sky.texels} texels, max |faces - captureHemisphere| ${ps.sky.maxError.toExponential(2)} (mean ${ps.sky.meanError.toExponential(2)}, sky up to ${ps.sky.maxValue.toFixed(3)})`);
+      const pct = (k) => `${(100 * k / ps.probe.texels).toFixed(1)}%`;
+      check('pixi3d: the arcade probe sees the sky (no black-sky texels)', ps.probe.skyTexels > 0 && ps.probe.skyBlackAfter === 0,
+        `${ps.probe.skyTexels} sky texels (${pct(ps.probe.skyTexels)} of ${ps.probe.texels}); black texels ${ps.probe.blackBefore} (${pct(ps.probe.blackBefore)}) without the sky -> ${ps.probe.blackAfter} (${pct(ps.probe.blackAfter)}) with it; black sky texels ${ps.probe.skyBlackBefore} -> ${ps.probe.skyBlackAfter}`);
+      for (const [k, label] of [['ssr', 'SSR on'], ['ssrOff', 'SSR off']]) {
+        const c = ps.composite[k], aa = ps.composite[`${k}AA`];
+        console.log(`  pixi3d probe sky, composite ${label} (${c.glossyPx} glossy px, 0-255): black sky -> sky mean ${c.mean.toFixed(2)} / p99 ${c.p99} / max ${c.max}; ${c.changedPx} px change >= 2 (mean ${c.changedMean.toFixed(2)}, p99 ${c.changedP99}); A/A mean ${aa.mean.toFixed(3)} / p99 ${aa.p99} / max ${aa.max}`);
+      }
       const mc = await p.T('window.__p.motionCheck()');
       const err = Object.fromEntries(mc.rows.map((r) => [r.scale, r.meanError]));
       check('pixi3d: motion reprojects with motionVectorScale [1, 1]', mc.best === '1,1' && err['1,1'] < 0.5 * err['0,0'],
@@ -1252,7 +1342,7 @@ async function pixi3dChecks(pages) {
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull || ssrBenchFull ? 3_600_000 : 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -1271,9 +1361,11 @@ async function main() {
       const ca = await p.T('window.__p.cubeArray');
       check('cube-array support installed and self-tested (W20 shim)', ca.mode === 'shim' || ca.mode === 'native', `${ca.mode}: ${ca.reason}`);
       // the storage and pre-phase-2 parity checks compare lookups without Lagarde's seam options (the
-      // 'hw' and legacy nodes don't have them; W26 made distanceRoughness the default, D53)
+      // 'hw' and legacy nodes don't have them; W26 made distanceRoughness the default, D53) and with
+      // r187's lod mapping (theirs; W31 made 'alpha' the default, D101)
       const seamDefaults = await p.T('[window.__p.probes.distanceRoughness, window.__p.probes.roughnessLerp]');
-      await p.T('(window.__p.setSeamOptions(false), true)');
+      const lodDefault = await p.T('window.__p.probes.lodMapping');
+      await p.T("(window.__p.setSeamOptions(false), window.__p.setLodMapping('r187'), true)");
       const shots = {};
       for (const lookup of ['warp', 'none', 'hw', 'cube-array', 'auto']) {
         await p.T(`(window.__p.setLookup('${lookup}'), window.__p.capture(), true)`);
@@ -1348,8 +1440,9 @@ async function main() {
         check('a failing self-test uninstalls the shim and reports false; auto falls back', st.ok === false && st.failed.mode === 'none' && st.layout === 'cube2d' && st.again === true && st.relayout === 'cube-array',
           `${st.failed.reason}; then auto ${st.layout}, re-install ${st.again} (${st.relayout})`);
       }
-      await p.T(`(window.__p.setSeamOptions(${seamDefaults[0]}, ${seamDefaults[1]}), true)`);
+      await p.T(`(window.__p.setSeamOptions(${seamDefaults[0]}, ${seamDefaults[1]}), window.__p.setLodMapping(${JSON.stringify(lodDefault)}), true)`);
       check('seam options default: distanceRoughness on, roughnessLerp off (W26, D53)', seamDefaults[0] === true && seamDefaults[1] === false, JSON.stringify(seamDefaults));
+      check("lod mapping default: 'alpha' (W31, D101)", lodDefault === 'alpha', JSON.stringify(lodDefault));
       // W20: the feature checks run on one storage: 'auto' (the cube array through the shim, default) or the 2D array
       const probesLayout = args.includes('--probes-layout') ? args[args.indexOf('--probes-layout') + 1] : 'cube-array';
       if (probesLayout === 'cube2d') await p.T("(async () => { await window.__p.setShim(false); window.__p.setLookup('warp'); return true; })()");
@@ -1376,6 +1469,7 @@ async function main() {
       check("lookup option ao: Lagarde's specular occlusion", lo.so < 1e-3, `max rel err ${lo.so.toExponential(1)}`);
       check('lookup option frameIrradiance: re-fit by k / probe L1 irradiance, clamped', lo.refit < 2e-3 && lo.clampErr < 1e-4 && lo.lum > 0 && lo.ratios.every(Number.isFinite) && lo.slots.every((s) => s >= 0),
         `max rel err ${lo.refit.toExponential(1)} (ratios ${lo.ratios.slice(0, 6).join(' ')} ...), clamp ${lo.clampErr.toExponential(1)}`);
+      check('lookup option refit: false keeps a lookup with frameIrradiance plain (D803)', lo.refitOff < 1e-5, `max rel err ${lo.refitOff.toExponential(1)}`);
       // W26 (D53): Lagarde's seam options against the plain lookup fed the CPU's r' and lerped direction
       const so = await C('seamOptions');
       check("lookup options distanceRoughness / roughnessLerp: Lagarde 2014 Listing 25 / App. F", so.err.dist < 2e-3 && so.err.lerp < 2e-3 && so.err.both < 2e-3 && so.err.off < 2e-3 && so.lum > 0 && so.changedDist > 0.01 && so.changedLerp > 0.01,
@@ -1386,6 +1480,15 @@ async function main() {
       savePng('probes-refit-on.png', rf.on);
       const rs = await p.T(`(${IMAGE_STATS})(${JSON.stringify(rf.on)}, ${JSON.stringify(rf.off)})`);
       check('re-fit with LightProbeGrid renders and changes the image', rs.lum > 10 && rs.mean > 0.5, `lum ${rs.lum.toFixed(1)}, mean diff ${rs.mean.toFixed(2)} / 255`);
+      // W31 (D25): bake({ bounces: 2 }) re-captures with the first pass's probes visible: the rooms'
+      // interreflection reaches the probes (brighter); 1 is the plain bake
+      const bo = await p.T(`(async () => { const P = window.__p; P.setGrid(true, 0.08); const one = await P.shot();
+        P.setBounces(2); const two = await P.shot(); P.setBounces(1); const back = await P.shot(); P.setGrid(false); return { one, two, back }; })()`);
+      savePng('probes-bounces-2.png', bo.two);
+      const b2 = await p.T(`(${IMAGE_STATS})(${JSON.stringify(bo.two)}, ${JSON.stringify(bo.one)})`);
+      const b1 = await p.T(`(${IMAGE_STATS})(${JSON.stringify(bo.back)}, ${JSON.stringify(bo.one)})`);
+      check('bake bounces: 2 adds the probes\' interreflection; back to 1 restores the plain bake (D25)', b2.mean > 1 && b2.lum > b1.lum && b1.mean < 0.01, // (< 0.01: the grid's known highlight scatter, W7)
+        `bounce 2 vs 1: mean ${b2.mean.toFixed(2)} / 255, lum ${b1.lum.toFixed(1)} -> ${b2.lum.toFixed(1)}; back to 1: max ${b1.max} / 255`);
       const ck = await C('cacheKey');
       check('two probe sets of equal size keep their own programs', ck.left[0] > 200 && ck.left[2] < 50 && ck.right[2] > 200 && ck.right[0] < 50 && ck.keysDiffer,
         `left ${ck.left}, right ${ck.right}, keys differ ${ck.keysDiffer}`);
@@ -1415,11 +1518,12 @@ async function main() {
 
       if (args.includes('--time-bake')) {
         // loop stopped (FREEZE); median ms per bake, 5 bakes per submit-wait, 7 bursts
+        const res0 = await p.T('window.__p.params.resolution');
         for (const res of [128, 256]) {
           const t = await p.T(`window.__p.timeBake(${res})`);
           console.log(`  bake, 3 probes at ${res} px: median ${t.median.toFixed(2)} ms (${t.all.map((x) => x.toFixed(2)).join(' ')})`);
         }
-        await p.T('(window.__p.setResolution(128), true)');
+        await p.T(`(window.__p.setResolution(${res0}), true)`);
       }
 
       if (args.includes('--time-lookup')) {
@@ -1453,7 +1557,8 @@ async function main() {
         pages.push(o);
         await o.T(FREEZE);
         await o.T("(window.__p.setLookup('warp'), window.__p.capture(), true)");
-        await p.T('(window.__p.setSeamOptions(false), window.__p.capture(), true)'); // the other build has no seam options (D53)
+        // the other build has no seam options (D53), r187's lod mapping (D101) and bakes at 128 px (D23)
+        await p.T("(window.__p.setSeamOptions(false), window.__p.setLodMapping('r187'), window.__p.setResolution(128), true)");
         const a = await p.T('window.__p.shot()');
         const b = await o.T('window.__p.shot()');
         savePng('probes-compare.png', b);
@@ -1483,6 +1588,7 @@ async function main() {
     if (runs('sssr-core')) await sssrCoreChecks(pages);
     if (runs('ssr')) await ssrChecks(pages);
     if (runs('hybrid')) await hybridChecks(pages);
+    if (only === 'mirror-bias') await mirrorBiasChecks(pages); // W32: the mirrorBias check alone (also part of ssr)
     if (only === 'seam') {
       // W26: the D53 seam sweep alone (examples/ssr, denoised)
       const sp = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1`);
@@ -1537,6 +1643,8 @@ async function main() {
       check('probe core: a constant capture looks up as that constant', r.refit.constErr < 2e-3, `max rel err ${r.refit.constErr.toExponential(2)}`);
       check('probe core: re-fit by 2x the probe L1 irradiance doubles the lookup', r.refit.refitErr < 2e-2, `max rel err ${r.refit.refitErr.toExponential(2)}`);
       check("probe core: Lagarde's specular occlusion", r.refit.soErr < 1e-4, `max err ${r.refit.soErr.toExponential(2)}`);
+      check('probe core: a frame irradiance provider turns the re-fit on; refit: false keeps it off (D803)', r.refit.autoErr < 2e-2 && r.refit.offErr < 2e-3,
+        `auto x2 max rel err ${r.refit.autoErr.toExponential(2)}, off x1 ${r.refit.offErr.toExponential(2)}`);
       check('sssr probe fallback: constant probes = constant fallback (to one f16 step)', r.sssr.constantVsProbes === 0, `${r.sssr.constantVsProbes} px differ`);
       check('sssr probe fallback: structured probes reach the fallback pixels', r.sssr.structuredVsConstant > r.sssr.pixels * 0.05, `${r.sssr.structuredVsConstant} of ${r.sssr.pixels} px`);
       const rt = r.sssr.rt;

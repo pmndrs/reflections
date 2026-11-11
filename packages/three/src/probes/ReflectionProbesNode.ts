@@ -38,7 +38,7 @@ import * as THREE from 'three/webgpu';
 import { bool, cameraPosition, code, cubeTexture, float, mat4, materialEnvRotation, nodeObject, normalWorld, positionWorld, reflectVector, sampler, storage, texture, vec3, vec4, wgslFn } from 'three/tsl';
 import {
   PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludesWgsl, probeProxyShareFunctionWgsl,
-  probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
+  probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLodMapping, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
 } from '@pmndrs/reflections-core';
 import { probeOrigin, probeWorldScale, type ReflectionProbes } from './ReflectionProbes';
 
@@ -82,8 +82,14 @@ export interface ProbeLookupOptions {
    * each probe's radiance by `clamp( frameIrradiance / probeIrradiance( N ), 0, probes.refitClamp )`,
    * with probeIrradiance the probe's L1 SH from its own capture (SPEC "Probe re-fit"). Needs the
    * probes baked with `irradiance: true` (the default). Uses `normal`, or the material's normal.
+   * Passing it turns the re-fit on (D803); `refit: false` keeps it off.
    */
   frameIrradiance?: N;
+  /**
+   * Re-fit by `frameIrradiance` (D803). Default: on when `frameIrradiance` is given, else off (there
+   * is nothing to re-fit by). `false` keeps the lookup plain while still passing a frame irradiance.
+   */
+  refit?: boolean;
   /**
    * Lagarde 2014's distance-based roughness on box-projected probes (D53): sharp near the projection
    * box, the set's roughness from the capture point's distance on. Default: the set's
@@ -96,6 +102,11 @@ export interface ProbeLookupOptions {
    * (D53). Default: the set's {@link ReflectionProbes.roughnessLerp}.
    */
   roughnessLerp?: boolean;
+  /**
+   * Roughness to mip ('alpha' or three r187's 'r187', D101). Default: the set's
+   * {@link ReflectionProbes.lodMapping} ('alpha').
+   */
+  lodMapping?: ProbeLodMapping;
 }
 
 // One wgslFn and include per lookup variant, shared by every node and material: three emits a
@@ -109,7 +120,7 @@ function lookupFor(options: CoreLookupOptions): { fn: N; includes: N } {
   let includes = _includes.get(source);
   if (!includes) _includes.set(source, (includes = code(source) as N));
   const layoutKey = `${options.layout.id}:${options.layout.mipLevelCount}`;
-  const key = `${layoutKey}:${options.dominantDirection === true}:${options.refit === true}:${options.distanceRoughness === true}:${options.roughnessLerp === true}:${options.count ?? -1}`;
+  const key = `${layoutKey}:${options.lodMapping}:${options.dominantDirection === true}:${options.refit === true}:${options.distanceRoughness === true}:${options.roughnessLerp === true}:${options.count ?? -1}`;
   let entry = _lookups.get(key);
   if (!entry) {
     entry = { fn: wgslFn(probeLookupFunctionWgsl({ ...options, mirrorX: true }, 'probesLookup'), [includes]) as N, includes };
@@ -136,8 +147,13 @@ function tableFor(probes: ReflectionProbes): SetTable {
   return t;
 }
 
-/** The volumes of the last bake, in lookup order (smallest first), as core's table wants them. */
-function volumeList(probes: ReflectionProbes): ProbeVolume[] {
+/**
+ * The volumes of the last bake, in lookup order (smallest first, slot = index), as core's table
+ * wants them: world centre, half size, projection box and offset, capture origin, the set's
+ * `boxProjection`. For engines or passes that bind the probe atlas themselves (the trace hit
+ * shading, D2900); see {@link packReflectionProbesTable} for the whole table.
+ */
+export function reflectionProbeVolumes(probes: ReflectionProbes): ProbeVolume[] {
   return probes.bakedProbes.map((probe, slot) => {
     probe.getWorldPosition(_p);
     probeOrigin(probe, _o);
@@ -154,6 +170,21 @@ function volumeList(probes: ReflectionProbes): ProbeVolume[] {
 }
 
 /**
+ * The set's volume table as the probe node packs it (core `packProbeTable`: header, then
+ * {@link reflectionProbeVolumes}), for a pass that owns its own table buffer. `enabled` is off while
+ * the set is capturing, so captures see only the environment, as the node's lookups do. The
+ * irradiance rows (the re-fit's L1 SH, `probes.irradiance`) are not included: copy them to
+ * `probeIrradianceRow(count) * 16` bytes if the lookup re-fits. Reuses `target` when it is large enough.
+ */
+export function packReflectionProbesTable(probes: ReflectionProbes, target?: Float32Array<ArrayBuffer>): Float32Array<ArrayBuffer> {
+  const count = probes.bakedProbes.length;
+  return packProbeTable({
+    maxLod: probes.texture!.mipmaps.length - 1, enabled: !probes.capturing, environmentSlot: count,
+    irradianceRow: probeIrradianceRow(count), refitClamp: probes.refitClamp,
+  }, reflectionProbeVolumes(probes), target);
+}
+
+/**
  * Packs the set's table (core packProbeTable) and uploads it with queue.writeBuffer, once per render
  * (`renderId`, -1: always); copies the bake's L1 SH into the irradiance rows when it changed.
  */
@@ -162,10 +193,7 @@ function writeTable(probes: ReflectionProbes, t: SetTable, renderer: THREE.WebGP
   t.renderId = renderId;
   const count = probes.bakedProbes.length;
   // captures see only the environment, so baking doesn't feed back into itself
-  t.packed = packProbeTable({
-    maxLod: probes.texture!.mipmaps.length - 1, enabled: !probes.capturing, environmentSlot: count,
-    irradianceRow: probeIrradianceRow(count), refitClamp: probes.refitClamp,
-  }, volumeList(probes), t.packed);
+  t.packed = packReflectionProbesTable(probes, t.packed);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const backend = renderer.backend as any;
   const buffer: GPUBuffer | undefined = backend.get(t.attribute).buffer;
@@ -235,11 +263,15 @@ export class ReflectionProbesNode extends THREE.Node {
   readonly aoNode: N = null;
   readonly viewNode: N = null;
   readonly frameIrradianceNode: N = null;
+  /** The explicit `refit` option; undefined: on exactly when `frameIrradianceNode` is set. */
+  readonly refit: boolean | undefined;
   /** Whether the output is `vec4( radiance, coverage )` without environment fallback. */
   readonly coverage: boolean;
   /** The lookup's own `distanceRoughness` / `roughnessLerp`; undefined: the set's. */
   readonly distanceRoughness: boolean | undefined;
   readonly roughnessLerp: boolean | undefined;
+  /** The lookup's own `lodMapping`; undefined: the set's. */
+  readonly lodMapping: ProbeLodMapping | undefined;
   private table: SetTable | null = null;
   private renderer: THREE.WebGPURenderer | null = null;
   private volumes = 0;
@@ -253,6 +285,8 @@ export class ReflectionProbesNode extends THREE.Node {
     this.coverage = options?.coverage === true;
     this.distanceRoughness = options?.distanceRoughness;
     this.roughnessLerp = options?.roughnessLerp;
+    this.lodMapping = options?.lodMapping;
+    this.refit = options?.refit;
     if (options) {
       if (options.position != null) this.positionNode = nodeObject(options.position);
       if (options.direction != null) this.directionNode = nodeObject(options.direction);
@@ -273,14 +307,17 @@ export class ReflectionProbesNode extends THREE.Node {
     // separate probe sets from sharing a program (#35046 6837c32abc); the texture id makes render
     // objects rebind after a bake that replaced the texture
     const probes = this.probes;
-    const { distanceRoughness, roughnessLerp } = this.seamOptions();
+    const { distanceRoughness, roughnessLerp, lodMapping } = this.seamOptions();
     return THREE.NodeUtils.hash(super.customCacheKey(), probes.bakedProbes.length, probes.bakedSeamFix === 'warp' ? 1 : 0, probes.bakedLayout === 'cube-array' ? 1 : 0, probes.texture?.id ?? 0,
-      distanceRoughness ? 1 : 0, roughnessLerp ? 1 : 0);
+      distanceRoughness ? 1 : 0, roughnessLerp ? 1 : 0, lodMapping === 'r187' ? 1 : 0);
   }
 
-  /** The seam options this lookup uses: its own, else the set's (D53). */
+  /** The set-wide lookup options this lookup uses: its own, else the set's (seam options D53, lod mapping D101). */
   seamOptions() {
-    return { distanceRoughness: this.distanceRoughness ?? this.probes.distanceRoughness, roughnessLerp: this.roughnessLerp ?? this.probes.roughnessLerp };
+    return {
+      distanceRoughness: this.distanceRoughness ?? this.probes.distanceRoughness, roughnessLerp: this.roughnessLerp ?? this.probes.roughnessLerp,
+      lodMapping: this.lodMapping ?? this.probes.lodMapping,
+    };
   }
 
   updateBefore(frame?: { renderId: number }): undefined {
@@ -312,7 +349,8 @@ export class ReflectionProbesNode extends THREE.Node {
     const position: N = this.positionNode ?? positionWorld;
     const direction: N = this.directionNode ?? (context.getUV ? context.getUV(this, builder) : reflectVector);
     const roughness: N = float(this.roughnessNode ?? (context.getTextureLevel ? context.getTextureLevel(this) : 0)).clamp();
-    const refit = this.frameIrradianceNode !== null;
+    // re-fit: on with a frame irradiance unless switched off (D803)
+    const refit = this.frameIrradianceNode !== null && this.refit !== false;
     const dominant = this.normalNode !== null;
     const normal: N = this.normalNode ?? (refit ? normalWorld : direction);
     // the environment slot is unrotated: the material's direction gets its environment rotation,

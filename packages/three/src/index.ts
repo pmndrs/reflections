@@ -8,7 +8,8 @@ export {
 } from './probes/ReflectionProbes';
 export {
   ReflectionProbesNode, reflectionProbes, reflectionProbesLocal, sampleReflectionProbes, sampleReflectionProbesLocal,
-  ReflectionProbesProxyNode, sampleReflectionProbesProxyShare, parallaxCorrect, cubeFaceUV, type ProbeLookupInputs, type ProbeLookupOptions,
+  ReflectionProbesProxyNode, sampleReflectionProbesProxyShare, parallaxCorrect, cubeFaceUV, reflectionProbeVolumes, packReflectionProbesTable,
+  type ProbeLookupInputs, type ProbeLookupOptions,
 } from './probes/ReflectionProbesNode';
 export { ReflectionProbesHelper } from './probes/ReflectionProbesHelper';
 

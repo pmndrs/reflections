@@ -2,7 +2,8 @@
 // device. SPEC "Capture stays in the adapter", and with pixi-3d the capture is pixi-3d's: six
 // renders of the scene from the probe (Camera3D with a renderTexture, examples/pixi3d/shared) hand
 // six rgba16float face textures to `captureFaces()`, which stacks them into a cube and lets core
-// prefilter it. The environment slot takes the view's Hemisphere, evaluated per texel exactly as
+// prefilter it. Each face camera draws the view's background first (pixi-3d's BackgroundPass on that
+// camera), so a local probe sees the sky behind its geometry (D2104). The environment slot takes the view's Hemisphere, evaluated per texel exactly as
 // pixi-3d's envSourceHemisphereBit does (`captureHemisphere()`), so misses see the same sky.
 //
 //   const probes = new PixiProbeSet(app.renderer, { capacity: 1 });

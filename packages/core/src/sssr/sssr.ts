@@ -151,6 +151,12 @@ export interface ScreenSpaceReflectionsSettings {
    * confidence-1 pixels and a constant fallback are the same either way.
    */
   fallbackRoughness?: 'mirror' | 'surface';
+  /**
+   * Bias of the glossy ray sample toward the mirror direction, 0..1 (SSSR 2015, PICA; D49). The
+   * VNDF's radial random number is scaled by `1 - mirrorBias`, which truncates the lobe: less noise,
+   * a sharper (biased) reflection. Default 0: FFX SSSR's full lobe, bit for bit. 1 = mirror.
+   */
+  mirrorBias?: number;
   /** Override the frame index (blue-noise rotation). Default: increments per dispatch. */
   frameIndex?: number;
 }
@@ -432,6 +438,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     f[124] = s.thicknessLengthFactor ?? THICKNESS_HYBRID.thicknessLengthFactor;
     u[125] = useHistory ? 1 : 0;
     u[126] = (s.fallbackRoughness ?? 'surface') === 'surface' ? 1 : 0;
+    f[127] = Math.min(1, Math.max(0, s.mirrorBias ?? 0));
     const mvs = inputs.motionVectorScale ?? [1, 1];
     f[128] = mvs[0]; f[129] = mvs[1];
     device.queue.writeBuffer(params, 0, data);

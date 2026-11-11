@@ -34,9 +34,9 @@ const W = Number(q.get('w') ?? 960), H = Number(q.get('h') ?? 540);
 // lookup); legacy-*: the pre-phase-2 TSL lookup (./legacy.ts); hw: the legacy lookup on hardware cube textures
 type Lookup = 'auto' | 'cube-array' | SeamFix | 'hw' | 'legacy-warp' | 'legacy-none';
 const params = {
-  lookup: (q.get('lookup') ?? 'auto') as Lookup, resolution: Number(q.get('res') ?? 128),
+  lookup: (q.get('lookup') ?? 'auto') as Lookup, resolution: Number(q.get('res') ?? 256), // the package default (D23)
   showProbes: false, showGrid: q.has('grid'), gridResolution: 6, gridSize: 0.12,
-  boxProjection: true, refit: q.has('refit'), dynamicObject: (q.get('obj') ?? 'Sphere') as 'None' | 'Sphere', pause: q.has('pause'), liveCapture: !q.has('static'), animateScene: !q.has('static'),
+  boxProjection: true, refit: q.has('refit'), bounces: Number(q.get('bounces') ?? 1), dynamicObject: (q.get('obj') ?? 'Sphere') as 'None' | 'Sphere', pause: q.has('pause'), liveCapture: !q.has('static'), animateScene: !q.has('static'),
 };
 
 /**
@@ -227,7 +227,7 @@ async function main() {
     // keep helpers, the test grid and the moving mirror sphere out of the probes: a mirror captured
     // into the probes reflects them back, and in a live capture that loop makes the room flicker.
     // The spinning torus stays in (it is rough, so it can't feed back).
-    probes.bake(renderer, scene, { resolution: params.resolution, near: 0.05, far: 30, exclude: [probesHelper, grid, dynamicObject] });
+    probes.bake(renderer, scene, { resolution: params.resolution, near: 0.05, far: 30, exclude: [probesHelper, grid, dynamicObject], bounces: params.bounces });
     if (params.lookup === 'hw') copyToCubes();
   }
 
@@ -288,6 +288,7 @@ async function main() {
   check('Live capture (re-bake every frame)', params.liveCapture, (v) => { params.liveCapture = v; if (!v) capture(); });
   check('Box projection', params.boxProjection, (v) => { probes.boxProjection = v; });
   check('Re-fit (LightProbeGrid)', params.refit, (v) => { params.refit = v; install(); });
+  select('Bounces (capture passes)', ['1', '2', '3', '4'], String(params.bounces), (v) => { params.bounces = Number(v); capture(); });
   select('Object', ['None', 'Sphere'], params.dynamicObject, (v) => { params.dynamicObject = v as 'None' | 'Sphere'; dynamicObject.visible = v !== 'None'; });
   check('Pause', params.pause, (v) => { params.pause = v; });
   slider('Object roughness', dynamicMaterial.roughness, (v) => { dynamicMaterial.roughness = v; });
@@ -338,8 +339,12 @@ async function main() {
       get cubeArray() { return { ...cubeArraySupportStatus(renderer), bakedLayout: probes.bakedLayout, bakedSeamFix: probes.bakedSeamFix }; },
       setRefit(on: boolean, clamp?: number) { params.refit = on; if (clamp !== undefined) probes.refitClamp = clamp; install(); },
       setResolution(v: number) { params.resolution = v; install(); },
+      /** W31 (D25): capture passes per bake (1: captures see only the environment). */
+      setBounces(n: number) { params.bounces = n; capture(); },
       /** W26 (D53): the set's Lagarde seam options (the environment node rebuilds itself). */
       setSeamOptions(distanceRoughness: boolean, roughnessLerp = distanceRoughness) { probes.distanceRoughness = distanceRoughness; probes.roughnessLerp = roughnessLerp; },
+      /** W31 (D101): the set's lod mapping ('alpha' default; 'r187' for parity with the pre-phase-2 node and other builds). */
+      setLodMapping(v: 'alpha' | 'r187') { probes.lodMapping = v; },
       setPose(p: { pos: number[]; target: number[]; fov?: number }) {
         camera.position.fromArray(p.pos); controls.target.fromArray(p.target);
         camera.fov = p.fov ?? 50; camera.updateProjectionMatrix(); controls.update();
