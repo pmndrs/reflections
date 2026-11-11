@@ -34,7 +34,7 @@ const W = Number(q.get('w') ?? 960), H = Number(q.get('h') ?? 540);
 // lookup); legacy-*: the pre-phase-2 TSL lookup (./legacy.ts); hw: the legacy lookup on hardware cube textures
 type Lookup = 'auto' | 'cube-array' | SeamFix | 'hw' | 'legacy-warp' | 'legacy-none';
 const params = {
-  lookup: (q.get('lookup') ?? 'auto') as Lookup, resolution: Number(q.get('res') ?? 128),
+  lookup: (q.get('lookup') ?? 'auto') as Lookup, resolution: Number(q.get('res') ?? 256), // the package default (D23)
   showProbes: false, showGrid: q.has('grid'), gridResolution: 6, gridSize: 0.12,
   boxProjection: true, refit: q.has('refit'), dynamicObject: (q.get('obj') ?? 'Sphere') as 'None' | 'Sphere', pause: q.has('pause'), liveCapture: !q.has('static'), animateScene: !q.has('static'),
 };

@@ -31,7 +31,10 @@ export interface ProbeSetOptions {
   layout?: ProbeLayoutId;
   /** Default 'rgba16float'. */
   format?: ProbeSetFormat;
-  /** Capture face size, a power of two >= 64. Default 128. */
+  /**
+   * Capture face size, a power of two >= 64. Default 256 (D23 / D62: mirror-grade; 128 for many
+   * probes or mobile, see the three adapter's `BakeOptions.resolution` for sizing).
+   */
   sourceSize?: number;
   /** Atlas size (mip 0 face, or octa side). Default `sourceSize`. */
   size?: number;
@@ -87,7 +90,7 @@ export class ProbeSet {
     this.options = options;
     this.capacity = options.capacity;
     this.format = options.format ?? 'rgba16float';
-    this.sourceSize = options.sourceSize ?? 128;
+    this.sourceSize = options.sourceSize ?? 256;
     this.size = options.size ?? this.sourceSize;
     this.maxLod = maxLodFor(this.sourceSize);
     this.layout = createProbeLayout(options.layout ?? 'cube-hw', { maxLod: this.maxLod });

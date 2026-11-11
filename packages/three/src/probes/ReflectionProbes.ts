@@ -106,7 +106,17 @@ export class ReflectionProbe extends THREE.Object3D {
 }
 
 export interface BakeOptions {
-  /** Cube face size, rounded down to a power of two, at least 64. Default 128. */
+  /**
+   * Cube face size, rounded down to a power of two, at least 64. Default 256 (as #35046; D23, D62).
+   *
+   * Sizing: the sharpest material that samples a probe sets its size. 256 for mirror-grade probes
+   * (polished floors, mirrors, metal below roughness ~0.2: Lagarde 2014's minimum for mirror-like
+   * surfaces, Godot's default); 128 when many probes share the scene or on mobile (a quarter of the
+   * memory and bake time; Godot's mobile size), and for probes that only glossy or rough surfaces
+   * see. Memory per probe (rgba16f, 6 faces, all mips): ~4.2 MB at 256, ~1.0 MB at 128. Bake time grows about
+   * 2x from 128 to 256 (W31: 3 probes ~2.3 -> ~4 ms). Whether many small probes beat a few large
+   * ones at equal memory is open (docs/HANDOFF.md fine-tune backlog, "Probe count vs resolution").
+   */
   resolution?: number;
   /** Near plane of the capture camera. Default 0.1. */
   near?: number;
@@ -146,6 +156,8 @@ export interface BakeOptions {
  * narrower SSR-to-probe step on glossy floors); the lerp off (it moved every stage away from the reference).
  */
 const DEFAULT_DISTANCE_ROUGHNESS = true;
+/** Default {@link BakeOptions.resolution} (D23, decided 2026-11-11: #35046's 256). */
+const DEFAULT_RESOLUTION = 256;
 const DEFAULT_ROUGHNESS_LERP = false;
 
 export type SeamFix = 'warp' | 'none';
@@ -273,8 +285,8 @@ export class ReflectionProbes extends THREE.Object3D {
     const r = renderer as Renderer;
     if (r.backend.isWebGPUBackend !== true) throw new Error('ReflectionProbes: .bake() requires the WebGPU backend.');
     const { near = 0.1, far = 100, environment: environmentOption = true } = options;
-    // rounded down like #35046 (2712ba1b23), but from 64: our prefilter has no 256 floor (D23)
-    const resolution = Math.max(64, THREE.MathUtils.floorPowerOfTwo(options.resolution ?? 128));
+    // default 256 and rounded down like #35046 (2712ba1b23), but from 64: our prefilter has no 256 floor (D23)
+    const resolution = Math.max(64, THREE.MathUtils.floorPowerOfTwo(options.resolution ?? DEFAULT_RESOLUTION));
 
     this.updateWorldMatrix(true, true);
     const probes = (this.children.filter((c) => (c as ReflectionProbe).isReflectionProbe) as ReflectionProbe[]).sort((a, b) => volume(a) - volume(b));

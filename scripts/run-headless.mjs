@@ -1417,11 +1417,12 @@ async function main() {
 
       if (args.includes('--time-bake')) {
         // loop stopped (FREEZE); median ms per bake, 5 bakes per submit-wait, 7 bursts
+        const res0 = await p.T('window.__p.params.resolution');
         for (const res of [128, 256]) {
           const t = await p.T(`window.__p.timeBake(${res})`);
           console.log(`  bake, 3 probes at ${res} px: median ${t.median.toFixed(2)} ms (${t.all.map((x) => x.toFixed(2)).join(' ')})`);
         }
-        await p.T('(window.__p.setResolution(128), true)');
+        await p.T(`(window.__p.setResolution(${res0}), true)`);
       }
 
       if (args.includes('--time-lookup')) {
