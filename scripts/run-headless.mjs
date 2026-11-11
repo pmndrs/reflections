@@ -1360,9 +1360,11 @@ async function main() {
       const ca = await p.T('window.__p.cubeArray');
       check('cube-array support installed and self-tested (W20 shim)', ca.mode === 'shim' || ca.mode === 'native', `${ca.mode}: ${ca.reason}`);
       // the storage and pre-phase-2 parity checks compare lookups without Lagarde's seam options (the
-      // 'hw' and legacy nodes don't have them; W26 made distanceRoughness the default, D53)
+      // 'hw' and legacy nodes don't have them; W26 made distanceRoughness the default, D53) and with
+      // r187's lod mapping (theirs; W31 made 'alpha' the default, D101)
       const seamDefaults = await p.T('[window.__p.probes.distanceRoughness, window.__p.probes.roughnessLerp]');
-      await p.T('(window.__p.setSeamOptions(false), true)');
+      const lodDefault = await p.T('window.__p.probes.lodMapping');
+      await p.T("(window.__p.setSeamOptions(false), window.__p.setLodMapping('r187'), true)");
       const shots = {};
       for (const lookup of ['warp', 'none', 'hw', 'cube-array', 'auto']) {
         await p.T(`(window.__p.setLookup('${lookup}'), window.__p.capture(), true)`);
@@ -1437,8 +1439,9 @@ async function main() {
         check('a failing self-test uninstalls the shim and reports false; auto falls back', st.ok === false && st.failed.mode === 'none' && st.layout === 'cube2d' && st.again === true && st.relayout === 'cube-array',
           `${st.failed.reason}; then auto ${st.layout}, re-install ${st.again} (${st.relayout})`);
       }
-      await p.T(`(window.__p.setSeamOptions(${seamDefaults[0]}, ${seamDefaults[1]}), true)`);
+      await p.T(`(window.__p.setSeamOptions(${seamDefaults[0]}, ${seamDefaults[1]}), window.__p.setLodMapping(${JSON.stringify(lodDefault)}), true)`);
       check('seam options default: distanceRoughness on, roughnessLerp off (W26, D53)', seamDefaults[0] === true && seamDefaults[1] === false, JSON.stringify(seamDefaults));
+      check("lod mapping default: 'alpha' (W31, D101)", lodDefault === 'alpha', JSON.stringify(lodDefault));
       // W20: the feature checks run on one storage: 'auto' (the cube array through the shim, default) or the 2D array
       const probesLayout = args.includes('--probes-layout') ? args[args.indexOf('--probes-layout') + 1] : 'cube-array';
       if (probesLayout === 'cube2d') await p.T("(async () => { await window.__p.setShim(false); window.__p.setLookup('warp'); return true; })()");
@@ -1465,6 +1468,7 @@ async function main() {
       check("lookup option ao: Lagarde's specular occlusion", lo.so < 1e-3, `max rel err ${lo.so.toExponential(1)}`);
       check('lookup option frameIrradiance: re-fit by k / probe L1 irradiance, clamped', lo.refit < 2e-3 && lo.clampErr < 1e-4 && lo.lum > 0 && lo.ratios.every(Number.isFinite) && lo.slots.every((s) => s >= 0),
         `max rel err ${lo.refit.toExponential(1)} (ratios ${lo.ratios.slice(0, 6).join(' ')} ...), clamp ${lo.clampErr.toExponential(1)}`);
+      check('lookup option refit: false keeps a lookup with frameIrradiance plain (D803)', lo.refitOff < 1e-5, `max rel err ${lo.refitOff.toExponential(1)}`);
       // W26 (D53): Lagarde's seam options against the plain lookup fed the CPU's r' and lerped direction
       const so = await C('seamOptions');
       check("lookup options distanceRoughness / roughnessLerp: Lagarde 2014 Listing 25 / App. F", so.err.dist < 2e-3 && so.err.lerp < 2e-3 && so.err.both < 2e-3 && so.err.off < 2e-3 && so.lum > 0 && so.changedDist > 0.01 && so.changedLerp > 0.01,
@@ -1475,6 +1479,15 @@ async function main() {
       savePng('probes-refit-on.png', rf.on);
       const rs = await p.T(`(${IMAGE_STATS})(${JSON.stringify(rf.on)}, ${JSON.stringify(rf.off)})`);
       check('re-fit with LightProbeGrid renders and changes the image', rs.lum > 10 && rs.mean > 0.5, `lum ${rs.lum.toFixed(1)}, mean diff ${rs.mean.toFixed(2)} / 255`);
+      // W31 (D25): bake({ bounces: 2 }) re-captures with the first pass's probes visible: the rooms'
+      // interreflection reaches the probes (brighter); 1 is the plain bake
+      const bo = await p.T(`(async () => { const P = window.__p; P.setGrid(true, 0.08); const one = await P.shot();
+        P.setBounces(2); const two = await P.shot(); P.setBounces(1); const back = await P.shot(); P.setGrid(false); return { one, two, back }; })()`);
+      savePng('probes-bounces-2.png', bo.two);
+      const b2 = await p.T(`(${IMAGE_STATS})(${JSON.stringify(bo.two)}, ${JSON.stringify(bo.one)})`);
+      const b1 = await p.T(`(${IMAGE_STATS})(${JSON.stringify(bo.back)}, ${JSON.stringify(bo.one)})`);
+      check('bake bounces: 2 adds the probes\' interreflection; back to 1 restores the plain bake (D25)', b2.mean > 1 && b2.lum > b1.lum && b1.mean < 0.01, // (< 0.01: the grid's known highlight scatter, W7)
+        `bounce 2 vs 1: mean ${b2.mean.toFixed(2)} / 255, lum ${b1.lum.toFixed(1)} -> ${b2.lum.toFixed(1)}; back to 1: max ${b1.max} / 255`);
       const ck = await C('cacheKey');
       check('two probe sets of equal size keep their own programs', ck.left[0] > 200 && ck.left[2] < 50 && ck.right[2] > 200 && ck.right[0] < 50 && ck.keysDiffer,
         `left ${ck.left}, right ${ck.right}, keys differ ${ck.keysDiffer}`);
@@ -1504,11 +1517,12 @@ async function main() {
 
       if (args.includes('--time-bake')) {
         // loop stopped (FREEZE); median ms per bake, 5 bakes per submit-wait, 7 bursts
+        const res0 = await p.T('window.__p.params.resolution');
         for (const res of [128, 256]) {
           const t = await p.T(`window.__p.timeBake(${res})`);
           console.log(`  bake, 3 probes at ${res} px: median ${t.median.toFixed(2)} ms (${t.all.map((x) => x.toFixed(2)).join(' ')})`);
         }
-        await p.T('(window.__p.setResolution(128), true)');
+        await p.T(`(window.__p.setResolution(${res0}), true)`);
       }
 
       if (args.includes('--time-lookup')) {
@@ -1542,7 +1556,8 @@ async function main() {
         pages.push(o);
         await o.T(FREEZE);
         await o.T("(window.__p.setLookup('warp'), window.__p.capture(), true)");
-        await p.T('(window.__p.setSeamOptions(false), window.__p.capture(), true)'); // the other build has no seam options (D53)
+        // the other build has no seam options (D53), r187's lod mapping (D101) and bakes at 128 px (D23)
+        await p.T("(window.__p.setSeamOptions(false), window.__p.setLodMapping('r187'), window.__p.setResolution(128), true)");
         const a = await p.T('window.__p.shot()');
         const b = await o.T('window.__p.shot()');
         savePng('probes-compare.png', b);
@@ -1627,6 +1642,8 @@ async function main() {
       check('probe core: a constant capture looks up as that constant', r.refit.constErr < 2e-3, `max rel err ${r.refit.constErr.toExponential(2)}`);
       check('probe core: re-fit by 2x the probe L1 irradiance doubles the lookup', r.refit.refitErr < 2e-2, `max rel err ${r.refit.refitErr.toExponential(2)}`);
       check("probe core: Lagarde's specular occlusion", r.refit.soErr < 1e-4, `max err ${r.refit.soErr.toExponential(2)}`);
+      check('probe core: a frame irradiance provider turns the re-fit on; refit: false keeps it off (D803)', r.refit.autoErr < 2e-2 && r.refit.offErr < 2e-3,
+        `auto x2 max rel err ${r.refit.autoErr.toExponential(2)}, off x1 ${r.refit.offErr.toExponential(2)}`);
       check('sssr probe fallback: constant probes = constant fallback (to one f16 step)', r.sssr.constantVsProbes === 0, `${r.sssr.constantVsProbes} px differ`);
       check('sssr probe fallback: structured probes reach the fallback pixels', r.sssr.structuredVsConstant > r.sssr.pixels * 0.05, `${r.sssr.structuredVsConstant} of ${r.sssr.pixels} px`);
       const rt = r.sssr.rt;
