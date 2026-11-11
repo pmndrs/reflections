@@ -168,8 +168,12 @@ async function main() {
       hitRadiance: c.geometry.select(tone(c.ssr), vec3(0)),
       specular: c.geometry.select(tone(c.specular), vec3(0)),
       probeSpecular: c.geometry.select(tone(c.probeSpecular), vec3(0)),
-      // W38: the pixels the ray-traced pass traced (SSR's miss list, after the tile cap), red; RT on only
-      traced: c.geometry.and(c.source.greaterThan(0.5)).select(vec3(1, 0, 0), vec3(0)),
+      // W38: the pixels the ray-traced pass traced (SSR's miss list, after the tile cap): red where the
+      // ray hit the scene, magenta where it missed (or was capped); RT on only
+      traced: (() => {
+        const src: N = c.source.add(0.5).floor();
+        return c.geometry.not().or(src.lessThan(1)).select(vec3(0), src.equal(1).or(src.equal(4)).select(vec3(1, 0, 0), vec3(1, 0, 1)));
+      })(),
       hitDistance: (() => { const d: N = c.hitDistance; return d.greaterThan(0).select((vec3(1, 0.8, 0.5) as N).mul(d.div(d.add(2))), vec3(0)); })(),
     };
     let out: N = vec3(0);
