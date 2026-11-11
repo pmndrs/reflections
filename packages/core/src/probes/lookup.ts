@@ -34,7 +34,7 @@
 //                      roughness from the capture point's distance on (D53).
 //   roughnessLerp      Lagarde 2014 Appendix F: the box-projected direction lerped back toward the
 //                      unprojected one by r, mix(normalize(corrected), normalize(dir), r) (Frostbite
-//                      lerps the unnormalized corrected vector, D2600).
+//                      lerps the unnormalized corrected vector, D2700).
 //   probeSpecularOcclusion(NdotV, ao, roughness) is always defined: Lagarde 2014's
 //                      saturate(pow(NdotV + ao, exp2(-16 a - 1)) - 1 + ao), a = perceptual^2, D66.
 //
@@ -68,7 +68,7 @@ export interface ProbeLookupOptions {
   distanceRoughness?: boolean;
   /**
    * Lagarde 2014's roughness lerp of the box-projected direction back toward the unprojected one
-   * (Appendix F, D53, D2600). Default false.
+   * (Appendix F, D53, D2700). Default false.
    */
   roughnessLerp?: boolean;
   /** Roughness to mip. Default 'r187'. */

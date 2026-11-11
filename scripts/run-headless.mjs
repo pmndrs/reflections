@@ -1394,17 +1394,19 @@ async function main() {
       if (!args.includes('--seam-pt-only')) await seamChecks(sp, true);
       if (args.includes('--seam-pt') || args.includes('--seam-pt-only')) {
         // vs the path-traced reference (examples/showcase/compare.html Measure, W21/W23): MAD / bias of
-        // 'probes only' and 'ours denoised' over the glossy px, Lagarde's options off (?seam=0) and on
+        // 'probes only' and 'ours denoised' over the glossy px, Lagarde's options off (?seam=0), each alone, both
         const rows = [];
-        for (const [scene, floor] of [['toyCar', 0.25], ['carConcept', 0.25], ['chess', 0.25], ['sponza', null]]) {
-          for (const seam of [0, 1]) {
+        // SEAM_PT_SCENES=chess,sponza runs a subset (the four together pass the script's 10 min limit)
+        const ptScenes = process.env.SEAM_PT_SCENES?.split(',');
+        for (const [scene, floor] of [['toyCar', 0.25], ['carConcept', 0.25], ['chess', 0.25], ['sponza', null]].filter(([id]) => !ptScenes || ptScenes.includes(id))) {
+          for (const seam of ['0', 'dist', 'lerp', '1']) {
             const page = await openPage(`http://127.0.0.1:${PORT}/showcase/compare.html?manual&scene=${scene}&left=ours-denoised&right=probes&seam=${seam}${floor !== null ? `&floorRoughness=${floor}` : ''}`);
             if (!(await page.T('window.__p.entries()')).length) { page.close(); console.log('  (no showcase assets: --seam-pt skipped)'); break; }
             await page.T('window.__p.freeze(true)');
             const m = await page.T("window.__p.measure({ samples: 32, warmup: 24, frames: 8, methods: ['probes', 'ours-denoised'], orbitFrames: 0 })");
             page.close();
             const fmt = m.rows.map((r) => `${r.method} MAD ${r.mad.toFixed(2)} bias ${r.bias.toFixed(2)}`).join(', ');
-            console.log(`  vs path traced ${scene}${floor !== null ? ` floor r ${floor}` : ''} seam ${seam ? 'on ' : 'off'}: ${m.glossyPixels} glossy px, ${fmt}`);
+            console.log(`  vs path traced ${scene}${floor !== null ? ` floor r ${floor}` : ''} seam ${seam}: ${m.glossyPixels} glossy px, ${fmt}`);
             rows.push({ scene, floor, seam, glossyPixels: m.glossyPixels, rows: m.rows.map(({ method, mad, bias, stdMean }) => ({ method, mad, bias, stdMean })) });
           }
         }

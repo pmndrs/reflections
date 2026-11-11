@@ -67,8 +67,12 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   if (sc.background === sc.environment) { sc.backgroundIntensity = sc.environmentIntensity; sc.backgroundBlurriness = 0; }
   probes.bake(renderer, kit.scene, { resolution: 128, near: kit.bake.near, far: kit.bake.far });
   [sc.backgroundIntensity, sc.backgroundBlurriness] = keep;
-  // W26 (D53): ?seam=0|1 Lagarde's distanceRoughness + roughnessLerp (lit and composite), default: the package's
-  if (params.has('seam')) probes.distanceRoughness = probes.roughnessLerp = params.get('seam') !== '0';
+  // W26 (D53): ?seam=0|1|dist|lerp Lagarde's distanceRoughness / roughnessLerp (lit and composite), default: the package's
+  if (params.has('seam')) {
+    const v = params.get('seam');
+    probes.distanceRoughness = v === '1' || v === 'dist';
+    probes.roughnessLerp = v === '1' || v === 'lerp';
+  }
   kit.scene.environmentNode = reflectionProbes(probes) as N;
 
   let provider: MeshBVHTraceProvider | null = null;
