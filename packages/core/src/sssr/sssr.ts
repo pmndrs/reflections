@@ -40,8 +40,8 @@ export const DEFAULT_ROUGHNESS_THRESHOLD = 0.447;
  * The radiance-fallback seam (docs/HANDOFF.md): WGSL defining
  * `fn sampleRadianceFallback(P: vec3f, dir: vec3f, roughness: f32) -> vec3f`
  * (world-space position and direction, perceptual roughness), with its bindings in `@group(1)`.
- * It is called for rays that miss (lerped by hit confidence; roughness 0 as in FFX, or the pixel's
- * own with `settings.fallbackRoughness: 'surface'`) and for
+ * It is called for rays that miss (lerped by hit confidence; by default at the pixel's own roughness
+ * along its mirror direction, or at roughness 0 as in FFX with `settings.fallbackRoughness: 'mirror'`) and for
  * reflective pixels rougher than the threshold (mirror direction, sqrt of the extracted roughness).
  * The snippet may read the tracer's uniform block `P` (e.g. `P.iblFactor`, `P.fallbackColor`).
  */
@@ -144,10 +144,11 @@ export interface ScreenSpaceReflectionsSettings {
   hitColor?: 'current' | 'history';
   /**
    * Roughness a screen-space miss takes its fallback at (the `(1 - confidence)` part of radiance).
-   * 'mirror' (default, FFX SSSR): the sampled reflection direction at roughness 0, sharp, for a
-   * denoiser to blur. 'surface' (D1806): the mirror direction at the pixel's own roughness, the same
-   * lookup pixels above `roughnessThreshold` get, for a resolve that uses radiance as is (no denoiser,
-   * no probe term of its own). Hits (confidence 1) and mirrors (roughness 0) are the same either way.
+   * 'surface' (default, D1806): the lookup pixels above `roughnessThreshold` get, along the pixel's
+   * mirror direction at its own perceptual roughness, per pixel (quad copies included), so radiance
+   * shown as is (or denoised) carries the probe's blur. 'mirror' (FFX SSSR): the ray's sampled
+   * direction at roughness 0, sharp, left for the denoiser to blur. Mirror pixels (alpha < 1e-4),
+   * confidence-1 pixels and a constant fallback are the same either way.
    */
   fallbackRoughness?: 'mirror' | 'surface';
   /** Override the frame index (blue-noise rotation). Default: increments per dispatch. */
@@ -430,7 +431,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     f[123] = s.thicknessRoughnessFactor ?? THICKNESS_HYBRID.thicknessRoughnessFactor;
     f[124] = s.thicknessLengthFactor ?? THICKNESS_HYBRID.thicknessLengthFactor;
     u[125] = useHistory ? 1 : 0;
-    u[126] = (s.fallbackRoughness ?? 'mirror') === 'surface' ? 1 : 0;
+    u[126] = (s.fallbackRoughness ?? 'surface') === 'surface' ? 1 : 0;
     const mvs = inputs.motionVectorScale ?? [1, 1];
     f[128] = mvs[0]; f[129] = mvs[1];
     device.queue.writeBuffer(params, 0, data);

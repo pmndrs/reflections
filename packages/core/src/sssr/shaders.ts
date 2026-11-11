@@ -48,6 +48,9 @@
 // - The hit-to-surface distance is measured at the mip the march ended on, not at mip 1 (D1000).
 // - The environment-map lookup is the radiance-fallback seam `sampleRadianceFallback(P, dir,
 //   perceptualRoughness)`, a WGSL snippet with its own @group(1) bindings.
+// - A miss blends to the fallback at the pixel's own roughness along its mirror direction (the
+//   rough-pixel lookup, per pixel, quad copies included); FFX's roughness-0 lookup along the sampled
+//   direction is `fallbackRoughness: 'mirror'` (D1806).
 
 /** Byte size of the uniform block (struct Params below). */
 export const PARAMS_SIZE = 528;
@@ -677,8 +680,8 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   if (confidence > 0.0) { hit_radiance = loadHitColor(hit.xy); }
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
   let hit_distance = select(0.0, world_ray_length, confidence > 0.0);
-  // FFX: the miss fallback along the sampled direction at roughness 0 (the denoiser blurs it).
-  // fallbackRoughness 'surface' (D1806): each pixel's own rough-pixel lookup, quad copies included.
+  // fallbackRoughness 'surface' (default, D1806): each pixel's own rough-pixel lookup, quad copies
+  // included. 'mirror' (FFX): the sampled direction at roughness 0, left for the denoiser to blur.
   if (P.fallbackRoughnessSurface != 0u) {
     storeRadianceSurface((*r).packed, (*r).coords, world_space_origin, world_space_reflected_direction, world_ray_length, hit_radiance, hit_distance, confidence);
   } else {
