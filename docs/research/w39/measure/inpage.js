@@ -276,5 +276,64 @@
     home(); P.setSettings({ mirrorBias: 0 }); P.setDenoise(true); P.setAA('upscaler'); resetAll();
     return { size: [W, H], frames, refFrames, warm, deg, half, passes, binPx, results };
   }
-  window.__w39 = { grab, masks, measure, rotate, readTex, restStats, orbitStats, heat, toUrl, decode, binMasks, biasStudy, get size() { return [W, H]; } };
+  /**
+   * W39 task 3: specular occlusion off / on against a traced reference. Reference: every pixel traced
+   * (roughnessThreshold 1, SSR then the ray-traced fallback, hits carry their own visibility), raw
+   * (no denoiser), the mean of `refFrames` still frames. Tests: the page's defaults (threshold 0.447,
+   * no RT, denoiser on), specOcc off / on, mean of `frames` after `warm`. Masks: AO bands from the
+   * page's GTAO (the 'ao' view), geometry; per mask mean |test - ref| and the signed mean (8-bit luma).
+   */
+  async function soStudy(o = {}) {
+    const { refFrames = 256, frames = 16, warm = 90, shots = false } = o;
+    P.stop();
+    let rgbMean = null;
+    const meanOf = async (cnt) => {
+      let acc = null; const rgb = new Float64Array(W * H * 4 || 1);
+      for (let f = 0; f < cnt; f++) { const g = await grab(true); const x = g.l; if (!acc) acc = new Float64Array(x.length); for (let i = 0; i < x.length; i++) acc[i] += x[i]; if (rgb.length === g.d.length) for (let i = 0; i < g.d.length; i++) rgb[i] += g.d[i]; }
+      for (let i = 0; i < acc.length; i++) acc[i] /= cnt;
+      rgbMean = rgb.map((v) => v / cnt);
+      return acc;
+    };
+    const keepThr = P.ssr.settings.roughnessThreshold;
+    P.setSpecOcc(true); P.setView('ao'); for (let i = 0; i < 3; i++) await P.step(1);
+    const aoL = await grab();
+    P.setView('final');
+    await P.step(1);
+    const t = P.ssr.gbuffer.gpuTextures(); const dep = await readTex(t.depth);
+    const inv = P.ssr.gbuffer.conventions.depthInverted;
+    const n = W * H;
+    const geo = new Uint8Array(n); for (let i = 0; i < n; i++) geo[i] = (inv ? dep.data[i] > 0 : dep.data[i] < 1) ? 1 : 0;
+    const band = (th) => geo.map((g, i) => (g && aoL[i] < th * 255 ? 1 : 0));
+    const nrm = await readTex(t.normal);
+    const rough = (i) => nrm.data[i * 4 + 3];
+    const b8 = band(0.8);
+    const M = {
+      geometry: geo, 'ao<0.95': band(0.95), 'ao<0.8': b8, 'ao<0.6': band(0.6),
+      'ao<0.8 r<0.1': b8.map((v, i) => (v && rough(i) < 0.1 ? 1 : 0)),
+      'ao<0.8 r.1-.447': b8.map((v, i) => (v && rough(i) >= 0.1 && rough(i) < 0.447 ? 1 : 0)),
+      'ao<0.8 r>=.447': b8.map((v, i) => (v && rough(i) >= 0.447 ? 1 : 0)),
+    };
+    P.setSpecOcc(false); P.setSettings({ roughnessThreshold: 1 }); P.setRT(true); P.setDenoise(false); resetAll();
+    for (let i = 0; i < 4; i++) await P.step(1);
+    const ref = await meanOf(refFrames);
+    let refUrl;
+    if (shots) { const c = new Uint8ClampedArray(n * 4); for (let i = 0; i < n * 4; i++) c[i] = (i & 3) === 3 ? 255 : rgbMean[i]; refUrl = await toUrl(c); }
+    if (keepThr === undefined) delete P.ssr.settings.roughnessThreshold; else P.setSettings({ roughnessThreshold: keepThr });
+    P.setRT(false); P.setDenoise(true);
+    const out = { size: [W, H], px: Object.fromEntries(Object.entries(M).map(([k, v]) => [k, count(v)])), tests: {} };
+    for (const so of [false, true]) {
+      P.setSpecOcc(so); resetAll();
+      for (let i = 0; i < warm; i++) await P.step(1);
+      const m = await meanOf(frames);
+      out.tests[so ? 'on' : 'off'] = Object.fromEntries(Object.entries(M).map(([k, mask]) => {
+        let px = 0, a = 0, s = 0;
+        for (let i = 0; i < n; i++) if (mask[i]) { const d = m[i] - ref[i]; px++; a += Math.abs(d); s += d; }
+        return [k, { mad: Number((a / Math.max(1, px)).toFixed(3)), signed: Number((s / Math.max(1, px)).toFixed(3)) }];
+      }));
+    }
+    P.setSpecOcc(false); resetAll();
+    if (shots) out.refShot = refUrl;
+    return out;
+  }
+  window.__w39 = { grab, masks, measure, rotate, readTex, restStats, orbitStats, heat, toUrl, decode, binMasks, biasStudy, soStudy, get size() { return [W, H]; } };
 })();

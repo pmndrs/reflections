@@ -1,0 +1,518 @@
+{
+ "what": "W39 task 3 (after W44, main 4e4558b): Lagarde specular occlusion from GTAO (examples ?specOcc=1) off / on, AA off, denoiser on, hitShading reshade. traced: examples/ssr vs a fully traced reference (roughnessThreshold 1, SSR + ?rt=1, raw, mean of 256 frames); per mask mad = mean |test - ref|, signed = mean (test - ref), 8-bit luma; masks: GTAO bands and the G-buffer roughness split of ao < 0.8. pathTraced: examples/showcase/compare.html ours-denoised vs the WebGPU path tracer (64 spp + OIDN), 8-bit sRGB after AgX, [MAD, signed] per GTAO band (AO mask from the showcase page at the same scene, pose and size).",
+ "traced": {
+  "contact": {
+   "size": [
+    960,
+    540
+   ],
+   "px": {
+    "geometry": 505037,
+    "ao<0.95": 29568,
+    "ao<0.8": 11621,
+    "ao<0.6": 3948,
+    "ao<0.8 r<0.1": 4917,
+    "ao<0.8 r.1-.447": 4384,
+    "ao<0.8 r>=.447": 2320
+   },
+   "tests": {
+    "off": {
+     "geometry": {
+      "mad": 4.63,
+      "signed": -1.65
+     },
+     "ao<0.95": {
+      "mad": 6.66,
+      "signed": -0.971
+     },
+     "ao<0.8": {
+      "mad": 10.807,
+      "signed": -1.078
+     },
+     "ao<0.6": {
+      "mad": 16.792,
+      "signed": 4.014
+     },
+     "ao<0.8 r<0.1": {
+      "mad": 23.756,
+      "signed": -1.659
+     },
+     "ao<0.8 r.1-.447": {
+      "mad": 1.692,
+      "signed": -0.742
+     },
+     "ao<0.8 r>=.447": {
+      "mad": 0.59,
+      "signed": -0.484
+     }
+    },
+    "on": {
+     "geometry": {
+      "mad": 4.758,
+      "signed": -1.979
+     },
+     "ao<0.95": {
+      "mad": 8.774,
+      "signed": -6.253
+     },
+     "ao<0.8": {
+      "mad": 15.457,
+      "signed": -13.028
+     },
+     "ao<0.6": {
+      "mad": 23.252,
+      "signed": -20.275
+     },
+     "ao<0.8 r<0.1": {
+      "mad": 33.439,
+      "signed": -28.157
+     },
+     "ao<0.8 r.1-.447": {
+      "mad": 2.905,
+      "signed": -2.397
+     },
+     "ao<0.8 r>=.447": {
+      "mad": 1.064,
+      "signed": -1.052
+     }
+    }
+   }
+  },
+  "contact-low": {
+   "size": [
+    960,
+    540
+   ],
+   "px": {
+    "geometry": 459734,
+    "ao<0.95": 26881,
+    "ao<0.8": 7756,
+    "ao<0.6": 2099,
+    "ao<0.8 r<0.1": 2657,
+    "ao<0.8 r.1-.447": 4262,
+    "ao<0.8 r>=.447": 837
+   },
+   "tests": {
+    "off": {
+     "geometry": {
+      "mad": 2.053,
+      "signed": 0.232
+     },
+     "ao<0.95": {
+      "mad": 4.474,
+      "signed": -0.105
+     },
+     "ao<0.8": {
+      "mad": 7.023,
+      "signed": 0.79
+     },
+     "ao<0.6": {
+      "mad": 12.278,
+      "signed": 3.2
+     },
+     "ao<0.8 r<0.1": {
+      "mad": 16.921,
+      "signed": 2.543
+     },
+     "ao<0.8 r.1-.447": {
+      "mad": 2.095,
+      "signed": -0.095
+     },
+     "ao<0.8 r>=.447": {
+      "mad": 0.703,
+      "signed": -0.271
+     }
+    },
+    "on": {
+     "geometry": {
+      "mad": 2.181,
+      "signed": -0.037
+     },
+     "ao<0.95": {
+      "mad": 6.484,
+      "signed": -4.185
+     },
+     "ao<0.8": {
+      "mad": 12.926,
+      "signed": -10.815
+     },
+     "ao<0.6": {
+      "mad": 27.355,
+      "signed": -24.852
+     },
+     "ao<0.8 r<0.1": {
+      "mad": 33.357,
+      "signed": -29.74
+     },
+     "ao<0.8 r.1-.447": {
+      "mad": 2.482,
+      "signed": -0.912
+     },
+     "ao<0.8 r>=.447": {
+      "mad": 1.253,
+      "signed": -1.163
+     }
+    }
+   }
+  },
+  "contact-floor0.6": {
+   "size": [
+    960,
+    540
+   ],
+   "px": {
+    "geometry": 505037,
+    "ao<0.95": 29568,
+    "ao<0.8": 11621,
+    "ao<0.6": 3948,
+    "ao<0.8 r<0.1": 0,
+    "ao<0.8 r.1-.447": 4384,
+    "ao<0.8 r>=.447": 7237
+   },
+   "tests": {
+    "off": {
+     "geometry": {
+      "mad": 2.81,
+      "signed": -1.443
+     },
+     "ao<0.95": {
+      "mad": 7.182,
+      "signed": 1.519
+     },
+     "ao<0.8": {
+      "mad": 10.11,
+      "signed": 4.741
+     },
+     "ao<0.6": {
+      "mad": 15.432,
+      "signed": 13.418
+     },
+     "ao<0.8 r<0.1": {
+      "mad": 0,
+      "signed": 0
+     },
+     "ao<0.8 r.1-.447": {
+      "mad": 1.542,
+      "signed": -0.664
+     },
+     "ao<0.8 r>=.447": {
+      "mad": 15.3,
+      "signed": 8.015
+     }
+    },
+    "on": {
+     "geometry": {
+      "mad": 2.816,
+      "signed": -1.806
+     },
+     "ao<0.95": {
+      "mad": 6.425,
+      "signed": -3.381
+     },
+     "ao<0.8": {
+      "mad": 8.076,
+      "signed": -5.4
+     },
+     "ao<0.6": {
+      "mad": 8.904,
+      "signed": -6.167
+     },
+     "ao<0.8 r<0.1": {
+      "mad": 0,
+      "signed": 0
+     },
+     "ao<0.8 r.1-.447": {
+      "mad": 2.817,
+      "signed": -2.342
+     },
+     "ao<0.8 r>=.447": {
+      "mad": 11.262,
+      "signed": -7.252
+     }
+    }
+   }
+  },
+  "roughnessRamp": {
+   "size": [
+    960,
+    540
+   ],
+   "px": {
+    "geometry": 487946,
+    "ao<0.95": 23587,
+    "ao<0.8": 12294,
+    "ao<0.6": 5714,
+    "ao<0.8 r<0.1": 905,
+    "ao<0.8 r.1-.447": 1293,
+    "ao<0.8 r>=.447": 10096
+   },
+   "tests": {
+    "off": {
+     "geometry": {
+      "mad": 2.635,
+      "signed": 2.174
+     },
+     "ao<0.95": {
+      "mad": 5.607,
+      "signed": 5.363
+     },
+     "ao<0.8": {
+      "mad": 6.8,
+      "signed": 6.694
+     },
+     "ao<0.6": {
+      "mad": 8.002,
+      "signed": 7.996
+     },
+     "ao<0.8 r<0.1": {
+      "mad": 1.791,
+      "signed": 1.277
+     },
+     "ao<0.8 r.1-.447": {
+      "mad": 0.987,
+      "signed": 0.427
+     },
+     "ao<0.8 r>=.447": {
+      "mad": 7.994,
+      "signed": 7.982
+     }
+    },
+    "on": {
+     "geometry": {
+      "mad": 2.493,
+      "signed": 2
+     },
+     "ao<0.95": {
+      "mad": 3.085,
+      "signed": 2.454
+     },
+     "ao<0.8": {
+      "mad": 2.658,
+      "signed": 1.975
+     },
+     "ao<0.6": {
+      "mad": 1.977,
+      "signed": 1.045
+     },
+     "ao<0.8 r<0.1": {
+      "mad": 1.374,
+      "signed": 0.594
+     },
+     "ao<0.8 r.1-.447": {
+      "mad": 0.796,
+      "signed": 0.082
+     },
+     "ao<0.8 r>=.447": {
+      "mad": 3.011,
+      "signed": 2.341
+     }
+    }
+   }
+  },
+  "boxRoom-floor": {
+   "size": [
+    960,
+    540
+   ],
+   "px": {
+    "geometry": 449129,
+    "ao<0.95": 51985,
+    "ao<0.8": 22271,
+    "ao<0.6": 7779,
+    "ao<0.8 r<0.1": 1884,
+    "ao<0.8 r.1-.447": 11390,
+    "ao<0.8 r>=.447": 8997
+   },
+   "tests": {
+    "off": {
+     "geometry": {
+      "mad": 2.3,
+      "signed": -2.006
+     },
+     "ao<0.95": {
+      "mad": 0.938,
+      "signed": -0.703
+     },
+     "ao<0.8": {
+      "mad": 1.017,
+      "signed": -0.764
+     },
+     "ao<0.6": {
+      "mad": 0.885,
+      "signed": -0.63
+     },
+     "ao<0.8 r<0.1": {
+      "mad": 0.562,
+      "signed": 0.135
+     },
+     "ao<0.8 r.1-.447": {
+      "mad": 1.524,
+      "signed": -1.198
+     },
+     "ao<0.8 r>=.447": {
+      "mad": 0.47,
+      "signed": -0.403
+     }
+    },
+    "on": {
+     "geometry": {
+      "mad": 2.307,
+      "signed": -2.019
+     },
+     "ao<0.95": {
+      "mad": 0.996,
+      "signed": -0.81
+     },
+     "ao<0.8": {
+      "mad": 1.121,
+      "signed": -0.961
+     },
+     "ao<0.6": {
+      "mad": 1.016,
+      "signed": -0.881
+     },
+     "ao<0.8 r<0.1": {
+      "mad": 0.571,
+      "signed": 0.075
+     },
+     "ao<0.8 r.1-.447": {
+      "mad": 1.642,
+      "signed": -1.444
+     },
+     "ao<0.8 r>=.447": {
+      "mad": 0.576,
+      "signed": -0.567
+     }
+    }
+   }
+  }
+ },
+ "pathTraced": {
+  "carConcept": {
+   "geometry": {
+    "off": [
+     16.38,
+     4.25
+    ],
+    "on": [
+     15.63,
+     3.08
+    ]
+   },
+   "ao<0.95": {
+    "off": [
+     43.41,
+     30.04
+    ],
+    "on": [
+     36.24,
+     19.85
+    ]
+   },
+   "ao<0.8": {
+    "off": [
+     88.98,
+     78.88
+    ],
+    "on": [
+     64.7,
+     49.6
+    ]
+   },
+   "ao<0.6": {
+    "off": [
+     95.79,
+     88.84
+    ],
+    "on": [
+     60.4,
+     47.4
+    ]
+   }
+  },
+  "chess": {
+   "geometry": {
+    "off": [
+     9.85,
+     4.66
+    ],
+    "on": [
+     9.75,
+     4.22
+    ]
+   },
+   "ao<0.95": {
+    "off": [
+     15.11,
+     8.59
+    ],
+    "on": [
+     14.16,
+     4.71
+    ]
+   },
+   "ao<0.8": {
+    "off": [
+     15.99,
+     7.56
+    ],
+    "on": [
+     14.49,
+     1.51
+    ]
+   },
+   "ao<0.6": {
+    "off": [
+     15.28,
+     5.51
+    ],
+    "on": [
+     13.9,
+     -1.72
+    ]
+   }
+  },
+  "carConcept-floor0.5": {
+   "geometry": {
+    "off": [
+     19.12,
+     10.57
+    ],
+    "on": [
+     18.53,
+     9.67
+    ]
+   },
+   "ao<0.95": {
+    "off": [
+     34.21,
+     19.52
+    ],
+    "on": [
+     29.26,
+     12.08
+    ]
+   },
+   "ao<0.8": {
+    "off": [
+     62.93,
+     50.76
+    ],
+    "on": [
+     49.27,
+     31.22
+    ]
+   },
+   "ao<0.6": {
+    "off": [
+     70.22,
+     61.35
+    ],
+    "on": [
+     50.66,
+     34.78
+    ]
+   }
+  }
+ }
+}
