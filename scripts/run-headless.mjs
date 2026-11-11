@@ -11,6 +11,7 @@
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
 //   pnpm check -- --only ssr-bench --ssr-bench   # the phase 3 gate bench: ours vs three's SSRNode (minutes); JSON to out/ssr-bench.json
 //                                    # (--ssr-scenes rooms,mirrorWall to narrow it)
+//   pnpm check -- --only ssr-rt --rt-shadow-timing   # D903: GPU ms of hit shadow rays, kit scenes, 960x540 + 1080p (also ssr-rt-bvh)
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
 import { spawn } from 'node:child_process';
@@ -632,6 +633,69 @@ async function regressionChecks(pages) {
  *  - GPU ms of the trace pass grows with the miss count (same frame, miss threshold varied);
  *  - traced rays never exceed the per-tile cap or the frame budget.
  */
+/** D903: the provider's any-hit walk (`traceAny`) agrees with its own first-hit walk, camera + scene rays. */
+async function rtAnyHitChecks(p, label) {
+  for (const kind of ['camera', 'scene']) {
+    const a = await p.T(`window.__p.rtAnyHitOracle(4096, '${kind}')`);
+    check(`rt ${label}: traceAny agrees with traceFirstHit, ${kind} rays`,
+      a.agree === a.rays && a.nearOk >= a.positive * 0.999 && a.farOk >= a.positive * 0.999,
+      `hit/miss ${a.agree}/${a.rays} (${a.hits} hits); nothing before 0.5 t ${a.nearOk}/${a.positive}, something before 1.5 t ${a.farOk}/${a.positive}`);
+  }
+}
+
+/**
+ * D903: hit shading vs the on-screen colour of the same hits, shadow rays off and on (one
+ * reference frame, both shadings on the same rays). A shadow ray can only darken a hit.
+ */
+async function rtHitShadingLines(p, id) {
+  const fmt = (hs) => `mean ${hs.meanShaded.toFixed(3)} vs ${hs.meanScreen.toFixed(3)} (ratio ${hs.ratio.toFixed(3)}), mean abs rel ${hs.meanAbsRel.toFixed(3)}`;
+  // off, on, off again: the second 'off' is the frame-to-frame noise of this per-pixel comparison
+  // (not zero with reuse off on 'contact'); information, the check is on the shaded hits below
+  const hs = await p.T('window.__p.hitShadingError({}, [{ hitShadows: false }, { hitShadows: true }, { hitShadows: false }])');
+  const [off, on, again] = hs.variants;
+  console.log(`  rt ${id}: hit shading vs on-screen colour over ${on.pixels} traced hits the camera sees: shadows off ${fmt(off)}; on ${fmt(on)}; `
+    + `> 1% darker with shadows ${(on.darker * 100).toFixed(1)}% (off vs off ${(again.darker * 100).toFixed(1)}%), brighter ${(on.brighter * 100).toFixed(2)}% (off vs off ${(again.brighter * 100).toFixed(2)}%)`);
+  // the hits the hit shading shades this frame (reuse on): deterministic, a shadow ray can only darken
+  const fx = await p.T('window.__p.rtShadowEffect()');
+  check(`rt ${id}: shadow rays only darken shaded hits (D903)`, fx.on.pixels > 0 && fx.noise.darker + fx.noise.brighter < 0.001 && fx.on.brighter < 0.001 && fx.on.mean <= fx.on.meanOff + 1e-6,
+    `${fx.on.pixels} shaded hits: ${(fx.on.darker * 100).toFixed(1)}% > 1% darker, ${(fx.on.brighter * 100).toFixed(2)}% brighter (same rays twice without shadows: ${(fx.noise.darker * 100).toFixed(2)}% / ${(fx.noise.brighter * 100).toFixed(2)}%); mean ${fx.on.meanOff.toFixed(3)} -> ${fx.on.mean.toFixed(3)}`);
+  return { on, off, fx };
+}
+
+/**
+ * D903: GPU ms of the trace pass with shadow rays on vs off, per kit scene, at 960x540 and 1080p
+ * (loop stopped, median of 20 frames, alternating off / on twice and averaging). With on-screen
+ * reuse (default) only off-screen hits are shaded; 'all shaded' turns reuse off (every hit sends one).
+ * Opt-in (`--rt-shadow-timing`): ~2 minutes per provider.
+ */
+async function rtShadowTiming(label, bvhParam) {
+  const scenes = [['offscreen', 'mirror'], ['mirrorWall', ''], ['contact', ''], ['moving', '']];
+  const url = (w, h, scene, pose) => `http://127.0.0.1:${PORT}/ssr/?manual&timing&w=${w}&h=${h}&rt=1${bvhParam}&scene=${scene}${pose ? `&pose=${pose}` : ''}`;
+  const page = await openPage(url(960, 540, ...scenes[0]));
+  for (const [w, h] of [[960, 540], [1920, 1080]]) {
+    const parts = [];
+    for (const [scene, pose] of scenes) {
+      if (!(w === 960 && scene === scenes[0][0])) await page.navigate(url(w, h, scene, pose));
+      const row = [];
+      for (const reuse of [true, false]) {
+        const ms = { on: [], off: [] };
+        for (const shadows of [false, true, false, true]) {
+          await page.T(`window.__p.setTraceSettings({ hitShadows: ${shadows}, reuseOnScreenHits: ${reuse} })`);
+          const t = await page.T('window.__p.time(20)');
+          ms[shadows ? 'on' : 'off'].push(t.ms['rt trace'] ?? NaN);
+        }
+        await page.T('window.__p.step(1)');
+        const st = await page.T('window.__p.traceStats()');
+        const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+        row.push(`${reuse ? 'reuse' : 'all shaded'} ${(st.hits - st.onScreenHits)} shaded hits: ${mean(ms.off).toFixed(3)} -> ${mean(ms.on).toFixed(3)} ms (+${(mean(ms.on) - mean(ms.off)).toFixed(3)})`);
+      }
+      parts.push(`${scene}: ${row.join(', ')}`);
+    }
+    console.log(`  rt ${label} shadow rays, GPU ms of 'rt trace' at ${w}x${h} (off -> on, median of 20, loop stopped): ${parts.join('; ')}`);
+  }
+  page.close();
+}
+
 async function ssrRtChecks(pages) {
   console.log('examples/ssr (?rt=1):');
   const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1`);
@@ -642,6 +706,7 @@ async function ssrRtChecks(pages) {
   const oracle = await p.T('window.__p.rtOracle(4096)');
   check('rt provider (three-mesh-bvh port) agrees with THREE.Raycaster', oracle.agree / oracle.rays > 0.995 && oracle.gpuOnly + oracle.cpuOnly <= oracle.rays * 0.003,
     `${oracle.agree}/${oracle.rays} agree (${oracle.bothMiss} both miss), gpu-only ${oracle.gpuOnly}, cpu-only ${oracle.cpuOnly}, p99 rel ${oracle.p99Rel.toExponential(1)}, max rel ${oracle.maxRel.toExponential(1)}; BVH ${bvh.meshes} meshes, ${bvh.triangles} tris, ${bvh.buildMs.toFixed(0)} ms`);
+  await rtAnyHitChecks(p, 'three-mesh-bvh port');
   await p.T("window.__p.setPose('mirror')");
   await p.T('window.__p.setRT(false)');
   await p.T('window.__p.step(2)');
@@ -683,9 +748,9 @@ async function ssrRtChecks(pages) {
     const e = results.logs.slice(b).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
     const extra = id === 'mirrorWall' ? `; wall: ${(st.wall.confidentFraction * 100).toFixed(1)}% confident, corr ${st.wall.lumCorrelation.toFixed(3)}` : '';
     check(`rt ${id}: renders, finite, no validation errors`, e.length === 0 && st.nonFinite === 0, e.length ? e.slice(0, 2).join(' | ') : `${st.misses} misses -> ${JSON.stringify(st.rt)}${extra}`);
-    const hs = await p.T('window.__p.hitShadingError()');
-    console.log(`  rt ${id}: hit shading vs on-screen colour over ${hs.pixels} traced hits the camera sees: mean ${hs.meanShaded.toFixed(3)} vs ${hs.meanScreen.toFixed(3)} (ratio ${hs.ratio.toFixed(3)}), mean abs rel ${hs.meanAbsRel.toFixed(3)}`);
+    await rtHitShadingLines(p, id);
   }
+  if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '');
 
   // GPU ms vs miss count at 1080p: the same frame, misses varied with the miss-list threshold
   const big = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1&scene=offscreen&pose=mirror`);
@@ -732,6 +797,7 @@ async function ssrRtBvhChecks(pages) {
         `${fmtOracle(o)}; BVH ${bvh.meshes} meshes, ${bvh.triangles} tris, ${bvh.buildMs.toFixed(0)} ms${bvh.fallbackReason ? ` (${bvh.fallbackReason})` : ''}`);
     }
     if (builder !== 'auto') continue;
+    await rtAnyHitChecks(p, `@pmndrs/bvh (${bvh.builder})`);
     await p.T("window.__p.setPose('mirror')");
     await p.T('window.__p.setRT(false)');
     await p.T('window.__p.step(2)');
@@ -776,8 +842,11 @@ async function ssrRtBvhChecks(pages) {
           e.length === 0 && c.agree / c.rays > 0.995 && c.pmndrsOnly + c.tmbOnly <= c.rays * 0.003 && c.normal >= c.compared * 0.995,
           e.length ? e.slice(0, 2).join(' | ') : detail);
       }
+      // D903: the same hit-shading measurement as the ssr-rt section, on this provider
+      if (['mirrorWall', 'contact', 'moving'].includes(id)) { await p.T('window.__p.step(2)'); await rtHitShadingLines(p, `${id} (@pmndrs/bvh)`); }
     }
   }
+  if (args.includes('--rt-shadow-timing')) await rtShadowTiming('@pmndrs/bvh', '&bvh=pmndrs');
 
   // Information, not a gate: trace-pass GPU ms of both walks on the same frame (1080p, offscreen
   // 'mirror', every confidence below 1.01 traced), loop stopped, median of 20.

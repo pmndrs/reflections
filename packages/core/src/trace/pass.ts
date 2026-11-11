@@ -12,7 +12,7 @@
 import { constantRadianceFallback, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs } from '../sssr/sssr';
 import { mat4Invert, mat4Mul } from '../sssr/math';
 import { PassTimer } from '../sssr/timer';
-import { DEFAULT_HIT_MATERIAL_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
+import { DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_TRACE_ANY_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
 import { RT_BEGIN_WGSL, RT_PARAMS_SIZE, RT_STATE, RT_STATE_HEADER, rtTraceWgsl } from './shaders';
 
 export interface TracedReflectionsOptions {
@@ -54,6 +54,12 @@ export interface TracedReflectionsSettings {
    * Pass the tracer's setting so both sources agree.
    */
   hitColor?: 'current' | 'history';
+  /**
+   * Hit shading may trace shadow rays (`traceLightVisible`, D903): `environmentHitShading` sends
+   * one per directional light from each traced hit it shades (not from on-screen reused hits, whose
+   * scene colour is already shadowed). Off: every light is unoccluded. Default true.
+   */
+  hitShadows?: boolean;
   /** Relative view-distance tolerance for that test. Default 0.02. */
   onScreenDepthTolerance?: number;
   /** The fallback's `P.iblFactor`. Default 1. */
@@ -196,6 +202,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     fallbackWgsl: fallback.wgsl,
     providerWgsl: provider.code({ group: 2, firstBinding: 0 }),
     materialWgsl: provider.capabilities.hitMaterial ? '' : DEFAULT_HIT_MATERIAL_WGSL,
+    anyHitWgsl: provider.capabilities.anyHit ? '' : DEFAULT_TRACE_ANY_WGSL,
     hitShadingWgsl: shading.wgsl,
   });
   const traceModule = device.createShaderModule({ label: `rt trace (${provider.name})`, code });
@@ -241,6 +248,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     f[48] = s.onScreenDepthTolerance ?? 0.02;
     u[49] = tilesX;
     f[50] = s.iblFactor ?? 1;
+    u[51] = s.hitShadows ?? true ? 1 : 0;
     const fc = s.fallbackColor ?? [0, 0, 0];
     f[52] = fc[0]; f[53] = fc[1]; f[54] = fc[2]; f[55] = 1;
     const mvs = frame.inputs.motionVectorScale ?? [1, 1];
