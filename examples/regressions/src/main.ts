@@ -5,7 +5,8 @@
 //            instance moves only it; a camera cut + resetHistory() gives 0 motion; two render()
 //            calls in one animation frame give the same motion as one per frame; jittered frames
 //            with the unjittered projection given give 0 motion; roughnessNode / metalnessNode
-//            reach the G-buffer; MeshBasic env reflections stay out of scene colour;
+//            reach the G-buffer; MeshBasic env reflections stay out of scene colour; glass in front
+//            of a metal refracts the metal into `lit` as a plain render does (W42);
 //            logarithmicDepthBuffer is rejected.
 //  bc6h:     no anchor index overflows its slot (a patched copy of the shipped WGSL counts them);
 //            a capped scratch buffer gives the same bits; an encode whose blocks exceed the
@@ -13,7 +14,7 @@
 import * as THREE from 'three/webgpu';
 import { float } from 'three/tsl';
 import { createBC6HEncoder } from '@pmndrs/reflections/core';
-import { FrameGBuffer, getDevice } from '@pmndrs/reflections/three';
+import { FrameGBuffer, getDevice, getGPUTexture } from '@pmndrs/reflections/three';
 // @ts-ignore vite raw import
 import bc6hSrc from '../../../packages/core/src/encode/bc6h.ts?raw';
 import { gbufferFirstFrameChecks, rtHistoryChecks, rtStatsChecks, rtTileChecks, ssrHistoryChecks } from './ssr';
@@ -238,6 +239,36 @@ async function gbufferChecks() {
     roughnessNode: px(nr, W / 4, H / 2, 3), metalnessNode: px(am, W / 4, H / 2, 3),
     basicEnvSceneColor: [0, 1, 2].map((c) => px(sc, (3 * W) / 4, H / 2, c)), basicExpected: new THREE.Color(0x404040).r,
   };
+
+  // W42 (D3520): glass in front of a metal plane. three's transmission refracts the render target's
+  // attachment 0; the G-buffer's `lit` must match a plain render (with `output`, no specular, first,
+  // the metal behind the glass came out black)
+  {
+    const c3 = document.createElement('canvas'); c3.width = W; c3.height = H;
+    const lr = new THREE.WebGPURenderer({ canvas: c3, antialias: false, requiredLimits: { maxColorAttachmentBytesPerSample: 64 } } as N);
+    lr.setPixelRatio(1); lr.setSize(W, H, false);
+    await lr.init();
+    const ldev = getDevice(lr);
+    ldev.addEventListener('uncapturederror', (e) => { gpuErrors.push((e as GPUUncapturedErrorEvent).error.message); });
+    const gs = new THREE.Scene();
+    const white = new THREE.DataTexture(new Uint8Array(4 * 8).fill(255), 4, 2); white.mapping = THREE.EquirectangularReflectionMapping; white.needsUpdate = true;
+    gs.environment = white;
+    gs.background = new THREE.Color(0, 0, 0);
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0.3 }));
+    plane.position.z = -2; gs.add(plane);
+    gs.add(new THREE.Mesh(new THREE.SphereGeometry(1.5, 48, 24), new THREE.MeshPhysicalMaterial({ color: 0xffffff, transmission: 1, thickness: 0, roughness: 0, metalness: 0 })));
+    const gcam = new THREE.PerspectiveCamera(40, W / H, 0.1, 100); gcam.position.set(0, 0, 10); gcam.updateMatrixWorld();
+    const lgb = new FrameGBuffer(lr, { width: W, height: H });
+    await raf(); lgb.render(gs, gcam);
+    const plain = new THREE.RenderTarget(W, H, { type: THREE.HalfFloatType, depthBuffer: true });
+    lr.setRenderTarget(plain); lr.render(gs, gcam); lr.setRenderTarget(null);
+    if (lgb.lit) {
+      const lit = await readTexture(ldev, lgb.gpuTextures().lit!), ref = await readTexture(ldev, getGPUTexture(lr, plain.texture));
+      const at = (t: { data: Float32Array; ch: number; width: number }) => [0, 1, 2].map((c) => t.data[((H / 2) * t.width + W / 2) * t.ch + c]);
+      r.transmission = { lit: at(lit), plain: at(ref) };
+    } else r.transmission = { skipped: 'device has no lit target' };
+    lgb.dispose(); plain.dispose(); lr.dispose();
+  }
 
   // logarithmic depth: rejected with a clear error
   const c2 = document.createElement('canvas'); c2.width = c2.height = 16;
