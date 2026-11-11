@@ -1389,6 +1389,15 @@ async function main() {
       savePng('probes-refit-on.png', rf.on);
       const rs = await p.T(`(${IMAGE_STATS})(${JSON.stringify(rf.on)}, ${JSON.stringify(rf.off)})`);
       check('re-fit with LightProbeGrid renders and changes the image', rs.lum > 10 && rs.mean > 0.5, `lum ${rs.lum.toFixed(1)}, mean diff ${rs.mean.toFixed(2)} / 255`);
+      // W31 (D25): bake({ bounces: 2 }) re-captures with the first pass's probes visible: the rooms'
+      // interreflection reaches the probes (brighter); 1 is the plain bake
+      const bo = await p.T(`(async () => { const P = window.__p; P.setGrid(true, 0.08); const one = await P.shot();
+        P.setBounces(2); const two = await P.shot(); P.setBounces(1); const back = await P.shot(); P.setGrid(false); return { one, two, back }; })()`);
+      savePng('probes-bounces-2.png', bo.two);
+      const b2 = await p.T(`(${IMAGE_STATS})(${JSON.stringify(bo.two)}, ${JSON.stringify(bo.one)})`);
+      const b1 = await p.T(`(${IMAGE_STATS})(${JSON.stringify(bo.back)}, ${JSON.stringify(bo.one)})`);
+      check('bake bounces: 2 adds the probes\' interreflection; back to 1 restores the plain bake (D25)', b2.mean > 1 && b2.lum > b1.lum && b1.mean < 0.01, // (< 0.01: the grid's known highlight scatter, W7)
+        `bounce 2 vs 1: mean ${b2.mean.toFixed(2)} / 255, lum ${b1.lum.toFixed(1)} -> ${b2.lum.toFixed(1)}; back to 1: max ${b1.max} / 255`);
       const ck = await C('cacheKey');
       check('two probe sets of equal size keep their own programs', ck.left[0] > 200 && ck.left[2] < 50 && ck.right[2] > 200 && ck.right[0] < 50 && ck.keysDiffer,
         `left ${ck.left}, right ${ck.right}, keys differ ${ck.keysDiffer}`);
