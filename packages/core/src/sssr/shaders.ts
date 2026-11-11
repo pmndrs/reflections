@@ -89,6 +89,7 @@ struct Params {
   thicknessLengthFactor: f32,
   hitColorFromHistory: u32,
   fallbackRoughnessSurface: u32,
+  mirrorBias: f32,
   motionVectorScale: vec2f,
   _pad2: vec2u,
 };
@@ -466,7 +467,10 @@ fn sampleReflectionVector(view_direction: vec3f, normal: vec3f, roughness: f32, 
   let TBN_row2 = N;
   let view_direction_tbn = vec3f(dot(TBN_row0, -view_direction), dot(TBN_row1, -view_direction), dot(TBN_row2, -view_direction));
   let u = sampleRandomVector2D(did);
-  let sampled_normal_tbn = sampleGGXVNDF(view_direction_tbn, roughness, roughness, u.x, u.y);
+  // Mirror bias (SSSR 2015 slide 68, PICA p451; D49): pull the lobe's radial number toward the
+  // mirror end. In Heitz's VNDF U1 sets the disk radius (r = sqrt(U1)), so the mirror end is
+  // U1 = 0: U1 = lerp(u.x, 0, bias). bias 0 multiplies by exactly 1 (FFX, bit for bit).
+  let sampled_normal_tbn = sampleGGXVNDF(view_direction_tbn, roughness, roughness, u.x * (1.0 - P.mirrorBias), u.y);
   let reflected_direction_tbn = reflect(-view_direction_tbn, sampled_normal_tbn);
   let TBN_col0 = vec3f(TBN_row0[0], TBN_row1[0], TBN_row2[0]);
   let TBN_col1 = vec3f(TBN_row0[1], TBN_row1[1], TBN_row2[1]);
