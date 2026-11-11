@@ -4,11 +4,13 @@
 //             coverage against the volume weights computed on the CPU, radiance against cube-hw rgba16f
 //   refit     a constant capture (c) with a frame irradiance of 2 pi c: the L1 SH of each probe is pi c,
 //             so the re-fit doubles every lookup; plus Lagarde's specular occlusion at fixed inputs
+//   mixed     D805: sets of three layouts (cube2d-warp, cube-hw, octa) in one shader module
+//             (probeLookupWgsl([...]) with suffixes), each against its own single-set module, bit for bit
 //   sssr      the core tracer on its analytic scene (examples/sssr-core) with probeRadianceFallback: a
 //             probe set holding the constant c must give the image of the constant fallback c, bit for
 //             bit; a structured capture must change the fallback pixels
 import {
-  ProbeSet, createScreenSpaceReflections, createTracedReflections, constantRadianceFallback, type TraceProvider, type TracedReflectionsStats, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
+  ProbeSet, probeLookupWgsl, createScreenSpaceReflections, createTracedReflections, constantRadianceFallback, type TraceProvider, type TracedReflectionsStats, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
   type FrameInputs, type ProbeLayoutId, type ProbeSetFormat, type ProbeVolume, type ScreenSpaceReflectionsInputs, reflectionsRequiredLimits,
 } from '@pmndrs/reflections/core';
 import { lookAt, perspective, SCENE_WGSL } from '../../sssr-core/src/scene';
@@ -214,8 +216,64 @@ async function main() {
     result.refit = { constErr, refitErr, soErr, autoErr, offErr };
     say(`constant capture: max rel err ${constErr.toExponential(2)}; re-fit x2: ${refitErr.toExponential(2)}; specular occlusion: ${soErr.toExponential(2)}`);
 
+    result.mixed = await mixed();
     result.sssr = await sssr();
     return result;
+  }
+
+  // ---- D805: three layouts in one module, against each layout's own module (evaluate())
+  async function mixed() {
+    const cfgs: { layout: ProbeLayoutId; size?: number; suffix: string }[] = [
+      { layout: 'cube2d-warp', suffix: '' }, { layout: 'cube-hw', suffix: 'Hw' }, { layout: 'octa', size: 160, suffix: 'Octa' },
+    ];
+    const kinds = [0, 1, 3, 0];
+    const sets = cfgs.map((c) => {
+      const set = new ProbeSet(device, { capacity: 3, sourceSize: SOURCE, layout: c.layout, size: c.size });
+      const enc = device.createCommandEncoder();
+      for (let s = 0; s < 3; s++) set.capture(enc, s, cubes[kinds[s]]);
+      set.captureEnvironment(enc, cubes[kinds[3]]);
+      device.queue.submit([enc.finish()]);
+      set.setVolumes(volumes);
+      set.update();
+      return set;
+    });
+    const out = device.createBuffer({ size: COUNT * cfgs.length * 2 * 16, usage: U.STORAGE | U.COPY_SRC });
+    const code = probeLookupWgsl(sets.map((set, k) => set.lookupOptions({ group: k + 1, suffix: cfgs[k].suffix }))) + /* wgsl */ `
+@group(0) @binding(0) var<storage, read> pts: array<vec4f>;
+@group(0) @binding(1) var<storage, read_write> outv: array<vec4f>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let i = id.x;
+  if (i >= arrayLength(&pts) / 3u) { return; }
+  let P = pts[3u * i].xyz; let R = pts[3u * i + 1u].xyz; let r = pts[3u * i + 1u].w;
+${cfgs.map((c, k) => `  outv[${cfgs.length * 2}u * i + ${2 * k}u] = probeRadiance${c.suffix}(P, R, r);
+  outv[${cfgs.length * 2}u * i + ${2 * k + 1}u] = vec4f(probeRadianceWithEnvironment${c.suffix}(P, R, r), 1.0);`).join('\n')}
+}`;
+    const pipe = device.createComputePipeline({
+      layout: device.createPipelineLayout({ bindGroupLayouts: [evalBgl, ...sets.map((s) => s.bindGroupLayout)] }),
+      compute: { module: device.createShaderModule({ code }), entryPoint: 'main' },
+    });
+    const enc = device.createCommandEncoder();
+    const p = enc.beginComputePass(); p.setPipeline(pipe);
+    p.setBindGroup(0, device.createBindGroup({ layout: evalBgl, entries: [{ binding: 0, resource: { buffer: ptsBuf } }, { binding: 1, resource: { buffer: out } }] }));
+    sets.forEach((set, k) => p.setBindGroup(k + 1, set.bindGroup));
+    p.dispatchWorkgroups(COUNT / 64); p.end();
+    device.queue.submit([enc.finish()]);
+    const shared = await readBuffer(out);
+    out.destroy();
+    for (const set of sets) set.dispose();
+    const res = [];
+    for (let k = 0; k < cfgs.length; k++) {
+      const own = await evaluate({ layout: cfgs[k].layout, size: cfgs[k].size, kinds });
+      let maxAbs = 0;
+      for (let i = 0; i < COUNT; i++) for (let row = 0; row < 2; row++) for (let c = 0; c < 4; c++) {
+        const a = shared[(i * cfgs.length * 2 + 2 * k + row) * 4 + c], b = own[(i * 3 + row) * 4 + c];
+        maxAbs = Math.max(maxAbs, Number.isFinite(a) && Number.isFinite(b) ? Math.abs(a - b) : Infinity);
+      }
+      res.push({ layout: cfgs[k].layout, suffix: cfgs[k].suffix, maxAbs });
+    }
+    say(`mixed layouts in one module vs their own: ${res.map((r) => `${r.layout} max ${r.maxAbs}`).join(', ')}`);
+    return res;
   }
 
   // ---- the SSSR radiance-fallback seam on sssr-core's analytic scene

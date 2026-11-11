@@ -13,15 +13,31 @@ export type ProbeLayoutId = 'cube2d-warp' | 'cube2d-none' | 'cube-hw' | 'octa' |
 export interface ProbeLayout {
   id: ProbeLayoutId;
   /**
-   * WGSL defining
+   * WGSL for a module that samples (or prefilters) this layout only, defining
    *   fn dirForTexel(texel: vec2u, layer: u32, mip: u32, size: u32) -> vec3f
    *     the (unit) direction the prefilter integrates for `texel` of layer `layer` (within one
    *     probe) at mip `mip`, for a texture whose mip 0 is `size` px;
    *   fn sampleLayout(tex: <textureType>, samp: sampler, probe: u32, dir: vec3f, lod: f32) -> vec4f
    *     the filtered radiance of probe `probe` along `dir` (need not be normalized) at mip `lod`.
-   * Helper names are prefixed `pl_`. One layout per shader module (the names collide otherwise).
+   * Both forward to the prefixed functions below (`dirFunction`, `sampleFunction`). The unprefixed
+   * names exist once per module, so for several layouts in one module use `chunks` (or
+   * `probeLayoutsWgsl([...])`) and call the prefixed names instead (D805).
    */
   wgsl: string;
+  /**
+   * Prefix of this layout's own WGSL names (`pl_cube2d_warp_`, `pl_cube2d_none_`, `pl_cube_hw_`,
+   * `pl_octa<maxLod>_`). Shared helpers are prefixed `pl_` and live in their own chunk.
+   */
+  prefix: string;
+  /** WGSL name of this layout's `sampleLayout` (same signature): `<prefix>sample`. */
+  sampleFunction: string;
+  /** WGSL name of this layout's `dirForTexel` (same signature): `<prefix>dirForTexel`. */
+  dirFunction: string;
+  /**
+   * The layout's WGSL without the unprefixed aliases, in chunks: emit each key once per module
+   * (`dedupeChunks`), and layouts of different ids (or octa of different maxLod) never collide.
+   */
+  chunks: readonly ProbeWgslChunk[];
   /** WGSL type of the texture `sampleLayout` takes, e.g. `texture_2d_array<f32>`. */
   textureType: string;
   /** Texture shape for N probes at `size` px (mip 0 face or octa side). */
@@ -32,6 +48,12 @@ export interface ProbeLayout {
   layersPerProbe: number;
   /** Roughness mips: maxLod + 1. Mip `lod` holds roughness `lodToRoughness(lod, maxLod)`. */
   mipLevelCount: number;
+}
+
+/** A piece of module-scope WGSL with a name: two chunks of the same key are the same code. */
+export interface ProbeWgslChunk {
+  key: string;
+  wgsl: string;
 }
 
 export interface ProbeLayoutOptions {

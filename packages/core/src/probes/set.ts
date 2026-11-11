@@ -18,7 +18,7 @@ import { createProbeLayout, type ProbeLayout, type ProbeLayoutId } from './layou
 import { LayoutPrefilter } from './layouts/prefilter';
 import { ProbeFormatWriter } from './layouts/formats';
 import { maxLodFor } from './lod';
-import { probeLookupWgsl, type ProbeLodMapping } from './lookup';
+import { probeLookupWgsl, type ProbeLodMapping, type ProbeLookupModuleOptions } from './lookup';
 import { ProbeIrradiance } from './irradiance';
 import { packProbeTable, probeIrradianceRow, probeTableRows, sortProbeVolumes, type ProbeVolume } from './table';
 
@@ -131,14 +131,20 @@ export class ProbeSet {
 
   /**
    * The lookup module (see probeLookupWgsl): bindings 0..2 of `@group(group)`, matching
-   * `bindGroupLayout` / `bindGroup`.
+   * `bindGroupLayout` / `bindGroup`. `suffix` renames its entry points (`probeRadiance<suffix>`, ...);
+   * for several sets in one module, use `probeLookupWgsl([a.lookupOptions(...), b.lookupOptions(...)])`.
    */
-  wgsl({ group = 0 }: { group?: number } = {}) {
+  wgsl({ group = 0, suffix }: { group?: number; suffix?: string } = {}) {
+    return probeLookupWgsl(this.lookupOptions({ group, suffix }));
+  }
+
+  /** The lookup module options of this set (see {@link wgsl}), for `probeLookupWgsl([...])`. */
+  lookupOptions({ group = 0, suffix }: { group?: number; suffix?: string } = {}): ProbeLookupModuleOptions {
     const o = this.options;
-    return probeLookupWgsl({
-      layout: this.layout, group, mirrorX: o.mirrorX, dominantDirection: o.dominantDirection,
+    return {
+      layout: this.layout, group, suffix, mirrorX: o.mirrorX, dominantDirection: o.dominantDirection,
       refit: o.refit, distanceRoughness: o.distanceRoughness, roughnessLerp: o.roughnessLerp, frameIrradianceWgsl: o.frameIrradianceWgsl, lodMapping: o.lodMapping,
-    });
+    };
   }
 
   /** Records the prefilter of `cube` (`sourceSize` px faces, mip 0 read) into atlas slot `slot`. */

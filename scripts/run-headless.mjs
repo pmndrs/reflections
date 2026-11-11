@@ -1488,6 +1488,11 @@ async function main() {
       const b1 = await p.T(`(${IMAGE_STATS})(${JSON.stringify(bo.back)}, ${JSON.stringify(bo.one)})`);
       check('bake bounces: 2 adds the probes\' interreflection; back to 1 restores the plain bake (D25)', b2.mean > 1 && b2.lum > b1.lum && b1.mean < 0.01, // (< 0.01: the grid's known highlight scatter, W7)
         `bounce 2 vs 1: mean ${b2.mean.toFixed(2)} / 255, lum ${b1.lum.toFixed(1)} -> ${b2.lum.toFixed(1)}; back to 1: max ${b1.max} / 255`);
+      // W35 (D805): probe sets of different layouts in one shader, each as in its own shader
+      const ml = await C('mixedLayouts');
+      // (to float rounding: the shader compiler may fold a function differently next to another one)
+      check(`probe sets of ${ml.sets.length} layouts in one shader match their own lookups (D805)`, ml.sets.length >= 2 && ml.sets.every((s) => s.q255 === 0 && s.maxAbs < 1e-6 && s.lum > 0),
+        ml.sets.map((s) => `${s.layout} max ${s.q255} / 255 (float ${s.maxAbs.toExponential(1)}, tone-mapped ${s.max255.toExponential(1)} / 255, lum ${s.lum.toFixed(2)})`).join(', '));
       const ck = await C('cacheKey');
       check('two probe sets of equal size keep their own programs', ck.left[0] > 200 && ck.left[2] < 50 && ck.right[2] > 200 && ck.right[0] < 50 && ck.keysDiffer,
         `left ${ck.left}, right ${ck.right}, keys differ ${ck.keysDiffer}`);
@@ -1644,6 +1649,8 @@ async function main() {
       check("probe core: Lagarde's specular occlusion", r.refit.soErr < 1e-4, `max err ${r.refit.soErr.toExponential(2)}`);
       check('probe core: a frame irradiance provider turns the re-fit on; refit: false keeps it off (D803)', r.refit.autoErr < 2e-2 && r.refit.offErr < 2e-3,
         `auto x2 max rel err ${r.refit.autoErr.toExponential(2)}, off x1 ${r.refit.offErr.toExponential(2)}`);
+      check('probe core: sets of three layouts in one module match their own modules (D805)', r.mixed.length === 3 && r.mixed.every((m) => m.maxAbs === 0),
+        r.mixed.map((m) => `${m.layout} max ${m.maxAbs}`).join(', '));
       check('sssr probe fallback: constant probes = constant fallback (to one f16 step)', r.sssr.constantVsProbes === 0, `${r.sssr.constantVsProbes} px differ`);
       check('sssr probe fallback: structured probes reach the fallback pixels', r.sssr.structuredVsConstant > r.sssr.pixels * 0.05, `${r.sssr.structuredVsConstant} of ${r.sssr.pixels} px`);
       const rt = r.sssr.rt;

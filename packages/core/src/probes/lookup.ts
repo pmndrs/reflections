@@ -44,7 +44,8 @@
 // for engines whose cube captures are x-mirrored (three's CubeCamera).
 
 import { PROBE_HEADER_ROWS, PROBE_IRRADIANCE_ROWS, PROBE_ROWS_PER_VOLUME } from './table';
-import type { ProbeLayout } from './layouts/types';
+import { dedupeChunks } from './layouts';
+import type { ProbeLayout, ProbeWgslChunk } from './layouts/types';
 
 /**
  * How roughness maps to the atlas mip. 'r187': three r187's `maxLod * r * (2 - r)` (D3), so a
@@ -102,15 +103,16 @@ export function lodWgsl(mapping: ProbeLodMapping = DEFAULT_PROBE_LOD_MAPPING) {
 }
 
 /**
- * Helpers every flavour shares (no bindings). Names are prefixed `pr_`. They depend only on the layout
- * and `mirrorX`, so lookups with different lod-mapping / dominant-direction / re-fit /
- * distance-roughness / roughness-lerp / count options can share one include in a shader module.
+ * Helpers every flavour shares (no bindings, no options). Names are prefixed `pr_`. Lookups of any
+ * layout and options (lod mapping, dominant direction, re-fit, distance roughness, roughness lerp,
+ * count, mirrorX) share this one chunk in a shader module; the layout's own WGSL comes in its own
+ * chunks (D805).
  */
-const helpersWgsl = (o: ProbeLookupOptions) => /* wgsl */ `
+const HELPERS_WGSL = /* wgsl */ `
 const PR_HEADER_ROWS: u32 = ${PROBE_HEADER_ROWS}u;
 const PR_ROWS_PER_VOLUME: u32 = ${PROBE_ROWS_PER_VOLUME}u;
 const PR_IRRADIANCE_ROWS: u32 = ${PROBE_IRRADIANCE_ROWS}u;
-const PR_MIRROR_X: bool = ${o.mirrorX === true};
+const PR_IDENTITY = mat4x4f(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
 // Mip l holds roughness 1 - sqrt(1 - l / maxLod); between mips l and l + 1 below r = 0.3, blend
 // linearly in r^2 (the lobe width) instead of in lod.
 fn pr_lodAlpha(r: f32, maxLod: f32) -> f32 {
@@ -130,8 +132,6 @@ fn pr_lod_alpha(roughness: f32, maxLod: f32) -> f32 {
   let r = clamp(roughness, 0.0, 1.0);
   return ${lodWgsl('alpha')};
 }
-// World direction to the layout's texture space.
-fn pr_texDir(d: vec3f) -> vec3f { return select(d, vec3f(-d.x, d.y, d.z), PR_MIRROR_X); }
 // Box-projected direction (BPCEM, #35046's guarded form): where the ray from P along dir leaves the
 // box (size boxSize, centre boxPos), as a direction from the capture point origin.
 fn pr_parallax(P: vec3f, dir: vec3f, boxSize: vec3f, boxPos: vec3f, origin: vec3f) -> vec3f {
@@ -185,6 +185,9 @@ fn pr_shIrradiance(a: vec4f, b: vec4f, c: vec4f, N: vec3f) -> vec3f {
  */
 const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: string, samp: string) => {
   const unroll = o.count;
+  const sample = o.layout.sampleFunction;
+  // world direction to the layout's texture space
+  const texDir = (d: string) => (o.mirrorX === true ? `vec3f(-(${d}).x, (${d}).y, (${d}).z)` : d);
   const lodFn = `pr_lod_${o.lodMapping ?? DEFAULT_PROBE_LOD_MAPPING}`;
   // box projection; with Lagarde's seam options (D53) pr_parallax with its distance t kept (App. F)
   const seam = o.distanceRoughness === true || o.roughnessLerp === true;
@@ -215,7 +218,7 @@ const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: stri
       if ((u32(r1.w) & 1u) != 0u && insideProjection) {
 ${projection}      }
       let slot = u32(r2.w);
-      var c = sampleLayout(${tex}, ${samp}, slot, pr_texDir(corrected), vlod).rgb;
+      var c = ${sample}(${tex}, ${samp}, slot, ${texDir('corrected')}, vlod).rgb;
       if (refitOn) {
         let s = irrRow + slot * PR_IRRADIANCE_ROWS;
         let probeIrr = pr_shIrradiance(${row('s')}, ${row('s + 1u')}, ${row('s + 2u')}, N);
@@ -246,7 +249,7 @@ ${unroll === undefined ? `  for (var i = 0u; i < count; i++) {\n${volume}  }\n` 
     let slot = u32(envSlot);
     // the same (possibly bent) direction as the volumes, into the environment's frame
     let envDir = (envRotation * vec4f(dir, 0.0)).xyz;
-    var c = sampleLayout(${tex}, ${samp}, slot, pr_texDir(envDir), lod).rgb;
+    var c = ${sample}(${tex}, ${samp}, slot, ${texDir('envDir')}, lod).rgb;
     if (refitOn) {
       let s = irrRow + slot * PR_IRRADIANCE_ROWS;
       let probeIrr = pr_shIrradiance(${row('s')}, ${row('s + 1u')}, ${row('s + 2u')}, N);
@@ -308,13 +311,27 @@ export function probeProxyShareFunctionWgsl(options: Pick<ProbeLookupOptions, 'c
   return `fn ${name}(table: ptr<storage, array<vec4f>, read>, P: vec3f, dir: vec3f, near: f32, far: f32) -> f32 {${proxyBody(options, (i) => `(*table)[${i}]`)}}\n`;
 }
 
+const HELPERS_CHUNK: ProbeWgslChunk = { key: 'pr_helpers', wgsl: HELPERS_WGSL };
+
+/**
+ * The module-scope WGSL of {@link probeLookupIncludesWgsl} as named chunks (each layout's chunks,
+ * then the shared helpers), one per key. An engine that assembles shaders from pieces (three's
+ * `code()` nodes) emits each key once per module; lookups of every layout and option then live
+ * side by side (D805).
+ */
+export function probeLookupIncludeChunks(options: Pick<ProbeLookupOptions, 'layout'> | readonly Pick<ProbeLookupOptions, 'layout'>[]): ProbeWgslChunk[] {
+  const list = Array.isArray(options) ? options : [options as Pick<ProbeLookupOptions, 'layout'>];
+  return dedupeChunks([...list.flatMap((o) => o.layout.chunks), HELPERS_CHUNK]);
+}
+
 /**
  * Module-scope WGSL for engines that own the bindings: the layout's sampling code and the shared
  * helpers (no bindings). Include it once per shader module, then call the function of
- * {@link probeLookupFunctionWgsl}.
+ * {@link probeLookupFunctionWgsl}. For lookups of several layouts in one module, pass all their
+ * options at once (each piece is emitted once); the result depends only on the layouts.
  */
-export function probeLookupIncludesWgsl(options: ProbeLookupOptions): string {
-  return options.layout.wgsl + helpersWgsl(options);
+export function probeLookupIncludesWgsl(options: Pick<ProbeLookupOptions, 'layout'> | readonly Pick<ProbeLookupOptions, 'layout'>[]): string {
+  return probeLookupIncludeChunks(options).map((c) => c.wgsl).join('\n');
 }
 
 /**
@@ -338,8 +355,46 @@ export interface ProbeLookupModuleOptions extends ProbeLookupOptions {
   /**
    * WGSL defining `fn frameIrradiance(P: vec3f, N: vec3f) -> vec3f`, the frame's irradiance from
    * the app's GI, for `refit`; given, the re-fit is on unless `refit: false` (D803). Default: none.
+   * Several sets in one module share one provider: pass the same text to each (it is emitted once).
    */
   frameIrradianceWgsl?: string;
+  /**
+   * Appended to every name this set's module defines (its bindings `pr_atlas`..., `probeLookup`,
+   * `probeRadiance`, `probeRadianceWithEnvironment`, the `N` forms, `probeFrameIrradiance`,
+   * `probeProxyShare`), so several sets live in one module (D805): `suffix: 'B'` gives
+   * `probeRadianceB(P, R, r)`. Shared helpers (`probeSpecularOcclusion`) keep their names. Default ''.
+   */
+  suffix?: string;
+}
+
+/** One set's bindings and entry points, without the includes. */
+function moduleWgsl(moduleOptions: ProbeLookupModuleOptions): { frame: string; body: string } {
+  // the re-fit defaults on with a frame irradiance provider, off without (D803); explicit wins
+  const options = { ...moduleOptions, refit: moduleOptions.refit ?? moduleOptions.frameIrradianceWgsl !== undefined };
+  const g = options.group ?? 0, b = options.binding ?? 0, x = options.suffix ?? '';
+  const frame = options.refit ? (options.frameIrradianceWgsl ?? '') : '';
+  // without a provider, a negative frame irradiance switches the re-fit off
+  const frameCall = options.refit && options.frameIrradianceWgsl ? 'frameIrradiance(P, N)' : 'vec3f(-1.0)';
+  const atlas = `pr_atlas${x}`, samp = `pr_sampler${x}`, table = `pr_table${x}`;
+  return {
+    frame,
+    body: `
+@group(${g}) @binding(${b}) var ${atlas}: ${options.layout.textureType};
+@group(${g}) @binding(${b + 1}) var ${samp}: sampler;
+@group(${g}) @binding(${b + 2}) var<storage, read> ${table}: array<vec4f>;
+fn probeLookup${x}(${SIGNATURE}) -> vec4f {${lookupBody(options, (i) => `${table}[${i}]`, atlas, samp)}}
+fn probeFrameIrradiance${x}(P: vec3f, N: vec3f) -> vec3f { return ${frameCall}; }
+fn probeRadianceN${x}(P: vec3f, N: vec3f, R: vec3f, roughness: f32) -> vec4f {
+  return probeLookup${x}(P, N, R, roughness, PR_IDENTITY, probeFrameIrradiance${x}(P, N), false);
+}
+fn probeRadianceWithEnvironmentN${x}(P: vec3f, N: vec3f, R: vec3f, roughness: f32) -> vec3f {
+  return probeLookup${x}(P, N, R, roughness, PR_IDENTITY, probeFrameIrradiance${x}(P, N), true).rgb;
+}
+fn probeRadiance${x}(P: vec3f, R: vec3f, roughness: f32) -> vec4f { return probeRadianceN${x}(P, normalize(R), R, roughness); }
+fn probeRadianceWithEnvironment${x}(P: vec3f, R: vec3f, roughness: f32) -> vec3f { return probeRadianceWithEnvironmentN${x}(P, normalize(R), R, roughness); }
+fn probeProxyShare${x}(P: vec3f, dir: vec3f, near: f32, far: f32) -> f32 {${proxyBody(options, (i) => `${table}[${i}]`)}}
+`,
+  };
 }
 
 /**
@@ -359,30 +414,20 @@ export interface ProbeLookupModuleOptions extends ProbeLookupOptions {
  *
  * `roughness` is perceptual. Without N (the first two), N = R: no dominant-direction bend, and the
  * re-fit evaluates irradiance about R.
+ *
+ * Several sets in one module (any layouts, D805): pass an array, each with its own `suffix` and
+ * group / binding range. The includes are emitted once for all of them:
+ *
+ *   probeLookupWgsl([a.lookupOptions({ group: 1 }), b.lookupOptions({ group: 2, suffix: 'B' })])
+ *   // probeRadiance(P, R, r) samples a, probeRadianceB(P, R, r) samples b
  */
-export function probeLookupWgsl(moduleOptions: ProbeLookupModuleOptions): string {
-  // the re-fit defaults on with a frame irradiance provider, off without (D803); explicit wins
-  const options = { ...moduleOptions, refit: moduleOptions.refit ?? moduleOptions.frameIrradianceWgsl !== undefined };
-  const g = options.group ?? 0, b = options.binding ?? 0;
-  const frame = options.refit ? (options.frameIrradianceWgsl ?? '') : '';
-  // without a provider, a negative frame irradiance switches the re-fit off
-  const frameCall = options.refit && options.frameIrradianceWgsl ? 'frameIrradiance(P, N)' : 'vec3f(-1.0)';
-  return `${probeLookupIncludesWgsl(options)}
-@group(${g}) @binding(${b}) var pr_atlas: ${options.layout.textureType};
-@group(${g}) @binding(${b + 1}) var pr_sampler: sampler;
-@group(${g}) @binding(${b + 2}) var<storage, read> pr_table: array<vec4f>;
-${frame}
-fn probeLookup(${SIGNATURE}) -> vec4f {${lookupBody(options, (i) => `pr_table[${i}]`, 'pr_atlas', 'pr_sampler')}}
-fn probeFrameIrradiance(P: vec3f, N: vec3f) -> vec3f { return ${frameCall}; }
-const PR_IDENTITY = mat4x4f(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
-fn probeRadianceN(P: vec3f, N: vec3f, R: vec3f, roughness: f32) -> vec4f {
-  return probeLookup(P, N, R, roughness, PR_IDENTITY, probeFrameIrradiance(P, N), false);
-}
-fn probeRadianceWithEnvironmentN(P: vec3f, N: vec3f, R: vec3f, roughness: f32) -> vec3f {
-  return probeLookup(P, N, R, roughness, PR_IDENTITY, probeFrameIrradiance(P, N), true).rgb;
-}
-fn probeRadiance(P: vec3f, R: vec3f, roughness: f32) -> vec4f { return probeRadianceN(P, normalize(R), R, roughness); }
-fn probeRadianceWithEnvironment(P: vec3f, R: vec3f, roughness: f32) -> vec3f { return probeRadianceWithEnvironmentN(P, normalize(R), R, roughness); }
-fn probeProxyShare(P: vec3f, dir: vec3f, near: f32, far: f32) -> f32 {${proxyBody(options, (i) => `pr_table[${i}]`)}}
-`;
+export function probeLookupWgsl(moduleOptions: ProbeLookupModuleOptions | readonly ProbeLookupModuleOptions[]): string {
+  const list: readonly ProbeLookupModuleOptions[] = Array.isArray(moduleOptions) ? moduleOptions : [moduleOptions as ProbeLookupModuleOptions];
+  const suffixes = list.map((o) => o.suffix ?? '');
+  if (new Set(suffixes).size !== list.length) throw new Error(`probeLookupWgsl: each set in one module needs its own suffix, got [${suffixes.map((x) => `'${x}'`).join(', ')}]`);
+  const slots = list.flatMap((o) => [0, 1, 2].map((k) => `${o.group ?? 0}:${(o.binding ?? 0) + k}`));
+  if (new Set(slots).size !== slots.length) throw new Error('probeLookupWgsl: two sets in one module share a binding (give each its own group or binding)');
+  const parts = list.map(moduleWgsl);
+  const frames = [...new Set(parts.map((p) => p.frame).filter((f) => f !== ''))];
+  return `${probeLookupIncludesWgsl(list)}\n${frames.join('\n')}${parts.map((p) => p.body).join('')}`;
 }

@@ -37,7 +37,7 @@
 import * as THREE from 'three/webgpu';
 import { bool, cameraPosition, code, cubeTexture, float, mat4, materialEnvRotation, nodeObject, normalWorld, positionWorld, reflectVector, sampler, storage, texture, vec3, vec4, wgslFn } from 'three/tsl';
 import {
-  PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludesWgsl, probeProxyShareFunctionWgsl,
+  PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludeChunks, probeProxyShareFunctionWgsl,
   probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLodMapping, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
 } from '@pmndrs/reflections-core';
 import { probeOrigin, probeWorldScale, type ReflectionProbes } from './ReflectionProbes';
@@ -109,21 +109,29 @@ export interface ProbeLookupOptions {
   lodMapping?: ProbeLodMapping;
 }
 
-// One wgslFn and include per lookup variant, shared by every node and material: three emits a
-// CodeNode once per shader only when it is the same node instance.
-// The includes depend only on the layout (and mirrorX, always true here); the function on the rest.
-const _includes = new Map<string, N>();
-const _lookups = new Map<string, { fn: N; includes: N }>();
-function lookupFor(options: CoreLookupOptions): { fn: N; includes: N } {
-  // keyed by the code itself: layouts whose WGSL doesn't depend on maxLod share one include
-  const source = probeLookupIncludesWgsl({ layout: options.layout, mirrorX: true });
-  let includes = _includes.get(source);
-  if (!includes) _includes.set(source, (includes = code(source) as N));
+// One wgslFn per lookup variant and one code node per include chunk, shared by every node and
+// material: three emits a CodeNode once per shader only when it is the same node instance. The
+// chunks (the layout's own code, keyed by its prefix, and core's shared helpers) don't collide, so
+// a material can sample probe sets of different layouts, e.g. a cube array and a 2D array (D805).
+const _chunks = new Map<string, N>();
+const _lookups = new Map<string, { fn: N; includes: N[] }>();
+function includesFor(layout: ProbeLayout): N[] {
+  return probeLookupIncludeChunks({ layout }).map((c) => {
+    // keyed by the code itself: the key names it, the code tells layouts of different maxLod apart
+    let node = _chunks.get(c.wgsl);
+    if (!node) _chunks.set(c.wgsl, (node = code(c.wgsl) as N));
+    return node;
+  });
+}
+function lookupFor(options: CoreLookupOptions): { fn: N; includes: N[] } {
+  const includes = includesFor(options.layout);
   const layoutKey = `${options.layout.id}:${options.layout.mipLevelCount}`;
   const key = `${layoutKey}:${options.lodMapping}:${options.dominantDirection === true}:${options.refit === true}:${options.distanceRoughness === true}:${options.roughnessLerp === true}:${options.count ?? -1}`;
   let entry = _lookups.get(key);
   if (!entry) {
-    entry = { fn: wgslFn(probeLookupFunctionWgsl({ ...options, mirrorX: true }, 'probesLookup'), [includes]) as N, includes };
+    // a name per variant: a shader holding two variants (two sets, or two lookups of one) would
+    // otherwise see three rename one with a warning
+    entry = { fn: wgslFn(probeLookupFunctionWgsl({ ...options, mirrorX: true }, `probesLookup${_lookups.size}`), includes) as N, includes };
     _lookups.set(key, entry);
   }
   return entry;
@@ -232,7 +240,7 @@ function atlasNode(probes: ReflectionProbes): N {
 /** Box-projected direction (Lagarde's BPCEM, the guarded form from #35046), core's `pr_parallax`. */
 export const parallaxCorrect = (P: N, dir: N, boxSize: N, boxPos: N, origin: N): N => {
   const { includes } = lookupFor({ layout: createProbeLayout('cube2d-warp', { maxLod: 4 }) });
-  return (wgslFn('fn probesParallax(P: vec3f, dir: vec3f, boxSize: vec3f, boxPos: vec3f, origin: vec3f) -> vec3f { return pr_parallax(P, dir, boxSize, boxPos, origin); }', [includes]) as N)({ P, dir, boxSize, boxPos, origin });
+  return (wgslFn('fn probesParallax(P: vec3f, dir: vec3f, boxSize: vec3f, boxPos: vec3f, origin: vec3f) -> vec3f { return pr_parallax(P, dir, boxSize, boxPos, origin); }', includes) as N)({ P, dir, boxSize, boxPos, origin });
 };
 
 /**
@@ -241,7 +249,7 @@ export const parallaxCorrect = (P: N, dir: N, boxSize: N, boxPos: N, origin: N):
  */
 export const cubeFaceUV = (dir: N): N => {
   const { includes } = lookupFor({ layout: createProbeLayout('cube2d-warp', { maxLod: 4 }) });
-  return (wgslFn('fn probesCubeFaceUV(dir: vec3f) -> vec3f { return pl_cubeFaceUV(vec3f(-dir.x, dir.y, dir.z)); }', [includes]) as N)({ dir });
+  return (wgslFn('fn probesCubeFaceUV(dir: vec3f) -> vec3f { return pl_cubeFaceUV(vec3f(-dir.x, dir.y, dir.z)); }', includes) as N)({ dir });
 };
 
 /**
@@ -365,7 +373,7 @@ export class ReflectionProbesNode extends THREE.Node {
     }).toVar();
     if (this.aoNode === null) return this.coverage ? result : result.rgb;
     const { includes } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit });
-    const occlusion = wgslFn('fn probesSpecularOcclusion(NdotV: f32, ao: f32, roughness: f32) -> f32 { return probeSpecularOcclusion(NdotV, ao, roughness); }', [includes]) as N;
+    const occlusion = wgslFn('fn probesSpecularOcclusion(NdotV: f32, ao: f32, roughness: f32) -> f32 { return probeSpecularOcclusion(NdotV, ao, roughness); }', includes) as N;
     const V: N = this.viewNode ?? cameraPosition.sub(position).normalize();
     const n: N = this.normalNode ?? normalWorld;
     const so: N = occlusion({ NdotV: vec3(n).dot(vec3(V)).clamp(), ao: float(this.aoNode), roughness });
@@ -452,7 +460,7 @@ export class ReflectionProbesProxyNode extends THREE.Node {
     const { includes } = lookupFor({ layout: probeLayoutFor(probes) });
     const key = `${this.volumes}`;
     let fn = _proxyFns.get(key);
-    if (!fn) _proxyFns.set(key, (fn = wgslFn(probeProxyShareFunctionWgsl({ count: this.volumes }, 'probesProxyShare'), [includes]) as N));
+    if (!fn) _proxyFns.set(key, (fn = wgslFn(probeProxyShareFunctionWgsl({ count: this.volumes }, 'probesProxyShare'), includes) as N));
     return fn({ table: this.table.node, P: vec3(this.positionNode), dir: vec3(this.directionNode), near: float(this.nearNode), far: float(this.farNode) });
   }
 }
