@@ -15,14 +15,15 @@
 //                                  `textures.motion`. The MRT slot must be named 'velocity': three only
 //                                  moves `positionPrevious` by last frame's instance / bone / batch
 //                                  matrices when `builder.needsPreviousData()`, i.e. `mrt.has('velocity')`.
-//   lit (optional)   rgba16float   three's full lit output (+8 bytes: needs a raised limit, see `lit`)
+//   lit (optional)   rgba16float   three's full lit output (+8 bytes: needs a raised limit, see `lit`); a =
+//                                  the base specular's scale under a clear coat (1 - cc Fcc; opacity if blended)
 //   depth            depth32float  hardware depth (reverse-Z if the renderer uses it)
 import * as THREE from 'three/webgpu';
 import { diffuseColor, mrt, nodeObject, normalWorld, output, uniform, vec2, vec4 } from 'three/tsl';
 import {
   FrameCameraHistory, type FrameCamera, type FrameConventions, type FrameInputs, type FrameTextures,
 } from '@pmndrs/reflections-core';
-import { gbufferMetalness, gbufferRoughness, sceneColorNoSpecular } from './nodes';
+import { gbufferBaseSpecularScale, gbufferMetalness, gbufferRoughness, sceneColorNoSpecular } from './nodes';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -158,7 +159,8 @@ export class FrameGBuffer {
       albedoMetalness: vec4((diffuseColor as N).rgb, gbufferMetalness),
       velocity: motionNode, // must be 'velocity', see the header
     };
-    if (this.lit) outputs.lit = output;
+    // alpha: the base layer's specular scale under a clear coat (W27, D2702), not the opacity
+    if (this.lit) outputs.lit = vec4((output as N).rgb, gbufferBaseSpecularScale);
     this.mrt = mrt(outputs);
     // guides clear to zero (no surface); scene colour keeps the renderer's clear / background
     for (const n of ['normalRoughness', 'albedoMetalness', 'velocity', 'lit']) this.mrt.setClearColor(n, 0x000000, 0);

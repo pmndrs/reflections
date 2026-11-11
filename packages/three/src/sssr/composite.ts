@@ -18,7 +18,8 @@
 // needs `lit` and an estimate of what three added, not a specular-free re-render; with confidence
 // 0 the result is `lit` exactly. What it gets wrong is in docs/DIVERGES.md D603-D606: the
 // subtraction is only as good as our estimate of three's term (geometry roughness, AO maps,
-// clearcoat / sheen / iridescence / specular colour are not modelled), hit radiance has no
+// sheen / iridescence / specular colour are not modelled; a clear coat's attenuation of the base
+// layer is, from the lit target's alpha, D2702, but its own layer stays three's), hit radiance has no
 // specular (scene colour without it, D400), and there is no denoiser here (rule 7), so glossy SSR
 // is one noisy sample per quad.
 //
@@ -88,7 +89,7 @@ export interface ScreenSpaceComposite {
   final: N;
   /** three's lit image as rendered (the composite with SSR off). */
   lit: N;
-  /** Specular radiance weight (F0 x DFG.x + DFG.y). */
+  /** Specular radiance weight ((F0 x DFG.x + DFG.y) x the base layer's scale under a clear coat, D2702). */
   weight: N;
   /** Probe / environment radiance along the reflection (what three's term is assumed to be). */
   probeSpecular: N;
@@ -142,7 +143,11 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
   const g = ssr.gbuffer.textures;
   const at = options.uv ?? uv();
   if (!options.lit && !g.lit) throw new Error('screenSpaceComposite: the G-buffer has no lit target (raise maxColorAttachmentBytesPerSample to 36+) and no `lit` was given');
-  const lit: N = options.lit ?? texture(g.lit!, at).rgb;
+  const litTexel: N = options.lit ? null : texture(g.lit!, at);
+  const lit: N = options.lit ?? litTexel.rgb;
+  // three scales the base layer's specular by (1 - clearcoat x Fcc) under a clear coat; the G-buffer's
+  // lit alpha carries it (W27, D2702). Without the G-buffer's lit (a caller's `lit`): 1, unmodelled.
+  const baseSpecularScale: N = litTexel ? float(litTexel.a).clamp(0, 1) : float(1);
   const nr: N = texture(g.normalRoughness!, at);
   const am: N = texture(g.albedoMetalness!, at);
   const depth: N = texture(g.depth, at).x;
@@ -162,7 +167,7 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
 
   const dfg: N = (DFGLUT as N)({ roughness, dotNV });
   const F0: N = mix(vec3(0.04), am.rgb, am.w);
-  const weight: N = F0.mul(dfg.x).add(dfg.y).toVar();
+  const weight: N = F0.mul(dfg.x).add(dfg.y).mul(baseSpecularScale).toVar();
 
   const intensity: N = typeof options.environmentIntensity === 'number' || options.environmentIntensity === undefined
     ? uniform(options.environmentIntensity ?? 1) : options.environmentIntensity;

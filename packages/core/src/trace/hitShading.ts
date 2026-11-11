@@ -109,7 +109,8 @@ fn hitEnvTexel(c: vec2i, size: vec2i) -> vec3f {
 }
 fn hitEnvSample(d: vec3f) -> vec3f {
   let size = vec2i(textureDimensions(hitEnvTexture, 0));
-  let uv = vec2f(atan2(d.z, d.x) * 0.15915494 + 0.5, asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5);
+  let dx = select(d.x, 1e-6, abs(d.x) + abs(d.z) < 1e-6); // atan2(0, 0) is NaN on some backends (the poles)
+  let uv = vec2f(atan2(d.z, dx) * 0.15915494 + 0.5, asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5);
   let p = uv * vec2f(size) - 0.5;
   let i = vec2i(floor(p));
   let f = p - floor(p);
