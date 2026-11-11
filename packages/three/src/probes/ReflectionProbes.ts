@@ -158,7 +158,9 @@ export interface BakeOptions {
    * probe order). n > 2 adds passes the same way. Each pass costs one bake of those probes, so 2
    * doubles the bake: scenes without mirrors or glossy surfaces facing each other (and live,
    * per-frame bakes) can use 1 to halve it; their probes then lack the interreflection
-   * (D3200: 1 -> 2 changes the rooms by mean 5.6-6.4 / 255, p99 42-49).
+   * (D3200: 1 -> 2 changes the rooms by mean 5.6-6.4 / 255, p99 42-49). With {@link probes} (a
+   * time-sliced bake), every pass covers only the slice, so a sliced 2-bounce bake differs from a
+   * full one (the slice's second pass sees the other probes' last bake): slice with 1.
    */
   bounces?: number;
 }
