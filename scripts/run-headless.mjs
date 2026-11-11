@@ -203,6 +203,16 @@ async function sssrCoreChecks(pages) {
   check('sssr cube-environment fallback: same rays and hits', se.rays === st.rays && Math.abs(se.mirrorHitFraction - st.mirrorHitFraction) < 1e-3,
     `rays ${se.rays}, hit ${(se.mirrorHitFraction * 100).toFixed(1)}%`);
   savePng('sssr-core-env.png', await env.T('window.__p.shot()'));
+  // fallbackRoughness (D1806): 'surface' takes misses' fallback at the pixel's roughness (the rough-path
+  // lookup), 'mirror' is FFX's roughness 0. Mirrors and confidence-1 pixels must not change.
+  const fr = await env.T('window.__p.fallbackRoughness()');
+  console.log('  fallbackRoughness', JSON.stringify(fr));
+  check("sssr fallbackRoughness 'surface': glossy misses at the probe lookup of their own roughness",
+    fr.misses > 1000 && fr.missSurface.p99 < 1 && fr.missMirror.mean > fr.missSurface.mean && fr.partialSurface.p99 < 1,
+    `misses ${fr.misses}: |radiance - lookup(r)| mean / p99 (/255) mirror ${fr.missMirror.mean} / ${fr.missMirror.p99}, surface ${fr.missSurface.mean} / ${fr.missSurface.p99}; ` +
+    `partial confidence ${fr.partials}: mirror ${fr.partialMirror.mean} / ${fr.partialMirror.p99}, surface ${fr.partialSurface.mean} / ${fr.partialSurface.p99}`);
+  check("sssr fallbackRoughness 'surface': mirrors and confidence-1 pixels unchanged", fr.mirrors > 1000 && fr.mirrorsDiffer === 0 && fr.confidentDiffer === 0,
+    `${fr.mirrorsDiffer} of ${fr.mirrors} mirror px, ${fr.confidentDiffer} of ${fr.confident} confidence-1 px differ`);
   // 4K, every surface a mirror: more than 65535 x 64 rays, so the intersect args must be 2-D
   // (D601). A 1-D dispatch over the limit is skipped without a validation error: radiance stays 0.
   const uhd = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?w=3840&h=2160&allmirror`);

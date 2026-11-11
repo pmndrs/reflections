@@ -85,7 +85,7 @@ struct Params {
   thicknessRoughnessFactor: f32,
   thicknessLengthFactor: f32,
   hitColorFromHistory: u32,
-  _pad1: u32,
+  fallbackRoughnessSurface: u32,
   motionVectorScale: vec2f,
   _pad2: vec2u,
 };
@@ -647,7 +647,17 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   var reflection_radiance = vec3f(0.0);
   if (confidence > 0.0) { reflection_radiance = loadHitColor(hit.xy); }
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
-  let environment_lookup = sampleRadianceFallback(world_space_origin, world_space_reflected_direction, 0.0);
+  // FFX: the miss fallback along the sampled direction at roughness 0 (the denoiser blurs it).
+  // fallbackRoughness 'surface' (D1806): the rough-pixel lookup instead, along the mirror direction at
+  // the pixel's own (perceptual) roughness, so a resolve that shows radiance as is gets the probe's blur.
+  var fallback_direction = world_space_reflected_direction;
+  var fallback_roughness = 0.0;
+  if (P.fallbackRoughnessSurface != 0u) {
+    let view_space_surface_normal = (P.viewMatrix * vec4f(loadWorldSpaceNormal(vec2i((*r).coords)), 0.0)).xyz;
+    fallback_direction = (P.invView * vec4f(reflect(normalize((*r).view_space_ray), view_space_surface_normal), 0.0)).xyz;
+    fallback_roughness = sqrt((*r).roughness);
+  }
+  let environment_lookup = sampleRadianceFallback(world_space_origin, fallback_direction, fallback_roughness);
   reflection_radiance = mix(environment_lookup, reflection_radiance, confidence);
   storeRadiance((*r).packed, (*r).coords, vec4f(reflection_radiance, world_ray_length), select(0.0, world_ray_length, confidence > 0.0), confidence);
   // Hybrid sample: low confidence, not marched into the background, and not too rough to trace.
