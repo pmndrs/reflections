@@ -503,6 +503,44 @@ async function ssrChecks(pages) {
   console.log(`  GPU ms ${t.size.join('x')} through the three adapter (${t.variant}, mirrorWall, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
   await mirrorBiasChecks(pages);
   await denoiserGateChecks(pages);
+  await specOccChecks(pages);
+}
+
+/**
+ * W39 (D66, D4510): examples/ssr `?specOcc=1` / `__p.setSpecOcc()` hands the composite GTAO (on the
+ * G-buffer) for Lagarde's specular occlusion on the probe part. On the contact scene (objects on a
+ * mirror floor, AA off) turning it on must darken pixels, and those must sit where the AO input
+ * (the `ao` view) says the surface is occluded; elsewhere the image stays put. No GPU errors.
+ */
+async function specOccChecks(pages) {
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&scene=contact`);
+  pages.push(p);
+  const r = await p.T(`(async () => {
+    const P = window.__p;
+    const luma = async () => {
+      const img = new Image(); img.src = await P.shot(); await img.decode();
+      const c = new OffscreenCanvas(img.width, img.height); const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, img.width, img.height).data; const l = new Float32Array(img.width * img.height);
+      for (let i = 0; i < l.length; i++) l[i] = 0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2];
+      return l;
+    };
+    P.setView('final'); await P.step(40); const off = await luma();
+    P.setSpecOcc(true); await P.step(40); const on = await luma();
+    P.setView('ao'); await P.step(2); const ao = await luma();
+    P.setView('specularOcclusion'); await P.step(2); const so = await luma();
+    P.setSpecOcc(false); P.setView('final'); await P.step(2);
+    let darker = 0, darkerInAO = 0, outside = 0, outsidePx = 0, soMin = 255, aoMin = 255;
+    for (let i = 0; i < off.length; i++) {
+      const d = off[i] - on[i];
+      if (d > 4) { darker++; if (ao[i] < 0.95 * 255) darkerInAO++; }
+      if (ao[i] > 0.97 * 255) { outsidePx++; outside += Math.abs(d); }
+      soMin = Math.min(soMin, so[i]); aoMin = Math.min(aoMin, ao[i]);
+    }
+    return { px: off.length, darker, darkerInAO, outsideMean: outside / Math.max(1, outsidePx), soMin, aoMin, errors: P.gpuErrors.length };
+  })()`);
+  check('ssr specOcc (GTAO -> Lagarde, probe part): darkens the contact creases only, no GPU errors',
+    r.errors === 0 && r.darker > r.px * 0.003 && r.darkerInAO > 0.8 * r.darker && r.outsideMean < 0.5 && r.aoMin < 0.5 * 255 && r.soMin < 0.8 * 255,
+    `${(100 * r.darker / r.px).toFixed(2)}% px darker > 4/255, ${(100 * r.darkerInAO / Math.max(1, r.darker)).toFixed(0)}% of them where AO < 0.95; mean |change| where AO > 0.97: ${r.outsideMean.toFixed(3)}; min AO ${(r.aoMin / 255).toFixed(2)}, min factor ${(r.soMin / 255).toFixed(2)}; GPU errors ${r.errors}`);
 }
 
 /**
@@ -1693,6 +1731,7 @@ async function main() {
     if (runs('hybrid')) await hybridChecks(pages);
     if (only === 'mirror-bias') await mirrorBiasChecks(pages); // W32: the mirrorBias check alone (also part of ssr)
     if (only === 'denoiser-gate') await denoiserGateChecks(pages); // W34: the D1402 check alone (also part of ssr)
+    if (only === 'spec-occ') await specOccChecks(pages); // W39: the specOcc toggle alone (also part of ssr)
     if (only === 'seam') {
       // W26: the D53 seam sweep alone (examples/ssr, denoised)
       const sp = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1`);
