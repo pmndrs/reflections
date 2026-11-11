@@ -1157,7 +1157,8 @@ async function babylonChecks(pages) {
  * page is a setup notice, and the check asserts that the notice renders. With it: renders, no
  * validation errors, finite outputs, rays traced; the glossy floor reflects the signs (confident SSR);
  * the G-buffer carries the material values; the contract's camera reprojects onto pixi-3d's own
- * pixels and its normals agree with the depth; the probe captures sample as world directions; the
+ * pixels and its normals agree with the depth; the probe captures sample as world directions and
+ * draw the view's sky behind the geometry (W33: black-sky texels and the composite's change logged); the
  * motion texture reprojects with motionVectorScale [1, 1]. Screenshots of the final image (denoised
  * when the sibling Denoiser repo is there, and raw), SSR off, probes off and the debug views.
  */
