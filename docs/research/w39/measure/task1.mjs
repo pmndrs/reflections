@@ -9,25 +9,26 @@ const args = process.argv.slice(2);
 const scenes = (args[0] ?? 'facingMirrors,mirrorWall,carConcept').split(',');
 const aas = (args[1] ?? 'upscaler,taa,off').split(',');
 const hits = ['current', 'final'];
+const shades = (args[2] ?? 'reshade,off').split(',');
 const results = fs.existsSync(OUTDIR + 'results.json') ? JSON.parse(fs.readFileSync(OUTDIR + 'results.json', 'utf8')) : {};
 
-for (const scene of scenes) {
+for (const shade of shades) for (const scene of scenes) {
   const showcase = scene === 'carConcept';
-  const url = showcase ? `${BASE}/showcase/?scene=${scene}&w=960&h=540` : `${BASE}/ssr/?scene=${scene}&w=960&h=540`;
+  const url = showcase ? `${BASE}/showcase/?scene=${scene}&w=960&h=540&reshade=${shade}` : `${BASE}/ssr/?scene=${scene}&w=960&h=540&reshade=${shade}`;
   const page = await openPage(url);
   try {
     await page.evalJs(INPAGE);
     await page.T('window.__p.stop()');
     const cam0 = showcase ? await page.T('window.__p.camera()') : null;
     for (const aa of aas) for (const hit of hits) {
-      const key = `${scene}|${aa}|${hit}`;
+      const key = `${shade}|${scene}|${aa}|${hit}`;
       const shots = aa !== 'off' || true;
       await page.T(showcase
         ? `(async () => { const P = window.__p; P.setAA('${aa}'); P.setHit('${hit}'); P.setCamera(${JSON.stringify(cam0[0])}, ${JSON.stringify(cam0[1])}); await P.step(2); })()`
         : `(async () => { const P = window.__p; P.setAA('${aa}'); P.setHitColor('${hit}'); P.setPose('default'); P.hybrid.resetHistory(); P.ssr.resetHistory(); await P.step(2); })()`);
       const t0 = Date.now();
       const r = await page.T(`window.__w39.measure({ scene: '${scene}', shots: ${shots} })`);
-      for (const k of ['restHeat', 'orbitHeat', 'moving', 'settled', 'ghostHeat']) if (r[k]) { savePng(`${OUTDIR}${scene}-${aa}-${hit}-${k}.png`, r[k]); delete r[k]; }
+      for (const k of ['restHeat', 'orbitHeat', 'moving', 'settled', 'ghostHeat']) if (r[k]) { savePng(`${OUTDIR}${shade}-${scene}-${aa}-${hit}-${k}.png`, r[k]); delete r[k]; }
       results[key] = r;
       const f = (x) => (typeof x === 'number' ? Number(x.toFixed(3)) : x);
       console.log(key, `${((Date.now() - t0) / 1000).toFixed(1)}s`);
@@ -35,6 +36,7 @@ for (const scene of scenes) {
       fs.mkdirSync(OUTDIR, { recursive: true });
       fs.writeFileSync(OUTDIR + 'results.json', JSON.stringify(results, null, 1));
     }
+    console.log('hitShading', await page.T('window.__p.ssr.settings.hitShading ?? "(default)"'));
     const errs = await page.T('window.__p.gpuErrors');
     if (errs?.length || page.logs.length) console.log('errors', errs, page.logs.slice(0, 5));
   } finally { page.close(); }
