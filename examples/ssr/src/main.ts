@@ -28,6 +28,7 @@ import {
 import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
 import { ASSET_SCENES, SCENES, type KitScene } from '../../shared';
 import { createReflectionDenoiser, denoiserAvailable, denoiserSource } from '../../shared/denoiser';
+import { TemporalAA } from '../../shared/taa';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -52,6 +53,11 @@ const bvhBuilder = (q.get('bvhBuilder') ?? 'auto') as BvhBuilderPreference;
 /** `&shadingNormals=0`: traced hits shaded with the flat geometric normal (D1700 A/B). */
 const shadingNormals = q.get('shadingNormals') !== '0';
 const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
+/**
+ * Temporal anti-aliasing on the display (../../shared/taa.ts, W40): on by default, off under
+ * `?manual` (the headless checks compare unjittered pixels); `?taa=1|0` overrides both.
+ */
+const wantTAA = q.has('taa') ? q.get('taa') !== '0' : !manual;
 
 const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'ssrWeight', 'hitFade', 'probeConsistency', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'coverage', 'source', 'rtSource', 'grid'] as const;
 type View = (typeof VIEWS)[number];
@@ -222,6 +228,8 @@ async function main() {
   const historyMaterial = new THREE.MeshBasicNodeMaterial();
   historyMaterial.toneMapped = false;
   const historyQuad = new THREE.QuadMesh(historyMaterial);
+  const taa = new TemporalAA(renderer, ssr.gbuffer.textures.motion!, W, H);
+  taa.enabled = wantTAA;
   let hitMode: HitColorMode = (q.get('hit') as HitColorMode) ?? 'current';
   function setHitColor(m: HitColorMode) {
     if (!HIT_MODES.includes(m)) throw new Error(`hit colour ${m}?`);
@@ -229,6 +237,7 @@ async function main() {
     ssr.settings.hitColor = m === 'current' ? 'current' : 'history';
     ssr.historySource = m === 'final' ? historyRT.texture : null;
     ssr.resetHistory();
+    taa.reset();
   }
   setHitColor(hitMode);
   function buildDisplay() {
@@ -360,6 +369,7 @@ async function main() {
     ssr.resetHistory();
     buildDisplay();
     hybrid.resetHistory();
+    taa.reset();
     refreshUI();
     return { id: kit.id, views: Object.keys(kit.views), probes: probes?.bakedProbes.length ?? 0, animated: !!kit.update };
   }
@@ -371,6 +381,7 @@ async function main() {
     if (v.fov) { kit!.camera.fov = v.fov; kit!.camera.updateProjectionMatrix(); }
     controls.target.set(...v.target);
     controls.update();
+    taa.reset();
   }
 
   function frame() {
@@ -378,10 +389,17 @@ async function main() {
     if (manual || !looping) nextNodeFrame();
     kit.camera.aspect = W / H; kit.camera.updateProjectionMatrix(); kit.camera.updateMatrixWorld();
     if (provider && kit.update) { kit.scene.updateMatrixWorld(); refitProvider(); }
-    ssr.render(kit.scene, kit.camera);
+    ssr.render(kit.scene, kit.camera, taa.jitter(kit.camera, W, H));
+    taa.restore(kit.camera);
     hybrid.update();
     updateMask();
-    pipeline.render();
+    if (taa.enabled) {
+      const prev = renderer.getRenderTarget();
+      renderer.setRenderTarget(taa.input);
+      pipeline.render();
+      renderer.setRenderTarget(prev);
+      taa.resolve();
+    } else pipeline.render();
     if (hitMode === 'final') {
       const prev = renderer.getRenderTarget();
       renderer.setRenderTarget(historyRT);
@@ -431,6 +449,9 @@ async function main() {
   const denoiseBox = document.createElement('input'); denoiseBox.type = 'checkbox'; denoiseBox.checked = hybrid.denoise; denoiseBox.disabled = !denoiser;
   denoiseBox.onchange = () => { hybrid.denoise = denoiseBox.checked; refreshUI(); if (!looping) frame(); };
   row(denoiser ? 'Denoise (FFX)' : 'Denoise (no denoiser found)', denoiseBox);
+  const taaBox = document.createElement('input'); taaBox.type = 'checkbox'; taaBox.checked = wantTAA;
+  taaBox.onchange = () => { taa.enabled = taaBox.checked; taa.reset(); if (!looping) frame(); };
+  row('Temporal AA', taaBox);
   const depthBox = document.createElement('input'); depthBox.type = 'checkbox'; depthBox.checked = q.get('depthAware') !== '0';
   hybrid.depthAware.value = depthBox.checked ? 1 : 0;
   depthBox.onchange = () => { hybrid.depthAware.value = depthBox.checked ? 1 : 0; if (!looping) frame(); };
@@ -451,6 +472,7 @@ async function main() {
     ].join('\n');
   }
   function setView(v: View) {
+    taa.reset();
     uGrid.value = v === 'grid' ? 1 : 0;
     uView.value = VIEWS.indexOf(v);
     viewSel.value = v;
@@ -477,6 +499,8 @@ async function main() {
       setHitColor: (m: HitColorMode) => setHitColor(m),
       setRT(on: boolean) { ssr.rayTracing = on; },
       hybrid, get denoiserName() { return denoiser?.name ?? null; },
+      get taa() { return taa; },
+      setTAA(on: boolean) { taa.enabled = on; taa.reset(); taaBox.checked = on; },
       setDenoise(on: boolean) { hybrid.denoise = on && !!denoiser; denoiseBox.checked = hybrid.denoise; },
       setTraceSettings(s: N) { ssr.traceSettings = { ...s }; },
       /** D901 A/B: traced hits lit by the scene's probes (default) or always by the environment mean (`false`). */

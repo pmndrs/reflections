@@ -196,8 +196,11 @@ export class ScreenSpaceReflectionsPass {
     if (this.core && !this.core.outputs.missList) { this.core.destroy(); this.core = null; }
   }
 
-  /** Render the G-buffer and trace. Returns the frame's contract inputs. */
-  render(scene: THREE.Scene, camera: THREE.Camera, opts: { jitter?: readonly [number, number] } = {}): FrameInputs {
+  /**
+   * Render the G-buffer and trace. Returns the frame's contract inputs. With a jittered camera
+   * (TAA), pass the jitter and the unjittered `projection` (FrameGBuffer.render, D405).
+   */
+  render(scene: THREE.Scene, camera: THREE.Camera, opts: { jitter?: readonly [number, number]; projection?: ArrayLike<number> } = {}): FrameInputs {
     this.sceneEnvironment = scene.environment;
     this.sceneEnvironmentIntensity = scene.environmentIntensity ?? 1;
     this.sceneProbes = sceneLightingProbes(scene);

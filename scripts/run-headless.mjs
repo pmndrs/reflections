@@ -1045,6 +1045,31 @@ async function showcaseChecks(pages) {
     check(`showcase ${id}: renders on / off / rt, no GPU errors`, s.gpuErrors === 0 && errs.length === 0 && lum > 8 && !!s.bvh,
       `${info.probes} probes (${info.layout}, ${info.bakeMs.toFixed(0)} ms), denoiser ${s.denoiser ?? 'none'}, mean ${lum.toFixed(0)}/255, BVH ${s.bvh?.triangles} tris; reflections ${(s.timings.total ?? NaN).toFixed(2)} ms${errs.length ? '; ' + errs[0] : ''}`);
   }
+  // W40 (D3500): reflections at rest stay still. Consecutive frames of a still camera, 8-bit display luma:
+  // share of pixels whose mean |frame - previous| is over 1/255. Without TAA the denoised mirror floor
+  // keeps a 1-3/255 shimmer (about 1% of the frame, 9% of the floor's reflection of the car).
+  if (ids.includes('carConcept')) {
+    await p.T(`window.__p.load('carConcept')`);
+    const still = `(async (on) => {
+      const P = window.__p; P.setView('final'); P.setTAA(on); await P.step(90);
+      const c = document.createElement('canvas'); const g = c.getContext('2d', { willReadFrequently: true });
+      let prev = null, acc = null, n = 0;
+      for (let k = 0; k < 9; k++) {
+        const img = new Image(); img.src = await P.shot(); await img.decode();
+        c.width = img.width; c.height = img.height; g.drawImage(img, 0, 0);
+        const d = g.getImageData(0, 0, img.width, img.height).data;
+        const l = new Float32Array(d.length / 4); for (let i = 0; i < l.length; i++) l[i] = 0.2126 * d[4 * i] + 0.7152 * d[4 * i + 1] + 0.0722 * d[4 * i + 2];
+        if (prev) { acc ??= new Float32Array(l.length); for (let i = 0; i < l.length; i++) acc[i] += Math.abs(l[i] - prev[i]); n++; }
+        prev = l;
+      }
+      let over = 0; for (let i = 0; i < acc.length; i++) if (acc[i] / n > 1) over++;
+      return over / acc.length * 100;
+    })`;
+    const off = await p.T(`(${still})(false)`);
+    const on = await p.T(`(${still})(true)`);
+    check('showcase carConcept: still camera, reflections settle under TAA (< 0.3% of pixels flicker > 1/255)', on < 0.3,
+      `TAA on ${on.toFixed(2)}%, off ${off.toFixed(2)}% of pixels with mean |frame - previous| > 1/255`);
+  }
 }
 
 /**
