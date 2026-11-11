@@ -1128,13 +1128,14 @@ async function showcaseChecks(pages) {
     check(`showcase ${id}: renders on / off / rt, no GPU errors`, s.gpuErrors === 0 && errs.length === 0 && lum > 8 && !!s.bvh,
       `${info.probes} probes (${info.layout}, ${info.bakeMs.toFixed(0)} ms), denoiser ${s.denoiser ?? 'none'}, mean ${lum.toFixed(0)}/255, BVH ${s.bvh?.triangles} tris; reflections ${(s.timings.total ?? NaN).toFixed(2)} ms${errs.length ? '; ' + errs[0] : ''}`);
   }
-  // W40 (D3500): reflections at rest stay still. Consecutive frames of a still camera, 8-bit display luma:
-  // share of pixels whose mean |frame - previous| is over 1/255. Without TAA the denoised mirror floor
-  // keeps a 1-3/255 shimmer (about 1% of the frame, 9% of the floor's reflection of the car).
+  // W40 (D3500), W36 (D4201): reflections at rest stay still. Consecutive frames of a still camera, 8-bit
+  // display luma: share of pixels whose mean |frame - previous| is over 1/255. Without anti-aliasing the
+  // denoised mirror floor keeps a 1-3/255 shimmer (about 1% of the frame, 9% of the floor's reflection of the
+  // car). The default anti-aliasing (@pmndrs/upscaler, NativeAA) must settle it; W40's TAA is reported beside it.
   if (ids.includes('carConcept')) {
     await p.T(`window.__p.load('carConcept')`);
-    const still = `(async (on) => {
-      const P = window.__p; P.setView('final'); P.setTAA(on); await P.step(90);
+    const still = `(async (mode) => {
+      const P = window.__p; P.setView('final'); P.setAA(mode); await P.step(90);
       const c = document.createElement('canvas'); const g = c.getContext('2d', { willReadFrequently: true });
       let prev = null, acc = null, n = 0;
       for (let k = 0; k < 9; k++) {
@@ -1148,10 +1149,23 @@ async function showcaseChecks(pages) {
       let over = 0; for (let i = 0; i < acc.length; i++) if (acc[i] / n > 1) over++;
       return over / acc.length * 100;
     })`;
-    const off = await p.T(`(${still})(false)`);
-    const on = await p.T(`(${still})(true)`);
-    check('showcase carConcept: still camera, reflections settle under TAA (< 0.3% of pixels flicker > 1/255)', on < 0.3,
-      `TAA on ${on.toFixed(2)}%, off ${off.toFixed(2)}% of pixels with mean |frame - previous| > 1/255`);
+    const off = await p.T(`(${still})('off')`);
+    const taa = await p.T(`(${still})('taa')`);
+    const on = await p.T(`(${still})('upscaler')`);
+    check('showcase carConcept: still camera, reflections settle under anti-aliasing (upscaler; < 0.3% of pixels flicker > 1/255)', on < 0.3,
+      `upscaler ${on.toFixed(2)}%, W40 TAA ${taa.toFixed(2)}%, off ${off.toFixed(2)}% of pixels with mean |frame - previous| > 1/255`);
+    // W36: upscaling (G-buffer and reflections at the render size) renders
+    const before = results.logs.length;
+    const up = await openPage(`http://127.0.0.1:${PORT}/showcase/?manual&w=1280&h=720&scene=carConcept&upscale=performance`);
+    pages.push(up);
+    await up.T('window.__p.step(8)');
+    const ui = await up.T('window.__p.info()');
+    const upShot = await up.T('window.__p.shot()');
+    savePng('showcase-carConcept-upscale-performance.png', upShot);
+    const upLum = await up.T(`(${tone})(${JSON.stringify(upShot)})`);
+    const upErrs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    check('showcase carConcept: ?upscale=performance renders (G-buffer at half size, upscaled)', ui.gpuErrors === 0 && upErrs.length === 0 && ui.renderSize[0] === 640 && ui.renderSize[1] === 360 && upLum > 8,
+      `render ${ui.renderSize.join('x')} -> ${ui.size.join('x')}, mean ${upLum.toFixed(0)}/255${upErrs.length ? '; ' + upErrs[0] : ''}`);
   }
 }
 
