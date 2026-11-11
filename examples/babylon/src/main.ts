@@ -511,11 +511,11 @@ async function stats() {
   counter.destroy();
   const rad = await readTexture(core.outputs.radiance);
   const conf = await readTexture(core.outputs.confidence);
-  const mat = await readTexture(ssr.frame.material!);
+  const mat = await readTexture(ssr.lastFrame!.textures.roughness.texture); // reflectivity: roughness = 1 - a (D1802)
   let nonFinite = 0, mirror = 0, mirrorConfident = 0, geometryPx = 0, confSum = 0;
   for (let i = 0; i < conf.data.length; i++) {
     for (let c = 0; c < 4; c++) if (!Number.isFinite(rad.data[i * 4 + c])) nonFinite++;
-    const rough = mat.data[i * 4];
+    const rough = 1 - mat.data[i * 4 + 3];
     if (rough < 0.999) { geometryPx++; confSum += conf.data[i]; }
     if (rough < 0.02) { mirror++; if (conf.data[i] >= 0.9) mirrorConfident++; }
   }
@@ -621,14 +621,14 @@ async function motionCheck() {
   const t = ssr.lastFrame!.textures;
   const b = await readTexture(t.sceneColor);
   const m = await readTexture(t.motion);
-  const mat = await readTexture(ssr.frame.material!);
+  const mat = await readTexture(ssr.lastFrame!.textures.roughness.texture); // reflectivity: roughness = 1 - a (D1802)
   const W = t.sceneColor.width, H = t.sceneColor.height;
   const scales: [number, number][] = [[-1, -1], [1, 1], [1, -1], [-1, 1], [0, 0]];
   const err = scales.map(() => 0);
   let n = 0;
   for (let y = 4; y < H - 4; y += 3) for (let x = 4; x < W - 4; x += 3) {
     const i = y * W + x;
-    if (mat.data[i * 4] > 0.999) continue; // background
+    if (1 - mat.data[i * 4 + 3] > 0.999) continue; // background
     const mx = m.data[i * 4], my = m.data[i * 4 + 1];
     if (Math.abs(mx) + Math.abs(my) < 1e-4) continue;
     const res = scales.map(([sx, sy]) => {
@@ -703,7 +703,7 @@ async function iblCompare() {
   // the masks, from the G-buffer of this frame (Babylon's targets are Y-flipped: row 0 = bottom)
   const t = ssr.lastFrame!.textures;
   const vel = await readTexture(t.motion);
-  const mat = await readTexture(ssr.frame.material!);
+  const mat = await readTexture(ssr.lastFrame!.textures.roughness.texture); // reflectivity: roughness = 1 - a (D1802)
   composite!.specularFactors = false;
   const before = await settled();
   for (const pl of plugins) pl.active = false;
@@ -718,7 +718,7 @@ async function iblCompare() {
   const diffs = { before: { geometry: [] as number[], occluded: [] as number[], energyOnly: [] as number[] }, after: { geometry: [] as number[], occluded: [] as number[], energyOnly: [] as number[] } };
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const i = y * W + x;
-    if (mat.data[i * 4] > 0.999) continue; // background
+    if (1 - mat.data[i * 4 + 3] > 0.999) continue; // background
     const packed = vel.data[i * 4 + 2];
     const ms = packed > 1.5, factor = 1 - (packed - (ms ? 2 : 0));
     const k = ((H - 1 - y) * W + x) * 4; // canvas row
