@@ -53,7 +53,7 @@
 //   direction is `fallbackRoughness: 'mirror'` (D1806).
 
 /** Byte size of the uniform block (struct Params below). */
-export const PARAMS_SIZE = 528;
+export const PARAMS_SIZE = 544;
 
 export const PARAMS_WGSL = /* wgsl */ `
 struct Params {
@@ -93,6 +93,10 @@ struct Params {
   motionVectorScale: vec2f,
   roughnessUnpackMul: f32,
   roughnessUnpackAdd: f32,
+  hitShadingMode: u32,
+  metalnessChannel: u32,
+  hasHitMaterial: u32,
+  hasClearcoat: u32,
 };
 @group(0) @binding(0) var<uniform> P: Params;
 `;
@@ -378,7 +382,11 @@ fn main() {
 // ---------------------------------------------------------------------------------------------
 // Intersection (ffx_sssr_intersect.h + ffx_sssr_intersect_pass.hlsl).
 
-export function intersectWgsl(variant: Variant, inverted: boolean, fallbackWgsl: string, missList: boolean): string {
+/**
+ * `hitShadingWgsl`: the hit-shading module (and stubs) that defines `hitShadeLobe` for the
+ * re-shade (W44, D3540); see `screenSpaceHitShadingWgsl` in ./sssr.ts.
+ */
+export function intersectWgsl(variant: Variant, inverted: boolean, fallbackWgsl: string, missList: boolean, hitShadingWgsl: string): string {
   const sg = variant === 'subgroups';
   return /* wgsl */ `
 ${sg ? 'enable subgroups;\ndiagnostic(off, subgroup_uniformity);' : ''}
@@ -398,7 +406,11 @@ ${missList ? `@group(0) @binding(11) var<storage, read_write> missList: array<ve
 @group(0) @binding(12) var<storage, read_write> missCounter: array<atomic<u32>, 4>;` : ''}
 @group(0) @binding(13) var t_history: texture_2d<f32>;
 @group(0) @binding(14) var t_motion: texture_2d<f32>;
+@group(0) @binding(15) var t_albedo: texture_2d<f32>;
+@group(0) @binding(16) var t_metalness: texture_2d<f32>;
+@group(0) @binding(17) var t_clearcoat: texture_2d<f32>;
 ${fallbackWgsl}
+${hitShadingWgsl}
 
 const M_PI: f32 = 3.14159265358979;
 const FLOAT_MAX: f32 = 3.402823466e+38;
@@ -434,6 +446,31 @@ fn loadHitColor(hit_uv: vec2f) -> vec3f {
   let prev_uv = hit_uv - textureLoad(t_motion, pc, 0).xy * P.motionVectorScale;
   if (any(prev_uv < vec2f(0.0)) || any(prev_uv >= vec2f(1.0))) { return loadInputColor(p); }
   return textureLoad(t_history, vec2i(prev_uv * vec2f(textureDimensions(t_history))), 0).xyz;
+}
+// View-dependent re-shade of a screen-space hit (W44, D3540; FFX reuses the screen colour as is).
+// The screen holds what leaves the hit toward the camera; the ray wants what leaves it toward the
+// ray's origin. The view-independent part (the scene colour without specular, this frame) is kept,
+// and the specular lobe is evaluated along the reflected ray: the hit's F0 = mix(0.04, albedo,
+// metalness) and roughness from the G-buffer, three's split sum on the radiance along R (the hit
+// shading's probes / environment, or the radiance fallback), as traced hits are shaded (D3510).
+// No visibility ray here (no BVH in this pass).
+const HIT_SHADING_RESHADE: u32 = 1u;
+fn hitMaterialSpecular(p: vec2i) -> HitSpecular {
+  let roughness = sqrt(max(textureLoad(t_roughness, p, 0).x, 0.0));
+  var f0 = vec3f(0.04);
+  if (P.hasHitMaterial != 0u) {
+    let albedo = textureLoad(t_albedo, p, 0).rgb;
+    let metal = textureLoad(t_metalness, p, 0)[min(P.metalnessChannel, 3u)];
+    f0 = mix(vec3f(0.04), albedo, clamp(metal, 0.0, 1.0));
+  }
+  var cc = vec2f(0.0);
+  if (P.hasClearcoat != 0u) { cc = textureLoad(t_clearcoat, p, 0).xy; }
+  return HitSpecular(f0, roughness, clamp(cc.x, 0.0, 1.0), clamp(cc.y, 0.0, 1.0));
+}
+fn reshadeHit(hit_uv: vec2f, world_hit: vec3f, ray_direction: vec3f) -> vec3f {
+  let p = clamp(vec2i(vec2f(P.renderSize) * hit_uv), vec2i(0), vec2i(P.renderSize) - 1);
+  let N = loadWorldSpaceNormal(p);
+  return hitShadeLobe(hitMaterialSpecular(p), world_hit, N, ray_direction, vec3f(0.0), loadInputColor(p));
 }
 fn sampleRandomVector2D(p: vec2u) -> vec2f { return textureLoad(t_blue_noise, vec2i(p % 128u), 0).xy; }
 
@@ -682,8 +719,14 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   var confidence = 0.0;
   if (valid_hit) { confidence = validateHit(hit, (*r).uv, world_space_ray, screen_size, thickness, (*r).march.most_detailed_mip); }
   var hit_radiance = vec3f(0.0);
-  if (confidence > 0.0) { hit_radiance = loadHitColor(hit.xy); }
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
+  if (confidence > 0.0) {
+    if (P.hitShadingMode == HIT_SHADING_RESHADE) {
+      hit_radiance = reshadeHit(hit.xy, world_space_hit, normalize(world_space_reflected_direction));
+    } else {
+      hit_radiance = loadHitColor(hit.xy);
+    }
+  }
   let hit_distance = select(0.0, world_ray_length, confidence > 0.0);
   // fallbackRoughness 'surface' (default, D1806): each pixel's own rough-pixel lookup, quad copies
   // included. 'mirror' (FFX): the sampled direction at roughness 0, left for the denoiser to blur.

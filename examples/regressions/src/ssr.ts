@@ -82,7 +82,7 @@ export async function ssrHistoryChecks() {
     const app = new THREE.RenderTarget(W, H, { type: THREE.HalfFloatType, depthBuffer: false });
     renderer.initRenderTarget(app);
     fillTexture(device, getGPUTexture(renderer, app.texture), [STALE, 0, STALE, 1]);
-    const ssr = new ScreenSpaceReflectionsPass(renderer, { gbufferOptions: { width: W, height: H }, settings: { hitColor: 'history' } });
+    const ssr = new ScreenSpaceReflectionsPass(renderer, { gbufferOptions: { width: W, height: H }, settings: { hitColor: 'history', hitShading: 'off' } }); // the screen colour as is (W44): this checks which one is read
     ssr.historySource = app.texture;
     ssr.render(scene, camera);
     out.appFirstFrame = await hitColours(rig, ssr);
@@ -97,7 +97,7 @@ export async function ssrHistoryChecks() {
 
   // (b) the G-buffer's lit target: history -> current -> history with a scene change in between
   {
-    const ssr = new ScreenSpaceReflectionsPass(renderer, { gbufferOptions: { width: W, height: H }, settings: { hitColor: 'history' } });
+    const ssr = new ScreenSpaceReflectionsPass(renderer, { gbufferOptions: { width: W, height: H }, settings: { hitColor: 'history', hitShading: 'off' } }); // the screen colour as is (W44): this checks which one is read
     box.material.emissive.setRGB(STALE, 0, STALE);
     ssr.render(scene, camera); // history <- lit with the stale-coloured box
     ssr.render(scene, camera);
@@ -187,8 +187,9 @@ async function coreRtRig() {
   const inputs = core.screenSpaceInputsFromFrame(frame, tracer, { history: stale });
   const run = (ssrHit: 'current' | 'history', rtSettings: Record<string, unknown>, rtInputs = inputs) => {
     const cmd = device.createCommandEncoder();
-    tracer.dispatch(cmd, inputs, { hitColor: ssrHit, missConfidenceThreshold: 1.01, fallbackColor: [0, 0, 0] });
-    rt.dispatch(cmd, { tracer, inputs: rtInputs }, rtSettings as never);
+    tracer.dispatch(cmd, inputs, { hitColor: ssrHit, hitShading: 'off', missConfidenceThreshold: 1.01, fallbackColor: [0, 0, 0] });
+    // on-screen reuse as is (W44's re-shade off): these checks are about which colour it reads
+    rt.dispatch(cmd, { tracer, inputs: rtInputs }, { hitShading: 'off', ...rtSettings } as never);
     device.queue.submit([cmd.finish()]);
   };
   /** Traced hits that reused the on-screen colour (source 4), and how many of those carry the stale colour. */
