@@ -123,10 +123,22 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
   // (the tracer's FullScreenQuad, not QuadMesh: the material reads rows top-down against its uv)
   const rawQuad = new FullScreenQuad(rawMat), denQuad = new FullScreenQuad(denMat);
 
+  // Warm the denoiser while the first samples trace: its first call loads the weights and builds the
+  // pipelines (seconds), so run one on a blank frame of the same size and formats now, not at the cap.
+  const warm: Promise<unknown> = oidn ? (async () => {
+    const blank = new THREE.StorageTexture(W, H);
+    blank.type = THREE.FloatType; // rgba32float, as the tracer's target
+    (renderer as N).initTexture(blank);
+    renderGBuffer();
+    const color = gpuTex(blank), albedo = gpuTex(albedoRT.texture), normal = gpuTex(normalRT.texture), output = gpuTex(denoisedTex);
+    if (color && albedo && normal && output) await oidn.denoiseTextures({ color, albedo, normal, hdr: true, inputFlipY: false, auxInputFlipY: false, transfer: 'linear', output });
+    blank.dispose();
+  })().catch((e) => console.warn('[pathtraced] denoiser warm-up', e)) : Promise.resolve();
+
   type State = 'tracing' | 'denoising' | 'done';
   let state: State = 'tracing';
   let epoch = 0, reached = 0, counting = false, denoised = false, showDenoised = params.get('ptRaw') !== '1';
-  let dispatches = 0, dirty = false, denoiseMs = 0, traceStart = performance.now(), traceMs = 0, denoiseError = '';
+  let dispatches = 0, dirty = false, denoiseMs = 0, traceStart = performance.now(), traceMs = 0, readyMs = 0, denoiseError = '';
   const last = new THREE.Matrix4(), lastP = new THREE.Matrix4();
 
   const restart = () => {
@@ -155,6 +167,8 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
     if (!oidn) { state = 'done'; dirty = true; return; }
     state = 'denoising';
     try {
+      await warm;
+      if (e !== epoch) return;
       renderGBuffer();
       const color = pt.target && gpuTex(pt.target), albedo = gpuTex(albedoRT.texture), normal = gpuTex(normalRT.texture), out = gpuTex(denoisedTex);
       if (!color || !albedo || !normal || !out) throw new Error('denoise: GPU textures unavailable');
@@ -164,6 +178,7 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
       if (e !== epoch || !res) return; // camera moved: a newer accumulation owns the state
       denoiseMs = performance.now() - t;
       denoised = true;
+      readyMs = performance.now() - traceStart; // still -> denoised frame on screen
     } catch (err) {
       if (e !== epoch) return;
       denoiseError = String((err as Error)?.message ?? err);
@@ -215,7 +230,7 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
     info: () => ({
       tracer: 'three-gpu-pathtracer WebGPUPathTracer', bounces: pt.maxBounces, filterGlossyFactor: 0, mis: true, clampIndirect: pt.clampIndirect,
       maxSamples, samples: reached, dispatches, denoised, denoiser: oidn ? `OIDN (${oidn.runtime.lastChoice ?? oidn.runtime.name}), albedo + normal aux` : null,
-      traceMs: Math.round(traceMs), denoiseMs: Math.round(denoiseMs), clearcoatDropped, sceneBuildMs: Math.round(buildMs),
+      traceMs: Math.round(traceMs), denoiseMs: Math.round(denoiseMs), readyMs: Math.round(readyMs), clearcoatDropped, sceneBuildMs: Math.round(buildMs),
     }),
     gpuErrors: () => errors,
     dispose() {

@@ -40,6 +40,12 @@ const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
 const statusEl = $('#status');
 const stage = $('#stage'), layerA = $('#layerA'), layerB = $('#layerB'), input = $('#input'), divider = $('#divider');
 const labelA = $('#labelA'), labelB = $('#labelB');
+/** The side labels drawn on the image: method name (with its A / B badge) and a status line. */
+function setLabel(i: 0 | 1, name: string, stat: string) {
+  const l = i === 0 ? labelA : labelB;
+  l.querySelector('.name')!.textContent = name;
+  l.querySelector('.stat')!.textContent = stat;
+}
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
 const available = (id: MethodId) =>
@@ -136,13 +142,15 @@ async function main() {
     layout();
     return [a, b] as const;
   }
-  async function setSide(i: 0 | 1, id: MethodId) {
-    sides[i] = id;
-    sideSel[i].value = id;
-    (i === 0 ? labelA : labelB).textContent = `loading ${METHOD_SHORT[id]}...`;
+  /** Put `a` on side A (left) and `b` on side B (right): pickers, labels, URL (?left= ?right=), canvases. */
+  async function setSides(a: MethodId, b: MethodId) {
+    sides[0] = a; sides[1] = b;
+    sideSel[0].value = a; sideSel[1].value = b;
+    for (const i of [0, 1] as const) if (!live.has(sides[i])) setLabel(i, METHOD_SHORT[sides[i]], 'loading...');
+    markPreset();
+    const u = new URL(location.href); u.searchParams.set('left', a); u.searchParams.set('right', b); history.replaceState(null, '', u);
     await mountSides();
     prune();
-    const u = new URL(location.href); u.searchParams.set(i === 0 ? 'left' : 'right', id); history.replaceState(null, '', u);
   }
 
   function setPose(name: string) {
@@ -166,7 +174,7 @@ async function main() {
     for (const k of [...instances.keys()]) drop(k);
     entry = entries.find((e) => e.id === id) ?? entries[0];
     statusEl.textContent = `loading ${entry.title}...`;
-    labelA.textContent = `loading ${METHOD_SHORT[sides[0]]}...`; labelB.textContent = `loading ${METHOD_SHORT[sides[1]]}...`;
+    setLabel(0, METHOD_SHORT[sides[0]], 'loading...'); setLabel(1, METHOD_SHORT[sides[1]], 'loading...');
     const [a] = await mountSides();
     exposure = a.scene.exposure;
     for (const m of live.values()) m.setExposure(exposure);
@@ -190,9 +198,7 @@ async function main() {
     for (const m of visible()) m.frame(camera);
   }
   function labels() {
-    const line = (id: MethodId) => { const m = live.get(id); const s = m?.status(); return METHOD_SHORT[id] + (s ? `\n${s}` : '') + (m ? '' : '\nloading...'); };
-    labelA.textContent = line(sides[0]);
-    labelB.textContent = line(sides[1]);
+    for (const i of [0, 1] as const) { const m = live.get(sides[i]); setLabel(i, METHOD_SHORT[sides[i]], m ? m.status() : 'loading...'); }
   }
   function tick() {
     requestAnimationFrame(tick);
@@ -387,20 +393,38 @@ async function main() {
   ptDenoisedBox.disabled = !oidnAvailable || !pathTracerAvailable;
   note('Traces while the camera moves (restarts on every move), stops at max samples, denoises once and then sits idle.');
 
-  h2('Split');
+  // A | B: A's picker sits over the left half of the image, B's over the right (the bar in compare.html)
   const methodOpts = METHOD_IDS.map((id) => [id, METHOD_LABELS[id] + (available(id) ? '' : ' (unavailable)'), !available(id)] as [string, string, boolean]);
   const sideSel = [
-    select(methodOpts, sides[0], (v) => { setSide(0, v as MethodId).catch(fail); }),
-    select(methodOpts, sides[1], (v) => { setSide(1, v as MethodId).catch(fail); }),
+    select(methodOpts, sides[0], (v) => { setSides(v as MethodId, sides[1]).catch(fail); }),
+    select(methodOpts, sides[1], (v) => { setSides(sides[0], v as MethodId).catch(fail); }),
   ];
-  row('Left', sideSel[0]);
-  row('Right', sideSel[1]);
-  const swap = document.createElement('button'); swap.textContent = 'Swap sides';
-  swap.onclick = () => { const [a, b] = sides; sides[0] = b; sides[1] = a; sideSel[0].value = b; sideSel[1].value = a; mountSides().catch(fail); };
+  sideSel[0].title = 'A: the left of the divider'; sideSel[1].title = 'B: the right of the divider';
+  $('#pickA').append(sideSel[0]);
+  const badgeB = document.createElement('span'); badgeB.className = 'badge b'; badgeB.textContent = 'B';
+  $('#pickB').append(sideSel[1], badgeB);
+  $('#swapBtn').onclick = () => { setSides(sides[1], sides[0]).catch(fail); };
+  // one-click pairs (A vs B); the matching one is highlighted
+  const PRESETS: [MethodId, MethodId, string][] = [
+    ['ours-rt', 'pathtraced', 'ours + RT vs path traced'],
+    ['ours-denoised', 'pathtraced', 'ours vs path traced'],
+    ['ours-denoised', 'three-ffx', 'ours vs three SSR + FFX'],
+    ['ours-denoised', 'ours-rt', 'ours vs ours + RT'],
+  ];
+  const presetBtns = PRESETS.filter(([a, b]) => available(a) && available(b)).map(([a, b, text]) => {
+    const btn = document.createElement('button'); btn.textContent = text; btn.title = `A: ${METHOD_LABELS[a]}\nB: ${METHOD_LABELS[b]}`;
+    btn.onclick = () => { setSides(a, b).catch(fail); };
+    $('#presets').append(btn);
+    return { a, b, btn };
+  });
+  function markPreset() { for (const p of presetBtns) p.btn.classList.toggle('on', p.a === sides[0] && p.b === sides[1]); }
+  markPreset();
+
+  h2('Split');
   const resetBtn = document.createElement('button'); resetBtn.textContent = 'Reset history';
   resetBtn.onclick = () => { for (const m of live.values()) m.reset(); };
-  const btns = document.createElement('div'); btns.style.display = 'flex'; btns.style.gap = '6px'; btns.append(swap, resetBtn); panel.append(btns);
-  note('Drag the divider. Orbit drives both sides; each method keeps its own copy of the scene and renderer.');
+  panel.append(resetBtn);
+  note('A shows left of the divider, B right of it: pick them in the bar above the image. Drag the divider. Orbit drives both sides; each method keeps its own copy of the scene and renderer.');
 
   h2('Readout (still camera)');
   const sampIn = num(Number(q.get('samples') ?? 256)), warmIn = num(Number(q.get('warmup') ?? 48)), framesIn = num(Number(q.get('frames') ?? 32));
@@ -436,7 +460,7 @@ async function main() {
     __p: {
       THREE, entries: () => entries.map((e) => e.id),
       load, setPose, poses: () => [...poseSel.options].map((o) => o.value),
-      setSides: async (a: MethodId, b: MethodId) => { sides[0] = a; sides[1] = b; sideSel[0].value = a; sideSel[1].value = b; await mountSides(); prune(); },
+      setSides,
       setSplit: (x: number) => { split = x; layout(); },
       freeze: (v = true) => { frozen = v; freezeBox.checked = v; },
       reset: () => { for (const m of live.values()) m.reset(); },
