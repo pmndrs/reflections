@@ -17,7 +17,7 @@ import * as THREE from 'three/webgpu';
 import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, reflectionProbes,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, installCubeArraySupport, reflectionProbes,
 } from '@pmndrs/reflections/three';
 import { availableAssets } from '../../shared';
 import { createReflectionDenoiser, denoiserAvailable } from '../../shared/denoiser';
@@ -63,6 +63,8 @@ async function main() {
   let [W, H] = size();
   renderer.setSize(W, H, false);
   await renderer.init();
+  // cube arrays on stock r187 (W20 shim, self-tested; patches nothing and probes keep the 2D array if it fails). ?shim=0 opts out.
+  if (q.get('shim') !== '0') await installCubeArraySupport(renderer);
 
   const ssr = new ScreenSpaceReflectionsPass(renderer, { missList: true, timestamps: true });
   const device = ssr.device;
@@ -263,7 +265,7 @@ async function main() {
     hybrid.resetHistory();
     refreshUI();
     const u = new URL(location.href); u.searchParams.set('scene', id); history.replaceState(null, '', u);
-    return { id, probes: probes.bakedProbes.length, bakeMs };
+    return { id, probes: probes.bakedProbes.length, bakeMs, layout: probes.bakedLayout };
   }
   function setPose(name: string) {
     const v = kit!.views[name];
@@ -427,7 +429,7 @@ async function main() {
     timingsEl.textContent = lines.join('\n');
     if (building) return;
     status.textContent = [
-      `${kit.title} | ${W}x${H} | three r${THREE.REVISION} | ${ssr.variant ?? ''} | ${probes?.bakedProbes.length ?? 0} probes baked in ${bakeMs.toFixed(0)} ms` +
+      `${kit.title} | ${W}x${H} | three r${THREE.REVISION} | ${ssr.variant ?? ''} | ${probes?.bakedProbes.length ?? 0} probes (${probes?.bakedLayout ?? '-'}) baked in ${bakeMs.toFixed(0)} ms` +
         (bvhInfo ? ` | BVH ${bvhInfo.triangles.toLocaleString()} triangles, ${bvhInfo.ms.toFixed(0)} ms` : ''),
       kit.credit,
       gpuErrors.length ? `GPU errors: ${gpuErrors.length} (${gpuErrors[0].slice(0, 120)})` : '',

@@ -6,7 +6,7 @@
 import * as THREE from 'three/webgpu';
 import { renderOutput, vec3, vec4 } from 'three/tsl';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, reflectionProbes,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, installCubeArraySupport, reflectionProbes,
 } from '@pmndrs/reflections/three';
 import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
 import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, applySceneParams, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
@@ -26,6 +26,8 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.setSize(W, H, false);
   await renderer.init();
+  // cube arrays on stock r187 (W20 shim, self-tested; the 2D array if it fails), as the showcase page. ?shim=0 opts out.
+  if (params.get('shim') !== '0') await installCubeArraySupport(renderer);
   renderer.toneMappingExposure = ctx.exposure;
 
   const ssr = new ScreenSpaceReflectionsPass(renderer, { missList: true });

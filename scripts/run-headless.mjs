@@ -859,7 +859,7 @@ async function showcaseChecks(pages) {
     const lum = await p.T(`(${tone})(${JSON.stringify(shots.on)})`);
     const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
     check(`showcase ${id}: renders on / off / rt, no GPU errors`, s.gpuErrors === 0 && errs.length === 0 && lum > 8 && !!s.bvh,
-      `${info.probes} probes (${info.bakeMs.toFixed(0)} ms), denoiser ${s.denoiser ?? 'none'}, mean ${lum.toFixed(0)}/255, BVH ${s.bvh?.triangles} tris; reflections ${(s.timings.total ?? NaN).toFixed(2)} ms${errs.length ? '; ' + errs[0] : ''}`);
+      `${info.probes} probes (${info.layout}, ${info.bakeMs.toFixed(0)} ms), denoiser ${s.denoiser ?? 'none'}, mean ${lum.toFixed(0)}/255, BVH ${s.bvh?.triangles} tris; reflections ${(s.timings.total ?? NaN).toFixed(2)} ms${errs.length ? '; ' + errs[0] : ''}`);
   }
 }
 
