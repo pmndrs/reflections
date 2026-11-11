@@ -67,6 +67,7 @@ For the fine-tune pass once the phases are built and running. Nothing here block
 - Probe captures after a layout and environment change: fixed by a second capture pass; revisit the cost.
 
 **Quality experiments**
+- Probe count vs resolution (D23, decided 2026-11-11): many small probes (Ben's demos) against a few large ones at equal memory, on the rooms and Sponza; output is the sizing guidance that goes with the 256 px default.
 - Probe fallback behind objects is the probe's blurred, parallax-shifted view (one capture point): a soft capsule above the sphere's reflection in examples/ssr mirrorWall `low` (W12, out/w12-low-after-final.png). `?rt=1` fills it.
 - The kit's sky is procedural (`useSky`, D1502); W11's Poly Haven HDRIs would read better if the kit ever takes downloads.
 - FFX's roughness gate is fixed at construction; the examples/ssr threshold slider doesn't move it (D1402).
