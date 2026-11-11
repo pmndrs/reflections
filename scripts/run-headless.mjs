@@ -546,6 +546,34 @@ function f2Checks(r) {
       `wrong size: ${rh.wrongSize.threw ?? 'no error'}${rh.wrongSize.validationError ? ` (validation: ${rh.wrongSize.validationError.slice(0, 80)})` : ''}; missing: ${rh.missing.threw ?? 'no error'}`);
     check('rtHistory: no WebGPU errors', rh.gpuErrors.length === 0, rh.gpuErrors.slice(0, 2).join(' | '));
   }
+  // W27 (D603): the composite's specular swap vs three's own term (examples/regressions/src/swap.ts)
+  const sw = section('specularSwap');
+  if (sw) {
+    const fmt = (m) => `blend ${m.blend.mean}/${m.blend.p99}/${m.blend.max} (lin ${m.blend.meanLinear} of T ${m.blend.meanT}), full ${m.full.mean}/${m.full.p99}/${m.full.max}`;
+    const R = sw.results;
+    const c0 = Object.values(R).flatMap((v) => Object.values(v).map((m) => m.c0Max));
+    check('specular swap: confidence 0 gives lit exactly (every term)', sw.litMismatch < 20 && c0.every((x) => x === 0), `max |final - lit| ${Math.max(...c0)}, mask mismatch ${sw.litMismatch} px`);
+    for (const term of Object.keys(R.gbuffer)) {
+      const g = R.gbuffer[term], e = R.estimate?.[term];
+      // 8-bit sRGB, mean / p99 / max over the sphere: the halo where SSR blends in (c = 0.5, black hit)
+      check(`specular swap: ${term} halo (c 0.5) mean < 0.15, p99 < 1 /255`, g.blend.mean < 0.15 && g.blend.p99 < 1,
+        `${sw.specularTarget ? 'G-buffer' : 'estimate (no specular target)'}: ${fmt(g)}${e ? `; estimate: ${fmt(e)}` : ''}`);
+    }
+    check('specularSwap: no WebGPU errors', sw.gpuErrors.length === 0, sw.gpuErrors.slice(0, 2).join(' | '));
+  }
+  const sa = section('specularSwapAssets');
+  if (sa) {
+    const fmt = (m) => `${m.blend.mean}/${m.blend.p99}/${m.blend.max} (${m.blend.px} px)`;
+    for (const [id, s] of Object.entries(sa)) {
+      if (id === 'gpuErrors') continue;
+      if (s.skipped) { console.log(`  specular swap ${id}: skipped (${s.skipped})`); continue; }
+      const g = s.results.gbuffer, e = s.results.estimate;
+      const parts = ['inScope', 'specularOrIor', 'aoMap', 'outOfScope', 'all'].map((k) => `${k} ${fmt(g[k])}${e ? ` [estimate ${fmt(e[k])}]` : ''}`);
+      check(`specular swap ${id}: confidence 0 gives lit exactly; in-scope halo (c 0.5) mean < 0.25 /255`, g.all.c0Max === 0 && g.inScope.blend.mean < 0.25,
+        `census ${JSON.stringify(s.census)}; blend mean/p99/max: ${parts.join('; ')}`);
+    }
+    check('specularSwapAssets: no WebGPU errors', sa.gpuErrors.length === 0, sa.gpuErrors.slice(0, 2).join(' | '));
+  }
   const rs = section('rtStats');
   if (rs) {
     check('rt readStats() reports the last dispatched frame while an earlier read is pending',
