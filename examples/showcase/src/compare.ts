@@ -261,6 +261,7 @@ async function main() {
     try {
       // reference
       const pt = await get('pathtraced');
+      pt.setMaxSamples?.(samples);
       while ((pt.samples?.() ?? 0) < samples) {
         pt.frame(camera);
         say(`path tracing the reference: ${pt.samples?.()} / ${samples} samples`);
@@ -449,7 +450,7 @@ async function main() {
         g.putImageData(img, 0, 0);
         return { mean, url: c.toDataURL('image/png') };
       },
-      async converge(samples: number) { const pt = await get('pathtraced'); while ((pt.samples?.() ?? 0) < samples) { pt.frame(camera); await nextFrame(); } return pt.samples?.(); },
+      async converge(samples: number) { const pt = await get('pathtraced'); pt.setMaxSamples?.(samples); while ((pt.samples?.() ?? 0) < samples) { pt.frame(camera); await nextFrame(); } return pt.samples?.(); },
       measure, get lastMeasure() { return lastMeasure; },
       drop, prune,
       info: () => ({ scene: entry.id, pose, sides: [...sides], split, frozen, live: [...live.keys()], status: Object.fromEntries([...live].map(([k, m]) => [k, m.status()])) }),

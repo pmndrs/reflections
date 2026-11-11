@@ -67,6 +67,9 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
 
   const last = new T.Matrix4(), lastP = new T.Matrix4();
   const budgetMs = 24;
+  // Stopgap until W23's denoised WebGPU reference: stop tracing at a cap (?ptMax, default 64) so the
+  // page goes idle instead of accumulating forever. Measure raises the cap to its reference count.
+  let cap = Math.max(1, Number(params.get('ptMax') ?? 64));
   return {
     id: 'pathtraced', canvas, scene: sceneInfo(kit),
     frame(cam) {
@@ -76,14 +79,16 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
         pt.updateCamera();
       }
       // as many tiles as fit in the frame budget (each renderSample renders one tile)
+      if (pt.samples >= cap) return;
       const t = performance.now();
-      do { pt.renderSample(); } while (performance.now() - t < budgetMs && !pt.isCompiling);
+      do { pt.renderSample(); } while (performance.now() - t < budgetMs && !pt.isCompiling && pt.samples < cap);
     },
     async idle() { /* WebGL: drawing buffer preserved, nothing to wait for */ },
     reset() { pt.reset(); },
     setExposure(e) { renderer.toneMappingExposure = e; pt.reset(); },
     samples: () => Math.floor(pt.samples),
-    status: () => `${Math.floor(pt.samples)} samples${pt.isCompiling ? ' (compiling)' : ''}`,
+    setMaxSamples(n: number) { cap = Math.max(cap, n); },
+    status: () => `${Math.floor(Math.min(pt.samples, cap))} / ${cap} samples${pt.samples >= cap ? ' (done)' : ''}${pt.isCompiling ? ' (compiling)' : ''}`,
     info: () => ({ bounces: pt.bounces, filterGlossyFactor: 0, mis: true, clearcoatDropped, sceneBuildMs: Math.round(buildMs) }),
     gpuErrors: () => [],
     // (the local checkout's dispose() reads an `_albedoNormalPass` it never creates: guarded)

@@ -57,6 +57,8 @@ export interface CompareMethod {
   status(): string;
   /** Path tracer only: accumulated samples. */
   samples?(): number;
+  /** Path tracer only: raise the sample cap (the reference stops tracing at it). */
+  setMaxSamples?(n: number): void;
   /** Ours only: render the glossy-pixel mask (geometry with perceptual roughness < 0.447) into the canvas. */
   renderMask?(camera: THREE.PerspectiveCamera): void;
   /** Settings actually used (for the readout and the write-up). */
