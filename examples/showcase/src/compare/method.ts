@@ -116,4 +116,11 @@ export async function freshEnvironment(kit: ShowcaseScene, entry: ShowcaseEntry)
 /** Scene overrides every method applies the same way, before baking or rendering: ?floorRoughness=. */
 export function applySceneParams(kit: ShowcaseScene, params: URLSearchParams) {
   if (params.has('floorRoughness')) kit.floor.setRoughness(Number(params.get('floorRoughness')));
+  // Background display, every method alike. The blurred backdrop is blurred two different ways (three: a
+  // PMREM mip at roughness = blurriness; the path tracer: a cone jitter per camera ray, which smears the
+  // studio's key light into a big bright disc the PMREM blur doesn't show). The compare page therefore
+  // shows the HDRI sharp (bgBlur 0) on every side by default, for a like-for-like background and
+  // like-for-like reflections of it; ?bgBlur=0.35 restores the showcase look. Lighting is never affected.
+  kit.scene.backgroundBlurriness = Number(params.get('bgBlur') ?? 0);
+  if (params.has('bgIntensity')) kit.scene.backgroundIntensity = Number(params.get('bgIntensity'));
 }
