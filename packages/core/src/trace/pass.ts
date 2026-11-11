@@ -55,6 +55,13 @@ export interface TracedReflectionsSettings {
    */
   hitColor?: 'current' | 'history';
   /**
+   * Roughness a traced miss takes its fallback at, as the SSSR tracer's `fallbackRoughness` (pass
+   * the tracer's setting so both agree): 'surface' (default) = each pixel's own rough-pixel lookup
+   * (mirror direction, its perceptual roughness), quad copies included; 'mirror' = the ray's
+   * direction at roughness 0 (FFX). Mirror pixels and a constant fallback are the same either way.
+   */
+  fallbackRoughness?: 'mirror' | 'surface';
+  /**
    * Hit shading may trace shadow rays (`traceLightVisible`, D903): `environmentHitShading` sends
    * one per directional light from each traced hit it shades (not from on-screen reused hits, whose
    * scene colour is already shadowed). Off: every light is unoccluded. Default true.
@@ -255,6 +262,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     const mvs = frame.inputs.motionVectorScale ?? [1, 1];
     f[56] = mvs[0]; f[57] = mvs[1];
     u[58] = (s.hitColor ?? 'current') === 'history' ? 1 : 0;
+    u[59] = (s.fallbackRoughness ?? 'surface') === 'surface' ? 1 : 0;
     device.queue.writeBuffer(params, 0, data);
   }
 
