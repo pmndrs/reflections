@@ -6,14 +6,17 @@
 //
 // `lit` is the view's colour (pixi-3d with REFLECTIONS_SCENE_COLOR_BIT: no environment specular), `radiance` core's lerp(probes / environment,
 // SSR hit, confidence) (./ScreenSpaceReflections.ts), F0 = mix(0.04, albedo, metalness), and (A, B)
-// the split-sum environment BRDF. Core exports no DFG term and pixi-3d's BRDF table isn't reachable
-// from a Filter, so the adapter uses Karis' analytic fit (D2004). The result is exposed, tone-mapped (ACES fit) and
+// the split-sum environment BRDF. pixi-3d's BRDF table isn't reachable from a Filter, so the filter
+// uses core's `splitSumDFG` in pixi-3d's own form (separable Schlick-GGX, k = alpha / 2, what its
+// `generateBrdfLut` integrates and REFLECTIONS_SCENE_COLOR_BIT subtracts with), a WGSL const table on
+// a 32 x 32 grid (D2004). The result is exposed, tone-mapped (ACES fit) and
 // sRGB-encoded for pixi's 8-bit canvas: the filter is the view's "present" step.
 //
 // The filter samples the frame by the position inside the filtered object's bounds (the
 // vertex attribute pixi feeds every filter), not by its input texture: pixi renders a filter's input
 // into an 8-bit texture, which would clip the HDR colour. So the object must be an unrotated
 // rectangle showing the whole view (a Sprite of the view's colour target, scaled freely), D2005.
+import { splitSumDFGWgsl } from '@pmndrs/reflections-core';
 import { Filter, GpuProgram, type Texture } from 'pixi.js';
 
 /** Debug views, by index. */
@@ -74,15 +77,7 @@ fn mainVertex(@location(0) aPosition: vec2<f32>) -> VSOutput {
   return VSOutput(vec4(position, 0.0, 1.0), aPosition * (gfu.uOutputFrame.zw * gfu.uInputSize.zw), aPosition);
 }
 
-// Karis, "Physically Based Shading on Mobile" (2014): analytic split-sum environment BRDF.
-fn envBRDF(NdotV: f32, roughness: f32) -> vec2f {
-  let c0 = vec4f(-1.0, -0.0275, -0.572, 0.022);
-  let c1 = vec4f(1.0, 0.0425, 1.04, -0.04);
-  let r = roughness * c0 + c1;
-  let a004 = min(r.x * r.x, exp2(-9.28 * NdotV)) * r.x + r.y;
-  return vec2f(-1.04, 1.04) * a004 + r.zw;
-}
-
+${splitSumDFGWgsl('separable')}
 // Narkowicz's ACES fit.
 fn aces(x: vec3f) -> vec3f {
   return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3f(0.0), vec3f(1.0));
@@ -104,7 +99,7 @@ fn mainFragment(@location(0) uv: vec2<f32>, @location(1) local: vec2<f32>) -> @l
   let geometry = mo.w > 0.5;
   let roughness = nr.w;
   let F0 = mix(vec3f(0.04), mat.rgb, mat.a);
-  let ab = envBRDF(mo.z, roughness);
+  let ab = splitSumDFG(mo.z, roughness);
   let weight = F0 * ab.x + ab.y;
   let reflection = select(vec3f(0.0), weight * refl.rgb * compositeUniforms.uAmount, geometry);
   var c = lit + reflection;

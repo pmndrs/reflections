@@ -1329,7 +1329,7 @@ async function pixi3dChecks(pages) {
       await p.T('window.__p.setSSR(true)');
       await shot('probes-off');
       await p.T('window.__p.setProbes(true)');
-      for (const v of ['lit', 'reflection', 'radiance', 'confidence', 'normal', 'roughness', 'metalness', 'albedo', 'motion']) {
+      for (const v of ['lit', 'reflection', 'radiance', 'confidence', 'normal', 'roughness', 'metalness', 'albedo', 'motion', 'weight']) {
         await p.T(`window.__p.setView(${JSON.stringify(v)})`);
         await shot(`view-${v}`);
       }
