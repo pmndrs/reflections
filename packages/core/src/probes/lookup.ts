@@ -27,6 +27,14 @@
 //   refit              idTech 8 / Lazarov 2013 normalization: each probe's radiance times
 //                      clamp(frameIrradiance(P, N) / probeIrradiance(N), 0, refitClamp), with
 //                      probeIrradiance the probe's L1 SH (table rows, ./irradiance.ts), D60.
+//   distanceRoughness  Lagarde 2014's distance-based roughness (Listing 25), per box-projected volume:
+//                      r' = mix(clamp(t / |hit - origin| * r, 0, r), r, r), t the distance from P to
+//                      where the ray leaves the projection box, r perceptual (Frostbite's
+//                      `linearRoughness`), so the lookup is sharp near contact and the volume's own
+//                      roughness from the capture point's distance on (D53).
+//   roughnessLerp      Lagarde 2014 Appendix F: the box-projected direction lerped back toward the
+//                      unprojected one by r, mix(normalize(corrected), normalize(dir), r) (Frostbite
+//                      lerps the unnormalized corrected vector, D2600).
 //   probeSpecularOcclusion(NdotV, ao, roughness) is always defined: Lagarde 2014's
 //                      saturate(pow(NdotV + ao, exp2(-16 a - 1)) - 1 + ao), a = perceptual^2, D66.
 //
@@ -52,6 +60,17 @@ export interface ProbeLookupOptions {
   dominantDirection?: boolean;
   /** Re-fit by frame irradiance (SPEC "Probe re-fit", D60). Default false. */
   refit?: boolean;
+  /**
+   * Lagarde 2014's distance-based roughness on box-projected volumes (Listing 25, D53): the
+   * roughness shrinks toward contact with the projection box, by the ratio of P's and the capture
+   * point's distances to the box hit. Default false.
+   */
+  distanceRoughness?: boolean;
+  /**
+   * Lagarde 2014's roughness lerp of the box-projected direction back toward the unprojected one
+   * (Appendix F, D53, D2600). Default false.
+   */
+  roughnessLerp?: boolean;
   /** Roughness to mip. Default 'r187'. */
   lodMapping?: ProbeLodMapping;
   /**
@@ -72,7 +91,8 @@ export function lodWgsl(mapping: ProbeLodMapping = 'r187') {
 
 /**
  * Helpers every flavour shares (no bindings). Names are prefixed `pr_`. They depend only on the layout,
- * `mirrorX` and `lodMapping`, so lookups with different dominant-direction / re-fit / count options
+ * `mirrorX` and `lodMapping`, so lookups with different dominant-direction / re-fit / distance-roughness /
+ * roughness-lerp / count options
  * can share one include in a shader module.
  */
 const helpersWgsl = (o: ProbeLookupOptions) => /* wgsl */ `
@@ -113,6 +133,13 @@ fn pr_parallaxDistance(P: vec3f, dir: vec3f, boxSize: vec3f, boxPos: vec3f) -> f
   let dist = (side * (boxSize * 0.5) + boxPos - P) / safe;
   return min(dist.x, min(dist.y, dist.z));
 }
+// Lagarde 2014 (Frostbite), computeDistanceBaseRoughness (Listing 25), in perceptual roughness r
+// (Frostbite's linearRoughness): dHit from the shading point, dCentre from the capture point, both
+// to the projection-box hit.
+fn pr_distanceRoughness(dHit: f32, dCentre: f32, r: f32) -> f32 {
+  let n = clamp(dHit / max(dCentre, 1e-4) * r, 0.0, r);
+  return mix(n, r, r);
+}
 // Lagarde 2014 (Frostbite), getSpecularDominantDir: a = perceptual^2.
 fn pr_dominantDirection(N: vec3f, R: vec3f, roughness: f32) -> vec3f {
   let a = roughness * roughness;
@@ -142,6 +169,16 @@ fn pr_shIrradiance(a: vec4f, b: vec4f, c: vec4f, N: vec3f) -> vec3f {
  */
 const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: string, samp: string) => {
   const unroll = o.count;
+  // box projection; with Lagarde's seam options (D53) pr_parallax with its distance t kept (App. F)
+  const seam = o.distanceRoughness === true || o.roughnessLerp === true;
+  const projection = !seam
+    ? '        corrected = pr_parallax(P, dir, r3.xyz, r0.xyz + r2.xyz, r4.xyz);\n'
+    : [
+      '        let t = pr_parallaxDistance(P, dir, r3.xyz, r0.xyz + r2.xyz);',
+      '        corrected = P + normalize(dir) * t - r4.xyz;',
+      ...(o.distanceRoughness === true ? ['        vlod = pr_lod(pr_distanceRoughness(t, length(corrected), rough), hdr.y);'] : []),
+      ...(o.roughnessLerp === true ? ['        corrected = mix(normalize(corrected), normalize(dir), rough);'] : []),
+    ].join('\n') + '\n';
   const volume = /* wgsl */ `    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
     let r0 = ${row('b')};
     let r1 = ${row('b + 1u')};
@@ -157,9 +194,11 @@ const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: stri
       // the projection box is centred at centre + offset; the capture point is r4
       let insideProjection = all(abs(lp - r2.xyz) <= r3.xyz * 0.5);
       var corrected = dir;
-      if ((u32(r1.w) & 1u) != 0u && insideProjection) { corrected = pr_parallax(P, dir, r3.xyz, r0.xyz + r2.xyz, r4.xyz); }
+      var vlod = lod;
+      if ((u32(r1.w) & 1u) != 0u && insideProjection) {
+${projection}      }
       let slot = u32(r2.w);
-      var c = sampleLayout(${tex}, ${samp}, slot, pr_texDir(corrected), lod).rgb;
+      var c = sampleLayout(${tex}, ${samp}, slot, pr_texDir(corrected), vlod).rgb;
       if (refitOn) {
         let s = irrRow + slot * PR_IRRADIANCE_ROWS;
         let probeIrr = pr_shIrradiance(${row('s')}, ${row('s + 1u')}, ${row('s + 2u')}, N);
@@ -172,7 +211,8 @@ const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: stri
   return /* wgsl */ `
   let hdr = ${row('0u')};
   let count = u32(hdr.x);
-  let lod = pr_lod(roughness, hdr.y);
+  let rough = clamp(roughness, 0.0, 1.0);
+  let lod = pr_lod(rough, hdr.y);
   let enabled = hdr.z;
   let envSlot = hdr.w;
   let irr = ${row('1u')};

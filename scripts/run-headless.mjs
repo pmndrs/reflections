@@ -1161,6 +1161,10 @@ async function main() {
       check("lookup option ao: Lagarde's specular occlusion", lo.so < 1e-3, `max rel err ${lo.so.toExponential(1)}`);
       check('lookup option frameIrradiance: re-fit by k / probe L1 irradiance, clamped', lo.refit < 2e-3 && lo.clampErr < 1e-4 && lo.lum > 0 && lo.ratios.every(Number.isFinite) && lo.slots.every((s) => s >= 0),
         `max rel err ${lo.refit.toExponential(1)} (ratios ${lo.ratios.slice(0, 6).join(' ')} ...), clamp ${lo.clampErr.toExponential(1)}`);
+      // W26 (D53): Lagarde's seam options against the plain lookup fed the CPU's r' and lerped direction
+      const so = await C('seamOptions');
+      check("lookup options distanceRoughness / roughnessLerp: Lagarde 2014 Listing 25 / App. F", so.err.dist < 2e-3 && so.err.lerp < 2e-3 && so.err.both < 2e-3 && so.err.off < 2e-3 && so.lum > 0 && so.changedDist > 0.01 && so.changedLerp > 0.01,
+        `max rel err dist ${so.err.dist.toExponential(1)}, lerp ${so.err.lerp.toExponential(1)}, both ${so.err.both.toExponential(1)}, geometry ${so.err.off.toExponential(1)}; changes the lookup by up to ${f(so.changedDist)} / ${f(so.changedLerp)}`);
       const rf = await p.T(`(async () => { const P = window.__p; P.setGrid(true, 0.3); P.setLookup('${probesLayout === 'cube2d' ? 'warp' : 'auto'}'); for (let i = 0; i < 3; i++) await P.shot(); const off = await P.shot();
         P.setRefit(true); for (let i = 0; i < 3; i++) await P.shot(); const on = await P.shot(); P.setRefit(false); P.setGrid(false); return { on, off }; })()`);
       savePng('probes-refit-off.png', rf.off);
@@ -1211,9 +1215,11 @@ async function main() {
         pages.push(t);
         await t.T(FREEZE);
         const rows = await t.T(`(async () => {
-          const P = window.__p, out = { warp: [], 'cube-array': [], 'legacy-warp': [] };
-          for (let k = 0; k < 5; k++) for (const lookup of ['legacy-warp', 'warp', 'cube-array']) {
-            P.setLookup(lookup); P.setGrid(true, 0.08);
+          const P = window.__p, out = { warp: [], 'cube-array': [], 'cube-array+seam': [], 'legacy-warp': [] };
+          // 'cube-array+seam': the same with Lagarde's distanceRoughness + roughnessLerp (W26, D53)
+          for (let k = 0; k < 5; k++) for (const lookup of ['legacy-warp', 'warp', 'cube-array', 'cube-array+seam']) {
+            P.setSeamOptions(lookup.endsWith('+seam'));
+            P.setLookup(lookup.replace('+seam', '')); P.setGrid(true, 0.08);
             const on = await P.timeFrames(30, 7); P.setEnvNode(false); const off = await P.timeFrames(30, 7); P.setEnvNode(true);
             out[lookup].push({ on: on.wall, off: off.wall, lookup: on.wall - off.wall, gpu: on.gpu - off.gpu, gpuOn: on.gpu });
           }
