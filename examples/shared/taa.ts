@@ -1,4 +1,4 @@
-// Temporal anti-aliasing for the example pages (W40): the resolve the FidelityFX SSSR sample and
+// Temporal anti-aliasing for the example pages (W40). Since W36 the pages default to @pmndrs/upscaler (./antialias.ts, D4200); this resolve stays selectable as `?aa=taa`. It is the resolve the FidelityFX SSSR sample and
 // the denoiser repo's reflection demo run after the reflections (TRAA there), here as a small pass
 // that fits our frame order (the scene is rasterised by FrameGBuffer before the display pipeline,
 // so three's TRAANode, which jitters the camera from inside a RenderPipeline, can't be used as is).
