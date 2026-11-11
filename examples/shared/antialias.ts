@@ -43,17 +43,29 @@ const PRESETS: Record<string, QualityMode> = {
 };
 
 /**
- * `?aa=upscaler|taa|off` (default `fallback`; `?taa=0` = off, `?taa=1` = the upscaler, for old links), and
- * `?upscale=native|quality|balanced|performance|ultra` or a ratio >= 1 (default native, ratio 1).
+ * The upscaler's settings on these pages (D4201), measured on facingMirrors (W36): RCAS off (its default
+ * 0.8 sharpens each jitter phase's edge differently: mirror-edge px flickering > 1/255 at rest 0.16% -> 4.2%)
+ * and a 128-frame history cap (its default 24 leaves the reflections' residual noise and the edges' jitter
+ * at rest: 0.48% vs 0.02%; W40's TAA settled at 128 too). Neither changes the slow orbit.
  */
-export function aaFromQuery(q: URLSearchParams, fallback: AAMode = 'upscaler'): { mode: AAMode; ratio: number } {
+export const UPSCALER_DEFAULTS = { sharpness: 0, maxAccumulation: 128 };
+
+/**
+ * `?aa=upscaler|taa|off` (default `fallback`; `?taa=0` = off, `?taa=1` = the upscaler, for old links),
+ * `?upscale=native|quality|balanced|performance|ultra` or a ratio >= 1 (default native, ratio 1), and the
+ * upscaler's `?sharpness=` / `?accum=` (maxAccumulation) over UPSCALER_DEFAULTS.
+ */
+export function aaFromQuery(q: URLSearchParams, fallback: AAMode = 'upscaler'): { mode: AAMode; ratio: number; settings: { sharpness: number; maxAccumulation: number } } {
   let mode: AAMode = fallback;
   if (q.has('taa')) mode = q.get('taa') === '0' ? 'off' : 'upscaler';
   const a = q.get('aa');
   if (a && a in AA_MODES) mode = a as AAMode;
   const u = q.get('upscale') ?? 'native';
   const ratio = u in PRESETS ? getQualityModeRatio(PRESETS[u]) : Math.max(1, Number(u) || 1);
-  return { mode, ratio };
+  const settings = { ...UPSCALER_DEFAULTS };
+  if (q.has('sharpness')) settings.sharpness = Number(q.get('sharpness'));
+  if (q.has('accum')) settings.maxAccumulation = Number(q.get('accum'));
+  return { mode, ratio, settings };
 }
 
 /** The render (G-buffer) size for a display size at `ratio` (the upscaler's rounding: floored). */
@@ -78,6 +90,8 @@ export interface DisplayAAOptions {
   mode: AAMode;
   /** display / render per axis (1 = native). */
   ratio: number;
+  /** Upscaler runtime settings over its defaults (UPSCALER_DEFAULTS on the pages). */
+  settings?: { sharpness?: number; maxAccumulation?: number };
   displayWidth: number;
   displayHeight: number;
   /** The page's tone mapping + output encoding (applied after the upscaler for tone-mapped views). */
@@ -149,6 +163,7 @@ export class DisplayAA {
     this.reactiveQuad = new THREE.QuadMesh(this.reactiveMaterial);
 
     this.upscaler = new Upscaler({ renderer, gpuTiming: true });
+    Object.assign(this.upscaler.settings, o.settings ?? {});
     this.configure();
 
     this.present = new THREE.RenderPipeline(renderer);
