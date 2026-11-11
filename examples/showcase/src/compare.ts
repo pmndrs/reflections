@@ -23,6 +23,8 @@
 // Experiment overrides (not product defaults): ?spq=1|2|4 ?tsf=<FFX temporalStabilityFactor>
 // ?hit=final|lit|current ?reshade=reshade|off ?specOcc=1 (ours; specOcc: Lagarde specular occlusion from GTAO, W39), ?mirrorBias= ?ssrMaxDistance= ?ssrThickness= (three's SSR), ?ptBounces=
 // ?ptMax= ?ptRaw=1 ?ptDenoise=0 ?ptClearcoat=0 (path tracer), ?floorRoughness= (every method's floor, before the bake)
+// W45: ?lobeFilter=<k> (ours: hitLobeFilter, D3550), ?keyLight=<scale> and ?paintRoughness=<r> (every method: scale the lights; set
+// clear-coated paint to roughness r without its normal map)
 import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { availableAssets } from '../../shared';
