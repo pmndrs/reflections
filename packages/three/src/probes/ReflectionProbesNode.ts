@@ -23,7 +23,10 @@
 //   sampleReflectionProbesLocal( ... )             #35046 head (77bbaaaa05): vec4( conditional probe
 //                                                  radiance, coverage ), no environment fallback.
 // Extra lookup options (each off by default, see ProbeLookupOptions): the shading `normal` (Lagarde's
-// dominant direction), `ao` (Lagarde's specular occlusion), `frameIrradiance` (the re-fit).
+// dominant direction), `ao` (Lagarde's specular occlusion), `frameIrradiance` (the re-fit); and two
+// that default to the set's own setting, so a material and the composite agree: `distanceRoughness`
+// (on by default) and `roughnessLerp` (off) (Lagarde's SSR-to-probe seam techniques, D53). With
+// distance roughness on, the lookup is no longer #35046's (D2700).
 //
 // The volume table is a storage buffer (one per probe set, shared by its nodes) written with
 // queue.writeBuffer before every render (updateBefore), not a uniform in a per-object group: r186/r187 re-upload per-object uniforms
@@ -81,6 +84,18 @@ export interface ProbeLookupOptions {
    * probes baked with `irradiance: true` (the default). Uses `normal`, or the material's normal.
    */
   frameIrradiance?: N;
+  /**
+   * Lagarde 2014's distance-based roughness on box-projected probes (D53): sharp near the projection
+   * box, the set's roughness from the capture point's distance on. Default: the set's
+   * {@link ReflectionProbes.distanceRoughness}. Override it on a material only together with the
+   * composite's lookup, or lit and composite disagree.
+   */
+  distanceRoughness?: boolean;
+  /**
+   * Lagarde 2014's lerp of the box-projected direction back toward the unprojected one by roughness
+   * (D53). Default: the set's {@link ReflectionProbes.roughnessLerp}.
+   */
+  roughnessLerp?: boolean;
 }
 
 // One wgslFn and include per lookup variant, shared by every node and material: three emits a
@@ -94,7 +109,7 @@ function lookupFor(options: CoreLookupOptions): { fn: N; includes: N } {
   let includes = _includes.get(source);
   if (!includes) _includes.set(source, (includes = code(source) as N));
   const layoutKey = `${options.layout.id}:${options.layout.mipLevelCount}`;
-  const key = `${layoutKey}:${options.dominantDirection === true}:${options.refit === true}:${options.count ?? -1}`;
+  const key = `${layoutKey}:${options.dominantDirection === true}:${options.refit === true}:${options.distanceRoughness === true}:${options.roughnessLerp === true}:${options.count ?? -1}`;
   let entry = _lookups.get(key);
   if (!entry) {
     entry = { fn: wgslFn(probeLookupFunctionWgsl({ ...options, mirrorX: true }, 'probesLookup'), [includes]) as N, includes };
@@ -222,6 +237,9 @@ export class ReflectionProbesNode extends THREE.Node {
   readonly frameIrradianceNode: N = null;
   /** Whether the output is `vec4( radiance, coverage )` without environment fallback. */
   readonly coverage: boolean;
+  /** The lookup's own `distanceRoughness` / `roughnessLerp`; undefined: the set's. */
+  readonly distanceRoughness: boolean | undefined;
+  readonly roughnessLerp: boolean | undefined;
   private table: SetTable | null = null;
   private renderer: THREE.WebGPURenderer | null = null;
   private volumes = 0;
@@ -233,6 +251,8 @@ export class ReflectionProbesNode extends THREE.Node {
     if (!probes.texture) throw new Error('ReflectionProbesNode: bake the probes first.');
     this.probes = probes;
     this.coverage = options?.coverage === true;
+    this.distanceRoughness = options?.distanceRoughness;
+    this.roughnessLerp = options?.roughnessLerp;
     if (options) {
       if (options.position != null) this.positionNode = nodeObject(options.position);
       if (options.direction != null) this.directionNode = nodeObject(options.direction);
@@ -253,7 +273,14 @@ export class ReflectionProbesNode extends THREE.Node {
     // separate probe sets from sharing a program (#35046 6837c32abc); the texture id makes render
     // objects rebind after a bake that replaced the texture
     const probes = this.probes;
-    return THREE.NodeUtils.hash(super.customCacheKey(), probes.bakedProbes.length, probes.bakedSeamFix === 'warp' ? 1 : 0, probes.bakedLayout === 'cube-array' ? 1 : 0, probes.texture?.id ?? 0);
+    const { distanceRoughness, roughnessLerp } = this.seamOptions();
+    return THREE.NodeUtils.hash(super.customCacheKey(), probes.bakedProbes.length, probes.bakedSeamFix === 'warp' ? 1 : 0, probes.bakedLayout === 'cube-array' ? 1 : 0, probes.texture?.id ?? 0,
+      distanceRoughness ? 1 : 0, roughnessLerp ? 1 : 0);
+  }
+
+  /** The seam options this lookup uses: its own, else the set's (D53). */
+  seamOptions() {
+    return { distanceRoughness: this.distanceRoughness ?? this.probes.distanceRoughness, roughnessLerp: this.roughnessLerp ?? this.probes.roughnessLerp };
   }
 
   updateBefore(frame?: { renderId: number }): undefined {
@@ -262,6 +289,7 @@ export class ReflectionProbesNode extends THREE.Node {
     if (probes.bakedLayout !== this.storage) { this.needsUpdate = true; return; }
     // a bake that changes the layout disposes the previous texture, so switch even before a recompile
     this.array.value = probes.texture!;
+    // (a change of the set's seam options bumps its nodes itself: ReflectionProbes.touchUsers)
     if (probes.bakedProbes.length !== this.volumes || probes.bakedSeamFix !== this.seamFix) {
       this.needsUpdate = true;
       return;
@@ -275,6 +303,7 @@ export class ReflectionProbesNode extends THREE.Node {
     if (probes.bakedLayout !== this.storage) { this.array = atlasNode(probes); this.storage = probes.bakedLayout; }
     this.seamFix = probes.bakedSeamFix;
     this.volumes = probes.bakedProbes.length;
+    const seam = this.seamOptions();
     this.table = tableFor(probes);
     this.updateBefore();
 
@@ -290,7 +319,7 @@ export class ReflectionProbesNode extends THREE.Node {
     // an explicit direction is looked up as given; core bends the direction first (dominant
     // direction) and rotates the bent one, so volumes and environment agree
     const envRotation: N = this.directionNode === null ? materialEnvRotation : mat4(new THREE.Matrix4());
-    const { fn } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit, count: this.volumes });
+    const { fn } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit, ...seam, count: this.volumes });
     const result: N = fn({
       atlas: this.array, samp: sampler(this.array), table: this.table.node,
       P: vec3(position), N: vec3(normal), R: vec3(direction), roughness, envRotation,

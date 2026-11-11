@@ -338,6 +338,8 @@ async function main() {
       get cubeArray() { return { ...cubeArraySupportStatus(renderer), bakedLayout: probes.bakedLayout, bakedSeamFix: probes.bakedSeamFix }; },
       setRefit(on: boolean, clamp?: number) { params.refit = on; if (clamp !== undefined) probes.refitClamp = clamp; install(); },
       setResolution(v: number) { params.resolution = v; install(); },
+      /** W26 (D53): the set's Lagarde seam options (the environment node rebuilds itself). */
+      setSeamOptions(distanceRoughness: boolean, roughnessLerp = distanceRoughness) { probes.distanceRoughness = distanceRoughness; probes.roughnessLerp = roughnessLerp; },
       setPose(p: { pos: number[]; target: number[]; fov?: number }) {
         camera.position.fromArray(p.pos); controls.target.fromArray(p.target);
         camera.fov = p.fov ?? 50; camera.updateProjectionMatrix(); controls.update();

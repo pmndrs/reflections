@@ -6,6 +6,7 @@
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p: core on the 2D array (warp), core on the cube array, the pre-phase-2 TSL node
+//   pnpm check -- --only seam        # W26 / D53: the SSR-to-probe seam sweep (Lagarde's options off / on), JSON to out/seam.json (SEAM_SHOTS=1: images)
 //   pnpm check -- --only probes --probes-layout cube2d   # run the probe feature checks on the 2D array (default: 'auto', a cube array through the shim)
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
@@ -339,6 +340,58 @@ async function hybridChecks(pages) {
   const b = blend.true, f = blend.false;
   check('hybrid mirrorWall lowSphere: the probe does not show through the reflected sphere', b.sphere.px > 5000 && b.sphereProbe < 0.02 && b.behindSSR < 0.2,
     `${b.sphere.px} px reflect the sphere: probe weight ${b.sphereProbe.toFixed(3)} (FFX blend ${f.sphereProbe.toFixed(3)}); ${b.behind.px} px reflect the wall behind it: hit weight ${b.behindSSR.toFixed(3)} (FFX ${f.behindSSR.toFixed(3)})`);
+  await p.T('window.__p.setDepthAware(true)');
+  await seamChecks(p);
+}
+
+/**
+ * W26 (D53): the SSR-to-probe seam, examples/ssr `seamStats` (8-bit luma step |final - lit| on 8x8
+ * blocks of confident glossy hits: the jump the image makes where the hit's weight fades to the
+ * probe), with Lagarde's options off and on. The check: glossy mirrorWall (floor r 0.3), distance
+ * roughness (the default since W26) narrows the step (W26: 15.87 -> 15.21).
+ * `--seam` sweeps scenes, poses, floor roughness and each option alone (the D53 numbers).
+ */
+const SEAM_MODES = { off: [false, false], dist: [true, false], lerp: [false, true], both: [true, true], 'off again': [false, false] };
+async function seamChecks(p, sweep = args.includes('--seam')) {
+  const run = async (scene, pose, floor, modes) => {
+    await p.T(`window.__p.load(${JSON.stringify(scene)})`);
+    if (pose) await p.T(`window.__p.setPose(${JSON.stringify(pose)})`);
+    if (floor !== null) await p.T(`window.__p.setFloorRoughness(${floor})`);
+    const defaults = await p.T('window.__p.getSeamOptions()');
+    const out = {};
+    for (const m of modes) {
+      const [d, l] = SEAM_MODES[m];
+      await p.T(`window.__p.setSeamOptions(${d}, ${l})`);
+      out[m] = await p.T(`window.__p.seamStats({ rmin: 0.05, rmax: 0.45, shots: ${!!process.env.SEAM_SHOTS} })`);
+      if (out[m].shots) {
+        const tag = `seam-${scene}${pose ? '-' + pose : ''}${floor !== null ? '-r' + floor : ''}-${m.replace(' ', '-')}`;
+        savePng(`${tag}-final.png`, out[m].shots.final); savePng(`${tag}-lit.png`, out[m].shots.lit);
+        delete out[m].shots;
+      }
+    }
+    await p.T(`window.__p.setSeamOptions(${defaults[0]}, ${defaults[1]})`);
+    return out;
+  };
+  const fmt = (r) => Object.entries(r).map(([m, v]) => `${m} ${v.step.toFixed(2)} (bias ${v.bias.toFixed(2)})`).join(', ');
+  // `final - lit` at confident hits is w (hit - the composite's probe term), so a change here also
+  // shows the composite follows the set's option (lit and composite call one lookup, D1501)
+  const r = await run('mirrorWall', null, 0.3, ['off', 'dist']);
+  console.log(`  seam mirrorWall floor r 0.3: ${r.off.blocks} blocks, step ${fmt(r)} / 255 luma`);
+  check('hybrid seam (D53): glossy mirrorWall floor, distance roughness (the default) narrows the SSR-to-probe step', r.off.blocks > 1000 && r.dist.blocks > 1000 && r.dist.step < r.off.step - 0.2,
+    `step off ${r.off.step.toFixed(2)} -> distanceRoughness ${r.dist.step.toFixed(2)} / 255 over ${r.dist.blocks} blocks (run-to-run <= 0.15)`);
+  if (!sweep) return;
+  const cases = [
+    ['mirrorWall', null, 0.1], ['mirrorWall', null, 0.2], ['mirrorWall', null, 0.3], ['mirrorWall', null, 0.4],
+    ['mirrorWall', 'low', 0.2], ['contact', null, 0.2], ['contact', 'low', 0.3], ['roughnessRamp', 'strips', null], ['boxRoom', null, 0.25],
+  ];
+  const all = [];
+  for (const [scene, pose, floor] of cases) {
+    const res = await run(scene, pose, floor, Object.keys(SEAM_MODES));
+    all.push({ scene, pose, floor, res });
+    console.log(`  seam ${scene}${pose ? ' ' + pose : ''}${floor !== null ? ` floor r ${floor}` : ''}: ${res.off.blocks} blocks; ${fmt(res)}`);
+  }
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, 'seam.json'), JSON.stringify(all, null, 1));
 }
 
 /**
@@ -1158,6 +1211,10 @@ async function main() {
       check('probes baked', info.probes === 3, JSON.stringify(info));
       const ca = await p.T('window.__p.cubeArray');
       check('cube-array support installed and self-tested (W20 shim)', ca.mode === 'shim' || ca.mode === 'native', `${ca.mode}: ${ca.reason}`);
+      // the storage and pre-phase-2 parity checks compare lookups without Lagarde's seam options (the
+      // 'hw' and legacy nodes don't have them; W26 made distanceRoughness the default, D53)
+      const seamDefaults = await p.T('[window.__p.probes.distanceRoughness, window.__p.probes.roughnessLerp]');
+      await p.T('(window.__p.setSeamOptions(false), true)');
       const shots = {};
       for (const lookup of ['warp', 'none', 'hw', 'cube-array', 'auto']) {
         await p.T(`(window.__p.setLookup('${lookup}'), window.__p.capture(), true)`);
@@ -1232,6 +1289,8 @@ async function main() {
         check('a failing self-test uninstalls the shim and reports false; auto falls back', st.ok === false && st.failed.mode === 'none' && st.layout === 'cube2d' && st.again === true && st.relayout === 'cube-array',
           `${st.failed.reason}; then auto ${st.layout}, re-install ${st.again} (${st.relayout})`);
       }
+      await p.T(`(window.__p.setSeamOptions(${seamDefaults[0]}, ${seamDefaults[1]}), true)`);
+      check('seam options default: distanceRoughness on, roughnessLerp off (W26, D53)', seamDefaults[0] === true && seamDefaults[1] === false, JSON.stringify(seamDefaults));
       // W20: the feature checks run on one storage: 'auto' (the cube array through the shim, default) or the 2D array
       const probesLayout = args.includes('--probes-layout') ? args[args.indexOf('--probes-layout') + 1] : 'cube-array';
       if (probesLayout === 'cube2d') await p.T("(async () => { await window.__p.setShim(false); window.__p.setLookup('warp'); return true; })()");
@@ -1258,6 +1317,10 @@ async function main() {
       check("lookup option ao: Lagarde's specular occlusion", lo.so < 1e-3, `max rel err ${lo.so.toExponential(1)}`);
       check('lookup option frameIrradiance: re-fit by k / probe L1 irradiance, clamped', lo.refit < 2e-3 && lo.clampErr < 1e-4 && lo.lum > 0 && lo.ratios.every(Number.isFinite) && lo.slots.every((s) => s >= 0),
         `max rel err ${lo.refit.toExponential(1)} (ratios ${lo.ratios.slice(0, 6).join(' ')} ...), clamp ${lo.clampErr.toExponential(1)}`);
+      // W26 (D53): Lagarde's seam options against the plain lookup fed the CPU's r' and lerped direction
+      const so = await C('seamOptions');
+      check("lookup options distanceRoughness / roughnessLerp: Lagarde 2014 Listing 25 / App. F", so.err.dist < 2e-3 && so.err.lerp < 2e-3 && so.err.both < 2e-3 && so.err.off < 2e-3 && so.lum > 0 && so.changedDist > 0.01 && so.changedLerp > 0.01,
+        `max rel err dist ${so.err.dist.toExponential(1)}, lerp ${so.err.lerp.toExponential(1)}, both ${so.err.both.toExponential(1)}, geometry ${so.err.off.toExponential(1)}; changes the lookup by up to ${f(so.changedDist)} / ${f(so.changedLerp)}`);
       const rf = await p.T(`(async () => { const P = window.__p; P.setGrid(true, 0.3); P.setLookup('${probesLayout === 'cube2d' ? 'warp' : 'auto'}'); for (let i = 0; i < 3; i++) await P.shot(); const off = await P.shot();
         P.setRefit(true); for (let i = 0; i < 3; i++) await P.shot(); const on = await P.shot(); P.setRefit(false); P.setGrid(false); return { on, off }; })()`);
       savePng('probes-refit-off.png', rf.off);
@@ -1308,9 +1371,11 @@ async function main() {
         pages.push(t);
         await t.T(FREEZE);
         const rows = await t.T(`(async () => {
-          const P = window.__p, out = { warp: [], 'cube-array': [], 'legacy-warp': [] };
-          for (let k = 0; k < 5; k++) for (const lookup of ['legacy-warp', 'warp', 'cube-array']) {
-            P.setLookup(lookup); P.setGrid(true, 0.08);
+          const P = window.__p, out = { warp: [], 'cube-array': [], 'cube-array+seam': [], 'legacy-warp': [] };
+          // 'cube-array+seam': the same with Lagarde's distanceRoughness + roughnessLerp (W26, D53)
+          for (let k = 0; k < 5; k++) for (const lookup of ['legacy-warp', 'warp', 'cube-array', 'cube-array+seam']) {
+            P.setSeamOptions(lookup.endsWith('+seam'));
+            P.setLookup(lookup.replace('+seam', '')); P.setGrid(true, 0.08);
             const on = await P.timeFrames(30, 7); P.setEnvNode(false); const off = await P.timeFrames(30, 7); P.setEnvNode(true);
             out[lookup].push({ on: on.wall, off: off.wall, lookup: on.wall - off.wall, gpu: on.gpu - off.gpu, gpuOn: on.gpu });
           }
@@ -1329,7 +1394,7 @@ async function main() {
         pages.push(o);
         await o.T(FREEZE);
         await o.T("(window.__p.setLookup('warp'), window.__p.capture(), true)");
-        await p.T('(window.__p.capture(), true)');
+        await p.T('(window.__p.setSeamOptions(false), window.__p.capture(), true)'); // the other build has no seam options (D53)
         const a = await p.T('window.__p.shot()');
         const b = await o.T('window.__p.shot()');
         savePng('probes-compare.png', b);
@@ -1359,6 +1424,33 @@ async function main() {
     if (runs('sssr-core')) await sssrCoreChecks(pages);
     if (runs('ssr')) await ssrChecks(pages);
     if (runs('hybrid')) await hybridChecks(pages);
+    if (only === 'seam') {
+      // W26: the D53 seam sweep alone (examples/ssr, denoised)
+      const sp = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1`);
+      pages.push(sp);
+      if (!args.includes('--seam-pt-only')) await seamChecks(sp, true);
+      if (args.includes('--seam-pt') || args.includes('--seam-pt-only')) {
+        // vs the path-traced reference (examples/showcase/compare.html Measure, W21/W23): MAD / bias of
+        // 'probes only' and 'ours denoised' over the glossy px, Lagarde's options off (?seam=0), each alone, both
+        const rows = [];
+        // SEAM_PT_SCENES=chess,sponza runs a subset (the four together pass the script's 10 min limit)
+        const ptScenes = process.env.SEAM_PT_SCENES?.split(',');
+        for (const [scene, floor] of [['toyCar', 0.25], ['carConcept', 0.25], ['chess', 0.25], ['sponza', null]].filter(([id]) => !ptScenes || ptScenes.includes(id))) {
+          for (const seam of ['0', 'dist', 'lerp', '1']) {
+            const page = await openPage(`http://127.0.0.1:${PORT}/showcase/compare.html?manual&scene=${scene}&left=ours-denoised&right=probes&seam=${seam}${floor !== null ? `&floorRoughness=${floor}` : ''}`);
+            if (!(await page.T('window.__p.entries()')).length) { page.close(); console.log('  (no showcase assets: --seam-pt skipped)'); break; }
+            await page.T('window.__p.freeze(true)');
+            const m = await page.T("window.__p.measure({ samples: 32, warmup: 24, frames: 8, methods: ['probes', 'ours-denoised'], orbitFrames: 0 })");
+            page.close();
+            const fmt = m.rows.map((r) => `${r.method} MAD ${r.mad.toFixed(2)} bias ${r.bias.toFixed(2)}`).join(', ');
+            console.log(`  vs path traced ${scene}${floor !== null ? ` floor r ${floor}` : ''} seam ${seam}: ${m.glossyPixels} glossy px, ${fmt}`);
+            rows.push({ scene, floor, seam, glossyPixels: m.glossyPixels, rows: m.rows.map(({ method, mad, bias, stdMean }) => ({ method, mad, bias, stdMean })) });
+          }
+        }
+        fs.mkdirSync(OUT, { recursive: true });
+        fs.writeFileSync(path.join(OUT, 'seam-pt.json'), JSON.stringify(rows, null, 1));
+      }
+    }
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (runs('babylon')) await babylonChecks(pages);
     if (runs('ssr-rt-bvh')) await ssrRtBvhChecks(pages);
