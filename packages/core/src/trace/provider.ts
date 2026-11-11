@@ -16,7 +16,14 @@
 //
 //   fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit
 //
-// and, if `capabilities.hitMaterial`, also `fn traceHitMaterial(hit: Hit) -> HitMaterial`.
+// and, if `capabilities.hitMaterial`, also `fn traceHitMaterial(hit: Hit) -> HitMaterial`;
+// if `capabilities.anyHit`, also
+//
+//   fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool
+//
+// (true if any triangle lies along the ray within tMax; the walk may stop at the first one), the
+// occlusion query hit shading uses for shadow rays (D903). Without it the pass derives one from
+// `traceFirstHit` (same answer, a full closest-hit walk).
 // Hit shading itself belongs to the pass (HitShading below), not the provider.
 
 /** Where a module's bindings land inside a kernel (same shape as @pmndrs/ddgi's `BindingSlot`). */
@@ -34,6 +41,12 @@ export interface TraceProviderCapabilities {
   readonly hitNormal: boolean;
   /** The provider defines `fn traceHitMaterial(hit: Hit) -> HitMaterial`. Otherwise the pass supplies a grey default. */
   readonly hitMaterial: boolean;
+  /**
+   * The provider defines `fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool` (an any-hit /
+   * occlusion walk that may stop at the first triangle it finds). Otherwise the pass supplies one
+   * from `traceFirstHit`. Default false.
+   */
+  readonly anyHit?: boolean;
 }
 
 /** A BVH ray walk behind the trace seam. */
@@ -42,8 +55,8 @@ export interface TraceProvider {
   readonly name: string;
   /**
    * WGSL declaring this provider's bindings at `slot` (in `entries` order) and defining
-   * `traceFirstHit`. Global names other than `traceFirstHit` / `traceHitMaterial` should carry a
-   * provider prefix so they never collide with the pass.
+   * `traceFirstHit` (+ `traceHitMaterial` / `traceAny` per `capabilities`). Other global names
+   * should carry a provider prefix so they never collide with the pass.
    */
   code(slot: BindingSlot): string;
   /** Layout entries, in the order `resources()` returns them. Fixed for the provider's lifetime. */
@@ -98,14 +111,25 @@ export const DEFAULT_HIT_MATERIAL_WGSL = /* wgsl */ `
 fn traceHitMaterial(hit: Hit) -> HitMaterial { return HitMaterial(vec3f(0.5), vec3f(0.0)); }
 `;
 
+/** `traceAny` for providers without an any-hit walk: the closest-hit walk, hit or not. */
+export const DEFAULT_TRACE_ANY_WGSL = /* wgsl */ `
+fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool { return traceFirstHit(origin, dir, tMax).t >= 0.0; }
+`;
+
 /**
  * How the pass shades a traced hit: WGSL defining
  *
  *   fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f
  *
  * (world hit point, world normal facing the ray, unit ray direction; returns the radiance leaving
- * P toward the ray origin). It may call `traceHitMaterial(hit)` and the pass's
- * `sampleRadianceFallback(P, dir, roughness)`. Its own bindings, if any, go in `@group(3)`.
+ * P toward the ray origin). It may call `traceHitMaterial(hit)`, the pass's
+ * `sampleRadianceFallback(P, dir, roughness)` and the pass's shadow query
+ *
+ *   fn traceLightVisible(P: vec3f, N: vec3f, L: vec3f, tMax: f32) -> bool
+ *
+ * (false if the provider's `traceAny` finds geometry between P, offset along N like the reflection
+ * ray's origin, and P + L x tMax; always true with the pass's `hitShadows` off; D903).
+ * Its own bindings, if any, go in `@group(3)`.
  * The on-screen reuse (a hit visible in the current frame takes its scene colour) happens in the
  * pass before this is called.
  */
