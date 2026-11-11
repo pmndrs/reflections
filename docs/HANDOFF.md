@@ -62,7 +62,8 @@ For the fine-tune pass once the phases are built and running. Nothing here block
 - About 1,800 extra forward-Z misses on the sssr-core glossy floor (W9 row).
 - Reflected sphere stripe ratio still 8.0 (cube 1.7) after D1000; streaks behind objects 4.6% with the hybrid thickness (D1001). Visible in examples/ssr mirrorWall as a jagged comb on the reflected sphere's top edge, raw and denoised (W12).
 - Raw glossy SSR (denoise off) speckles the r = 0.35 sphere, rim included, with single-pixel hits (the red post, the white wall); no NaN/Inf in any target at 6 poses, and denoised it's clean at `default` and `low` (W12).
-- RT hit shading reads 0.67-0.91x the on-screen colour on the kit scenes since W12's daylight sky (W8 measured 1.14-1.18x before it); W25's shadow rays move it by <= 0.02 (D903). Cause not looked for; suspects: the 32-direction env mean vs three's PMREM roughness-1 diffuse (the sky now dominates the lighting), one albedo per mesh (D902).
+- ~~RT hit shading reads 0.67-0.91x the on-screen colour~~: fixed by W28 (D901: hits take the probes three lights the scene with; 0.96-1.08x now). What is left is per-pixel material (D902): mean abs rel 0.32-0.40 from the patterned walls; toyCar 4.5x too bright from its averaged emissive map.
+- The three adapter's probe hit shading packs its own copy of the probe volume table (D2900): share the probe node's once `packages/three/src/probes/` exports it.
 - Skinned meshes repeat motion on a second `render()` in one frame (D700).
 - One shader can't mix `warp` and `none` probe sets (D805).
 - Probe captures after a layout and environment change: fixed by a second capture pass; revisit the cost.
@@ -211,7 +212,7 @@ interface TraceProvider {
   name: string;
   code(slot: BindingSlot): string;   // bindings at slot, in `entries` order; defines traceFirstHit (+ traceHitMaterial if capabilities.hitMaterial)
   entries: readonly ModuleBindingEntry[]; resources(): readonly GPUBindingResource[]; version: number; storageBufferCount: number;
-  capabilities: { hitNormal: boolean; hitMaterial: boolean; anyHit?: boolean };  // anyHit: W25
+  capabilities: { hitNormal: boolean; hitMaterial: boolean; anyHit?: boolean; shadingNormal?: boolean };  // anyHit: W25, shadingNormal: W28
   layoutVersion?: number;            // @pmndrs/bvh: GPU_LAYOUT_VERSION, checked by the provider at start-up
 }
 ```
@@ -223,11 +224,12 @@ struct HitMaterial { albedo: vec3f, emissive: vec3f }
 fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit                 // provider
 fn traceHitMaterial(hit: Hit) -> HitMaterial                                  // provider, or the pass's grey default
 fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool                     // provider if capabilities.anyHit, else the pass's (traceFirstHit) (W25)
+fn traceHitShadingNormal(hit: Hit) -> vec3f                                   // provider if capabilities.shadingNormal (vertex normals at hit.triangle x barycentrics, world, any length/side; 0 = none), else 0 (W28, D1700)
 fn traceLightVisible(P: vec3f, N: vec3f, L: vec3f, tMax: f32) -> bool         // pass: shadow ray, origin offset as D8; true with hitShadows off (W25)
-fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f          // HitShading (pass option); may call sampleRadianceFallback
+fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f          // HitShading (pass option); may call sampleRadianceFallback. N: the shading normal if any, on the ray's side
 ```
 
-The traced pass binds group 0 (itself: 3 storage buffers, 4 storage textures), 1 (radiance fallback, same snippet as SSSR), 2 (provider), 3 (hit shading). With 3 storage buffers of its own, a provider may use 5 on a default device, 4 with the probe fallback (its table is one more). F2: `createTracedReflections` counts all four groups (storage buffers and storage textures; `RadianceFallback` / `HitShading` declare theirs with `storageBufferCount` / `storageTextureCount`) against `device.limits` and throws with the limit to raise.
+The traced pass binds group 0 (itself: 3 storage buffers, 4 storage textures), 1 (radiance fallback, same snippet as SSSR), 2 (provider), 3 (hit shading: `environmentHitShading`, or W28's `probeHitShading(device, set | lookup options)` = lookup atlas / sampler / table at 0..2 + light uniform at 3, 1 storage buffer; three picks it when `scene.environmentNode` is `reflectionProbes(probes)`). With 3 storage buffers of its own, a provider may use 5 on a default device, 4 with the probe fallback (its table is one more). F2: `createTracedReflections` counts all four groups (storage buffers and storage textures; `RadianceFallback` / `HitShading` declare theirs with `storageBufferCount` / `storageTextureCount`) against `device.limits` and throws with the limit to raise.
 
 **Plugged in (W14):** `PmndrsBvhTraceProvider` in `packages/core/src/trace/pmndrsBvh.ts` is that wrapper; the three items below are on bvh's `reflections-integration` branch (normal and material in `GiHit`; the version export was already there). What follows is the pre-W14 note.
 
