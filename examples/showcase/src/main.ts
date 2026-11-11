@@ -217,7 +217,7 @@ async function main() {
     // the probes would make the floor near the model darker than the floor outside the probe box)
     const sc = kit.scene, keep = [sc.backgroundIntensity, sc.backgroundBlurriness] as const;
     if (sc.background === sc.environment) { sc.backgroundIntensity = sc.environmentIntensity; sc.backgroundBlurriness = 0; }
-    probes.bake(renderer, kit.scene, { resolution: 128, near: kit.bake.near, far: kit.bake.far });
+    probes.bake(renderer, kit.scene, { ...(q.has('probeRes') ? { resolution: Number(q.get('probeRes')) } : {}), near: kit.bake.near, far: kit.bake.far });
     [sc.backgroundIntensity, sc.backgroundBlurriness] = keep;
     nextNodeFrame();
     if (helper) helper.visible = state.helpers;

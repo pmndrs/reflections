@@ -65,7 +65,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   kit.scene.add(probes);
   const sc = kit.scene, keep = [sc.backgroundIntensity, sc.backgroundBlurriness] as const;
   if (sc.background === sc.environment) { sc.backgroundIntensity = sc.environmentIntensity; sc.backgroundBlurriness = 0; }
-  probes.bake(renderer, kit.scene, { resolution: 128, near: kit.bake.near, far: kit.bake.far });
+  probes.bake(renderer, kit.scene, { ...(params.has('probeRes') ? { resolution: Number(params.get('probeRes')) } : {}), near: kit.bake.near, far: kit.bake.far });
   [sc.backgroundIntensity, sc.backgroundBlurriness] = keep;
   // W26 (D53): ?seam=0|1|dist|lerp Lagarde's distanceRoughness / roughnessLerp (lit and composite), default: the package's
   if (params.has('seam')) {

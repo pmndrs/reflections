@@ -356,7 +356,7 @@ async function main() {
         probes.add(p);
       }
       kit.scene.add(probes);
-      probes.bake(renderer, kit.scene, { resolution: 128, near: 0.05, far: 60 });
+      probes.bake(renderer, kit.scene, { ...(q.has('probeRes') ? { resolution: Number(q.get('probeRes')) } : {}), near: 0.05, far: 60 });
       nextNodeFrame();
       kit.scene.environmentNode = reflectionProbes(probes) as N;
     }
