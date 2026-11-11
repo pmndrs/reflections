@@ -181,6 +181,8 @@ export interface ScreenSpaceReflectionsInputs {
   /** A material texture holding roughness in `roughnessChannel`. */
   roughness: GPUTexture;
   roughnessChannel?: number;
+  /** roughness = texel[roughnessChannel] * mul + add, before squaring. Default { mul: 1, add: 0 }; glossiness is { mul: -1, add: 1 }. */
+  roughnessUnpack?: { mul: number; add: number };
   /** Roughness is perceptual and gets squared (three: true). Default true. */
   roughnessIsPerceptual?: boolean;
   /** Lit scene colour without specular (the radiance a hit returns). */
@@ -275,6 +277,7 @@ export function screenSpaceInputsFromFrame(
     normalUnpack: { mul: c.normalUnpackMul, add: c.normalUnpackAdd },
     roughness: t.roughness.texture,
     roughnessChannel: t.roughness.channel,
+    roughnessUnpack: c.roughnessUnpack,
     roughnessIsPerceptual: c.roughnessIsPerceptual,
     color: t.sceneColor,
     motion: t.motion,
@@ -441,6 +444,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     f[127] = Math.min(1, Math.max(0, s.mirrorBias ?? 0));
     const mvs = inputs.motionVectorScale ?? [1, 1];
     f[128] = mvs[0]; f[129] = mvs[1];
+    f[130] = inputs.roughnessUnpack?.mul ?? 1; f[131] = inputs.roughnessUnpack?.add ?? 0;
     device.queue.writeBuffer(params, 0, data);
   }
 

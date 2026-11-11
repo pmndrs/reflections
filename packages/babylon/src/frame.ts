@@ -2,9 +2,10 @@
 // (or any MRT render) that writes linear HDR colour, depth32float, PREPASS_WORLD_NORMAL,
 // PREPASS_REFLECTIVITY and PREPASS_VELOCITY_LINEAR. Conventions: ./conventions.ts.
 //
-// Everything binds as Babylon wrote it except roughness: PREPASS_REFLECTIVITY.a holds glossiness
-// (1 - perceptual roughness), which no contract flag can express, so one compute dispatch writes a
-// contract-shaped material texture (rgba16float: r = perceptual roughness, g = metalness 1, D1802/D1803).
+// Everything binds as Babylon wrote it. Roughness is PREPASS_REFLECTIVITY.a, which holds glossiness
+// (1 - perceptual roughness): the contract's `roughnessUnpack` { mul: -1, add: 1 } turns it into
+// roughness where core reads it (D1802). Metalness is a constant 1 (albedo = F0, D1803): a
+// one-channel texture cleared to 1 when the size changes, no per-frame pass.
 import type { Camera } from '@babylonjs/core/Cameras/camera.js';
 import type { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine.js';
 import type { InternalTexture } from '@babylonjs/core/Materials/Textures/internalTexture.js';
@@ -35,19 +36,6 @@ export interface BabylonFrameOptions {
   sceneColorSpecular?: FrameConventions['sceneColorSpecular'];
 }
 
-const MATERIAL_WGSL = /* wgsl */ `
-@group(0) @binding(0) var reflectivity: texture_2d<f32>;
-@group(0) @binding(1) var material: texture_storage_2d<rgba16float, write>;
-@compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) id: vec3u) {
-  let size = textureDimensions(material);
-  if (any(id.xy >= size)) { return; }
-  let gloss = textureLoad(reflectivity, vec2i(id.xy), 0).a;
-  // r: perceptual roughness; g: metalness 1, so the contract's F0 = mix(0.04, albedo, 1) = Babylon's F0
-  textureStore(material, vec2i(id.xy), vec4f(clamp(1.0 - gloss, 0.0, 1.0), 1.0, 0.0, 1.0));
-}
-`;
-
 /**
  * Builds core `FrameInputs` from Babylon G-buffer textures on Babylon's device. One instance per
  * view: it keeps the previous frame's camera for motion and the denoise seam.
@@ -56,56 +44,46 @@ export class BabylonFrame {
   readonly engine: AbstractEngine;
   readonly device: GPUDevice;
   readonly conventions: FrameConventions;
-  /** rgba16float: r perceptual roughness, g metalness (1). Reallocated when the size changes. */
-  material: GPUTexture | null = null;
+  /** r8unorm, all 1: the contract's metalness (albedo = F0, D1803). Reallocated when the size changes. */
+  metalness: GPUTexture | null = null;
   private readonly history = new FrameCameraHistory();
-  private readonly pipeline: GPUComputePipeline;
   private frameIndex = 0;
 
   constructor(engine: AbstractEngine, options: BabylonFrameOptions = {}) {
     this.engine = engine;
     this.device = getDevice(engine);
     this.conventions = babylonFrameConventions(engine.useReverseDepthBuffer, options.sceneColorSpecular ?? 'direct');
-    this.pipeline = this.device.createComputePipeline({
-      label: 'babylon frame: material',
-      layout: 'auto',
-      compute: { module: this.device.createShaderModule({ label: 'babylon frame: material', code: MATERIAL_WGSL }), entryPoint: 'main' },
-    });
   }
 
   /** The next `build()` has no previous frame (camera cut). */
   resetHistory() { this.history.reset(); }
 
   /**
-   * Records the material conversion into `encoder` and returns the frame. Call once per rendered
-   * frame, after Babylon rendered `gbuffer` with `camera`.
+   * Returns the frame. Call once per rendered frame, after Babylon rendered `gbuffer` with `camera`;
+   * records into `encoder` only when the size changed (clearing the metalness texture).
    */
   build(encoder: GPUCommandEncoder, gbuffer: BabylonGBuffer, camera: Camera): FrameInputs {
     const color = getGPUTexture(gbuffer.color);
     const reflectivity = getGPUTexture(gbuffer.reflectivity);
     const { width, height } = color;
-    if (!this.material || this.material.width !== width || this.material.height !== height) {
-      this.material?.destroy();
-      this.material = this.device.createTexture({
-        label: 'babylon frame: material (roughness, metalness)', size: [width, height], format: 'rgba16float',
-        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
+    if (!this.metalness || this.metalness.width !== width || this.metalness.height !== height) {
+      this.metalness?.destroy();
+      this.metalness = this.device.createTexture({
+        label: 'babylon frame: metalness (1)', size: [width, height], format: 'r8unorm',
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
       });
+      encoder.beginRenderPass({
+        label: 'babylon frame: metalness clear',
+        colorAttachments: [{ view: this.metalness.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [1, 1, 1, 1] }],
+      }).end();
     }
-    const pass = encoder.beginComputePass({ label: 'babylon frame: material' });
-    pass.setPipeline(this.pipeline);
-    pass.setBindGroup(0, this.device.createBindGroup({
-      layout: this.pipeline.getBindGroupLayout(0),
-      entries: [{ binding: 0, resource: reflectivity.createView() }, { binding: 1, resource: this.material.createView() }],
-    }));
-    pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
-    pass.end();
     return {
       width, height,
       textures: {
         depth: getGPUTexture(gbuffer.depth),
         normal: getGPUTexture(gbuffer.worldNormal),
-        roughness: { texture: this.material, channel: 0 },
-        metalness: { texture: this.material, channel: 1 },
+        roughness: { texture: reflectivity, channel: 3 },
+        metalness: { texture: this.metalness, channel: 0 },
         albedo: reflectivity,
         motion: getGPUTexture(gbuffer.velocity),
         sceneColor: color,
@@ -117,7 +95,7 @@ export class BabylonFrame {
   }
 
   dispose() {
-    this.material?.destroy();
-    this.material = null;
+    this.metalness?.destroy();
+    this.metalness = null;
   }
 }
