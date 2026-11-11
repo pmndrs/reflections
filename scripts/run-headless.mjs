@@ -864,9 +864,11 @@ async function showcaseChecks(pages) {
 }
 
 /**
- * examples/showcase/compare.html (smoke, W21): the split renders with our denoised pipeline on the
- * left and three's SSRNode + FFX on the right, and the path tracer accumulates, with no GPU errors
- * and a non-black image. Skipped without assets. Screenshots: out/showcase-compare-{split,pathtraced}.png.
+ * examples/showcase/compare.html (smoke, W21/W23): the split renders with our denoised pipeline on the
+ * left and three's SSRNode + FFX on the right, with no GPU errors and a non-black image; the WebGPU
+ * path tracer stops at the page's max samples (no more samples or dispatches at rest) and its OIDN
+ * frame is far less speckled than the raw one. Skipped without assets.
+ * Screenshots: out/showcase-compare-{split,pathtraced,pathtraced-raw}.png.
  */
 async function showcaseCompareChecks(pages) {
   console.log('examples/showcase/compare.html:');
@@ -879,15 +881,34 @@ async function showcaseCompareChecks(pages) {
   await p.T('window.__p.step(16)');
   const split = await p.T('window.__p.shot()');
   savePng('showcase-compare-split.png', split);
-  const spp = await p.T('window.__p.converge(16)');
+  // the reference (W23): WebGPU tracer to the page's default cap, then OIDN once, then idle
+  const conv = await p.T('window.__p.converge()');
   const pt = await p.T("window.__p.shotOf('pathtraced')");
   savePng('showcase-compare-pathtraced.png', pt);
+  await p.T('window.__p.showDenoised(false)');
+  const raw = await p.T("window.__p.shotOf('pathtraced')");
+  savePng('showcase-compare-pathtraced-raw.png', raw);
+  await p.T('window.__p.showDenoised(true)');
+  // a few more frames at rest: no further samples and no further tracer dispatches
+  await p.T("window.__p.setSides('ours-denoised', 'pathtraced')");
+  await p.T('window.__p.step(12)');
+  const after = await p.T("window.__p.ptInfo()");
   const lum = async (url) => p.T(`(async (u) => { const i = new Image(); i.src = u; await i.decode(); const c = document.createElement('canvas'); c.width = 160; c.height = 90;
     const g = c.getContext('2d'); g.drawImage(i, 0, 0, 160, 90); const d = g.getImageData(0, 0, 160, 90).data; let s = 0; for (let k = 0; k < d.length; k += 4) s += d[k] + d[k + 1] + d[k + 2]; return s / (d.length / 4) / 3; })(${JSON.stringify(url)})`);
+  // speckle: mean 3x3 local variance of luma at full resolution (denoised << raw at 8 spp)
+  const speckle = async (url) => p.T(`(async (u) => { const i = new Image(); i.src = u; await i.decode(); const w = i.width, h = i.height; const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d'); g.drawImage(i, 0, 0); const d = g.getImageData(0, 0, w, h).data; const L = (x, y) => { const o = (y * w + x) * 4; return 0.2126 * d[o] + 0.7152 * d[o + 1] + 0.0722 * d[o + 2]; };
+    let acc = 0, n = 0; for (let y = 1; y < h - 1; y += 2) for (let x = 1; x < w - 1; x += 2) { let s = 0, s2 = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const l = L(x + dx, y + dy); s += l; s2 += l * l; } const m = s / 9; acc += s2 / 9 - m * m; n++; } return acc / n; })(${JSON.stringify(url)})`);
   const [ls, lp] = [await lum(split), await lum(pt)];
+  const [nRaw, nDen] = [await speckle(raw), await speckle(pt)];
   const errs = (await p.T('window.__p.gpuErrors()')).concat(results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l)));
-  check('showcase compare: split and path tracer render, no GPU errors', errs.length === 0 && ls > 8 && lp > 8 && spp >= 16,
-    `split mean ${ls.toFixed(0)}/255, path traced ${spp} spp mean ${lp.toFixed(0)}/255${errs.length ? '; ' + errs[0] : ''}`);
+  check('showcase compare: split and path tracer render, no GPU errors', errs.length === 0 && ls > 8 && lp > 8,
+    `split mean ${ls.toFixed(0)}/255, path traced mean ${lp.toFixed(0)}/255${errs.length ? '; ' + errs[0] : ''}`);
+  const stopped = conv.done && conv.samples === conv.maxSamples && after.samples === conv.samples && after.dispatches === conv.dispatches;
+  check('showcase compare: path tracer stops at max samples (no more dispatches at rest)', stopped,
+    `${conv.samples} / ${conv.maxSamples} spp in ${conv.seconds.toFixed(1)} s (trace ${conv.traceMs} ms); 12 frames later ${after.samples} spp, dispatches ${conv.dispatches} -> ${after.dispatches}`);
+  check('showcase compare: reference is OIDN-denoised once at the cap', conv.denoised && !!conv.denoiser && nDen < 0.6 * nRaw,
+    `${conv.denoiser ?? 'no denoiser'}, ${conv.denoiseMs} ms; 3x3 luma variance raw ${nRaw.toFixed(1)} -> denoised ${nDen.toFixed(1)}`);
 }
 
 /**

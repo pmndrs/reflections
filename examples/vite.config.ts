@@ -1,5 +1,5 @@
 import { dirname, resolve } from 'path';
-import { readdirSync, existsSync, readFileSync, realpathSync } from 'fs';
+import { readdirSync, existsSync, readFileSync, realpathSync, statSync } from 'fs';
 import { defineConfig } from 'vite';
 
 // Examples dev server: http://127.0.0.1:5370/<name>/ ($REFLECTIONS_PORT overrides; worktrees use their own) for each examples/<name>/index.html.
@@ -44,21 +44,37 @@ const denoiserRepo = findDenoiser();
 const denoiserThreeFfx = denoiserRepo && existsSync(resolve(denoiserRepo, 'packages/denoiser-three/src/temporal/ffx.ts'))
   ? resolve(denoiserRepo, 'packages/denoiser-three/src/temporal/ffx.ts') : null;
 
-// three-gpu-pathtracer (the compare page's path-traced reference, WebGL in its own canvas): a sibling
-// checkout found like the Denoiser repo, or $PATHTRACER_REPO; else a null stub.
+// The compare page's path-traced reference: three-gpu-pathtracer's WebGPU tracer (`three-gpu-pathtracer/webgpu`,
+// 0.0.28, a devDependency: the first release built for three r187) and the OIDN denoiser (the Denoiser repo's
+// `denoiser` package). $PATHTRACER_REPO points the alias at another checkout or package. The Denoiser repo's
+// own copy (0.0.27, pinned for its r186) does not run on r187: r187 dropped the single-struct storage buffers
+// its wavefront queues use ("an array element type cannot contain a runtime-sized array").
 function findPathTracer(): string | null {
-  const entry = (repo: string) => resolve(repo, 'src/core/WebGLPathTracer.js');
+  const entry = (repo: string) => resolve(repo, 'src/webgpu/index.js');
   const env = process.env.PATHTRACER_REPO;
-  if (env) return existsSync(entry(env)) ? resolve(env) : null;
-  for (let dir = resolve(root, '..'); dirname(dir) !== dir; dir = dirname(dir)) {
-    const repo = resolve(dirname(dir), 'three-gpu-pathtracer');
-    if (existsSync(entry(repo))) return repo;
-  }
-  return null;
+  if (env) return existsSync(entry(env)) ? realpathSync(env) : null;
+  const installed = resolve(root, '../node_modules/three-gpu-pathtracer');
+  return existsSync(entry(installed)) ? realpathSync(installed) : null;
 }
 const pathTracerRepo = findPathTracer();
+// OIDN: the `denoiser` package's source (its workspace deps aliased to source below) and its .tza weights.
+const oidnEntry = denoiserRepo && existsSync(resolve(denoiserRepo, 'packages/denoiser/src/index.ts')) ? resolve(denoiserRepo, 'packages/denoiser/src/index.ts') : null;
+const tzasDir = denoiserRepo ? resolve(denoiserRepo, 'packages/denoiser/tzas') : null;
+type Middleware = (req: { url?: string }, res: { setHeader(k: string, v: string): void; end(b: Buffer): void }, next: () => void) => void;
+const serveTzas = {
+  // dev: GET /tzas/<name>.tza from the Denoiser checkout (the denoiser's tzaUrl), as its examples do
+  name: 'reflections-serve-tzas',
+  configureServer(server: { middlewares: { use(path: string, fn: Middleware): void } }) {
+    server.middlewares.use('/tzas', (req, res, next) => {
+      const file = tzasDir && resolve(tzasDir, '.' + decodeURIComponent((req.url ?? '').split('?')[0]));
+      if (!tzasDir || !file || !file.startsWith(tzasDir + '/') || !existsSync(file) || !statSync(file).isFile()) return next();
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.end(readFileSync(file));
+    });
+  },
+};
 
-// Sources served from outside this repo (the Denoiser checkout, three-gpu-pathtracer) resolve `three`
+// Sources served as-is from outside the dep optimizer (the Denoiser checkout, the aliased tracer) resolve `three`
 // and `three-mesh-bvh` from here, never from their own node_modules: one three instance per page.
 const outside = [denoiserRepo, pathTracerRepo].filter((x): x is string => !!x);
 const sharedDeps = {
@@ -90,7 +106,7 @@ export default defineConfig({
       const path = id.split('?')[0].replaceAll('\\', '/');
       if (/\/pixi3d\/[^/]+\/main\.ts$/.test(path)) return readFileSync(resolve(root, 'pixi3d/unavailable.ts'), 'utf8');
     },
-  }, sharedDeps],
+  }, sharedDeps, serveTzas],
   server: {
     port: Number(process.env.REFLECTIONS_PORT ?? 5370), strictPort: true, host: '127.0.0.1',
     fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : []), ...(pathTracerRepo ? [pathTracerRepo] : []), ...(downsamplerRepo ? [downsamplerRepo] : []), ...(bvhRepo ? [bvhRepo] : [])] },
@@ -114,8 +130,16 @@ export default defineConfig({
         replacement: denoiserRepo ? resolve(denoiserRepo, 'packages/denoiser-ffx/src/index.ts') : resolve(root, 'shared/denoiser-missing.ts'),
       },
       { find: /^@pmndrs\/denoiser-three-ffx$/, replacement: denoiserThreeFfx ?? resolve(root, 'shared/denoiser-three-missing.ts') },
-      { find: /^three-gpu-pathtracer-webgl$/, replacement: pathTracerRepo ? resolve(pathTracerRepo, 'src/core/WebGLPathTracer.js') : resolve(root, 'shared/pathtracer-missing.ts') },
+      { find: /^three-gpu-pathtracer-webgpu$/, replacement: pathTracerRepo ? resolve(pathTracerRepo, 'src/webgpu/index.js') : resolve(root, 'shared/pathtracer-missing.ts') },
+      { find: /^@pmndrs\/denoiser-oidn$/, replacement: oidnEntry ?? resolve(root, 'shared/denoiser-oidn-missing.ts') },
+      // the `denoiser` package's workspace deps, from source (reached only through @pmndrs/denoiser-oidn)
+      ...(oidnEntry
+        ? ['core', 'wgsl', 'webnn'].map((p) => ({ find: new RegExp(`^@pmndrs/denoiser-${p}$`), replacement: resolve(denoiserRepo!, `packages/denoiser-${p}/src/index.ts`) }))
+        : []),
     ],
   },
+  // Behind an alias, vite would pre-bundle the tracer with its own copy of
+  // three (two three instances: broken TSL). Served as source instead, `sharedDeps` resolves its three.
+  optimizeDeps: { exclude: ['three-gpu-pathtracer-webgpu'] },
   build: { outDir: resolve(root, 'dist'), emptyOutDir: true, rollupOptions: { input: { ...pages, 'showcase-compare': resolve(root, 'showcase/compare.html') } } },
 });
