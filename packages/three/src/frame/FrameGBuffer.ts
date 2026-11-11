@@ -23,13 +23,15 @@
 //                                        x the clear coat's base scale (1 - cc Fcc, D3512),
 //                                  a = specular occlusion x material env intensity (./nodes.ts `gbufferSpecular`)
 //   shadingRoughness r16float      three's shading roughness (geometry-adjusted, >= 0.045; with `specular`, +2 bytes, D403)
+//   clearcoat (opt.) rg16float     clear coat factor, clear coat perceptual roughness (with `specular`, +4 bytes and the
+//                                  8th attachment; the screen-space hits' re-shade, W44 / D3541)
 //   depth            depth32float  hardware depth (reverse-Z if the renderer uses it)
 import * as THREE from 'three/webgpu';
 import { diffuseColor, mrt, nodeObject, normalWorld, output, uniform, vec2, vec4 } from 'three/tsl';
 import {
   FrameCameraHistory, type FrameCamera, type FrameConventions, type FrameInputs, type FrameTextures,
 } from '@pmndrs/reflections-core';
-import { gbufferMetalness, gbufferRoughness, gbufferShadingRoughness, gbufferSpecular, sceneColorNoSpecular } from './nodes';
+import { gbufferClearcoat, gbufferMetalness, gbufferRoughness, gbufferShadingRoughness, gbufferSpecular, sceneColorNoSpecular } from './nodes';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -51,7 +53,7 @@ export function getGPUTexture(renderer: THREE.WebGPURenderer, texture: THREE.Tex
   return gpu;
 }
 
-export type FrameTargetName = 'output' | 'normalRoughness' | 'albedoMetalness' | 'motion' | 'lit' | 'specular' | 'shadingRoughness';
+export type FrameTargetName = 'output' | 'normalRoughness' | 'albedoMetalness' | 'motion' | 'lit' | 'specular' | 'shadingRoughness' | 'clearcoat';
 
 export interface FrameGBufferOptions {
   /** Render size in pixels. Default: the renderer's drawing-buffer size, followed on each render(). */
@@ -71,11 +73,18 @@ export interface FrameGBufferOptions {
    * `'auto'` (default): on when `lit` is on and the device allows 46 bytes. Needs `lit`.
    */
   specular?: boolean | 'auto';
+  /**
+   * Also write each pixel's clear coat (`clearcoat`, rg16float: factor, perceptual roughness), so a
+   * screen-space hit on a coated surface re-shades its coat along the ray (W44, D3541): 4 more bytes
+   * (50 in all) and the 8th colour attachment. `'auto'` (default): on when `specular` is on and the
+   * device allows both. Needs `specular`.
+   */
+  clearcoat?: boolean | 'auto';
   /** 'uv' (default): uv-space motion, scale [1, 1]. 'ndc': three's velocity as is, scale [0.5, -0.5] (what denoiser/three expects). */
   motion?: 'uv' | 'ndc';
 }
 
-const BYTES = { base: 8 + 8 + 8 + 4, lit: 8, specular: 8 + 2 };
+const BYTES = { base: 8 + 8 + 8 + 4, lit: 8, specular: 8 + 2, clearcoat: 4 };
 
 /**
  * three's VelocityNode with the camera half of its history taken from our FrameCamera instead of
@@ -121,6 +130,8 @@ export class FrameGBuffer {
   readonly lit: boolean;
   /** The `specular` and `shadingRoughness` targets are written (see the option). */
   readonly specular: boolean;
+  /** The `clearcoat` target is written (see the option). */
+  readonly clearcoat: boolean;
   readonly motionMode: 'uv' | 'ndc';
   /** three textures by target name (plus `depth`), for TSL sampling (debug views, composites). */
   readonly textures: Record<FrameTargetName, THREE.Texture | undefined> & { depth: THREE.DepthTexture };
@@ -151,6 +162,14 @@ export class FrameGBuffer {
     if (this.specular && limit < withSpecular) {
       throw new Error(`FrameGBuffer: specular needs maxColorAttachmentBytesPerSample >= ${withSpecular}, device has ${limit}`);
     }
+    const withClearcoat = withSpecular + BYTES.clearcoat;
+    const wantClearcoat = options.clearcoat ?? 'auto';
+    const attachments = device.limits.maxColorAttachments;
+    this.clearcoat = wantClearcoat === 'auto' ? this.specular && limit >= withClearcoat && attachments >= 8 : wantClearcoat;
+    if (this.clearcoat && !this.specular) throw new Error('FrameGBuffer: clearcoat needs the specular target');
+    if (this.clearcoat && (limit < withClearcoat || attachments < 8)) {
+      throw new Error(`FrameGBuffer: clearcoat needs maxColorAttachmentBytesPerSample >= ${withClearcoat} and maxColorAttachments >= 8, device has ${limit} / ${attachments}`);
+    }
     this.motionMode = options.motion ?? 'uv';
     this.fixedSize = options.width !== undefined && options.height !== undefined;
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -164,6 +183,7 @@ export class FrameGBuffer {
     const names: FrameTargetName[] = this.lit ? ['lit', 'output'] : ['output'];
     names.push('normalRoughness', 'albedoMetalness', 'motion');
     if (this.specular) names.push('specular', 'shadingRoughness');
+    if (this.clearcoat) names.push('clearcoat');
     const depth = new THREE.DepthTexture(w, h, THREE.FloatType);
     depth.name = 'depth';
     const rt = new THREE.RenderTarget(w, h, { count: names.length, type: THREE.HalfFloatType, depthTexture: depth, depthBuffer: true });
@@ -177,6 +197,7 @@ export class FrameGBuffer {
     const motion = rt.textures[names.indexOf('motion')];
     motion.format = THREE.RGFormat; // rg16float
     if (this.specular) rt.textures[names.indexOf('shadingRoughness')].format = THREE.RedFormat; // r16float
+    if (this.clearcoat) rt.textures[names.indexOf('clearcoat')].format = THREE.RGFormat; // rg16float
     this.renderTarget = rt;
     this.textures = Object.fromEntries([...names.map((n, i) => [n, rt.textures[i]]), ['depth', depth]]) as never;
 
@@ -191,9 +212,10 @@ export class FrameGBuffer {
     };
     if (this.lit) outputs.lit = output;
     if (this.specular) { outputs.specular = gbufferSpecular; outputs.shadingRoughness = gbufferShadingRoughness; }
+    if (this.clearcoat) outputs.clearcoat = gbufferClearcoat;
     this.mrt = mrt(outputs);
     // guides clear to zero (no surface); scene colour keeps the renderer's clear / background
-    for (const n of ['normalRoughness', 'albedoMetalness', 'velocity', 'lit', 'specular', 'shadingRoughness']) this.mrt.setClearColor(n, 0x000000, 0);
+    for (const n of ['normalRoughness', 'albedoMetalness', 'velocity', 'lit', 'specular', 'shadingRoughness', 'clearcoat']) this.mrt.setClearColor(n, 0x000000, 0);
   }
 
   /** The contract's convention flags for this G-buffer. */
@@ -290,6 +312,7 @@ export class FrameGBuffer {
       motion: g(this.textures.motion!),
       sceneColor: g(this.textures.output!),
       lit: this.textures.lit ? g(this.textures.lit) : undefined,
+      clearcoat: this.textures.clearcoat ? g(this.textures.clearcoat) : undefined,
     };
   }
 

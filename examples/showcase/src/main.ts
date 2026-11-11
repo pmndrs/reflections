@@ -63,6 +63,9 @@ type View = keyof typeof VIEWS;
 const VIEW_IDS = Object.keys(VIEWS) as View[];
 type HitMode = 'current' | 'lit' | 'final';
 const HIT_MODES: Record<HitMode, string> = { final: "last frame's image", lit: "last frame's lit (no SSR)", current: 'this frame, no specular' };
+/** W44 (D3540): how a screen-space hit accounts for the view direction (`ssr.settings.hitShading`). `?reshade=` */
+type HitShadingMode = 'reshade' | 'off';
+const HIT_SHADING_MODES: Record<HitShadingMode, string> = { reshade: 'specular along the ray (re-shade)', off: 'screen colour as is' };
 const TONE = { agx: THREE.AgXToneMapping, neutral: THREE.NeutralToneMapping, aces: THREE.ACESFilmicToneMapping } as const;
 type Tone = keyof typeof TONE;
 
@@ -105,6 +108,7 @@ async function main() {
     rt: q.get('rt') === '1',
     view: (q.has('off') ? 'off' : (q.get('view') as View) ?? 'final') as View,
     hit: ((q.get('hit') as HitMode) ?? 'final') as HitMode,
+    reshade: ((q.get('reshade') as HitShadingMode) ?? 'reshade') as HitShadingMode,
     tone: ((q.get('tone') as Tone) ?? 'agx') as Tone,
     exposure: 1,
     helpers: false,
@@ -204,6 +208,13 @@ async function main() {
     ssr.resetHistory();
     aa.reset();
   }
+  function setReshade(m: HitShadingMode) {
+    state.reshade = m;
+    ssr.settings.hitShading = m;
+    ssr.resetHistory();
+    aa.reset();
+  }
+  ssr.settings.hitShading = state.reshade;
   function applySources() {
     // SSR off + RT on: no screen-space march, so every traced pixel is a miss and goes to the ray tracer
     if (state.ssr) delete ssr.settings.maxTraversalIntersections; else ssr.settings.maxTraversalIntersections = 0;
@@ -421,6 +432,8 @@ async function main() {
   row(aa.ratio > 1 ? `Anti-aliasing (upscale x${aa.ratio})` : 'Anti-aliasing', aaSel);
   function setAA(m: AAMode) { aa.mode = m; aaSel.value = m; }
   row('Hit colour', select(HIT_MODES, state.hit, (v) => setHit(v as HitMode)));
+  const reshadeSel = select(HIT_SHADING_MODES, state.reshade, (v) => setReshade(v as HitShadingMode));
+  row('Hit specular', reshadeSel);
   const soBox = check('Specular occlusion (GTAO)', state.specOcc, (v) => setSpecOcc(v));
   function setSpecOcc(on: boolean) { state.specOcc = on; soBox.checked = on; buildDisplay(); hybrid.resetHistory(); aa.reset(); }
   check('Show probe volumes', state.helpers, (v) => setHelpers(v));
@@ -538,6 +551,8 @@ async function main() {
         refreshUI();
       },
       setHit: (m: HitMode) => setHit(m),
+      /** W44: 'reshade' (default) | 'off'. */
+      setReshade: (m: HitShadingMode) => { setReshade(m); reshadeSel.value = m; },
       /** W39: Lagarde's specular occlusion from GTAO on the composite's probe part (D66, D4510). */
       setSpecOcc: (on: boolean) => setSpecOcc(on),
       aa,

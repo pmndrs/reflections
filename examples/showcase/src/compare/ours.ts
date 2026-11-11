@@ -51,6 +51,9 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   if (kit.thickness) Object.assign(ssr.settings, kit.thickness);
   if (params.has('spq')) ssr.settings.samplesPerQuad = Number(params.get('spq')) as 1 | 2 | 4;
   const hit = (params.get('hit') ?? 'final') as 'final' | 'lit' | 'current';
+  // W44 (D3540): ?reshade=reshade|off (default the package's 'reshade')
+  const reshade = (params.get('reshade') ?? 'reshade') as 'reshade' | 'off';
+  ssr.settings.hitShading = reshade;
   const motionScale = Number(params.get('motionScale') ?? 1);
 
   // probes, as the showcase bakes them
@@ -149,7 +152,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     setExposure(e) { renderer.toneMappingExposure = e; },
     status: () => (denoiser ? 'denoiser ffx-reflections' : wantDenoise ? 'no denoiser found' : '') + (provider ? ` | BVH ${provider.triangles.toLocaleString()} tris` : ''),
     info: () => ({
-      samplesPerQuad: ssr.settings.samplesPerQuad ?? 1, hitColor: hit, denoiser: denoiser ? { ...denoiserOptions } : null,
+      samplesPerQuad: ssr.settings.samplesPerQuad ?? 1, hitColor: hit, hitShading: reshade, denoiser: denoiser ? { ...denoiserOptions } : null,
       thickness: kit.thickness ?? 'default', rayTracing: !!provider, probes: kit.probes.length,
       varianceGuidedTracing: 'off (the seam passes no variance back to the tracer)',
     }),

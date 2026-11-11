@@ -390,7 +390,7 @@ async function main() {
    * the page's display tone (0-255), over traced floor pixels.
    */
   async function fallbackRoughness() {
-    const base = { ...settings, frameIndex: 7, minTraversalOccupancy: 0 };
+    const base = { ...settings, frameIndex: 7, minTraversalOccupancy: 0, hitShading: 'off' as const }; // hits as the screen colour (W44): the check isolates the fallback
     const run = async (s: ScreenSpaceReflectionsSettings) => {
       const enc = device.createCommandEncoder();
       main.dispatch(enc, inputs, { ...base, ...s });

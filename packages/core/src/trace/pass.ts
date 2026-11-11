@@ -73,6 +73,11 @@ export interface TracedReflectionsSettings {
    * specular, hitColor 'current', compares against). Default true.
    */
   hitSpecular?: boolean;
+  /**
+   * As the SSSR tracer's `hitShading` (pass the tracer's, W44, D3540): with 'reshade' an on-screen hit takes this frame's scene colour (its diffuse) plus its specular lobe along the ray
+   * (`hitShadeSurface`, without the visibility ray, D3542), not the screen colour as is. Default 'reshade'.
+   */
+  hitShading?: 'reshade' | 'off';
   /** Relative view-distance tolerance for that test. Default 0.02. */
   onScreenDepthTolerance?: number;
   /** The fallback's `P.iblFactor`. Default 1. */
@@ -270,6 +275,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     u[58] = (s.hitColor ?? 'current') === 'history' ? 1 : 0;
     u[59] = (s.fallbackRoughness ?? 'surface') === 'surface' ? 1 : 0;
     u[60] = s.hitSpecular ?? true ? 1 : 0;
+    u[61] = (s.hitShading ?? 'reshade') === 'off' ? 0 : 1;
     device.queue.writeBuffer(params, 0, data);
   }
 

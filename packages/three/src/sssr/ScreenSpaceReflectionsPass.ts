@@ -231,14 +231,17 @@ export class ScreenSpaceReflectionsPass {
     this.historyKey = key;
     const useHistory = !!history && this.historyValid;
     if (source && this.historySource) cmd.copyTextureToTexture({ texture: source }, { texture: history! }, size);
-    const inputs = screenSpaceInputsFromFrame(frame, core, { history: useHistory ? history : undefined });
+    // the re-shade's radiance along a hit's reflected ray (W44, D3540) and the traced hits' shading: one group 3
+    const hitShadingBindGroup = this.hitShadingGroup();
+    const inputs = screenSpaceInputsFromFrame(frame, core, { history: useHistory ? history : undefined, hitShadingBindGroup });
+    const hitShading = this.settings.hitShading ?? 'reshade';
     const out = core.dispatch(cmd, inputs, {
       frameIndex: frame.frameIndex, ...this.settings, hitColor: useHistory ? 'history' : 'current', fallbackColor: [0, 0, 0],
     });
     if (this.rt && this.rayTracing) {
       // traced misses take black like the tracer's fallback: the composite adds probes /
       // environment for 1 - confidence, exactly the term three's lit image already has
-      this.rt.dispatch(cmd, { tracer: core, inputs, hitShadingBindGroup: this.hitShadingGroup() }, { ...this.traceSettings, hitColor: useHistory ? 'history' : 'current', fallbackColor: [0, 0, 0] });
+      this.rt.dispatch(cmd, { tracer: core, inputs, hitShadingBindGroup }, { ...this.traceSettings, hitColor: useHistory ? 'history' : 'current', hitShading, fallbackColor: [0, 0, 0] });
       cmd.copyTextureToTexture({ texture: this.rt.source }, { texture: this.gpu(this.source) }, size);
       this.sourceDirty = true;
     } else if (this.sourceDirty) {
@@ -323,7 +326,7 @@ export class ScreenSpaceReflectionsPass {
   }
 
   private hitShadingGroup(): GPUBindGroup {
-    return this.hitShading!.bindGroup(this.traceOptions?.environmentIntensity ?? this.sceneEnvironmentIntensity, this.traceOptions?.lights === false ? {} : this.sceneLights);
+    return this.hitShading!.bindGroup(this.traceOptions?.environmentIntensity ?? this.sceneEnvironmentIntensity, this.traceOptions && this.traceOptions.lights !== false ? this.sceneLights : {});
   }
 
   private createTraced(w: number, h: number) {
@@ -335,12 +338,13 @@ export class ScreenSpaceReflectionsPass {
 
   private ensure(w: number, h: number, inverted: boolean) {
     const trace = this.traceOptions;
-    if (trace) {
-      // the hit shading is compiled into the trace pipeline: a new source (cube / equirect / probe
-      // layout or count) rebuilds it
-      this.hitShading ??= new ThreeHitShading(this.device, (t) => this.gpu(t));
-      const probes = trace.probes !== undefined ? trace.probes : this.sceneProbes;
-      if (this.hitShading.prepare(this.environmentTexture(), probes)) { this.rt?.destroy(); this.rt = null; }
+    // the hit shading is compiled into the trace pipeline and the tracer's intersect (the re-shade,
+    // W44): a new source (cube / equirect / probe layout or count) rebuilds both
+    this.hitShading ??= new ThreeHitShading(this.device, (t) => this.gpu(t));
+    const probes = trace?.probes !== undefined ? trace.probes : this.sceneProbes;
+    if (this.hitShading.prepare(this.environmentTexture(), probes)) {
+      this.rt?.destroy(); this.rt = null;
+      this.core?.destroy(); this.core = null;
     }
     const c = this.core;
     if (c && c.width === w && c.height === h && c.depthInverted === inverted) {
@@ -354,6 +358,7 @@ export class ScreenSpaceReflectionsPass {
     this.core = createScreenSpaceReflections(device, {
       width: w, height: h, depthInverted: inverted, variant: sub ? 'subgroups' : 'workgroup',
       missList: (this.options.missList ?? false) || !!this.options.trace || !!trace, timestamps: this.options.timestamps ?? false,
+      hitSpecularShading: this.hitShading.shading,
     });
     if (trace) this.createTraced(w, h);
     for (const t of [this.radiance, this.hitDistance, this.confidence, this.source]) (t as unknown as { setSize(w: number, h: number): void }).setSize(w, h);
