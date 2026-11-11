@@ -1,0 +1,2123 @@
+{
+ "what": "W39 task 2: settings.mirrorBias (D49) under @pmndrs/upscaler (NativeAA) and with AA off, FFX denoiser off / on. examples/ssr 960x540, loop stopped, 8-bit luma of the displayed image, per G-buffer perceptual-roughness bin (+-0.02, eroded 2 px from bin edges; mirrorWall: floor px only after setFloorRoughness). Reference per AA mode: mean of 256 still frames, raw (denoise off), bias 0. still: 60 warm frames then 32: std (temporal), flicker (mean |x_t - x_t-1|), bias (RMS of mean - ref, finite-sample noise removed), rmse (one frame vs ref). moving: pendulum orbit 0.1 deg/frame (5 frames each way, 4 legs per pass) through the start pose, 12 passes; rmse / bias / std of the frames at the start pose (camera still moving) vs ref; d2 = |second difference| inside each leg, mean and % > 4/255.",
+ "runs": {
+  "roughnessRamp": {
+   "size": [
+    960,
+    540
+   ],
+   "frames": 32,
+   "refFrames": 256,
+   "warm": 60,
+   "deg": 0.1,
+   "half": 10,
+   "passes": 12,
+   "binPx": [
+    9607,
+    10560,
+    10545,
+    10412
+   ],
+   "results": [
+    {
+     "aa": "upscaler",
+     "denoise": false,
+     "mirrorBias": 0,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 0.366,
+        "flicker": 0.117,
+        "bias": 2.079,
+        "signed": 0.269,
+        "rmse": 2.863
+       },
+       "moving": {
+        "rmse": 5.242,
+        "bias": 4.344,
+        "std": 2.935,
+        "d2": 1.031,
+        "pctD2Over4": 2.491
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 2.523,
+        "flicker": 0.756,
+        "bias": 4.816,
+        "signed": -0.167,
+        "rmse": 7.127
+       },
+       "moving": {
+        "rmse": 10.18,
+        "bias": 6.872,
+        "std": 7.51,
+        "d2": 5.246,
+        "pctD2Over4": 23.789
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 2.33,
+        "flicker": 0.652,
+        "bias": 5.185,
+        "signed": 0.052,
+        "rmse": 7.089
+       },
+       "moving": {
+        "rmse": 10.159,
+        "bias": 6.193,
+        "std": 8.053,
+        "d2": 6.857,
+        "pctD2Over4": 34.782
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 1.562,
+        "flicker": 0.451,
+        "bias": 3.562,
+        "signed": 0.653,
+        "rmse": 4.668
+       },
+       "moving": {
+        "rmse": 7.451,
+        "bias": 4.262,
+        "std": 6.112,
+        "d2": 5.597,
+        "pctD2Over4": 33.116
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": false,
+     "mirrorBias": 0.25,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 0.255,
+        "flicker": 0.112,
+        "bias": 2.415,
+        "signed": 0.14,
+        "rmse": 2.963
+       },
+       "moving": {
+        "rmse": 5.469,
+        "bias": 4.639,
+        "std": 2.896,
+        "d2": 0.967,
+        "pctD2Over4": 2.221
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 2.605,
+        "flicker": 0.87,
+        "bias": 10.848,
+        "signed": 0.958,
+        "rmse": 12.16
+       },
+       "moving": {
+        "rmse": 12.38,
+        "bias": 10.021,
+        "std": 7.27,
+        "d2": 5.464,
+        "pctD2Over4": 23.92
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 3.338,
+        "flicker": 0.925,
+        "bias": 11.635,
+        "signed": 1.271,
+        "rmse": 13.161
+       },
+       "moving": {
+        "rmse": 13.829,
+        "bias": 10.662,
+        "std": 8.807,
+        "d2": 7.787,
+        "pctD2Over4": 36.675
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 2.097,
+        "flicker": 0.563,
+        "bias": 7.628,
+        "signed": 1.045,
+        "rmse": 8.567
+       },
+       "moving": {
+        "rmse": 10.431,
+        "bias": 7.58,
+        "std": 7.166,
+        "d2": 6.916,
+        "pctD2Over4": 38.761
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": false,
+     "mirrorBias": 0.5,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 0.223,
+        "flicker": 0.079,
+        "bias": 2.829,
+        "signed": 0.107,
+        "rmse": 3.291
+       },
+       "moving": {
+        "rmse": 5.337,
+        "bias": 4.757,
+        "std": 2.419,
+        "d2": 0.851,
+        "pctD2Over4": 1.894
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 2.033,
+        "flicker": 0.723,
+        "bias": 13.536,
+        "signed": 1.688,
+        "rmse": 14.387
+       },
+       "moving": {
+        "rmse": 14.148,
+        "bias": 12.599,
+        "std": 6.436,
+        "d2": 4.5,
+        "pctD2Over4": 19.206
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 3.65,
+        "flicker": 1.025,
+        "bias": 16.926,
+        "signed": 4.351,
+        "rmse": 18.177
+       },
+       "moving": {
+        "rmse": 16.767,
+        "bias": 14.236,
+        "std": 8.858,
+        "d2": 7.994,
+        "pctD2Over4": 36.436
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 2.509,
+        "flicker": 0.695,
+        "bias": 10.313,
+        "signed": 2.886,
+        "rmse": 11.351
+       },
+       "moving": {
+        "rmse": 12.721,
+        "bias": 10.285,
+        "std": 7.486,
+        "d2": 7.45,
+        "pctD2Over4": 40.178
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": false,
+     "mirrorBias": 0.75,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 0.216,
+        "flicker": 0.049,
+        "bias": 3.737,
+        "signed": 0.08,
+        "rmse": 4.091
+       },
+       "moving": {
+        "rmse": 5.335,
+        "bias": 4.892,
+        "std": 2.128,
+        "d2": 0.726,
+        "pctD2Over4": 1.492
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 1.52,
+        "flicker": 0.535,
+        "bias": 15.585,
+        "signed": 2.241,
+        "rmse": 16.179
+       },
+       "moving": {
+        "rmse": 16.061,
+        "bias": 14.949,
+        "std": 5.872,
+        "d2": 3.398,
+        "pctD2Over4": 13.998
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 2.441,
+        "flicker": 0.864,
+        "bias": 22.239,
+        "signed": 6.918,
+        "rmse": 22.92
+       },
+       "moving": {
+        "rmse": 21.643,
+        "bias": 20.278,
+        "std": 7.563,
+        "d2": 6.538,
+        "pctD2Over4": 30.197
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 3.073,
+        "flicker": 0.911,
+        "bias": 17.446,
+        "signed": 8.275,
+        "rmse": 18.385
+       },
+       "moving": {
+        "rmse": 17.496,
+        "bias": 15.435,
+        "std": 8.239,
+        "d2": 7.959,
+        "pctD2Over4": 40.251
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": true,
+     "mirrorBias": 0,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 0.148,
+        "flicker": 0.015,
+        "bias": 7.452,
+        "signed": 0.833,
+        "rmse": 7.458
+       },
+       "moving": {
+        "rmse": 9.594,
+        "bias": 9.492,
+        "std": 1.398,
+        "d2": 0.515,
+        "pctD2Over4": 0.644
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 0.208,
+        "flicker": 0.02,
+        "bias": 9.918,
+        "signed": 1.505,
+        "rmse": 9.928
+       },
+       "moving": {
+        "rmse": 11.105,
+        "bias": 11.041,
+        "std": 1.195,
+        "d2": 0.44,
+        "pctD2Over4": 0.064
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 0.225,
+        "flicker": 0.021,
+        "bias": 8.262,
+        "signed": 2.47,
+        "rmse": 8.274
+       },
+       "moving": {
+        "rmse": 9.033,
+        "bias": 8.989,
+        "std": 0.892,
+        "d2": 0.366,
+        "pctD2Over4": 0.143
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 0.172,
+        "flicker": 0.016,
+        "bias": 5.442,
+        "signed": 2.086,
+        "rmse": 5.452
+       },
+       "moving": {
+        "rmse": 6.336,
+        "bias": 6.287,
+        "std": 0.786,
+        "d2": 0.348,
+        "pctD2Over4": 0.47
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": true,
+     "mirrorBias": 0.25,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 0.143,
+        "flicker": 0.015,
+        "bias": 7.125,
+        "signed": 0.552,
+        "rmse": 7.131
+       },
+       "moving": {
+        "rmse": 9.34,
+        "bias": 9.233,
+        "std": 1.409,
+        "d2": 0.506,
+        "pctD2Over4": 0.584
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 0.195,
+        "flicker": 0.02,
+        "bias": 10.317,
+        "signed": 1.976,
+        "rmse": 10.327
+       },
+       "moving": {
+        "rmse": 11.495,
+        "bias": 11.431,
+        "std": 1.214,
+        "d2": 0.451,
+        "pctD2Over4": 0.085
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 0.224,
+        "flicker": 0.021,
+        "bias": 10.324,
+        "signed": 3.028,
+        "rmse": 10.334
+       },
+       "moving": {
+        "rmse": 11.108,
+        "bias": 11.07,
+        "std": 0.917,
+        "d2": 0.373,
+        "pctD2Over4": 0.139
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 0.201,
+        "flicker": 0.018,
+        "bias": 7.152,
+        "signed": 2.841,
+        "rmse": 7.16
+       },
+       "moving": {
+        "rmse": 8.07,
+        "bias": 8.032,
+        "std": 0.786,
+        "d2": 0.357,
+        "pctD2Over4": 0.434
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": true,
+     "mirrorBias": 0.5,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 0.139,
+        "flicker": 0.015,
+        "bias": 6.983,
+        "signed": 0.444,
+        "rmse": 6.989
+       },
+       "moving": {
+        "rmse": 9.26,
+        "bias": 9.153,
+        "std": 1.405,
+        "d2": 0.505,
+        "pctD2Over4": 0.565
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 0.176,
+        "flicker": 0.018,
+        "bias": 11.184,
+        "signed": 2.814,
+        "rmse": 11.193
+       },
+       "moving": {
+        "rmse": 12.267,
+        "bias": 12.206,
+        "std": 1.228,
+        "d2": 0.46,
+        "pctD2Over4": 0.173
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 0.202,
+        "flicker": 0.019,
+        "bias": 13.524,
+        "signed": 5.487,
+        "rmse": 13.531
+       },
+       "moving": {
+        "rmse": 14.319,
+        "bias": 14.289,
+        "std": 0.918,
+        "d2": 0.372,
+        "pctD2Over4": 0.146
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 0.206,
+        "flicker": 0.019,
+        "bias": 9.582,
+        "signed": 4.99,
+        "rmse": 9.588
+       },
+       "moving": {
+        "rmse": 10.394,
+        "bias": 10.366,
+        "std": 0.771,
+        "d2": 0.359,
+        "pctD2Over4": 0.392
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": true,
+     "mirrorBias": 0.75,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 0.137,
+        "flicker": 0.015,
+        "bias": 6.971,
+        "signed": 0.427,
+        "rmse": 6.977
+       },
+       "moving": {
+        "rmse": 9.252,
+        "bias": 9.141,
+        "std": 1.428,
+        "d2": 0.504,
+        "pctD2Over4": 0.555
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 0.176,
+        "flicker": 0.018,
+        "bias": 12.484,
+        "signed": 2.916,
+        "rmse": 12.491
+       },
+       "moving": {
+        "rmse": 13.356,
+        "bias": 13.296,
+        "std": 1.27,
+        "d2": 0.464,
+        "pctD2Over4": 0.337
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 0.169,
+        "flicker": 0.017,
+        "bias": 17.905,
+        "signed": 7.531,
+        "rmse": 17.91
+       },
+       "moving": {
+        "rmse": 18.546,
+        "bias": 18.523,
+        "std": 0.931,
+        "d2": 0.393,
+        "pctD2Over4": 0.152
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 0.193,
+        "flicker": 0.018,
+        "bias": 14.393,
+        "signed": 8.866,
+        "rmse": 14.397
+       },
+       "moving": {
+        "rmse": 15.115,
+        "bias": 15.095,
+        "std": 0.772,
+        "d2": 0.365,
+        "pctD2Over4": 0.38
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": false,
+     "mirrorBias": 0,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 4.393,
+        "flicker": 4.508,
+        "bias": 0,
+        "signed": -0.02,
+        "rmse": 10.289
+       },
+       "moving": {
+        "rmse": 10.47,
+        "bias": 4.979,
+        "std": 9.21,
+        "d2": 8.935,
+        "pctD2Over4": 24.906
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 23.668,
+        "flicker": 28.448,
+        "bias": 0,
+        "signed": 0.07,
+        "rmse": 29.171
+       },
+       "moving": {
+        "rmse": 29.144,
+        "bias": 11.941,
+        "std": 26.585,
+        "d2": 52.238,
+        "pctD2Over4": 68.599
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 26.738,
+        "flicker": 31.662,
+        "bias": 0,
+        "signed": -0.037,
+        "rmse": 31.046
+       },
+       "moving": {
+        "rmse": 30.716,
+        "bias": 12.353,
+        "std": 28.123,
+        "d2": 57.549,
+        "pctD2Over4": 76.172
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 22.112,
+        "flicker": 25.039,
+        "bias": 0,
+        "signed": -0.023,
+        "rmse": 25.217
+       },
+       "moving": {
+        "rmse": 24.93,
+        "bias": 9.102,
+        "std": 23.209,
+        "d2": 45.896,
+        "pctD2Over4": 74.69
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": false,
+     "mirrorBias": 0.25,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 2.332,
+        "flicker": 2.919,
+        "bias": 1.927,
+        "signed": -0.278,
+        "rmse": 8.309
+       },
+       "moving": {
+        "rmse": 8.575,
+        "bias": 4.873,
+        "std": 7.056,
+        "d2": 5.772,
+        "pctD2Over4": 21.07
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 20.644,
+        "flicker": 25.386,
+        "bias": 5.66,
+        "signed": 0.668,
+        "rmse": 27.937
+       },
+       "moving": {
+        "rmse": 27.855,
+        "bias": 14.192,
+        "std": 23.968,
+        "d2": 47.695,
+        "pctD2Over4": 65.212
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 26.907,
+        "flicker": 32.697,
+        "bias": 6.267,
+        "signed": 0.103,
+        "rmse": 32.877
+       },
+       "moving": {
+        "rmse": 33.082,
+        "bias": 15.648,
+        "std": 29.148,
+        "d2": 59.542,
+        "pctD2Over4": 75.126
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 23.131,
+        "flicker": 27.518,
+        "bias": 4.877,
+        "signed": 0.365,
+        "rmse": 27.288
+       },
+       "moving": {
+        "rmse": 27.138,
+        "bias": 12.177,
+        "std": 24.252,
+        "d2": 49.91,
+        "pctD2Over4": 76.503
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": false,
+     "mirrorBias": 0.5,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 1.844,
+        "flicker": 2.252,
+        "bias": 3.097,
+        "signed": -0.294,
+        "rmse": 7.795
+       },
+       "moving": {
+        "rmse": 7.863,
+        "bias": 3.815,
+        "std": 6.875,
+        "d2": 4.528,
+        "pctD2Over4": 17.376
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 18.275,
+        "flicker": 21.97,
+        "bias": 9.72,
+        "signed": 1.971,
+        "rmse": 27.284
+       },
+       "moving": {
+        "rmse": 27.294,
+        "bias": 13.514,
+        "std": 23.713,
+        "d2": 41.633,
+        "pctD2Over4": 59.83
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 25.296,
+        "flicker": 30.863,
+        "bias": 10.116,
+        "signed": 2.526,
+        "rmse": 32.561
+       },
+       "moving": {
+        "rmse": 32.218,
+        "bias": 15.365,
+        "std": 28.318,
+        "d2": 56.766,
+        "pctD2Over4": 73.437
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 23.27,
+        "flicker": 27.647,
+        "bias": 7.722,
+        "signed": 2.621,
+        "rmse": 28.173
+       },
+       "moving": {
+        "rmse": 27.962,
+        "bias": 11.742,
+        "std": 25.377,
+        "d2": 50.144,
+        "pctD2Over4": 76.339
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": false,
+     "mirrorBias": 0.75,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 1.305,
+        "flicker": 1.584,
+        "bias": 4.097,
+        "signed": -0.293,
+        "rmse": 7.256
+       },
+       "moving": {
+        "rmse": 7.261,
+        "bias": 5.009,
+        "std": 5.257,
+        "d2": 3.533,
+        "pctD2Over4": 12.411
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 14.336,
+        "flicker": 17.31,
+        "bias": 13.776,
+        "signed": 2.741,
+        "rmse": 26.583
+       },
+       "moving": {
+        "rmse": 26.816,
+        "bias": 18.919,
+        "std": 19.005,
+        "d2": 33.186,
+        "pctD2Over4": 51.32
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 22.415,
+        "flicker": 26.888,
+        "bias": 14.879,
+        "signed": 4.966,
+        "rmse": 32.06
+       },
+       "moving": {
+        "rmse": 32.063,
+        "bias": 21.042,
+        "std": 24.192,
+        "d2": 50.886,
+        "pctD2Over4": 68.484
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 23.391,
+        "flicker": 27.808,
+        "bias": 11.736,
+        "signed": 5.768,
+        "rmse": 29.916
+       },
+       "moving": {
+        "rmse": 29.39,
+        "bias": 17.158,
+        "std": 23.862,
+        "d2": 51.123,
+        "pctD2Over4": 75.05
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": true,
+     "mirrorBias": 0,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 0.202,
+        "flicker": 0.095,
+        "bias": 5.571,
+        "signed": 0.225,
+        "rmse": 5.626
+       },
+       "moving": {
+        "rmse": 9.086,
+        "bias": 9.047,
+        "std": 0.84,
+        "d2": 0.77,
+        "pctD2Over4": 1.925
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 0.424,
+        "flicker": 0.248,
+        "bias": 7.774,
+        "signed": 4.264,
+        "rmse": 8.002
+       },
+       "moving": {
+        "rmse": 10.677,
+        "bias": 10.629,
+        "std": 1.009,
+        "d2": 0.729,
+        "pctD2Over4": 0.781
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 0.482,
+        "flicker": 0.27,
+        "bias": 7.436,
+        "signed": 4.196,
+        "rmse": 7.711
+       },
+       "moving": {
+        "rmse": 9.322,
+        "bias": 9.262,
+        "std": 1.048,
+        "d2": 0.755,
+        "pctD2Over4": 1.01
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 0.422,
+        "flicker": 0.211,
+        "bias": 5.598,
+        "signed": 2.709,
+        "rmse": 5.84
+       },
+       "moving": {
+        "rmse": 7.06,
+        "bias": 6.992,
+        "std": 0.975,
+        "d2": 0.75,
+        "pctD2Over4": 1.124
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": true,
+     "mirrorBias": 0.25,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 0.109,
+        "flicker": 0.061,
+        "bias": 5.624,
+        "signed": -0.16,
+        "rmse": 5.669
+       },
+       "moving": {
+        "rmse": 8.879,
+        "bias": 8.838,
+        "std": 0.85,
+        "d2": 0.731,
+        "pctD2Over4": 1.679
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 0.348,
+        "flicker": 0.212,
+        "bias": 10.404,
+        "signed": 4.656,
+        "rmse": 10.572
+       },
+       "moving": {
+        "rmse": 11.979,
+        "bias": 11.942,
+        "std": 0.938,
+        "d2": 0.669,
+        "pctD2Over4": 0.61
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 0.464,
+        "flicker": 0.271,
+        "bias": 9.744,
+        "signed": 4.823,
+        "rmse": 9.95
+       },
+       "moving": {
+        "rmse": 10.41,
+        "bias": 10.373,
+        "std": 0.878,
+        "d2": 0.695,
+        "pctD2Over4": 0.533
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 0.425,
+        "flicker": 0.227,
+        "bias": 6.978,
+        "signed": 3.362,
+        "rmse": 7.171
+       },
+       "moving": {
+        "rmse": 7.713,
+        "bias": 7.661,
+        "std": 0.895,
+        "d2": 0.729,
+        "pctD2Over4": 0.862
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": true,
+     "mirrorBias": 0.5,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 0.092,
+        "flicker": 0.049,
+        "bias": 5.811,
+        "signed": -0.231,
+        "rmse": 5.853
+       },
+       "moving": {
+        "rmse": 8.86,
+        "bias": 8.824,
+        "std": 0.8,
+        "d2": 0.714,
+        "pctD2Over4": 1.55
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 0.302,
+        "flicker": 0.181,
+        "bias": 12.855,
+        "signed": 5.495,
+        "rmse": 12.99
+       },
+       "moving": {
+        "rmse": 13.808,
+        "bias": 13.774,
+        "std": 0.969,
+        "d2": 0.649,
+        "pctD2Over4": 0.793
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 0.418,
+        "flicker": 0.251,
+        "bias": 13.78,
+        "signed": 7.259,
+        "rmse": 13.926
+       },
+       "moving": {
+        "rmse": 13.952,
+        "bias": 13.923,
+        "std": 0.896,
+        "d2": 0.659,
+        "pctD2Over4": 0.555
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 0.432,
+        "flicker": 0.235,
+        "bias": 9.75,
+        "signed": 5.575,
+        "rmse": 9.89
+       },
+       "moving": {
+        "rmse": 10.007,
+        "bias": 9.975,
+        "std": 0.8,
+        "d2": 0.698,
+        "pctD2Over4": 0.576
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": true,
+     "mirrorBias": 0.75,
+     "bins": [
+      {
+       "roughness": 0.1,
+       "px": 9607,
+       "still": {
+        "std": 0.085,
+        "flicker": 0.04,
+        "bias": 5.99,
+        "signed": -0.274,
+        "rmse": 6.033
+       },
+       "moving": {
+        "rmse": 8.906,
+        "bias": 8.876,
+        "std": 0.722,
+        "d2": 0.707,
+        "pctD2Over4": 1.495
+       }
+      },
+      {
+       "roughness": 0.2,
+       "px": 10560,
+       "still": {
+        "std": 0.256,
+        "flicker": 0.147,
+        "bias": 15.173,
+        "signed": 5.516,
+        "rmse": 15.287
+       },
+       "moving": {
+        "rmse": 15.546,
+        "bias": 15.517,
+        "std": 0.945,
+        "d2": 0.618,
+        "pctD2Over4": 0.978
+       }
+      },
+      {
+       "roughness": 0.3,
+       "px": 10545,
+       "still": {
+        "std": 0.347,
+        "flicker": 0.207,
+        "bias": 18.676,
+        "signed": 9.437,
+        "rmse": 18.782
+       },
+       "moving": {
+        "rmse": 18.465,
+        "bias": 18.442,
+        "std": 0.937,
+        "d2": 0.621,
+        "pctD2Over4": 0.798
+       }
+      },
+      {
+       "roughness": 0.4,
+       "px": 10412,
+       "still": {
+        "std": 0.391,
+        "flicker": 0.228,
+        "bias": 14.909,
+        "signed": 9.403,
+        "rmse": 14.999
+       },
+       "moving": {
+        "rmse": 14.908,
+        "bias": 14.89,
+        "std": 0.726,
+        "d2": 0.654,
+        "pctD2Over4": 0.402
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "mirrorWall-floor-r0.2": {
+   "size": [
+    960,
+    540
+   ],
+   "frames": 32,
+   "refFrames": 256,
+   "warm": 60,
+   "deg": 0.1,
+   "half": 10,
+   "passes": 12,
+   "binPx": [
+    191674
+   ],
+   "results": [
+    {
+     "aa": "upscaler",
+     "denoise": false,
+     "mirrorBias": 0,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 2.118,
+        "flicker": 0.664,
+        "bias": 3.413,
+        "signed": -0.13,
+        "rmse": 5.827
+       },
+       "moving": {
+        "rmse": 10.635,
+        "bias": 7.006,
+        "std": 8.001,
+        "d2": 9.477,
+        "pctD2Over4": 41.367
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": false,
+     "mirrorBias": 0.25,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 1.884,
+        "flicker": 0.641,
+        "bias": 8.377,
+        "signed": 0.565,
+        "rmse": 9.621
+       },
+       "moving": {
+        "rmse": 11.032,
+        "bias": 8.112,
+        "std": 7.477,
+        "d2": 8.791,
+        "pctD2Over4": 37.524
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": false,
+     "mirrorBias": 0.5,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 1.606,
+        "flicker": 0.58,
+        "bias": 11.092,
+        "signed": 0.559,
+        "rmse": 12.025
+       },
+       "moving": {
+        "rmse": 12.204,
+        "bias": 9.97,
+        "std": 7.039,
+        "d2": 7.644,
+        "pctD2Over4": 31.733
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": false,
+     "mirrorBias": 0.75,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 1.171,
+        "flicker": 0.447,
+        "bias": 14.014,
+        "signed": 0.67,
+        "rmse": 14.587
+       },
+       "moving": {
+        "rmse": 14.375,
+        "bias": 12.846,
+        "std": 6.451,
+        "d2": 6.384,
+        "pctD2Over4": 25.5
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": true,
+     "mirrorBias": 0,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 0.14,
+        "flicker": 0.013,
+        "bias": 9.818,
+        "signed": 1.718,
+        "rmse": 9.825
+       },
+       "moving": {
+        "rmse": 10.52,
+        "bias": 10.473,
+        "std": 0.999,
+        "d2": 0.501,
+        "pctD2Over4": 0.553
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": true,
+     "mirrorBias": 0.25,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 0.115,
+        "flicker": 0.011,
+        "bias": 9.705,
+        "signed": 2.207,
+        "rmse": 9.712
+       },
+       "moving": {
+        "rmse": 10.315,
+        "bias": 10.271,
+        "std": 0.946,
+        "d2": 0.486,
+        "pctD2Over4": 0.62
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": true,
+     "mirrorBias": 0.5,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 0.106,
+        "flicker": 0.01,
+        "bias": 10.237,
+        "signed": 1.756,
+        "rmse": 10.243
+       },
+       "moving": {
+        "rmse": 10.737,
+        "bias": 10.694,
+        "std": 0.957,
+        "d2": 0.493,
+        "pctD2Over4": 0.759
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": true,
+     "mirrorBias": 0.75,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 0.1,
+        "flicker": 0.01,
+        "bias": 11.688,
+        "signed": 1.211,
+        "rmse": 11.693
+       },
+       "moving": {
+        "rmse": 12.044,
+        "bias": 11.998,
+        "std": 1.053,
+        "d2": 0.505,
+        "pctD2Over4": 0.961
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": false,
+     "mirrorBias": 0,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 21.68,
+        "flicker": 23.92,
+        "bias": 0,
+        "signed": 0.003,
+        "rmse": 28.442
+       },
+       "moving": {
+        "rmse": 28.274,
+        "bias": 11.581,
+        "std": 25.794,
+        "d2": 44.586,
+        "pctD2Over4": 56.087
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": false,
+     "mirrorBias": 0.25,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 18.417,
+        "flicker": 21.028,
+        "bias": 6.164,
+        "signed": 0.748,
+        "rmse": 27.858
+       },
+       "moving": {
+        "rmse": 28.016,
+        "bias": 14.257,
+        "std": 24.117,
+        "d2": 39.526,
+        "pctD2Over4": 48.484
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": false,
+     "mirrorBias": 0.5,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 15.736,
+        "flicker": 18.19,
+        "bias": 10.139,
+        "signed": 0.834,
+        "rmse": 27.073
+       },
+       "moving": {
+        "rmse": 27.105,
+        "bias": 14.095,
+        "std": 23.152,
+        "d2": 34.531,
+        "pctD2Over4": 43.155
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": false,
+     "mirrorBias": 0.75,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 12.292,
+        "flicker": 14.607,
+        "bias": 14.077,
+        "signed": 0.941,
+        "rmse": 26.554
+       },
+       "moving": {
+        "rmse": 26.461,
+        "bias": 18.135,
+        "std": 19.27,
+        "d2": 28.068,
+        "pctD2Over4": 35.561
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": true,
+     "mirrorBias": 0,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 0.349,
+        "flicker": 0.188,
+        "bias": 9.162,
+        "signed": 4.782,
+        "rmse": 9.345
+       },
+       "moving": {
+        "rmse": 10.403,
+        "bias": 10.333,
+        "std": 1.205,
+        "d2": 0.704,
+        "pctD2Over4": 1.7
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": true,
+     "mirrorBias": 0.25,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 0.253,
+        "flicker": 0.152,
+        "bias": 11.161,
+        "signed": 5.214,
+        "rmse": 11.308
+       },
+       "moving": {
+        "rmse": 11.822,
+        "bias": 11.786,
+        "std": 0.92,
+        "d2": 0.595,
+        "pctD2Over4": 1.196
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": true,
+     "mirrorBias": 0.5,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 0.206,
+        "flicker": 0.13,
+        "bias": 12.505,
+        "signed": 4.731,
+        "rmse": 12.635
+       },
+       "moving": {
+        "rmse": 12.856,
+        "bias": 12.824,
+        "std": 0.909,
+        "d2": 0.572,
+        "pctD2Over4": 1.243
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": true,
+     "mirrorBias": 0.75,
+     "bins": [
+      {
+       "roughness": 0.2,
+       "px": 191674,
+       "still": {
+        "std": 0.168,
+        "flicker": 0.103,
+        "bias": 14.389,
+        "signed": 4.204,
+        "rmse": 14.501
+       },
+       "moving": {
+        "rmse": 14.458,
+        "bias": 14.43,
+        "std": 0.903,
+        "d2": 0.545,
+        "pctD2Over4": 1.277
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "mirrorWall-floor-r0.3": {
+   "size": [
+    960,
+    540
+   ],
+   "frames": 32,
+   "refFrames": 256,
+   "warm": 60,
+   "deg": 0.1,
+   "half": 10,
+   "passes": 12,
+   "binPx": [
+    190884
+   ],
+   "results": [
+    {
+     "aa": "upscaler",
+     "denoise": false,
+     "mirrorBias": 0,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 2.338,
+        "flicker": 0.653,
+        "bias": 3.733,
+        "signed": -0.306,
+        "rmse": 5.854
+       },
+       "moving": {
+        "rmse": 10.054,
+        "bias": 5.944,
+        "std": 8.11,
+        "d2": 9.72,
+        "pctD2Over4": 45.488
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": false,
+     "mirrorBias": 0.25,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 2.662,
+        "flicker": 0.75,
+        "bias": 9.461,
+        "signed": 1.429,
+        "rmse": 10.782
+       },
+       "moving": {
+        "rmse": 12.018,
+        "bias": 8.527,
+        "std": 8.469,
+        "d2": 10.118,
+        "pctD2Over4": 44.789
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": false,
+     "mirrorBias": 0.5,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 2.548,
+        "flicker": 0.778,
+        "bias": 13.066,
+        "signed": 1.857,
+        "rmse": 14.077
+       },
+       "moving": {
+        "rmse": 13.965,
+        "bias": 11.258,
+        "std": 8.262,
+        "d2": 9.998,
+        "pctD2Over4": 43.428
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": false,
+     "mirrorBias": 0.75,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 1.975,
+        "flicker": 0.688,
+        "bias": 17.012,
+        "signed": 1.874,
+        "rmse": 17.673
+       },
+       "moving": {
+        "rmse": 16.885,
+        "bias": 15.046,
+        "std": 7.663,
+        "d2": 8.989,
+        "pctD2Over4": 38.599
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": true,
+     "mirrorBias": 0,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 0.17,
+        "flicker": 0.015,
+        "bias": 7.944,
+        "signed": 1.279,
+        "rmse": 7.952
+       },
+       "moving": {
+        "rmse": 8.309,
+        "bias": 8.277,
+        "std": 0.725,
+        "d2": 0.403,
+        "pctD2Over4": 0.118
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": true,
+     "mirrorBias": 0.25,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 0.143,
+        "flicker": 0.013,
+        "bias": 9.446,
+        "signed": 3.339,
+        "rmse": 9.453
+       },
+       "moving": {
+        "rmse": 9.656,
+        "bias": 9.631,
+        "std": 0.699,
+        "d2": 0.392,
+        "pctD2Over4": 0.125
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": true,
+     "mirrorBias": 0.5,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 0.127,
+        "flicker": 0.011,
+        "bias": 11.278,
+        "signed": 3.695,
+        "rmse": 11.283
+       },
+       "moving": {
+        "rmse": 11.405,
+        "bias": 11.384,
+        "std": 0.694,
+        "d2": 0.396,
+        "pctD2Over4": 0.219
+       }
+      }
+     ]
+    },
+    {
+     "aa": "upscaler",
+     "denoise": true,
+     "mirrorBias": 0.75,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 0.111,
+        "flicker": 0.01,
+        "bias": 14.004,
+        "signed": 3.306,
+        "rmse": 14.008
+       },
+       "moving": {
+        "rmse": 13.997,
+        "bias": 13.979,
+        "std": 0.711,
+        "d2": 0.401,
+        "pctD2Over4": 0.335
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": false,
+     "mirrorBias": 0,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 23.691,
+        "flicker": 26.179,
+        "bias": 0,
+        "signed": 0.007,
+        "rmse": 28.628
+       },
+       "moving": {
+        "rmse": 28.567,
+        "bias": 10.316,
+        "std": 26.639,
+        "d2": 47.962,
+        "pctD2Over4": 64.903
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": false,
+     "mirrorBias": 0.25,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 22.995,
+        "flicker": 25.875,
+        "bias": 5.69,
+        "signed": 1.218,
+        "rmse": 30.222
+       },
+       "moving": {
+        "rmse": 30.279,
+        "bias": 12.919,
+        "std": 27.385,
+        "d2": 47.386,
+        "pctD2Over4": 60.404
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": false,
+     "mirrorBias": 0.5,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 21.338,
+        "flicker": 24.493,
+        "bias": 9.458,
+        "signed": 1.595,
+        "rmse": 30.366
+       },
+       "moving": {
+        "rmse": 30.334,
+        "bias": 13.707,
+        "std": 27.06,
+        "d2": 45.176,
+        "pctD2Over4": 56.662
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": false,
+     "mirrorBias": 0.75,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 18.61,
+        "flicker": 21.783,
+        "bias": 13.349,
+        "signed": 1.637,
+        "rmse": 30.003
+       },
+       "moving": {
+        "rmse": 30.036,
+        "bias": 18.162,
+        "std": 23.923,
+        "d2": 40.567,
+        "pctD2Over4": 51.012
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": true,
+     "mirrorBias": 0,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 0.398,
+        "flicker": 0.212,
+        "bias": 7.478,
+        "signed": 4.187,
+        "rmse": 7.706
+       },
+       "moving": {
+        "rmse": 8.437,
+        "bias": 8.383,
+        "std": 0.952,
+        "d2": 0.679,
+        "pctD2Over4": 1.057
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": true,
+     "mirrorBias": 0.25,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 0.364,
+        "flicker": 0.196,
+        "bias": 10.92,
+        "signed": 6.264,
+        "rmse": 11.077
+       },
+       "moving": {
+        "rmse": 11.248,
+        "bias": 11.218,
+        "std": 0.826,
+        "d2": 0.579,
+        "pctD2Over4": 0.68
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": true,
+     "mirrorBias": 0.5,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 0.311,
+        "flicker": 0.177,
+        "bias": 13.048,
+        "signed": 6.584,
+        "rmse": 13.177
+       },
+       "moving": {
+        "rmse": 13.104,
+        "bias": 13.082,
+        "std": 0.75,
+        "d2": 0.535,
+        "pctD2Over4": 0.612
+       }
+      }
+     ]
+    },
+    {
+     "aa": "off",
+     "denoise": true,
+     "mirrorBias": 0.75,
+     "bins": [
+      {
+       "roughness": 0.3,
+       "px": 190884,
+       "still": {
+        "std": 0.247,
+        "flicker": 0.15,
+        "bias": 15.47,
+        "signed": 6.152,
+        "rmse": 15.578
+       },
+       "moving": {
+        "rmse": 15.323,
+        "bias": 15.306,
+        "std": 0.725,
+        "d2": 0.498,
+        "pctD2Over4": 0.671
+       }
+      }
+     ]
+    }
+   ]
+  }
+ }
+}
