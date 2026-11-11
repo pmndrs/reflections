@@ -17,7 +17,7 @@
 // temporal path at ratio 1 (NativeAA); ?aa=taa is W40's resolve (D3500), ?aa=off (or ?taa=0) none.
 // ?upscale=quality|balanced|performance|ultra|<ratio>: G-buffer and reflections at the render size, upscaled.
 //
-// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?denoise=0 ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
+// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
 import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';
@@ -229,6 +229,8 @@ async function main() {
   }
 
   // ---- probes ----------------------------------------------------------------------------------------
+  /** `?bounces=` (default the package's 2, D4300; 1 halves the bake where no mirror or glossy surface faces another). */
+  let bounces: number | undefined = q.has('bounces') ? Number(q.get('bounces')) : undefined;
   function bake() {
     if (!probes || !kit) return;
     const t0 = performance.now();
@@ -237,7 +239,7 @@ async function main() {
     // the probes would make the floor near the model darker than the floor outside the probe box)
     const sc = kit.scene, keep = [sc.backgroundIntensity, sc.backgroundBlurriness] as const;
     if (sc.background === sc.environment) { sc.backgroundIntensity = sc.environmentIntensity; sc.backgroundBlurriness = 0; }
-    probes.bake(renderer, kit.scene, { ...(q.has('probeRes') ? { resolution: Number(q.get('probeRes')) } : {}), near: kit.bake.near, far: kit.bake.far });
+    probes.bake(renderer, kit.scene, { ...(q.has('probeRes') ? { resolution: Number(q.get('probeRes')) } : {}), ...(bounces !== undefined ? { bounces } : {}), near: kit.bake.near, far: kit.bake.far });
     [sc.backgroundIntensity, sc.backgroundBlurriness] = keep;
     nextNodeFrame();
     if (helper) helper.visible = state.helpers;
@@ -524,6 +526,18 @@ async function main() {
       setTAA(on: boolean) { setAA(on ? 'upscaler' : 'off'); },
       stop: stopLoop, start: startLoop,
       async step(n = 1) { for (let i = 0; i < n; i++) { frame(); await idle(); } },
+      /**
+       * W37 (D4300): re-bake with `n` bounces (undefined = the package default) and time it: wall
+       * clock from an idle queue to the queue draining again, loop stopped, median of `repeat`.
+       */
+      async bakeTime(n?: number, repeat = 5) {
+        stopLoop();
+        bounces = n;
+        const ms: number[] = [];
+        for (let i = 0; i < repeat; i++) { await idle(); const t0 = performance.now(); bake(); await idle(); ms.push(performance.now() - t0); }
+        ms.sort((a, b) => a - b);
+        return { bounces: n ?? 'default', probes: probes?.bakedProbes.length ?? 0, ms: ms[ms.length >> 1], all: ms };
+      },
       async shot() { frame(); const url = canvas.toDataURL('image/png'); await idle(); return url; },
       async info() {
         await idle();

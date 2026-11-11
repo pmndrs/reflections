@@ -36,6 +36,7 @@ type Lookup = 'auto' | 'cube-array' | SeamFix | 'hw' | 'legacy-warp' | 'legacy-n
 const params = {
   lookup: (q.get('lookup') ?? 'auto') as Lookup, resolution: Number(q.get('res') ?? 256), // the package default (D23)
   showProbes: false, showGrid: q.has('grid'), gridResolution: 6, gridSize: 0.12,
+  // bounces: 1 here, not the package's 2 (D4300): the #35046 parity page (`--compare`), captured live every frame
   boxProjection: true, refit: q.has('refit'), bounces: Number(q.get('bounces') ?? 1), dynamicObject: (q.get('obj') ?? 'Sphere') as 'None' | 'Sphere', pause: q.has('pause'), liveCapture: !q.has('static'), animateScene: !q.has('static'),
 };
 
