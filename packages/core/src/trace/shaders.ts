@@ -62,6 +62,7 @@ struct RtParams {
   motionVectorScale: vec2f,
   useHistory: u32,
   fallbackRoughnessSurface: u32,
+  hitSpecular: u32,
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
@@ -300,14 +301,7 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
   }
   var L = vec3f(0.0);
   var source = ${RT_SOURCE.tracedHit}u;
-  // On-screen reuse only for hits whose diffuse outweighs their specular lobe (W27b, D2751): the
-  // reused colour is the camera's view of the surface (with hitColor 'history', its reflections
-  // too), which for a metal (no diffuse: a mirror floor, metal paint) is a view-dependent term
-  // the ray doesn't see. Those are shaded (environment along the mirror direction) instead.
-  let hm = traceHitMaterial(hit);
-  let hs = traceHitSpecular(hit);
-  let specularDominant = max(hs.color.x, max(hs.color.y, hs.color.z)) + 0.04 * hs.clearcoat > max(hm.albedo.x, max(hm.albedo.y, hm.albedo.z));
-  if (P.reuseOnScreen != 0u && !specularDominant && onScreenRadiance(hitP, hitN, &L)) {
+  if (P.reuseOnScreen != 0u && onScreenRadiance(hitP, hitN, &L)) {
     source = ${RT_SOURCE.onScreenHit}u;
     atomicAdd(&state[${RT_STATE.onScreen}], 1u);
   } else {

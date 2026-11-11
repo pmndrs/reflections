@@ -728,7 +728,7 @@ async function rtHitShadingLines(p, id) {
   const fmt = (hs) => `mean ${hs.meanShaded.toFixed(3)} vs ${hs.meanScreen.toFixed(3)} (ratio ${hs.ratio.toFixed(3)}), mean abs rel ${hs.meanAbsRel.toFixed(3)}`;
   // off, on, off again: the second 'off' is the frame-to-frame noise of this per-pixel comparison
   // (not zero with reuse off on 'contact'); information, the check is on the shaded hits below
-  const hs = await p.T('window.__p.hitShadingError({}, [{ hitShadows: false }, { hitShadows: true }, { hitShadows: false }])');
+  const hs = await p.T('window.__p.hitShadingError({ hitSpecular: false }, [{ hitShadows: false }, { hitShadows: true }, { hitShadows: false }])');
   const [off, on, again] = hs.variants;
   console.log(`  rt ${id}: hit shading vs on-screen colour over ${on.pixels} traced hits the camera sees: shadows off ${fmt(off)}; on ${fmt(on)}; `
     + `> 1% darker with shadows ${(on.darker * 100).toFixed(1)}% (off vs off ${(again.darker * 100).toFixed(1)}%), brighter ${(on.brighter * 100).toFixed(2)}% (off vs off ${(again.brighter * 100).toFixed(2)}%)`);
@@ -739,7 +739,8 @@ async function rtHitShadingLines(p, id) {
   // D901 (W28): the kit scenes are lit by their probes (scene.environmentNode), so traced hits are
   // too; the environment mean (no bounce from the lit room) read 0.67-0.91x. Shadows on for both.
   await p.T('window.__p.setHitProbes(false)'); await p.T('window.__p.step(2)'); // rebuilds the traced pass
-  const env = await p.T('window.__p.hitShadingError()');
+  // the on-screen colour (hitColor 'current') has no specular: compare the diffuse part (W41, D3510)
+  const env = await p.T('window.__p.hitShadingError({ hitSpecular: false })');
   await p.T('window.__p.setHitProbes(true)'); await p.T('window.__p.step(2)');
   check(`rt ${id}: traced hits lit by the probes at the hit match the on-screen brightness (D901)`,
     hs.source === 'probes' && env.source === 'environment' && Math.abs(1 - on.ratio) <= 0.1 && Math.abs(1 - on.ratio) < Math.abs(1 - env.ratio),

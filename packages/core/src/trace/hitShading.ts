@@ -22,7 +22,7 @@
 // a shadow ray toward each directional light (the pass's `traceLightVisible`, any-hit; 1 with
 // `hitShadows` off; D903). The indirect and hemisphere terms are unshadowed.
 //
-// Plus, for providers with `traceHitSpecular` (W27b, D2750), the specular lobe and clear coat by
+// Plus, for providers with `traceHitSpecular` (W41, D3510), the specular lobe and clear coat by
 // `hitLayered` (three's split sum, the coat layered as three's finish()) on the radiance along the
 // mirror direction R at the hit's roughness: the environment (a cone around R whose width follows
 // the roughness; one sample below alpha 0.01), or the probe lookup at (P, R, roughness). Without it
@@ -78,14 +78,14 @@ fn hitLights(P: vec3f, N: vec3f) -> vec3f {
 `;
 
 const SPECULAR = /* wgsl */ `
-// The specular lobe and clear coat on top of the diffuse part (W27b, D2750); needs
+// The specular lobe and clear coat on top of the diffuse part (W41, D3510); needs
 // hitSpecularRadiance(P, R, roughness), the radiance along R at a perceptual roughness.
 fn hitShadeSurface(hit: Hit, P: vec3f, N: vec3f, dir: vec3f, emissive: vec3f, diffuse: vec3f) -> vec3f {
   let s = traceHitSpecular(hit);
-  if (max(s.color.x, max(s.color.y, s.color.z)) <= 0.0 && s.clearcoat <= 0.0) { return emissive + diffuse; }
+  if (P.hitSpecular == 0u || (max(s.color.x, max(s.color.y, s.color.z)) <= 0.0 && s.clearcoat <= 0.0)) { return emissive + diffuse; }
   let R = reflect(dir, N);
   let NdotV = clamp(dot(N, -dir), 1e-4, 1.0);
-  // Specular visibility (D2753): one any-hit ray along R; where geometry blocks it, what the lobe sees
+  // Specular visibility (D3513): one any-hit ray along R; where geometry blocks it, what the lobe sees
   // is not the environment / probe (a car's sill over a mirror floor sees its own underside). Rough
   // lobes leak around the blocker, so the occlusion fades out from roughness 0.3 to 1.
   var vis = 1.0;
@@ -259,7 +259,7 @@ ${UNIFORM_WGSL}
 @group(3) @binding(3) var<uniform> hitEnv: HitEnv;
 ${LIGHTS}
 // The probes along R at the hit's roughness (box-projected from the hit point, the environment slot
-// for the rest), as three's specular IBL with the probes as the environment (W27b, D2750).
+// for the rest), as three's specular IBL with the probes as the environment (W41, D3510).
 fn hitSpecularRadiance(P: vec3f, R: vec3f, roughness: f32) -> vec3f {
   return probeRadianceWithEnvironment(P, R, roughness) * hitEnv.intensity.x;
 }

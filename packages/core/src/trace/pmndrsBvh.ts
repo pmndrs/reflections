@@ -10,7 +10,7 @@
 //   1 triangles  every mesh's 48-byte triangles in tree order       (@pmndrs/bvh)
 //   2 top level  header, instance records, top-level nodes          (@pmndrs/bvh)
 //   3 shading    ours, array<vec4f>: a header row, the materials (albedo + clear coat, emissive + clear coat
-//                roughness, F0 + roughness (W27b); indexed by
+//                roughness, F0 + roughness (W41); indexed by
 //                GiHit.material), per instance its normal matrix + mesh, per mesh where its vertex
 //                normals and triangle corners are, then those corners and normals (D1700)
 //
@@ -50,8 +50,8 @@ export interface BvhTraceInstance {
 
 /**
  * Linear diffuse albedo and emitted radiance of a traced hit (WGSL `HitMaterial`), and its specular
- * lobe (WGSL `HitSpecular`, W27b): F0 (linear), perceptual roughness, clear coat factor and roughness.
- * Without `specular` the hit has no specular lobe (diffuse only, as before W27b).
+ * lobe (WGSL `HitSpecular`, W41): F0 (linear), perceptual roughness, clear coat factor and roughness.
+ * Without `specular` the hit has no specular lobe (diffuse only, as before W41).
  */
 export interface BvhTraceMaterial {
   readonly albedo: readonly [number, number, number];
@@ -134,7 +134,7 @@ export async function loadPmndrsBvh(module?: unknown): Promise<PmndrsBvhModule> 
   return bvh;
 }
 
-const MATERIAL_VEC4S = 3; // albedo + clear coat, emissive + clear coat roughness, F0 + roughness (W27b, D2750)
+const MATERIAL_VEC4S = 3; // albedo + clear coat, emissive + clear coat roughness, F0 + roughness (W41, D3510)
 const INSTANCE_VEC4S = 3;
 const NO_MATERIAL = 0xffffffff;
 

@@ -67,6 +67,12 @@ export interface TracedReflectionsSettings {
    * scene colour is already shadowed). Off: every light is unoccluded. Default true.
    */
   hitShadows?: boolean;
+  /**
+   * Shade the specular lobe and clear coat of traced hits whose provider has `traceHitSpecular`
+   * (W41, D3510). Off: hits are diffuse + emissive only, as before (what an on-screen colour without
+   * specular, hitColor 'current', compares against). Default true.
+   */
+  hitSpecular?: boolean;
   /** Relative view-distance tolerance for that test. Default 0.02. */
   onScreenDepthTolerance?: number;
   /** The fallback's `P.iblFactor`. Default 1. */
@@ -263,6 +269,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     f[56] = mvs[0]; f[57] = mvs[1];
     u[58] = (s.hitColor ?? 'current') === 'history' ? 1 : 0;
     u[59] = (s.fallbackRoughness ?? 'surface') === 'surface' ? 1 : 0;
+    u[60] = s.hitSpecular ?? true ? 1 : 0;
     device.queue.writeBuffer(params, 0, data);
   }
 

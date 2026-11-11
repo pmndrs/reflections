@@ -56,7 +56,7 @@ export const gbufferMetalness = /*@__PURE__*/ (Fn((builder: Builder) => {
 
 /**
  * How much of the base layer's specular survives a clear coat, three's `PhysicalLightingModel.finish`:
- * `1 - clearcoat x F_Schlick(0.04, 1, dot(clearcoatNormal, V))` (W27b, D2752); 1 without one. Folded
+ * `1 - clearcoat x F_Schlick(0.04, 1, dot(clearcoatNormal, V))` (W41, D3512); 1 without one. Folded
  * into `gbufferSpecular`'s weight, so the composite swaps the base layer's term at the weight three gave
  * it, not more (the full weight over-subtracted carConcept's red paint to black / cyan at grazing angles).
  */
@@ -95,7 +95,7 @@ function physicalLit(builder: Builder) {
  * besides that weight; 0 where the material has no environment). Materials without three's physical
  * lighting (basic, phong, lambert, unlit, custom output) write 0: their lit image has no such term,
  * so the composite leaves them as lit. rgb includes a clear coat's attenuation of the base layer
- * (W27b, D2752); the coat's own layer is not swapped. Not included (DIVERGES D603): sheen's energy compensation, iridescence's Fresnel, anisotropy's bent normal,
+ * (W41, D3512); the coat's own layer is not swapped. Not included (DIVERGES D603): sheen's energy compensation, iridescence's Fresnel, anisotropy's bent normal,
  * retroreflection, and a per-material `envMap` (the weight is right, the radiance the composite
  * looks up is the scene's).
  */
