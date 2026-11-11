@@ -17,6 +17,7 @@
 //   fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit
 //
 // and, if `capabilities.hitMaterial`, also `fn traceHitMaterial(hit: Hit) -> HitMaterial`;
+// if `capabilities.hitSpecular`, `fn traceHitSpecular(hit: Hit) -> HitSpecular` (W41, D3510);
 // if `capabilities.anyHit`, also
 //
 //   fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool
@@ -47,6 +48,11 @@ export interface TraceProviderCapabilities {
   readonly hitNormal: boolean;
   /** The provider defines `fn traceHitMaterial(hit: Hit) -> HitMaterial`. Otherwise the pass supplies a grey default. */
   readonly hitMaterial: boolean;
+  /**
+   * The provider defines `fn traceHitSpecular(hit: Hit) -> HitSpecular` (W41, D3510). Otherwise the
+   * pass supplies a no-specular default, so hits shade as before (diffuse + emissive only).
+   */
+  readonly hitSpecular?: boolean;
   /**
    * The provider defines `fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool` (an any-hit /
    * occlusion walk that may stop at the first triangle it finds). Otherwise the pass supplies one
@@ -117,11 +123,46 @@ struct HitMaterial {
   albedo: vec3f,
   emissive: vec3f,
 }
+
+// The specular lobe of a traced hit (W41, D3510): F0 (linear; mix(0.04, base, metalness) for a
+// metal-rough material), perceptual roughness, and a clear coat layer (three's / glTF's
+// KHR_materials_clearcoat: F0 0.04 over the base, factor and perceptual roughness).
+struct HitSpecular {
+  color: vec3f,
+  roughness: f32,
+  clearcoat: f32,
+  clearcoatRoughness: f32,
+}
+
+// Karis 2014 (mobile) analytic fit of the split-sum DFG term: F0 x A + B, at NdotV and perceptual
+// roughness. Close to three's DFGLUT for the hit's one sample; no texture needed in the trace pass.
+fn hitEnvBRDF(f0: vec3f, roughness: f32, NdotV: f32) -> vec3f {
+  let r = roughness * vec4f(-1.0, -0.0275, -0.572, 0.022) + vec4f(1.0, 0.0425, 1.04, -0.04);
+  let a004 = min(r.x * r.x, exp2(-9.28 * NdotV)) * r.x + r.y;
+  let ab = vec2f(-1.04, 1.04) * a004 + r.zw;
+  return f0 * ab.x + ab.y;
+}
+
+// What leaves a traced hit toward the ray origin, given its diffuse radiance (emissive excluded) and
+// the environment along the mirror direction at the base and clear coat roughness: three's
+// split-sum IBL (F0 x A + B) on the base, the clear coat layered on top as three does
+// (base x (1 - clearcoat x Fcc) + clearcoat x coat), Fcc = Schlick(0.04, 1, NdotV).
+fn hitLayered(s: HitSpecular, diffuse: vec3f, envBase: vec3f, envCoat: vec3f, NdotV: f32) -> vec3f {
+  let base = diffuse + envBase * hitEnvBRDF(s.color, s.roughness, NdotV);
+  let fcc = 0.04 + 0.96 * pow(1.0 - NdotV, 5.0);
+  let coat = envCoat * hitEnvBRDF(vec3f(0.04), s.clearcoatRoughness, NdotV);
+  return base * (1.0 - s.clearcoat * fcc) + s.clearcoat * coat;
+}
 `;
 
 /** `traceHitMaterial` for providers without materials: mid grey, no emission. */
 export const DEFAULT_HIT_MATERIAL_WGSL = /* wgsl */ `
 fn traceHitMaterial(hit: Hit) -> HitMaterial { return HitMaterial(vec3f(0.5), vec3f(0.0)); }
+`;
+
+/** `traceHitSpecular` for providers without it: no specular lobe, no clear coat (diffuse hits, as before W41). */
+export const DEFAULT_HIT_SPECULAR_WGSL = /* wgsl */ `
+fn traceHitSpecular(hit: Hit) -> HitSpecular { return HitSpecular(vec3f(0.0), 1.0, 0.0, 0.0); }
 `;
 
 /** `traceHitShadingNormal` for providers without vertex normals: none (the pass keeps the geometric normal). */
@@ -141,7 +182,7 @@ fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool { return traceFirstHit
  *
  * (world hit point, world normal facing the ray (the shading normal if the provider has one, D1700),
  * unit ray direction; returns the radiance leaving
- * P toward the ray origin). It may call `traceHitMaterial(hit)`, the pass's
+ * P toward the ray origin). It may call `traceHitMaterial(hit)`, `traceHitSpecular(hit)`, `hitLayered`, the pass's
  * `sampleRadianceFallback(P, dir, roughness)` and the pass's shadow query
  *
  *   fn traceLightVisible(P: vec3f, N: vec3f, L: vec3f, tMax: f32) -> bool
@@ -165,14 +206,22 @@ export interface HitShading {
 /**
  * Default hit shading (SPEC section 4, D11): emissive + albedo x the radiance fallback at the hit
  * point along the normal at roughness 1, i.e. a diffuse surface lit by whatever the fallback holds
- * (probes or the environment). No direct light, no shadows.
+ * (probes or the environment), plus the specular lobe (W41, D3510): the fallback along the mirror
+ * direction at the hit's roughness, by `hitLayered`. No direct light, no shadows.
  */
 export function fallbackHitShading(): HitShading {
   return {
     wgsl: /* wgsl */ `
 fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f {
   let m = traceHitMaterial(hit);
-  return m.emissive + m.albedo * sampleRadianceFallback(P, N, 1.0);
+  let s = traceHitSpecular(hit);
+  let diffuse = m.albedo * sampleRadianceFallback(P, N, 1.0);
+  if (!rtHitSpecularOn() || (max(s.color.x, max(s.color.y, s.color.z)) <= 0.0 && s.clearcoat <= 0.0)) { return m.emissive + diffuse; }
+  let R = reflect(dir, N);
+  let NdotV = clamp(dot(N, -dir), 1e-4, 1.0);
+  let envBase = sampleRadianceFallback(P, R, s.roughness);
+  let envCoat = select(envBase, sampleRadianceFallback(P, R, s.clearcoatRoughness), s.clearcoat > 0.0);
+  return m.emissive + hitLayered(s, diffuse, envBase, envCoat, NdotV);
 }
 `,
   };

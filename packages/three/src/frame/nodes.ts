@@ -1,8 +1,8 @@
 // TSL nodes for the frame-contract G-buffer (see ./FrameGBuffer.ts). Each is evaluated per material
 // at build time, so materials without a channel (basic, custom) get a sensible constant.
 import {
-  DFGLUT, Fn, ambientOcclusion, emissive, float, materialEnvIntensity, materialMetalness, materialRoughness, normalView, output,
-  positionViewDirection, property, roughness, specularColorBlended, specularF90, vec4,
+  DFGLUT, F_Schlick, Fn, ambientOcclusion, clearcoat, clearcoatNormalView, emissive, float, materialEnvIntensity, materialMetalness, materialRoughness, normalView, output,
+  positionViewDirection, property, roughness, specularColorBlended, specularF90, vec3, vec4,
 } from 'three/tsl';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,6 +55,21 @@ export const gbufferMetalness = /*@__PURE__*/ (Fn((builder: Builder) => {
 }) as N)();
 
 /**
+ * How much of the base layer's specular survives a clear coat, three's `PhysicalLightingModel.finish`:
+ * `1 - clearcoat x F_Schlick(0.04, 1, dot(clearcoatNormal, V))` (W41, D3512); 1 without one. Folded
+ * into `gbufferSpecular`'s weight, so the composite swaps the base layer's term at the weight three gave
+ * it, not more (the full weight over-subtracted carConcept's red paint to black / cyan at grazing angles).
+ */
+function clearcoatBaseScale(builder: Builder): N {
+  const m = builder.material;
+  const coated = m != null && ((typeof m.clearcoat === 'number' && m.clearcoat > 0) || m.clearcoatNode != null);
+  if (!coated) return float(1);
+  const dotNVcc: N = (clearcoatNormalView as N).dot(positionViewDirection).clamp();
+  const Fcc: N = (F_Schlick as N)({ dotVH: dotNVcc, f0: vec3(0.04), f90: float(1) }).x;
+  return float(1).sub((clearcoat as N).mul(Fcc));
+}
+
+/**
  * Materials whose lit colour carries three's physical environment specular (MeshStandard /
  * MeshPhysical and their node twins, lit, no custom fragment or output node).
  */
@@ -79,8 +94,8 @@ function physicalLit(builder: Builder) {
  * a = specularOcclusion x materialEnvIntensity (what three's environment radiance was multiplied by
  * besides that weight; 0 where the material has no environment). Materials without three's physical
  * lighting (basic, phong, lambert, unlit, custom output) write 0: their lit image has no such term,
- * so the composite leaves them as lit. Not included (DIVERGES D603): clearcoat's attenuation of the
- * base layer, sheen's energy compensation, iridescence's Fresnel, anisotropy's bent normal,
+ * so the composite leaves them as lit. rgb includes a clear coat's attenuation of the base layer
+ * (W41, D3512); the coat's own layer is not swapped. Not included (DIVERGES D603): sheen's energy compensation, iridescence's Fresnel, anisotropy's bent normal,
  * retroreflection, and a per-material `envMap` (the weight is right, the radiance the composite
  * looks up is the scene's).
  */
@@ -89,7 +104,7 @@ export const gbufferSpecular = /*@__PURE__*/ (Fn((builder: Builder) => {
   const m = builder.material;
   const dotNV: N = (normalView as N).dot(positionViewDirection).clamp();
   const dfg: N = (DFGLUT as N)({ roughness, dotNV });
-  const single: N = (specularColorBlended as N).mul(dfg.x).add((specularF90 as N).mul(dfg.y));
+  const single: N = (specularColorBlended as N).mul(dfg.x).add((specularF90 as N).mul(dfg.y)).mul(clearcoatBaseScale(builder));
   const hasEnvironment = m.envNode != null || m.envMap != null || builder.environmentNode != null;
   if (!hasEnvironment) return vec4(single, 0);
   // PhysicalLightingModel.ambientOcclusion: Lagarde's specular occlusion at three's roughness

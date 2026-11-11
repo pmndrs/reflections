@@ -9,7 +9,8 @@
 //   0 nodes      every mesh tree's 64-byte nodes                    (@pmndrs/bvh)
 //   1 triangles  every mesh's 48-byte triangles in tree order       (@pmndrs/bvh)
 //   2 top level  header, instance records, top-level nodes          (@pmndrs/bvh)
-//   3 shading    ours, array<vec4f>: a header row, the materials (albedo, emissive; indexed by
+//   3 shading    ours, array<vec4f>: a header row, the materials (albedo + clear coat, emissive + clear coat
+//                roughness, F0 + roughness (W41); indexed by
 //                GiHit.material), per instance its normal matrix + mesh, per mesh where its vertex
 //                normals and triangle corners are, then those corners and normals (D1700)
 //
@@ -47,10 +48,18 @@ export interface BvhTraceInstance {
   readonly material?: number;
 }
 
-/** Linear diffuse albedo and emitted radiance of a traced hit (WGSL `HitMaterial`). */
+/**
+ * Linear diffuse albedo and emitted radiance of a traced hit (WGSL `HitMaterial`), and its specular
+ * lobe (WGSL `HitSpecular`, W41): F0 (linear), perceptual roughness, clear coat factor and roughness.
+ * Without `specular` the hit has no specular lobe (diffuse only, as before W41).
+ */
 export interface BvhTraceMaterial {
   readonly albedo: readonly [number, number, number];
   readonly emissive?: readonly [number, number, number];
+  readonly specular?: readonly [number, number, number];
+  readonly roughness?: number;
+  readonly clearcoat?: number;
+  readonly clearcoatRoughness?: number;
 }
 
 export interface BvhTraceScene {
@@ -125,7 +134,7 @@ export async function loadPmndrsBvh(module?: unknown): Promise<PmndrsBvhModule> 
   return bvh;
 }
 
-const MATERIAL_VEC4S = 2;
+const MATERIAL_VEC4S = 3; // albedo + clear coat, emissive + clear coat roughness, F0 + roughness (W41, D3510)
 const INSTANCE_VEC4S = 3;
 const NO_MATERIAL = 0xffffffff;
 
@@ -150,6 +159,13 @@ fn traceHitMaterial(hit: Hit) -> HitMaterial {
   if (hit.material >= pbvhHeader().x) { return HitMaterial(vec3f(0.5), vec3f(0.0)); }
   let row = 1u + hit.material * ${MATERIAL_VEC4S}u;
   return HitMaterial(pbvhShading[row].rgb, pbvhShading[row + 1u].rgb);
+}
+
+fn traceHitSpecular(hit: Hit) -> HitSpecular {
+  if (hit.material >= pbvhHeader().x) { return HitSpecular(vec3f(0.0), 1.0, 0.0, 0.0); }
+  let row = 1u + hit.material * ${MATERIAL_VEC4S}u;
+  let spec = pbvhShading[row + 2u];
+  return HitSpecular(spec.rgb, spec.w, pbvhShading[row].w, pbvhShading[row + 1u].w);
 }
 
 ${shadingNormal ? `// D1700: the mesh's vertex normals at the triangle's corners, weighted by the barycentrics, through
@@ -195,7 +211,7 @@ export interface PmndrsBvhBuildInfo {
  */
 export class PmndrsBvhTraceProvider implements TraceProvider {
   readonly name = '@pmndrs/bvh';
-  readonly capabilities: { readonly hitNormal: true; readonly hitMaterial: true; readonly anyHit: true; readonly shadingNormal: boolean };
+  readonly capabilities: { readonly hitNormal: true; readonly hitMaterial: true; readonly hitSpecular: true; readonly anyHit: true; readonly shadingNormal: boolean };
   readonly layoutVersion: number;
   readonly entries: readonly ModuleBindingEntry[];
   readonly storageBufferCount: number;
@@ -216,7 +232,7 @@ export class PmndrsBvhTraceProvider implements TraceProvider {
   ) {
     this.layoutVersion = bvh.GPU_LAYOUT_VERSION;
     this.shading = packShading(materials, instances, meshes);
-    this.capabilities = { hitNormal: true, hitMaterial: true, anyHit: true, shadingNormal: this.shading.hasNormals };
+    this.capabilities = { hitNormal: true, hitMaterial: true, hitSpecular: true, anyHit: true, shadingNormal: this.shading.hasNormals };
     this.entries = [...bvh.TRACE_MODULE_ENTRIES, { visibility: 0x4, buffer: { type: 'read-only-storage' } }];
     this.storageBufferCount = this.entries.length;
     const upload = (label: string, data: ArrayBuffer | Float32Array) => {
@@ -323,11 +339,12 @@ function packShading(materials: readonly BvhTraceMaterial[], instances: readonly
   const data = new Float32Array(rows * 4);
   const u = new Uint32Array(data.buffer);
   u[0] = materials.length; u[1] = instanceRow; u[2] = meshRow; u[3] = instances.length;
-  data.set([0.5, 0.5, 0.5, 1], materialRow * 4);
+  data.set([0.5, 0.5, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 1], materialRow * 4);
   materials.forEach((m, i) => {
     const o = (materialRow + i * MATERIAL_VEC4S) * 4;
-    data.set([m.albedo[0], m.albedo[1], m.albedo[2], 1], o);
-    data.set([m.emissive?.[0] ?? 0, m.emissive?.[1] ?? 0, m.emissive?.[2] ?? 0, 0], o + 4);
+    data.set([m.albedo[0], m.albedo[1], m.albedo[2], m.clearcoat ?? 0], o);
+    data.set([m.emissive?.[0] ?? 0, m.emissive?.[1] ?? 0, m.emissive?.[2] ?? 0, m.clearcoatRoughness ?? 0], o + 4);
+    data.set([m.specular?.[0] ?? 0, m.specular?.[1] ?? 0, m.specular?.[2] ?? 0, m.roughness ?? 1], o + 8);
   });
   writeInstances(data, instanceRow, instances);
   meshes.forEach((m, i) => {

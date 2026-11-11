@@ -17,7 +17,8 @@
 //                                  matrices when `builder.needsPreviousData()`, i.e. `mrt.has('velocity')`.
 //   lit (optional)   rgba16float   three's full lit output (+8 bytes: needs a raised limit, see `lit`)
 //   specular (opt.)  rgba16float   three's environment-specular weights (with `lit`, +8 bytes, D603):
-//                                  rgb = single scattering (specularColorBlended x DFG.x + specularF90 x DFG.y),
+//                                  rgb = single scattering (specularColorBlended x DFG.x + specularF90 x DFG.y)
+//                                        x the clear coat's base scale (1 - cc Fcc, D3512),
 //                                  a = specular occlusion x material env intensity (./nodes.ts `gbufferSpecular`)
 //   shadingRoughness r16float      three's shading roughness (geometry-adjusted, >= 0.045; with `specular`, +2 bytes, D403)
 //   depth            depth32float  hardware depth (reverse-Z if the renderer uses it)

@@ -44,6 +44,9 @@ const VIEWS = {
   rtSource: 'Ray-traced pass per pixel',
   confidence: 'Screen-space confidence',
   hitDistance: 'Hit distance',
+  hitRadiance: 'Hit radiance (tracer, x confidence)',
+  specular: 'Specular radiance (composited, unweighted)',
+  probeSpecular: 'Probe / environment radiance (subtracted)',
 } as const;
 type View = keyof typeof VIEWS;
 const VIEW_IDS = Object.keys(VIEWS) as View[];
@@ -145,6 +148,9 @@ async function main() {
         return c.geometry.select(dim.add(col.mul(0.75)), vec3(0));
       })(),
       confidence: c.geometry.select(vec3(c.confidence), vec3(0.02, 0.03, 0.08)),
+      hitRadiance: c.geometry.select(tone(c.ssr), vec3(0)),
+      specular: c.geometry.select(tone(c.specular), vec3(0)),
+      probeSpecular: c.geometry.select(tone(c.probeSpecular), vec3(0)),
       hitDistance: (() => { const d: N = c.hitDistance; return d.greaterThan(0).select((vec3(1, 0.8, 0.5) as N).mul(d.div(d.add(2))), vec3(0)); })(),
     };
     let out: N = vec3(0);

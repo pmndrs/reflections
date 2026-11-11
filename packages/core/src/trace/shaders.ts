@@ -62,6 +62,7 @@ struct RtParams {
   motionVectorScale: vec2f,
   useHistory: u32,
   fallbackRoughnessSurface: u32,
+  hitSpecular: u32,
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
@@ -137,6 +138,9 @@ fn traceLightVisible(hitP: vec3f, N: vec3f, L: vec3f, tMax: f32) -> bool {
   let origin = hitP + N * (P.normalOffset * length(hitP - P.cameraPosition));
   return !traceAny(origin, L, tMax);
 }
+
+// The pass's hitSpecular setting (W41, D3510); a function, since hit shading names its point P.
+fn rtHitSpecularOn() -> bool { return P.hitSpecular != 0u; }
 
 ${parts.hitShadingWgsl}
 

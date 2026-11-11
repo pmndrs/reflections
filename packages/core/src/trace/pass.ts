@@ -12,7 +12,7 @@
 import { constantRadianceFallback, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs } from '../sssr/sssr';
 import { mat4Invert, mat4Mul } from '../sssr/math';
 import { PassTimer } from '../sssr/timer';
-import { DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_SHADING_NORMAL_WGSL, DEFAULT_TRACE_ANY_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
+import { DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, DEFAULT_SHADING_NORMAL_WGSL, DEFAULT_TRACE_ANY_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
 import { RT_BEGIN_WGSL, RT_PARAMS_SIZE, RT_STATE, RT_STATE_HEADER, rtTraceWgsl } from './shaders';
 
 export interface TracedReflectionsOptions {
@@ -67,6 +67,12 @@ export interface TracedReflectionsSettings {
    * scene colour is already shadowed). Off: every light is unoccluded. Default true.
    */
   hitShadows?: boolean;
+  /**
+   * Shade the specular lobe and clear coat of traced hits whose provider has `traceHitSpecular`
+   * (W41, D3510). Off: hits are diffuse + emissive only, as before (what an on-screen colour without
+   * specular, hitColor 'current', compares against). Default true.
+   */
+  hitSpecular?: boolean;
   /** Relative view-distance tolerance for that test. Default 0.02. */
   onScreenDepthTolerance?: number;
   /** The fallback's `P.iblFactor`. Default 1. */
@@ -208,7 +214,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   const code = rtTraceWgsl({
     fallbackWgsl: fallback.wgsl,
     providerWgsl: provider.code({ group: 2, firstBinding: 0 }),
-    materialWgsl: provider.capabilities.hitMaterial ? '' : DEFAULT_HIT_MATERIAL_WGSL,
+    materialWgsl: (provider.capabilities.hitMaterial ? '' : DEFAULT_HIT_MATERIAL_WGSL) + (provider.capabilities.hitSpecular ? '' : DEFAULT_HIT_SPECULAR_WGSL),
     anyHitWgsl: provider.capabilities.anyHit ? '' : DEFAULT_TRACE_ANY_WGSL,
     shadingNormalWgsl: provider.capabilities.shadingNormal ? '' : DEFAULT_SHADING_NORMAL_WGSL,
     hitShadingWgsl: shading.wgsl,
@@ -263,6 +269,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     f[56] = mvs[0]; f[57] = mvs[1];
     u[58] = (s.hitColor ?? 'current') === 'history' ? 1 : 0;
     u[59] = (s.fallbackRoughness ?? 'surface') === 'surface' ? 1 : 0;
+    u[60] = s.hitSpecular ?? true ? 1 : 0;
     device.queue.writeBuffer(params, 0, data);
   }
 

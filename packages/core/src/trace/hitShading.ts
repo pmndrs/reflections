@@ -21,6 +21,13 @@
 // The light terms are three's (BRDF_Lambert = albedo / pi, hemisphere weight 0.5 N.up + 0.5). V is
 // a shadow ray toward each directional light (the pass's `traceLightVisible`, any-hit; 1 with
 // `hitShadows` off; D903). The indirect and hemisphere terms are unshadowed.
+//
+// Plus, for providers with `traceHitSpecular` (W41, D3510), the specular lobe and clear coat by
+// `hitLayered` (three's split sum, the coat layered as three's finish()) on the radiance along the
+// mirror direction R at the hit's roughness: the environment (a cone around R whose width follows
+// the roughness; one sample below alpha 0.01), or the probe lookup at (P, R, roughness). Without it
+// a metal hit (albedo x (1 - metalness) = 0) was black: a mirror floor or metal car paint seen by
+// a ray.
 import type { HitShading } from './provider';
 import { probeLookupWgsl, type ProbeLookupOptions } from '../probes/lookup';
 import type { ProbeSet } from '../probes/set';
@@ -70,10 +77,33 @@ fn hitLights(P: vec3f, N: vec3f) -> vec3f {
 }
 `;
 
+const SPECULAR = /* wgsl */ `
+// The specular lobe and clear coat on top of the diffuse part (W41, D3510); needs
+// hitSpecularRadiance(P, R, roughness), the radiance along R at a perceptual roughness.
+fn hitShadeSurface(hit: Hit, P: vec3f, N: vec3f, dir: vec3f, emissive: vec3f, diffuse: vec3f) -> vec3f {
+  let s = traceHitSpecular(hit);
+  if (!rtHitSpecularOn() || (max(s.color.x, max(s.color.y, s.color.z)) <= 0.0 && s.clearcoat <= 0.0)) { return emissive + diffuse; }
+  let R = reflect(dir, N);
+  let NdotV = clamp(dot(N, -dir), 1e-4, 1.0);
+  // Specular visibility (D3513): one any-hit ray along R; where geometry blocks it, what the lobe sees
+  // is not the environment / probe (a car's sill over a mirror floor sees its own underside). Rough
+  // lobes leak around the blocker, so the occlusion fades out from roughness 0.3 to 1.
+  var vis = 1.0;
+  if (!traceLightVisible(P, N, R, HIT_SHADOW_RAY_LENGTH)) { vis = smoothstep(0.3, 1.0, s.roughness); }
+  let envBase = hitSpecularRadiance(P, R, s.roughness) * vis;
+  var envCoat = envBase;
+  if (s.clearcoat > 0.0 && abs(s.clearcoatRoughness - s.roughness) > 0.02) { envCoat = hitSpecularRadiance(P, R, s.clearcoatRoughness) * select(smoothstep(0.3, 1.0, s.clearcoatRoughness), 1.0, vis >= 1.0); }
+  return emissive + hitLayered(s, diffuse, envBase, envCoat, NdotV);
+}
+`;
+
 // The environment's cosine-weighted hemisphere mean (needs `hitEnvSample`).
 const SHADE = /* wgsl */ `
 const HIT_ENV_SAMPLES: u32 = 32u;
-fn hitEnvMean(N: vec3f) -> vec3f {
+fn hitEnvMean(N: vec3f) -> vec3f { return hitEnvLobe(N, 1.0, false); }
+// Mean of the environment over a cone around N: disk radius 'spread' in the tangent plane (1 = the
+// cosine-weighted hemisphere). 'sharp' reads the full-resolution environment (specular).
+fn hitEnvLobe(N: vec3f, spread: f32, sharp: bool) -> vec3f {
   // tangent frame (Duff et al. 2017)
   let s = select(-1.0, 1.0, N.z >= 0.0);
   let a = -1.0 / (s + N.z);
@@ -84,17 +114,25 @@ fn hitEnvMean(N: vec3f) -> vec3f {
   for (var i = 0u; i < HIT_ENV_SAMPLES; i++) {
     // cosine-weighted: r = sqrt(u), phi = golden angle x i
     let u = (f32(i) + 0.5) / f32(HIT_ENV_SAMPLES);
-    let r = sqrt(u);
+    let r = sqrt(u) * spread;
     let phi = f32(i) * 2.39996323;
-    let d = T * (r * cos(phi)) + B * (r * sin(phi)) + N * sqrt(max(0.0, 1.0 - u));
-    sum += hitEnvSample(d);
+    let d = T * (r * cos(phi)) + B * (r * sin(phi)) + N * sqrt(max(0.0, 1.0 - r * r));
+    if (sharp) { sum += hitEnvSampleSharp(d); } else { sum += hitEnvSample(d); }
   }
   return sum / f32(HIT_ENV_SAMPLES);
 }
 ${LIGHTS}
+// The environment along R at perceptual roughness r: one sample for near-mirrors, else a cone whose
+// radius follows alpha (a rough stand-in for the prefiltered GGX lobe).
+fn hitSpecularRadiance(P: vec3f, R: vec3f, roughness: f32) -> vec3f {
+  let alpha = roughness * roughness;
+  if (alpha < 0.01) { return hitEnvSampleSharp(R) * hitEnv.intensity.x; }
+  return hitEnvLobe(R, min(1.0, 2.0 * alpha), true) * hitEnv.intensity.x;
+}
+${SPECULAR}
 fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f {
   let m = traceHitMaterial(hit);
-  return m.emissive + m.albedo * (hitEnvMean(N) * hitEnv.intensity.x + hitLights(P, N));
+  return hitShadeSurface(hit, P, N, dir, m.emissive, m.albedo * (hitEnvMean(N) * hitEnv.intensity.x + hitLights(P, N)));
 }
 `;
 
@@ -110,13 +148,15 @@ fn hitEnvTexel(c: vec2i, size: vec2i) -> vec3f {
 }
 fn hitEnvSample(d: vec3f) -> vec3f {
   let size = vec2i(textureDimensions(hitEnvTexture, 0));
-  let uv = vec2f(atan2(d.z, d.x) * 0.15915494 + 0.5, asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5);
+  let dx = select(d.x, 1e-6, abs(d.x) + abs(d.z) < 1e-6); // atan2(0, 0) is NaN on some backends (the poles)
+  let uv = vec2f(atan2(d.z, dx) * 0.15915494 + 0.5, asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5);
   let p = uv * vec2f(size) - 0.5;
   let i = vec2i(floor(p));
   let f = p - floor(p);
   return mix(mix(hitEnvTexel(i, size), hitEnvTexel(i + vec2i(1, 0), size), f.x),
              mix(hitEnvTexel(i + vec2i(0, 1), size), hitEnvTexel(i + vec2i(1, 1), size), f.x), f.y);
 }
+fn hitEnvSampleSharp(d: vec3f) -> vec3f { return hitEnvSample(d); }
 `;
 
 const CUBE = /* wgsl */ `${UNIFORM_WGSL}
@@ -128,6 +168,7 @@ fn hitEnvSample(d: vec3f) -> vec3f {
   let mip = max(0.0, f32(textureNumLevels(hitEnvTexture)) - 4.0);
   return textureSampleLevel(hitEnvTexture, hitEnvSampler, d, mip).rgb;
 }
+fn hitEnvSampleSharp(d: vec3f) -> vec3f { return textureSampleLevel(hitEnvTexture, hitEnvSampler, d, 0.0).rgb; }
 `;
 
 /** The `HitEnv` uniform (intensity, lights) and its writer, shared by both hit shadings. */
@@ -217,12 +258,18 @@ const PROBE_SHADE = /* wgsl */ `
 ${UNIFORM_WGSL}
 @group(3) @binding(3) var<uniform> hitEnv: HitEnv;
 ${LIGHTS}
+// The probes along R at the hit's roughness (box-projected from the hit point, the environment slot
+// for the rest), as three's specular IBL with the probes as the environment (W41, D3510).
+fn hitSpecularRadiance(P: vec3f, R: vec3f, roughness: f32) -> vec3f {
+  return probeRadianceWithEnvironment(P, R, roughness) * hitEnv.intensity.x;
+}
+${SPECULAR}
 fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f {
   let m = traceHitMaterial(hit);
   // three's diffuse IBL with the probes as the environment: lookup(P, N, roughness 1) x pi x
   // intensity x albedo / pi; probes first, the environment slot for the rest
   let E = probeRadianceWithEnvironment(P, N, 1.0);
-  return m.emissive + m.albedo * (E * hitEnv.intensity.x + hitLights(P, N));
+  return hitShadeSurface(hit, P, N, dir, m.emissive, m.albedo * (E * hitEnv.intensity.x + hitLights(P, N)));
 }
 `;
 

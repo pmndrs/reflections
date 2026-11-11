@@ -11,8 +11,9 @@
 //               triangle offset, split axis or (leaf flag << 16 | triangle count), 2 pad.
 //               A TLAS leaf holds the transform slot in the low 24 bits and the BLAS root node.
 //   transforms  36 words per slot: matrixWorld, inverseMatrixWorld, visible, 3 pad words. We pack
-//               the slot's material into the pad words (albedo rgba8, emissive as 3 halves), the
-//               hook three-mesh-bvh's writeTransformData comment names for this.
+//               the slot's material into the pad words (W41): albedo rgb8 + roughness 8, emissive
+//               rgb9e5, specular F0 as sqrt-encoded rgb565 + clear coat 8 + clear coat roughness 8;
+//               the hook three-mesh-bvh's writeTransformData comment names for this.
 //   index       u32 triangle corners (rebased into the packed attributes)
 //   attributes  the interleaved per-vertex struct: `position` (first vec4f) and, when packed (the
 //               default of `fromObjects`), `normal` for the interpolated shading normal (D1700).
@@ -24,10 +25,18 @@
 import * as THREE from 'three/webgpu';
 import type { BindingSlot, ModuleBindingEntry, TraceProvider } from '@pmndrs/reflections-core';
 
-/** Linear diffuse albedo and emitted radiance of a traced hit (WGSL `HitMaterial`). */
+/**
+ * Linear diffuse albedo and emitted radiance of a traced hit (WGSL `HitMaterial`), and its specular
+ * lobe (WGSL `HitSpecular`, W41, D3510): F0 (linear), perceptual roughness, clear coat factor and
+ * roughness. Without `specular` the hit is diffuse only (as before W41).
+ */
 export interface HitMaterial {
   albedo: readonly [number, number, number];
   emissive: readonly [number, number, number];
+  specular?: readonly [number, number, number];
+  roughness?: number;
+  clearcoat?: number;
+  clearcoatRoughness?: number;
 }
 
 /** The parts of three-mesh-bvh's `BVHComputeData` this provider reads (structural, so the optional peer stays optional for types too). */
@@ -53,8 +62,9 @@ export interface MeshBVHTraceProviderOptions {
   shadingNormals?: boolean;
   /**
    * The material a mesh contributes to traced-hit shading. Default {@link defaultHitMaterial}:
-   * diffuse albedo `color x mean(map) x (1 - metalness)` and `emissive x mean(emissiveMap) x
-   * emissiveIntensity` (one colour per mesh: D902).
+   * diffuse albedo `color x mean(map) x (1 - metalness) x (1 - transmission)`, `emissive x
+   * mean(emissiveMap) x emissiveIntensity`, specular F0 `mix(0.04, base, metalness)`, roughness and
+   * clear coat (one set per mesh: D902, D3510).
    */
   material?: (mesh: THREE.Mesh) => HitMaterial;
 }
@@ -96,24 +106,39 @@ export function textureMeanColor(t: THREE.Texture): [number, number, number] | n
 }
 
 /**
- * Default hit material of a three mesh (first material of a multi-material mesh): diffuse albedo
- * `color x mean(map) x (1 - metalness)` and `emissive x mean(emissiveMap) x emissiveIntensity`.
+ * Default hit material of a three mesh (first material of a multi-material mesh), one set per mesh
+ * from the material's scalars x the mean of its maps (D902):
+ * - diffuse albedo `color x mean(map) x (1 - metalness) x (1 - transmission)`;
+ * - `emissive x mean(emissiveMap) x emissiveIntensity`;
+ * - specular F0 `mix(0.04, color x mean(map), metalness)` (W41, D3510; standard and physical
+ *   materials only), roughness `roughness x mean(roughnessMap).g`, metalness `x mean(metalnessMap).b`,
+ *   clear coat `clearcoat x mean(clearcoatMap).r` and `clearcoatRoughness` (physical materials).
  */
 export function defaultHitMaterial(mesh: THREE.Mesh): HitMaterial {
-  const m = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshStandardMaterial | undefined;
+  const m = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshPhysicalMaterial | undefined;
   const albedo: [number, number, number] = [0.5, 0.5, 0.5];
   const emissive: [number, number, number] = [0, 0, 0];
+  const out: HitMaterial = { albedo, emissive };
+  const pbr = typeof m?.metalness === 'number' && typeof m?.roughness === 'number';
+  const metalness = pbr ? m!.metalness * (m!.metalnessMap ? textureMeanColor(m!.metalnessMap)?.[2] ?? 1 : 1) : 0;
   if (m?.color) {
-    const k = 1 - (m.metalness ?? 0);
     const t = m.map ? textureMeanColor(m.map) ?? [1, 1, 1] : [1, 1, 1];
-    albedo[0] = m.color.r * t[0] * k; albedo[1] = m.color.g * t[1] * k; albedo[2] = m.color.b * t[2] * k;
+    const base = [m.color.r * t[0], m.color.g * t[1], m.color.b * t[2]];
+    const k = (1 - metalness) * (1 - (m.transmission ?? 0));
+    albedo[0] = base[0] * k; albedo[1] = base[1] * k; albedo[2] = base[2] * k;
+    if (pbr) {
+      out.specular = base.map((b) => 0.04 + (b - 0.04) * metalness) as [number, number, number];
+      out.roughness = m.roughness * (m.roughnessMap ? textureMeanColor(m.roughnessMap)?.[1] ?? 1 : 1);
+      out.clearcoat = (m.clearcoat ?? 0) * (m.clearcoatMap ? textureMeanColor(m.clearcoatMap)?.[0] ?? 1 : 1);
+      out.clearcoatRoughness = m.clearcoatRoughness ?? 0;
+    }
   }
   if (m?.emissive) {
     const k = m.emissiveIntensity ?? 1;
     const t = m.emissiveMap ? textureMeanColor(m.emissiveMap) ?? [1, 1, 1] : [1, 1, 1];
     emissive[0] = m.emissive.r * t[0] * k; emissive[1] = m.emissive.g * t[1] * k; emissive[2] = m.emissive.b * t[2] * k;
   }
-  return { albedo, emissive };
+  return out;
 }
 
 /** vec4f slot of `normal` in the attribute struct (every member a vec4f), or -1. */
@@ -394,14 +419,42 @@ fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
   return Hit(r.dist, r.indices.w, r.barycoord.yz, r.objectIndex, r.objectIndex, r.normal, r.side > 0.0);
 }
 
+fn tmbRgb9e5(p: u32) -> vec3f {
+  let scale = exp2(f32(p >> 27u) - 24.0); // exponent bias 15, 9 mantissa bits
+  return vec3f(f32(p & 511u), f32((p >> 9u) & 511u), f32((p >> 18u) & 511u)) * scale;
+}
 fn traceHitMaterial(hit: Hit) -> HitMaterial {
   if (hit.material == 0xffffffffu) { return HitMaterial(vec3f(0.5), vec3f(0.0)); }
   let w = tmbExtra(hit.material);
-  return HitMaterial(unpack4x8unorm(w.y).rgb, vec3f(unpack2x16float(w.z), unpack2x16float(w.w).x));
+  return HitMaterial(unpack4x8unorm(w.y).rgb, tmbRgb9e5(w.z));
+}
+fn traceHitSpecular(hit: Hit) -> HitSpecular {
+  if (hit.material == 0xffffffffu) { return HitSpecular(vec3f(0.0), 1.0, 0.0, 0.0); }
+  let w = tmbExtra(hit.material);
+  let f = vec3f(f32(w.w & 31u) / 31.0, f32((w.w >> 5u) & 63u) / 63.0, f32((w.w >> 11u) & 31u) / 31.0);
+  let cc = unpack4x8unorm(w.w);
+  return HitSpecular(f * f, unpack4x8unorm(w.y).w, cc.z, cc.w);
 }
 ${normal >= 0 ? shadingNormalWgsl(normal) : ''}`;
 
-const toHalf = THREE.DataUtils.toHalfFloat;
+/** Shared-exponent rgb9e5 (as WebGPU's rgb9e5ufloat): HDR emissive in one word. */
+function rgb9e5(c: readonly [number, number, number]): number {
+  const MAX = (511 / 512) * 2 ** 16;
+  const [r, g, b] = c.map((v) => Math.min(MAX, Math.max(0, v || 0)));
+  const m = Math.max(r, g, b);
+  if (m <= 0) return 0;
+  let e = Math.max(-16, Math.floor(Math.log2(m))) + 1 + 15;
+  let d = 2 ** (e - 24);
+  if (Math.floor(m / d + 0.5) >= 512) { e += 1; d *= 2; }
+  const q = (v: number) => Math.min(511, Math.floor(v / d + 0.5));
+  return (q(r) | (q(g) << 9) | (q(b) << 18) | (e << 27)) >>> 0;
+}
+/** Specular F0 as rgb565 of its square root (dielectric 0.04 decodes to 0.037-0.043, not 0.032-0.048). */
+function sqrt565(c: readonly [number, number, number]): number {
+  const q = (v: number, n: number) => Math.round(Math.sqrt(Math.min(1, Math.max(0, v))) * n);
+  return q(c[0], 31) | (q(c[1], 63) << 5) | (q(c[2], 31) << 11);
+}
+
 const unorm8 = (x: number) => Math.round(Math.min(1, Math.max(0, x)) * 255);
 
 /**
@@ -416,7 +469,7 @@ const unorm8 = (x: number) => Math.round(Math.min(1, Math.max(0, x)) * 255);
 export class MeshBVHTraceProvider implements TraceProvider {
   readonly name = 'three-mesh-bvh';
   readonly storageBufferCount = 4;
-  readonly capabilities: { readonly hitNormal: true; readonly hitMaterial: true; readonly anyHit: true; readonly shadingNormal: boolean };
+  readonly capabilities: { readonly hitNormal: true; readonly hitMaterial: true; readonly hitSpecular: true; readonly anyHit: true; readonly shadingNormal: boolean };
   readonly entries: readonly ModuleBindingEntry[] = [0, 1, 2, 3].map(() => ({ visibility: 0x4, buffer: { type: 'read-only-storage' as const } }));
   readonly data: MeshBVHComputeDataLike;
   private buffers: GPUBuffer[] = [];
@@ -430,7 +483,7 @@ export class MeshBVHTraceProvider implements TraceProvider {
   constructor(readonly device: GPUDevice, data: MeshBVHComputeDataLike, private readonly options: MeshBVHTraceProviderOptions = {}) {
     this.data = data;
     this.normal = options.shadingNormals === false ? -1 : normalSlot(data);
-    this.capabilities = { hitNormal: true, hitMaterial: true, anyHit: true, shadingNormal: this.normal >= 0 };
+    this.capabilities = { hitNormal: true, hitMaterial: true, hitSpecular: true, anyHit: true, shadingNormal: this.normal >= 0 };
     this.upload();
   }
 
@@ -488,9 +541,9 @@ export class MeshBVHTraceProvider implements TraceProvider {
     for (const { object, slot } of map.values()) {
       const m = (object as THREE.Mesh).isMesh ? material(object as THREE.Mesh) : { albedo: [0.5, 0.5, 0.5], emissive: [0, 0, 0] } as HitMaterial;
       const o = slot * LAYOUT.transformWords + 33;
-      transforms[o] = unorm8(m.albedo[0]) | (unorm8(m.albedo[1]) << 8) | (unorm8(m.albedo[2]) << 16) | (255 << 24);
-      transforms[o + 1] = toHalf(m.emissive[0]) | (toHalf(m.emissive[1]) << 16);
-      transforms[o + 2] = toHalf(m.emissive[2]);
+      transforms[o] = (unorm8(m.albedo[0]) | (unorm8(m.albedo[1]) << 8) | (unorm8(m.albedo[2]) << 16) | (unorm8(m.roughness ?? 1) << 24)) >>> 0;
+      transforms[o + 1] = rgb9e5(m.emissive);
+      transforms[o + 2] = (sqrt565(m.specular ?? [0, 0, 0]) | (unorm8(m.clearcoat ?? 0) << 16) | (unorm8(m.clearcoatRoughness ?? 0) << 24)) >>> 0;
     }
   }
 
