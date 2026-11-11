@@ -6,7 +6,9 @@ import * as THREE from 'three/webgpu';
 import { Fn, instanceIndex, instancedArray, positionWorld, vec3, vec4 } from 'three/tsl';
 import {
   ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, reflectionProbes, sampleReflectionProbes, sampleReflectionProbesLocal,
+  installCubeArraySupport, cubeArraySupported,
 } from '@pmndrs/reflections/three';
+import { ProbeIrradiance, createProbeLayout } from '@pmndrs/reflections/core';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -365,6 +367,157 @@ export function makeChecks(p: Page) {
       for (const set of sets) set.dispose();
       test.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); } });
       return { left, right, keysDiffer: keys[0] !== keys[1] };
+    },
+
+    /**
+     * D805 (W35): probe sets of different layouts in one shader. The page's set (a cube array with
+     * the shim, else the 2D array 'warp') plus 2D-array sets of the other seam fixes, all baked from
+     * the same scene, sampled by one compute kernel and by one kernel per set at the same inputs.
+     * Each set's value in the shared kernel must equal its own kernel's, bit for bit.
+     */
+    async mixedLayouts() {
+      const sets: ReflectionProbes[] = [p.probes];
+      const fixes = p.probes.bakedLayout === 'cube-array' ? ['warp', 'none'] as const : [p.probes.bakedSeamFix === 'warp' ? 'none' : 'warp'] as const;
+      const grid = p.grid.visible, object = p.dynamicObject.visible, helper = p.probesHelper.visible;
+      p.grid.visible = p.probesHelper.visible = p.dynamicObject.visible = false;
+      for (const seamFix of fixes) {
+        const set = new ReflectionProbes();
+        set.layout = 'cube2d';
+        set.seamFix = seamFix;
+        for (const probe of p.probes.children as ReflectionProbe[]) set.add(probe.clone());
+        nextFrame();
+        set.bake(renderer, scene, bakeOptions());
+        sets.push(set);
+      }
+      p.grid.visible = grid; p.dynamicObject.visible = object; p.probesHelper.visible = helper;
+      let seed = 7;
+      const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 4294967296);
+      const n = 256;
+      const rows: number[] = [];
+      for (let i = 0; i < n; i++) {
+        const d = new THREE.Vector3(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1).normalize();
+        rows.push(rnd() * 18 - 9, rnd() * 6 - 0.5, rnd() * 9 - 4.5, i % 8 === 0 ? 0 : i % 8 === 1 ? 1 : rnd(), d.x, d.y, d.z, 0);
+      }
+      const input = instancedArray(new Float32Array(rows) as never, 'vec4') as N;
+      const K = sets.length;
+      const kernelFor = (which: number[]) => {
+        const output = instancedArray(n * K, 'vec4') as N;
+        const kernel = Fn(() => {
+          const P = input.element(instanceIndex.mul(2)).xyz.toVar(), r = input.element(instanceIndex.mul(2)).w.toVar();
+          const dir = input.element(instanceIndex.mul(2).add(1)).xyz.toVar();
+          for (const k of which) output.element(instanceIndex.mul(K).add(k)).assign(vec4(sampleReflectionProbes(sets[k], P, dir, r), 1));
+        })().compute(n) as N;
+        return { output, kernel };
+      };
+      const read = async (which: number[]) => {
+        const { output, kernel } = kernelFor(which);
+        await renderer.computeAsync(kernel);
+        return new Float32Array(await renderer.getArrayBufferAsync(output.value));
+      };
+      const shared = await read(sets.map((_, k) => k));
+      const tone = (x: number) => (255 * Math.max(x, 0)) / (1 + Math.max(x, 0));
+      const per = [];
+      for (let k = 0; k < K; k++) {
+        const own = await read([k]);
+        let maxAbs = 0, max255 = 0, q255 = 0, lum = 0;
+        for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) {
+          const a = shared[(i * K + k) * 4 + c], b = own[(i * K + k) * 4 + c];
+          maxAbs = Math.max(maxAbs, Number.isFinite(a) && Number.isFinite(b) ? Math.abs(a - b) : Infinity);
+          max255 = Math.max(max255, Math.abs(tone(a) - tone(b)));
+          q255 = Math.max(q255, Math.abs(Math.round(tone(a)) - Math.round(tone(b))));
+          lum += b / (3 * n);
+        }
+        per.push({ layout: sets[k].bakedLayout === 'cube-array' ? 'cube-hw' : `cube2d-${sets[k].bakedSeamFix}`, maxAbs, max255, q255, lum });
+      }
+      for (const set of sets.slice(1)) set.dispose();
+      return { sets: per };
+    },
+
+    /**
+     * D2204 (W35): the view dimensions the atlas is bound with, over two bakes that each make a new
+     * atlas (so the materials bind it afresh) and a render after each, recorded by wrapping
+     * GPUTexture.createView and GPUDevice.createBindGroup. A cube-array atlas must only ever be
+     * bound as 'cube-array' (compatibility mode fixes a texture's binding view dimension). Plus the
+     * bake's irradiance (now read through the cube-array view) against the old path, core
+     * ProbeIrradiance as cube2d-none over a '2d-array' view of the same texture.
+     */
+    async atlasBindings() {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const device: GPUDevice = (renderer.backend as any).device;
+      const views = new WeakMap<GPUTextureView, { texture: GPUTexture; dimension: string }>();
+      const bound = new Map<GPUTexture, Set<string>>();
+      const createView = GPUTexture.prototype.createView, createBindGroup = GPUDevice.prototype.createBindGroup;
+      GPUTexture.prototype.createView = function (this: GPUTexture, d?: GPUTextureViewDescriptor) {
+        const v = createView.call(this, d);
+        views.set(v, { texture: this, dimension: d?.dimension ?? 'default' });
+        return v;
+      };
+      GPUDevice.prototype.createBindGroup = function (this: GPUDevice, d: GPUBindGroupDescriptor) {
+        for (const e of d.entries) {
+          const v = e.resource instanceof GPUTextureView ? views.get(e.resource) : undefined;
+          if (v) { let s = bound.get(v.texture); if (!s) bound.set(v.texture, (s = new Set())); s.add(v.dimension); }
+        }
+        return createBindGroup.call(this, d);
+      };
+      const atlases: GPUTexture[] = [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const atlas = (): GPUTexture => (renderer.backend as any).get(p.probes.texture).texture;
+      const res = p.params.resolution;
+      try {
+        for (const r of [res / 2, res]) {
+          bake({ resolution: r });
+          atlases.push(atlas());
+          await p.shot();
+        }
+      } finally {
+        GPUTexture.prototype.createView = createView;
+        GPUDevice.prototype.createBindGroup = createBindGroup;
+      }
+      const dims = atlases.map((t) => [...(bound.get(t) ?? [])]);
+      // irradiance: the bake's (cube-array view) vs the 2D-array view of the same texture
+      const target = atlases[1];
+      const read = async (b: GPUBuffer) => {
+        const rb = device.createBuffer({ size: b.size, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+        const enc = device.createCommandEncoder(); enc.copyBufferToBuffer(b, 0, rb, 0, b.size); device.queue.submit([enc.finish()]);
+        await rb.mapAsync(GPUMapMode.READ);
+        const out = new Float32Array(rb.getMappedRange().slice(0)); rb.destroy();
+        return out;
+      };
+      const baked = await read(p.probes.irradiance!);
+      // the pre-W35 path: the atlas as a 2D array, a cube array read as cube2d-none (its texel centres)
+      const oldId = p.probes.bakedLayout === 'cube-array' || p.probes.bakedSeamFix === 'none' ? 'cube2d-none' : 'cube2d-warp';
+      const old = new ProbeIrradiance(device, createProbeLayout(oldId, { maxLod: target.mipLevelCount - 1 }), { mirrorX: true });
+      const buf = device.createBuffer({ size: p.probes.irradiance!.size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+      const enc = device.createCommandEncoder();
+      old.encode(enc, target.createView({ dimension: '2d-array' }), buf, 0, Array.from({ length: p.probes.bakedProbes.length + 1 }, (_, i) => i));
+      device.queue.submit([enc.finish()]);
+      const ref = await read(buf);
+      buf.destroy();
+      let maxErr = 0, scale = 0;
+      for (let i = 0; i < ref.length; i++) { maxErr = Math.max(maxErr, Math.abs(baked[i] - ref[i])); scale = Math.max(scale, Math.abs(ref[i])); }
+      return { layout: p.probes.bakedLayout, dims, irradiance: { maxErr, scale, rel: maxErr / scale } };
+    },
+
+    /**
+     * D2204 (W35): a renderer on a compatibility-mode device (no 'core-features-and-limits'): the
+     * cube-array shim declines (compat devices can't create 'cube-array' views), so 'auto' probe
+     * sets bake into the 2D array there.
+     */
+    async compatShim() {
+      const adapter = await navigator.gpu.requestAdapter({ featureLevel: 'compatibility' } as GPURequestAdapterOptions);
+      if (!adapter) return { available: false };
+      const device = await adapter.requestDevice({});
+      const r = new THREE.WebGPURenderer({ canvas: new OffscreenCanvas(16, 16) as never, device } as ConstructorParameters<typeof THREE.WebGPURenderer>[0]);
+      await r.init();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const compat = (r.backend as any).compatibilityMode === true;
+      const ok = await installCubeArraySupport(r);
+      const set = new ReflectionProbes();
+      const storage = set.storageFor(r);
+      const out = { available: true, compat, installed: ok, supported: cubeArraySupported(r), storage };
+      r.dispose();
+      device.destroy();
+      return out;
     },
 
     /** Time slicing: three `bake({ probes: [one] })` calls equal one full bake; one call alone doesn't. */

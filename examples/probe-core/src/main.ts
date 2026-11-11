@@ -4,11 +4,17 @@
 //             coverage against the volume weights computed on the CPU, radiance against cube-hw rgba16f
 //   refit     a constant capture (c) with a frame irradiance of 2 pi c: the L1 SH of each probe is pi c,
 //             so the re-fit doubles every lookup; plus Lagarde's specular occlusion at fixed inputs
+//   mixed     D805: sets of three layouts (cube2d-warp, cube-hw, octa) in one shader module
+//             (probeLookupWgsl([...]) with suffixes), each against its own single-set module, bit for bit
+//   transform D1805 / D2104 (W35): the capture transform. Captures in three's (x-mirrored),
+//             Babylon's (y-mirrored) and pixi-3d's (camera images) conventions, made from the test
+//             captures by a face remap, each looked up through its transform against the plain set
 //   sssr      the core tracer on its analytic scene (examples/sssr-core) with probeRadianceFallback: a
 //             probe set holding the constant c must give the image of the constant fallback c, bit for
 //             bit; a structured capture must change the fallback pixels
 import {
-  ProbeSet, createScreenSpaceReflections, createTracedReflections, constantRadianceFallback, type TraceProvider, type TracedReflectionsStats, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
+  ProbeSet, probeLookupWgsl, ProbeCaptureRemap, LayoutPrefilter, createProbeLayout, maxLodFor, CAPTURE_MIRROR_X, CAPTURE_MIRROR_Y, CAPTURE_BABYLON_FACES, CAPTURE_CAMERA_FACES, type ProbeCaptureTransform,
+  createScreenSpaceReflections, createTracedReflections, constantRadianceFallback, type TraceProvider, type TracedReflectionsStats, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
   type FrameInputs, type ProbeLayoutId, type ProbeSetFormat, type ProbeVolume, type ScreenSpaceReflectionsInputs, reflectionsRequiredLimits,
 } from '@pmndrs/reflections/core';
 import { lookAt, perspective, SCENE_WGSL } from '../../sssr-core/src/scene';
@@ -214,8 +220,131 @@ async function main() {
     result.refit = { constErr, refitErr, soErr, autoErr, offErr };
     say(`constant capture: max rel err ${constErr.toExponential(2)}; re-fit x2: ${refitErr.toExponential(2)}; specular occlusion: ${soErr.toExponential(2)}`);
 
+    result.mixed = await mixed();
+    result.transform = await transform();
     result.sssr = await sssr();
     return result;
+  }
+
+  // ---- D1805 / D2104: the capture transform
+  async function transform() {
+    const kinds = [0, 1, 3, 0];
+    // a capture in another engine's convention, made from a WebGPU-convention cube by a face remap
+    const derive = (faces: ProbeCaptureTransform) => {
+      const remap = new ProbeCaptureRemap(device, faces);
+      const enc = device.createCommandEncoder();
+      const out = kinds.map((k) => {
+        const t = device.createTexture({ size: [SOURCE, SOURCE, 6], format: 'rgba16float', usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC });
+        remap.encode(enc, cubes[k], t);
+        return t;
+      });
+      device.queue.submit([enc.finish()]);
+      remap.dispose();
+      return out;
+    };
+    // the world mirrored in x (three's CubeCamera): ±X swapped, every face flipped in x; the world
+    // mirrored in y (a Babylon ReflectionProbe on WebGPU): ±Y swapped, rows flipped (both are their
+    // own inverse); camera images (pixi-3d): every face flipped in x
+    const three = derive({ faces: [1, 0, 2, 3, 4, 5].map((layer) => ({ layer, flipX: true })) });
+    const babylon = derive(CAPTURE_BABYLON_FACES);
+    const camera = derive(CAPTURE_CAMERA_FACES);
+    const run = async (sources: GPUTexture[], o: { mirrorX?: boolean; captureTransform?: ProbeCaptureTransform }) => {
+      const set = new ProbeSet(device, { capacity: 3, sourceSize: SOURCE, ...o });
+      const enc = device.createCommandEncoder();
+      for (let s = 0; s < 3; s++) set.capture(enc, s, sources[s]);
+      set.captureEnvironment(enc, sources[3]);
+      set.setVolumes(volumes);
+      set.update();
+      set.computeIrradiance(enc);
+      const pipe = device.createComputePipeline({
+        layout: device.createPipelineLayout({ bindGroupLayouts: [evalBgl, set.bindGroupLayout] }),
+        compute: { module: device.createShaderModule({ code: set.wgsl({ group: 1 }) + EVAL_WGSL }), entryPoint: 'main' },
+      });
+      const p = enc.beginComputePass(); p.setPipeline(pipe); p.setBindGroup(0, evalGroup); p.setBindGroup(1, set.bindGroup); p.dispatchWorkgroups(COUNT / 64); p.end();
+      device.queue.submit([enc.finish()]);
+      const out = await readBuffer(outBuf);
+      const table = await readBuffer(set.table);
+      const irr = table.slice(set.irradianceRow * 4);
+      set.dispose();
+      return { out, irr };
+    };
+    const ref = await run(kinds.map((k) => cubes[k]), {});
+    const exact = (a: Float32Array, b: Float32Array) => { let m = 0; for (let i = 0; i < a.length; i++) m = Math.max(m, Number.isFinite(a[i]) && Number.isFinite(b[i]) ? Math.abs(a[i] - b[i]) : Infinity); return m; };
+    // L1 SH rows (radiance coefficients) against the plain set's, relative to its largest
+    const irrErr = (a: Float32Array) => { let m = 0, s = 0; for (let i = 0; i < ref.irr.length; i++) { m = Math.max(m, Math.abs(a[i] - ref.irr[i])); s = Math.max(s, Math.abs(ref.irr[i])); } return m / s; };
+    const rows: Record<string, unknown>[] = [];
+    const add = async (name: string, sources: GPUTexture[], o: { mirrorX?: boolean; captureTransform?: ProbeCaptureTransform }) => {
+      const r = await run(sources, o);
+      const row = { name, exact: exact(r.out, ref.out), full: compare(r.out, ref.out, 1), local: compare(r.out, ref.out, 0), irr: irrErr(r.irr), out: r.out };
+      rows.push(row);
+      say(`capture transform ${name} vs plain: max ${row.exact.toExponential(1)}; full mean ${row.full.mean.toFixed(3)} p99 ${row.full.p99.toFixed(2)} max ${row.full.max.toFixed(1)} /255; SH rel err ${row.irr.toExponential(1)}`);
+      return row;
+    };
+    const alias = await add('three mirrorX', three, { mirrorX: true });
+    const axesX = await add('three axes [-x, y, z]', three, { captureTransform: CAPTURE_MIRROR_X });
+    await add('babylon faces (D1805 pass)', babylon, { captureTransform: CAPTURE_BABYLON_FACES });
+    await add('babylon axes [x, -y, z]', babylon, { captureTransform: CAPTURE_MIRROR_Y });
+    await add('pixi-3d camera faces', camera, { captureTransform: CAPTURE_CAMERA_FACES });
+    const aliasErr = exact(alias.out as Float32Array, axesX.out as Float32Array);
+    let both = '';
+    try { new ProbeSet(device, { capacity: 1, sourceSize: SOURCE, mirrorX: true, captureTransform: CAPTURE_MIRROR_Y }).dispose(); } catch (e) { both = String((e as Error).message); }
+    for (const t of [...three, ...babylon, ...camera]) t.destroy();
+    return { aliasErr, both, rows: rows.map(({ out: _out, ...r }) => r) };
+  }
+
+  // ---- D805: three layouts in one module, against each layout's own module (evaluate())
+  async function mixed() {
+    const cfgs: { layout: ProbeLayoutId; size?: number; suffix: string }[] = [
+      { layout: 'cube2d-warp', suffix: '' }, { layout: 'cube-hw', suffix: 'Hw' }, { layout: 'octa', size: 160, suffix: 'Octa' },
+    ];
+    const kinds = [0, 1, 3, 0];
+    const sets = cfgs.map((c) => {
+      const set = new ProbeSet(device, { capacity: 3, sourceSize: SOURCE, layout: c.layout, size: c.size });
+      const enc = device.createCommandEncoder();
+      for (let s = 0; s < 3; s++) set.capture(enc, s, cubes[kinds[s]]);
+      set.captureEnvironment(enc, cubes[kinds[3]]);
+      device.queue.submit([enc.finish()]);
+      set.setVolumes(volumes);
+      set.update();
+      return set;
+    });
+    const out = device.createBuffer({ size: COUNT * cfgs.length * 2 * 16, usage: U.STORAGE | U.COPY_SRC });
+    const code = probeLookupWgsl(sets.map((set, k) => set.lookupOptions({ group: k + 1, suffix: cfgs[k].suffix }))) + /* wgsl */ `
+@group(0) @binding(0) var<storage, read> pts: array<vec4f>;
+@group(0) @binding(1) var<storage, read_write> outv: array<vec4f>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let i = id.x;
+  if (i >= arrayLength(&pts) / 3u) { return; }
+  let P = pts[3u * i].xyz; let R = pts[3u * i + 1u].xyz; let r = pts[3u * i + 1u].w;
+${cfgs.map((c, k) => `  outv[${cfgs.length * 2}u * i + ${2 * k}u] = probeRadiance${c.suffix}(P, R, r);
+  outv[${cfgs.length * 2}u * i + ${2 * k + 1}u] = vec4f(probeRadianceWithEnvironment${c.suffix}(P, R, r), 1.0);`).join('\n')}
+}`;
+    const pipe = device.createComputePipeline({
+      layout: device.createPipelineLayout({ bindGroupLayouts: [evalBgl, ...sets.map((s) => s.bindGroupLayout)] }),
+      compute: { module: device.createShaderModule({ code }), entryPoint: 'main' },
+    });
+    const enc = device.createCommandEncoder();
+    const p = enc.beginComputePass(); p.setPipeline(pipe);
+    p.setBindGroup(0, device.createBindGroup({ layout: evalBgl, entries: [{ binding: 0, resource: { buffer: ptsBuf } }, { binding: 1, resource: { buffer: out } }] }));
+    sets.forEach((set, k) => p.setBindGroup(k + 1, set.bindGroup));
+    p.dispatchWorkgroups(COUNT / 64); p.end();
+    device.queue.submit([enc.finish()]);
+    const shared = await readBuffer(out);
+    out.destroy();
+    for (const set of sets) set.dispose();
+    const res = [];
+    for (let k = 0; k < cfgs.length; k++) {
+      const own = await evaluate({ layout: cfgs[k].layout, size: cfgs[k].size, kinds });
+      let maxAbs = 0;
+      for (let i = 0; i < COUNT; i++) for (let row = 0; row < 2; row++) for (let c = 0; c < 4; c++) {
+        const a = shared[(i * cfgs.length * 2 + 2 * k + row) * 4 + c], b = own[(i * 3 + row) * 4 + c];
+        maxAbs = Math.max(maxAbs, Number.isFinite(a) && Number.isFinite(b) ? Math.abs(a - b) : Infinity);
+      }
+      res.push({ layout: cfgs[k].layout, suffix: cfgs[k].suffix, maxAbs });
+    }
+    say(`mixed layouts in one module vs their own: ${res.map((r) => `${r.layout} max ${r.maxAbs}`).join(', ')}`);
+    return res;
   }
 
   // ---- the SSSR radiance-fallback seam on sssr-core's analytic scene
@@ -316,8 +445,119 @@ fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
     return res;
   }
 
+  // ---- D2204 (W35): compatibility mode. A device without 'core-features-and-limits' fixes each
+  // texture's binding view dimension at creation (textureBindingViewDimension).
+  async function compat() {
+    const a = await navigator.gpu.requestAdapter({ featureLevel: 'compatibility' } as GPURequestAdapterOptions);
+    if (!a) return { available: false };
+    const dev = await a.requestDevice({});
+    const isCompat = !dev.features.has('core-features-and-limits' as GPUFeatureName);
+    const errors: string[] = [];
+    dev.addEventListener('uncapturederror', (e) => errors.push((e as GPUUncapturedErrorEvent).error.message));
+    // which binding view dimensions does it allow a 6-layer texture to be created with and bound as?
+    const bind = async (declared: GPUTextureViewDimension, dim: GPUTextureViewDimension) => {
+      dev.pushErrorScope('validation');
+      const t = dev.createTexture({ size: [8, 8, 6], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING, textureBindingViewDimension: declared } as GPUTextureDescriptor);
+      const created = await dev.popErrorScope();
+      if (created) { t.destroy(); return `create: ${created.message.split('\n')[0].slice(0, 120)}`; }
+      dev.pushErrorScope('validation');
+      const bgl = dev.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { viewDimension: dim } }] });
+      dev.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: t.createView({ dimension: dim }) }] });
+      const e = await dev.popErrorScope();
+      t.destroy();
+      return e ? `bind: ${e.message.split('\n')[0].slice(0, 120)}` : 'ok';
+    };
+    const dims = {
+      cubeArrayAsCubeArray: await bind('cube-array', 'cube-array'), cubeArrayAs2dArray: await bind('cube-array', '2d-array'),
+      cubeAsCube: await bind('cube', 'cube'), arrayAs2dArray: await bind('2d-array', '2d-array'), arrayAsCube: await bind('2d-array', 'cube'),
+    };
+    // the probe core on this device: the same capture and lookups as evaluate() on the core device
+    const cubeOn = dev.createComputePipeline({ layout: 'auto', compute: { module: dev.createShaderModule({ code: CUBE_WGSL }), entryPoint: 'main' } });
+    const cube = dev.createTexture({ size: [SOURCE, SOURCE, 6], format: 'rgba16float', usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC });
+    {
+      const u = dev.createBuffer({ size: 16, usage: U.UNIFORM | U.COPY_DST });
+      dev.queue.writeBuffer(u, 0, new Uint32Array([SOURCE, 0, 0, 0]));
+      const enc = dev.createCommandEncoder();
+      const p = enc.beginComputePass(); p.setPipeline(cubeOn);
+      p.setBindGroup(0, dev.createBindGroup({ layout: cubeOn.getBindGroupLayout(0), entries: [{ binding: 0, resource: cube.createView({ dimension: '2d-array' }) }, { binding: 1, resource: { buffer: u } }] }));
+      p.dispatchWorkgroups(SOURCE / 8, SOURCE / 8, 6); p.end();
+      dev.queue.submit([enc.finish()]);
+    }
+    const ptsOn = dev.createBuffer({ size: pts.byteLength, usage: U.STORAGE | U.COPY_DST });
+    dev.queue.writeBuffer(ptsOn, 0, pts);
+    const outOn = dev.createBuffer({ size: pts.byteLength, usage: U.STORAGE | U.COPY_SRC });
+    const readOn = async (b: GPUBuffer) => {
+      const r = dev.createBuffer({ size: b.size, usage: U.MAP_READ | U.COPY_DST });
+      const enc = dev.createCommandEncoder(); enc.copyBufferToBuffer(b, 0, r, 0, b.size); dev.queue.submit([enc.finish()]);
+      await r.mapAsync(GPUMapMode.READ);
+      const o = new Float32Array(r.getMappedRange().slice(0)); r.destroy();
+      return o;
+    };
+    const sets: Record<string, unknown>[] = [];
+    for (const layout of [undefined, 'cube2d-none', 'cube-hw'] as (ProbeLayoutId | undefined)[]) {
+      const row: Record<string, unknown> = { asked: layout ?? 'default' };
+      dev.pushErrorScope('validation');
+      try {
+        const set = new ProbeSet(dev, { capacity: 3, sourceSize: SOURCE, layout });
+        row.layout = set.layout.id;
+        const enc = dev.createCommandEncoder();
+        for (let k = 0; k < 3; k++) set.capture(enc, k, cube);
+        set.captureEnvironment(enc, cube);
+        set.setVolumes(volumes); set.update();
+        set.computeIrradiance(enc);
+        const bgl = dev.createBindGroupLayout({ entries: [
+          { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+          { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+        ] });
+        const pipe = dev.createComputePipeline({
+          layout: dev.createPipelineLayout({ bindGroupLayouts: [bgl, set.bindGroupLayout] }),
+          compute: { module: dev.createShaderModule({ code: set.wgsl({ group: 1 }) + EVAL_WGSL }), entryPoint: 'main' },
+        });
+        const p = enc.beginComputePass(); p.setPipeline(pipe);
+        p.setBindGroup(0, dev.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: { buffer: ptsOn } }, { binding: 1, resource: { buffer: outOn } }] }));
+        p.setBindGroup(1, set.bindGroup); p.dispatchWorkgroups(COUNT / 64); p.end();
+        dev.queue.submit([enc.finish()]);
+        const out = await readOn(outOn);
+        set.dispose();
+        // against the same set on the core device
+        const ref = await evaluate({ layout: set.layout.id, kinds: [0, 0, 0, 0] });
+        let m = 0; for (let i = 0; i < out.length; i++) m = Math.max(m, Number.isFinite(out[i]) ? Math.abs(out[i] - ref[i]) : Infinity);
+        row.vsCore = m;
+      } catch (e) { row.throws = String((e as Error).message).slice(0, 160); }
+      const e = await dev.popErrorScope();
+      if (e) row.error = e.message.split('\n').slice(0, 2).join(' / ').slice(0, 200);
+      sets.push(row);
+    }
+    cube.destroy(); ptsOn.destroy(); outOn.destroy();
+    dev.destroy();
+    // the compatibility-mode prefilter path (GGX levels from a cube-only copy of the source chain),
+    // run on the core device, against the default path: the scratch must be identical
+    const scratchOf = async (cubeSourceCopy: boolean) => {
+      const lf = new LayoutPrefilter(device, createProbeLayout('cube2d-none', { maxLod: maxLodFor(SOURCE) }), SOURCE, SOURCE, { cubeSourceCopy });
+      const t = lf.scratch;
+      let bytes = 0;
+      for (let m = 0; m < t.mipLevelCount; m++) { const w = Math.max(1, t.width >> m); bytes += Math.ceil((w * 8) / 256) * 256 * w * 6; }
+      const b = device.createBuffer({ size: bytes, usage: U.COPY_DST | U.MAP_READ });
+      const enc = device.createCommandEncoder();
+      lf.encodeScratch(enc, cubes[0]);
+      let off = 0;
+      for (let m = 0; m < t.mipLevelCount; m++) {
+        const w = Math.max(1, t.width >> m), row = Math.ceil((w * 8) / 256) * 256;
+        enc.copyTextureToBuffer({ texture: t, mipLevel: m }, { buffer: b, offset: off, bytesPerRow: row, rowsPerImage: w }, [w, w, 6]);
+        off += row * w * 6;
+      }
+      device.queue.submit([enc.finish()]);
+      await b.mapAsync(GPUMapMode.READ);
+      const out = new Uint16Array(b.getMappedRange().slice(0)); b.destroy(); lf.dispose();
+      return out;
+    };
+    const plain = await scratchOf(false), copied = await scratchOf(true);
+    let prefilterDiffering = 0; for (let i = 0; i < plain.length; i++) if (plain[i] !== copied[i]) prefilterDiffering++;
+    return { available: true, isCompat, dims, sets, prefilterDiffering, prefilterValues: plain.length, errors: errors.slice(0, 4) };
+  }
+
   say('ready: window.__p.run()');
-  Object.assign(window, { __p: { run, device } });
+  Object.assign(window, { __p: { run, compat, device } });
 }
 
 function mul(a: Float32Array, b: Float32Array) {

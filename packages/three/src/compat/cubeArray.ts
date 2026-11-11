@@ -69,6 +69,10 @@ export function cubeArrayTextureClass(): typeof VendoredCubeArrayTexture {
 }
 
 const isWebGPU = (renderer: Any) => renderer?.backend?.isWebGPUBackend === true;
+// A compatibility-mode device (three's flag: no 'core-features-and-limits') can't create a texture
+// with textureBindingViewDimension 'cube-array' at all (Chrome, W35 / D2204): no cube arrays there.
+const isCompat = (renderer: Any) => renderer?.backend?.compatibilityMode === true;
+const COMPAT_REASON = "compatibility-mode WebGPU device: no 'cube-array' texture views (D2204)";
 
 // ---- patch bookkeeping ------------------------------------------------------------------------
 
@@ -344,7 +348,8 @@ async function selfTest(renderer: Any): Promise<string | null> {
  * checked. On any failure it uninstalls and resolves false.
  *
  * Resolves true at once (patching nothing) when three has CubeArrayTexture natively. Resolves false
- * without patching on the WebGL backend or a three revision outside {@link CUBE_ARRAY_SHIM_REVISIONS}.
+ * without patching on the WebGL backend, on a compatibility-mode device (no cube-array views there,
+ * D2204), or a three revision outside {@link CUBE_ARRAY_SHIM_REVISIONS}.
  * Idempotent per renderer (the same promise); undo with {@link uninstallCubeArraySupport}. Call after
  * `await renderer.init()`. {@link ReflectionProbes} with `layout: 'auto'` then bakes into a cube array.
  */
@@ -354,6 +359,7 @@ export function installCubeArraySupport(renderer: THREE.WebGPURenderer, options:
   const set = (s: CubeArraySupportStatus) => { status.set(renderer, s); return s.mode !== 'none'; };
   const run = (async () => {
     if (!isWebGPU(renderer)) return set({ mode: 'none', reason: 'not the WebGPU backend' });
+    if (isCompat(renderer)) return set({ mode: 'none', reason: COMPAT_REASON });
     if (nativeCubeArrayTexture() !== null) return set({ mode: 'native', reason: `three r${THREE.REVISION} has CubeArrayTexture` });
     if (!CUBE_ARRAY_SHIM_REVISIONS.includes(THREE.REVISION) && options.allowUntestedRevision !== true) {
       return set({ mode: 'none', reason: `three r${THREE.REVISION} is outside the shim's tested revisions (${CUBE_ARRAY_SHIM_REVISIONS.join(', ')})` });
@@ -391,13 +397,14 @@ export function uninstallCubeArraySupport(renderer: THREE.WebGPURenderer) {
 
 /** Whether `renderer` can bind CubeArrayTexture now: three's own, or the shim installed and self-tested on it. */
 export function cubeArraySupported(renderer: THREE.WebGPURenderer): boolean {
-  if (!isWebGPU(renderer)) return false;
+  if (!isWebGPU(renderer) || isCompat(renderer)) return false;
   if (nativeCubeArrayTexture() !== null) return true;
   return patches !== null && users.has(renderer) && status.get(renderer)?.mode === 'shim';
 }
 
 /** What {@link installCubeArraySupport} found for `renderer` (mode 'none' with a reason before any install). */
 export function cubeArraySupportStatus(renderer: THREE.WebGPURenderer): CubeArraySupportStatus {
+  if (isWebGPU(renderer) && isCompat(renderer)) return { mode: 'none', reason: COMPAT_REASON };
   if (nativeCubeArrayTexture() !== null && isWebGPU(renderer)) return { mode: 'native', reason: `three r${THREE.REVISION} has CubeArrayTexture` };
   return status.get(renderer) ?? { mode: 'none', reason: 'installCubeArraySupport( renderer ) not called' };
 }

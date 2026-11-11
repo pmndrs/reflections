@@ -10,9 +10,9 @@
 //                trilinear sample never reads past the border. See OCTA below.
 
 import { CUBE_WGSL, OCTA_WGSL } from './common';
-import type { ProbeLayout, ProbeLayoutId, ProbeLayoutOptions } from './types';
+import type { ProbeLayout, ProbeLayoutId, ProbeLayoutOptions, ProbeWgslChunk } from './types';
 
-export type { ProbeLayout, ProbeLayoutId, ProbeLayoutOptions } from './types';
+export type { ProbeLayout, ProbeLayoutId, ProbeLayoutOptions, ProbeWgslChunk } from './types';
 
 // TEXTURE_BINDING | COPY_DST | COPY_SRC (numeric, so this module loads without WebGPU globals)
 const USAGE = 0x04 | 0x02 | 0x01;
@@ -21,38 +21,42 @@ function descriptor(label: string, size: number, layers: number, mips: number, f
   return { label, size: [size, size, layers], format, mipLevelCount: mips, dimension: '2d', usage: USAGE };
 }
 
+// Every layout's own WGSL names start with its `prefix` (`pl_cube2d_warp_`, `pl_cube_hw_`, ...), so
+// one shader module can hold several layouts (D805). The cube / octa maths they share (./common)
+// goes in a chunk of its own, emitted once per module however many layouts use it.
+
 // Cube layouts. `size` is the mip 0 face size; mip `mip` faces are size >> mip.
-const cubeDirWgsl = (warp: boolean) => /* wgsl */ `
-fn dirForTexel(texel: vec2<u32>, layer: u32, mip: u32, size: u32) -> vec3<f32> {
+const cubeDirWgsl = (prefix: string, warp: boolean) => /* wgsl */ `
+fn ${prefix}dirForTexel(texel: vec2<u32>, layer: u32, mip: u32, size: u32) -> vec3<f32> {
   let s = f32(max(size >> mip, 1u));
   let px = vec2<f32>(texel);
   ${warp ? 'let uv = px / max(s - 1.0, 1.0) * 2.0 - 1.0;' : 'let uv = (px + 0.5) / s * 2.0 - 1.0;'}
   return normalize(pl_faceDirUV(layer, uv.x, uv.y));
 }`;
 
-const CUBE2D_NONE_SAMPLE = /* wgsl */ `
-fn sampleLayout(tex: texture_2d_array<f32>, samp: sampler, probe: u32, dir: vec3<f32>, lod: f32) -> vec4<f32> {
+const cube2dNoneSample = (prefix: string) => /* wgsl */ `
+fn ${prefix}sample(tex: texture_2d_array<f32>, samp: sampler, probe: u32, dir: vec3<f32>, lod: f32) -> vec4<f32> {
   let f = pl_cubeFaceUV(dir);
   return textureSampleLevel(tex, samp, f.xy, probe * 6u + u32(f.z), lod);
 }`;
 
 // Edge-centred texels: uv' = uv (s - 1) / s + 0.5 / s at the face size s of each mip, so the two
 // mips are sampled separately (ReflectionProbesNode's 'warp', same maths).
-const CUBE2D_WARP_SAMPLE = /* wgsl */ `
-fn pl_warpAt(tex: texture_2d_array<f32>, samp: sampler, uv: vec2<f32>, layer: u32, l: f32) -> vec4<f32> {
+const cube2dWarpSample = (prefix: string) => /* wgsl */ `
+fn ${prefix}warpAt(tex: texture_2d_array<f32>, samp: sampler, uv: vec2<f32>, layer: u32, l: f32) -> vec4<f32> {
   let s = f32(textureDimensions(tex, u32(l)).x);
   return textureSampleLevel(tex, samp, uv * ((s - 1.0) / s) + 0.5 / s, layer, l);
 }
-fn sampleLayout(tex: texture_2d_array<f32>, samp: sampler, probe: u32, dir: vec3<f32>, lod: f32) -> vec4<f32> {
+fn ${prefix}sample(tex: texture_2d_array<f32>, samp: sampler, probe: u32, dir: vec3<f32>, lod: f32) -> vec4<f32> {
   let f = pl_cubeFaceUV(dir);
   let layer = probe * 6u + u32(f.z);
   let l0 = floor(lod);
   let l1 = min(l0 + 1.0, f32(textureNumLevels(tex) - 1u));
-  return mix(pl_warpAt(tex, samp, f.xy, layer, l0), pl_warpAt(tex, samp, f.xy, layer, l1), lod - l0);
+  return mix(${prefix}warpAt(tex, samp, f.xy, layer, l0), ${prefix}warpAt(tex, samp, f.xy, layer, l1), lod - l0);
 }`;
 
-const CUBE_HW_SAMPLE = /* wgsl */ `
-fn sampleLayout(tex: texture_cube_array<f32>, samp: sampler, probe: u32, dir: vec3<f32>, lod: f32) -> vec4<f32> {
+const cubeHwSample = (prefix: string) => /* wgsl */ `
+fn ${prefix}sample(tex: texture_cube_array<f32>, samp: sampler, probe: u32, dir: vec3<f32>, lod: f32) -> vec4<f32> {
   return textureSampleLevel(tex, samp, dir, probe, lod);
 }`;
 
@@ -62,21 +66,55 @@ fn sampleLayout(tex: texture_cube_array<f32>, samp: sampler, probe: u32, dir: ve
 // uv mapping is the same at every mip, so one trilinear sample works; because it is at least half
 // a texel at every mip, a bilinear footprint inside the square never reaches past the gutter.
 // Gutter texels hold the continuation across the border (pl_octaWrap), so filtering across the
-// border blends the right neighbours.
-const octaWgsl = (maxLod: number) => /* wgsl */ `
-const PL_OCTA_MAX_LOD: u32 = ${maxLod}u;
-fn dirForTexel(texel: vec2<u32>, layer: u32, mip: u32, size: u32) -> vec3<f32> {
+// border blends the right neighbours. The prefix carries maxLod (dirForTexel depends on it).
+const octaWgsl = (prefix: string, maxLod: number) => /* wgsl */ `
+fn ${prefix}dirForTexel(texel: vec2<u32>, layer: u32, mip: u32, size: u32) -> vec3<f32> {
   let s = f32(max(size >> mip, 1u));
-  let b = 0.5 * f32(1u << PL_OCTA_MAX_LOD) / f32(size);
+  let b = 0.5 * f32(1u << ${maxLod}u) / f32(size);
   let t = (vec2<f32>(texel) + 0.5) / s;
   let p = (t - b) / (1.0 - 2.0 * b) * 2.0 - 1.0;
   return pl_octaDecode(pl_octaWrap(p));
 }
-fn sampleLayout(tex: texture_2d_array<f32>, samp: sampler, probe: u32, dir: vec3<f32>, lod: f32) -> vec4<f32> {
+fn ${prefix}sample(tex: texture_2d_array<f32>, samp: sampler, probe: u32, dir: vec3<f32>, lod: f32) -> vec4<f32> {
   let b = 0.5 / f32(textureDimensions(tex, textureNumLevels(tex) - 1u).x);
   let t = b + (pl_octaEncode(dir) * 0.5 + 0.5) * (1.0 - 2.0 * b);
   return textureSampleLevel(tex, samp, t, probe, lod);
 }`;
+
+const CUBE_CHUNK: ProbeWgslChunk = { key: 'pl_cube', wgsl: CUBE_WGSL };
+const OCTA_CHUNK: ProbeWgslChunk = { key: 'pl_octa', wgsl: OCTA_WGSL };
+
+/** The single-layout names (`dirForTexel`, `sampleLayout`) over a layout's prefixed functions. */
+const aliasesWgsl = (prefix: string, textureType: string) => /* wgsl */ `
+fn dirForTexel(texel: vec2<u32>, layer: u32, mip: u32, size: u32) -> vec3<f32> { return ${prefix}dirForTexel(texel, layer, mip, size); }
+fn sampleLayout(tex: ${textureType}, samp: sampler, probe: u32, dir: vec3<f32>, lod: f32) -> vec4<f32> { return ${prefix}sample(tex, samp, probe, dir, lod); }
+`;
+
+function layoutOf(id: ProbeLayoutId, prefix: string, chunks: ProbeWgslChunk[], rest: Omit<ProbeLayout, 'id' | 'wgsl' | 'chunks' | 'prefix' | 'sampleFunction' | 'dirFunction'>): ProbeLayout {
+  return {
+    id, prefix, chunks, sampleFunction: `${prefix}sample`, dirFunction: `${prefix}dirForTexel`,
+    wgsl: chunks.map((c) => c.wgsl).join('\n') + aliasesWgsl(prefix, rest.textureType), ...rest,
+  };
+}
+
+/**
+ * The WGSL of several layouts for one shader module: each shared chunk once, each layout's prefixed
+ * functions, and no single-layout aliases (call `layout.sampleFunction` / `layout.dirFunction`).
+ */
+export function probeLayoutsWgsl(layouts: readonly ProbeLayout[]): string {
+  return dedupeChunks(layouts.flatMap((l) => l.chunks)).map((c) => c.wgsl).join('\n');
+}
+
+/** Chunks in first-seen order, one per key; throws if two chunks share a key but not their code. */
+export function dedupeChunks(chunks: readonly ProbeWgslChunk[]): ProbeWgslChunk[] {
+  const seen = new Map<string, ProbeWgslChunk>();
+  for (const c of chunks) {
+    const had = seen.get(c.key);
+    if (had === undefined) seen.set(c.key, c);
+    else if (had.wgsl !== c.wgsl) throw new Error(`probe WGSL: two different chunks named '${c.key}'`);
+  }
+  return [...seen.values()];
+}
 
 /** Gutter of an octa probe as a fraction of its side (each side), for `maxLod`. */
 export const octaGutter = (size: number, maxLod: number) => (0.5 * 2 ** maxLod) / size;
@@ -88,27 +126,29 @@ export function createProbeLayout(id: ProbeLayoutId, { maxLod }: ProbeLayoutOpti
     case 'cube2d-warp':
     case 'cube2d-none': {
       const warp = id === 'cube2d-warp';
-      return {
-        id, mipLevelCount, layersPerProbe: 6, viewDimension: '2d-array', textureType: 'texture_2d_array<f32>',
-        wgsl: CUBE_WGSL + cubeDirWgsl(warp) + (warp ? CUBE2D_WARP_SAMPLE : CUBE2D_NONE_SAMPLE),
+      const prefix = warp ? 'pl_cube2d_warp_' : 'pl_cube2d_none_';
+      return layoutOf(id, prefix, [CUBE_CHUNK, { key: prefix, wgsl: cubeDirWgsl(prefix, warp) + (warp ? cube2dWarpSample(prefix) : cube2dNoneSample(prefix)) }], {
+        mipLevelCount, layersPerProbe: 6, viewDimension: '2d-array', textureType: 'texture_2d_array<f32>',
         textureDescriptor: (size, probes, format) => descriptor(`probes.${id}`, size, 6 * probes, mipLevelCount, format),
-      };
+      });
     }
-    case 'cube-hw':
-      return {
-        id, mipLevelCount, layersPerProbe: 6, viewDimension: 'cube-array', textureType: 'texture_cube_array<f32>',
-        wgsl: CUBE_WGSL + cubeDirWgsl(false) + CUBE_HW_SAMPLE,
+    case 'cube-hw': {
+      const prefix = 'pl_cube_hw_';
+      return layoutOf(id, prefix, [CUBE_CHUNK, { key: prefix, wgsl: cubeDirWgsl(prefix, false) + cubeHwSample(prefix) }], {
+        mipLevelCount, layersPerProbe: 6, viewDimension: 'cube-array', textureType: 'texture_cube_array<f32>',
         textureDescriptor: (size, probes, format) => descriptor(`probes.${id}`, size, 6 * probes, mipLevelCount, format),
-      };
-    case 'octa':
-      return {
-        id, mipLevelCount, layersPerProbe: 1, viewDimension: '2d-array', textureType: 'texture_2d_array<f32>',
-        wgsl: OCTA_WGSL + octaWgsl(maxLod),
+      });
+    }
+    case 'octa': {
+      const prefix = `pl_octa${maxLod}_`;
+      return layoutOf(id, prefix, [OCTA_CHUNK, { key: prefix, wgsl: octaWgsl(prefix, maxLod) }], {
+        mipLevelCount, layersPerProbe: 1, viewDimension: '2d-array', textureType: 'texture_2d_array<f32>',
         textureDescriptor: (size, probes, format) => {
           if (size >> maxLod < 1) throw new Error(`octa: size ${size} has no mip ${maxLod}`);
           return descriptor(`probes.${id}`, size, probes, mipLevelCount, format);
         },
-      };
+      });
+    }
     default:
       throw new Error(`createProbeLayout: '${id}' is not implemented`);
   }
