@@ -631,7 +631,15 @@ async function rtHitShadingLines(p, id) {
   const fx = await p.T('window.__p.rtShadowEffect()');
   check(`rt ${id}: shadow rays only darken shaded hits (D903)`, fx.on.pixels > 0 && fx.noise.darker + fx.noise.brighter < 0.001 && fx.on.brighter < 0.001 && fx.on.mean <= fx.on.meanOff + 1e-6,
     `${fx.on.pixels} shaded hits: ${(fx.on.darker * 100).toFixed(1)}% > 1% darker, ${(fx.on.brighter * 100).toFixed(2)}% brighter (same rays twice without shadows: ${(fx.noise.darker * 100).toFixed(2)}% / ${(fx.noise.brighter * 100).toFixed(2)}%); mean ${fx.on.meanOff.toFixed(3)} -> ${fx.on.mean.toFixed(3)}`);
-  return { on, off, fx };
+  // D901 (W28): the kit scenes are lit by their probes (scene.environmentNode), so traced hits are
+  // too; the environment mean (no bounce from the lit room) read 0.67-0.91x. Shadows on for both.
+  await p.T('window.__p.setHitProbes(false)'); await p.T('window.__p.step(2)'); // rebuilds the traced pass
+  const env = await p.T('window.__p.hitShadingError()');
+  await p.T('window.__p.setHitProbes(true)'); await p.T('window.__p.step(2)');
+  check(`rt ${id}: traced hits lit by the probes at the hit match the on-screen brightness (D901)`,
+    hs.source === 'probes' && env.source === 'environment' && Math.abs(1 - on.ratio) <= 0.1 && Math.abs(1 - on.ratio) < Math.abs(1 - env.ratio),
+    `${hs.source}: ${fmt(on)}; environment mean: ${fmt(env)}`);
+  return { on, off, fx, env };
 }
 
 /**

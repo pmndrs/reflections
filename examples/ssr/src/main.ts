@@ -477,6 +477,9 @@ async function main() {
       hybrid, get denoiserName() { return denoiser?.name ?? null; },
       setDenoise(on: boolean) { hybrid.denoise = on && !!denoiser; denoiseBox.checked = hybrid.denoise; },
       setTraceSettings(s: N) { ssr.traceSettings = { ...s }; },
+      /** D901 A/B: traced hits lit by the scene's probes (default) or always by the environment mean (`false`). */
+      setHitProbes(on: boolean) { const o = (ssr as N).traceOptions; if (o) { if (on) delete o.probes; else o.probes = null; } },
+      get hitShadingSource() { return ssr.hitShadingSource; },
       traceStats: () => ssr.readTraceStats(),
       get bvh() { return bvhInfo; },
       tileCapCheck: () => tileCapCheck(),
@@ -872,7 +875,7 @@ async function main() {
       }
       return { pixels: n, meanScreen: n ? sa / n : 0, meanShaded: n ? sb / n : 0, ratio: sa ? sb / sa : NaN, meanAbsRel: sa ? sabs / sa : NaN, darker: n ? darker / n : 0, brighter: n ? brighter / n : 0 };
     });
-    return { ...out[0], variants: out };
+    return { ...out[0], variants: out, source: ssr.hitShadingSource };
   }
 
   /**

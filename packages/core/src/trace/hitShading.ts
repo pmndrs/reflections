@@ -1,19 +1,29 @@
-// Hit shading with its own environment and lights (group 3), for passes whose radiance fallback is
-// not a lighting source: e.g. the three adapter, whose SSSR fallback is black because its composite
-// adds the probe / environment term itself (packages/three/src/sssr/composite.ts).
+// Hit shading with its own lighting (group 3), for passes whose radiance fallback is not a
+// lighting source: e.g. the three adapter, whose SSSR fallback is black because its composite adds
+// the probe / environment term itself (packages/three/src/sssr/composite.ts).
 //
 // The traced hit is shaded as a Lambert surface (D11, D903):
 //
-//   L = emissive + albedo x (envMean(N) x intensity + sum_hemi mix(ground, sky, 0.5 N.up + 0.5) / pi
+//   L = emissive + albedo x (indirect(P, N) x intensity + sum_hemi mix(ground, sky, 0.5 N.up + 0.5) / pi
 //                            + sum_dir colour x max(N.l, 0) x V(P, l) / pi)
 //
-// envMean is the cosine-weighted mean of the environment over the hemisphere around N (= E / pi),
-// estimated with a fixed 32-direction Fibonacci set (same set every pixel: no noise, a small bias
-// on sharp environments). The light terms are three's (BRDF_Lambert = albedo / pi, hemisphere
-// weight 0.5 N.up + 0.5). V is a shadow ray toward each directional light (the pass's
-// `traceLightVisible`, any-hit; 1 with `hitShadows` off; D903). The environment and hemisphere
-// terms are unshadowed. No probes yet (W7 brings a probe snippet; D901).
+// `indirect` is E / pi, the radiance a white Lambert surface reflects from what surrounds it:
+//
+//   - environmentHitShading: the cosine-weighted mean of the environment over the hemisphere
+//     around N, a fixed 32-direction Fibonacci set (same set every pixel: no noise, a small bias on
+//     sharp environments). Unoccluded: the sky as if nothing stood around the hit.
+//   - probeHitShading (D901, W28): the probe lookup at the hit point along N at roughness 1, with the
+//     environment slot for what no probe covers. That is what three's own lighting uses for the
+//     diffuse term when the probes are the scene's environment node (EnvironmentNode's irradiance
+//     context: direction N, level 1, x pi x intensity, then x albedo / pi), so lit walls and floors
+//     around the hit bounce into it as they do on screen.
+//
+// The light terms are three's (BRDF_Lambert = albedo / pi, hemisphere weight 0.5 N.up + 0.5). V is
+// a shadow ray toward each directional light (the pass's `traceLightVisible`, any-hit; 1 with
+// `hitShadows` off; D903). The indirect and hemisphere terms are unshadowed.
 import type { HitShading } from './provider';
+import { probeLookupWgsl, type ProbeLookupOptions } from '../probes/lookup';
+import type { ProbeSet } from '../probes/set';
 
 export type EnvironmentMapping = 'equirect' | 'cube';
 
@@ -40,6 +50,27 @@ struct HitEnv {
 };`;
 const UNIFORM_BYTES = 16 + 16 + 32 * HIT_MAX_DIRECTIONAL + 48 * HIT_MAX_HEMISPHERE;
 
+// Directional (shadowed) and hemisphere lights, E / pi (needs `hitEnv`).
+const LIGHTS = /* wgsl */ `
+// Shadow rays toward directional lights: far enough to leave any scene.
+const HIT_SHADOW_RAY_LENGTH: f32 = 1e30;
+fn hitLights(P: vec3f, N: vec3f) -> vec3f {
+  var E = vec3f(0.0);
+  for (var i = 0u; i < min(hitEnv.counts.x, ${HIT_MAX_DIRECTIONAL}u); i++) {
+    let l = hitEnv.dirDirection[i].xyz;
+    let nl = dot(N, l);
+    if (nl <= 0.0) { continue; }
+    if (!traceLightVisible(P, N, l, HIT_SHADOW_RAY_LENGTH)) { continue; }
+    E += hitEnv.dirColor[i].rgb * nl;
+  }
+  for (var i = 0u; i < min(hitEnv.counts.y, ${HIT_MAX_HEMISPHERE}u); i++) {
+    E += mix(hitEnv.hemiGround[i].rgb, hitEnv.hemiSky[i].rgb, dot(N, hitEnv.hemiUp[i].xyz) * 0.5 + 0.5);
+  }
+  return E * 0.31830989;
+}
+`;
+
+// The environment's cosine-weighted hemisphere mean (needs `hitEnvSample`).
 const SHADE = /* wgsl */ `
 const HIT_ENV_SAMPLES: u32 = 32u;
 fn hitEnvMean(N: vec3f) -> vec3f {
@@ -60,22 +91,7 @@ fn hitEnvMean(N: vec3f) -> vec3f {
   }
   return sum / f32(HIT_ENV_SAMPLES);
 }
-// Shadow rays toward directional lights: far enough to leave any scene.
-const HIT_SHADOW_RAY_LENGTH: f32 = 1e30;
-fn hitLights(P: vec3f, N: vec3f) -> vec3f {
-  var E = vec3f(0.0);
-  for (var i = 0u; i < min(hitEnv.counts.x, ${HIT_MAX_DIRECTIONAL}u); i++) {
-    let l = hitEnv.dirDirection[i].xyz;
-    let nl = dot(N, l);
-    if (nl <= 0.0) { continue; }
-    if (!traceLightVisible(P, N, l, HIT_SHADOW_RAY_LENGTH)) { continue; }
-    E += hitEnv.dirColor[i].rgb * nl;
-  }
-  for (var i = 0u; i < min(hitEnv.counts.y, ${HIT_MAX_HEMISPHERE}u); i++) {
-    E += mix(hitEnv.hemiGround[i].rgb, hitEnv.hemiSky[i].rgb, dot(N, hitEnv.hemiUp[i].xyz) * 0.5 + 0.5);
-  }
-  return E * 0.31830989;
-}
+${LIGHTS}
 fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f {
   let m = traceHitMaterial(hit);
   return m.emissive + m.albedo * (hitEnvMean(N) * hitEnv.intensity.x + hitLights(P, N));
@@ -114,6 +130,26 @@ fn hitEnvSample(d: vec3f) -> vec3f {
 }
 `;
 
+/** The `HitEnv` uniform (intensity, lights) and its writer, shared by both hit shadings. */
+function hitLightingUniform(device: GPUDevice, label: string) {
+  const uniform = device.createBuffer({ label, size: UNIFORM_BYTES, usage: 0x40 | 0x8 /* UNIFORM | COPY_DST */ });
+  const data = new ArrayBuffer(UNIFORM_BYTES);
+  const f = new Float32Array(data), u = new Uint32Array(data);
+  const setLighting = (k: number, lights: HitLights = {}) => {
+    f.fill(0);
+    f[0] = k;
+    const dirs = (lights.directional ?? []).slice(0, HIT_MAX_DIRECTIONAL);
+    const hemis = (lights.hemisphere ?? []).slice(0, HIT_MAX_HEMISPHERE);
+    u[4] = dirs.length; u[5] = hemis.length;
+    const D = 8, DC = D + 4 * HIT_MAX_DIRECTIONAL, HU = DC + 4 * HIT_MAX_DIRECTIONAL, HS = HU + 4 * HIT_MAX_HEMISPHERE, HG = HS + 4 * HIT_MAX_HEMISPHERE;
+    dirs.forEach((l, i) => { f.set(l.direction, D + 4 * i); f.set(l.color, DC + 4 * i); });
+    hemis.forEach((l, i) => { f.set(l.up, HU + 4 * i); f.set(l.sky, HS + 4 * i); f.set(l.ground, HG + 4 * i); });
+    device.queue.writeBuffer(uniform, 0, data);
+  };
+  setLighting(1);
+  return { uniform, setLighting };
+}
+
 export interface EnvironmentHitShading extends HitShading {
   readonly mapping: EnvironmentMapping;
   /** `view`: an equirect 2-D texture (any float format) or a cube. Recreate when the texture changes. */
@@ -132,21 +168,7 @@ export function environmentHitShading(device: GPUDevice, mapping: EnvironmentMap
       : [{ binding: 0, visibility: C, texture: { sampleType: 'float', viewDimension: 'cube' } }, { binding: 1, visibility: C, buffer: { type: 'uniform' } },
         { binding: 2, visibility: C, sampler: { type: 'filtering' } }],
   });
-  const uniform = device.createBuffer({ label: 'rt hit env', size: UNIFORM_BYTES, usage: 0x40 | 0x8 /* UNIFORM | COPY_DST */ });
-  const data = new ArrayBuffer(UNIFORM_BYTES);
-  const f = new Float32Array(data), u = new Uint32Array(data);
-  const setLighting = (k: number, lights: HitLights = {}) => {
-    f.fill(0);
-    f[0] = k;
-    const dirs = (lights.directional ?? []).slice(0, HIT_MAX_DIRECTIONAL);
-    const hemis = (lights.hemisphere ?? []).slice(0, HIT_MAX_HEMISPHERE);
-    u[4] = dirs.length; u[5] = hemis.length;
-    const D = 8, DC = D + 4 * HIT_MAX_DIRECTIONAL, HU = DC + 4 * HIT_MAX_DIRECTIONAL, HS = HU + 4 * HIT_MAX_HEMISPHERE, HG = HS + 4 * HIT_MAX_HEMISPHERE;
-    dirs.forEach((l, i) => { f.set(l.direction, D + 4 * i); f.set(l.color, DC + 4 * i); });
-    hemis.forEach((l, i) => { f.set(l.up, HU + 4 * i); f.set(l.sky, HS + 4 * i); f.set(l.ground, HG + 4 * i); });
-    device.queue.writeBuffer(uniform, 0, data);
-  };
-  setLighting(1);
+  const { uniform, setLighting } = hitLightingUniform(device, 'rt hit env');
   let sampler: GPUSampler | undefined;
   return {
     wgsl: (mapping === 'equirect' ? EQUIRECT : CUBE) + SHADE,
@@ -156,6 +178,90 @@ export function environmentHitShading(device: GPUDevice, mapping: EnvironmentMap
       const entries: GPUBindGroupEntry[] = [{ binding: 0, resource: view }, { binding: 1, resource: { buffer: uniform } }];
       if (mapping === 'cube') entries.push({ binding: 2, resource: (sampler ??= device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear' })) });
       return device.createBindGroup({ label: 'rt hit env', layout, entries });
+    },
+    setLighting,
+    destroy() { uniform.destroy(); },
+  };
+}
+
+// ---- probes at the hit (D901) -------------------------------------------------------------------
+
+/**
+ * Where a probe hit shading's lookup comes from: a core {@link ProbeSet} (its lookup options and,
+ * in `createBindGroup`, its atlas / sampler / table), or the lookup options of an engine's own
+ * atlas and table (three's ReflectionProbes: `probeLayoutFor(probes)`, `mirrorX: true`, `count`).
+ */
+export type ProbeHitShadingSource = ProbeSet | ProbeLookupOptions;
+
+/** The probe set's GPU resources for {@link ProbeHitShading.createBindGroup}. */
+export interface ProbeHitShadingResources {
+  /** The atlas, viewed as the layout's `viewDimension` (a ProbeSet's `atlasView`). */
+  atlas: GPUTextureView;
+  /** A filtering sampler (a ProbeSet's `sampler`). */
+  sampler: GPUSampler;
+  /** The volume table (core `packProbeTable` rows; a ProbeSet's `table`). */
+  table: GPUBuffer;
+}
+
+export interface ProbeHitShading extends HitShading {
+  readonly layoutId: string;
+  createBindGroup(resources: ProbeHitShadingResources): GPUBindGroup;
+  /** Environment intensity (scales the probe term, as three's `environmentIntensity`) and lights. */
+  setLighting(intensity: number, lights?: HitLights): void;
+  destroy(): void;
+}
+
+// The probe lookup module sits at bindings 0..2 of group 3 (atlas, sampler, table: a ProbeSet's
+// own layout), the HitEnv uniform at 3.
+const PROBE_SHADE = /* wgsl */ `
+${UNIFORM_WGSL}
+@group(3) @binding(3) var<uniform> hitEnv: HitEnv;
+${LIGHTS}
+fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f {
+  let m = traceHitMaterial(hit);
+  // three's diffuse IBL with the probes as the environment: lookup(P, N, roughness 1) x pi x
+  // intensity x albedo / pi; probes first, the environment slot for the rest
+  let E = probeRadianceWithEnvironment(P, N, 1.0);
+  return m.emissive + m.albedo * (E * hitEnv.intensity.x + hitLights(P, N));
+}
+`;
+
+const isProbeSet = (s: ProbeHitShadingSource): s is ProbeSet => typeof (s as ProbeSet).wgsl === 'function';
+
+/**
+ * Hit shading from reflection probes at the hit point (D901, SPEC section 4): emissive + albedo x
+ * (the probe lookup at P along N at roughness 1 x intensity + the directional / hemisphere lights of
+ * {@link environmentHitShading}). Group 3 holds the lookup's atlas, sampler and table (bindings
+ * 0..2) and the lighting uniform (3); one storage buffer (the table).
+ *
+ *   const shading = probeHitShading(device, set);   // or (device, { layout, mirrorX, count })
+ *   const rt = createTracedReflections(device, { ..., hitShading: shading });
+ *   rt.dispatch(cmd, { ..., hitShadingBindGroup: shading.createBindGroup({ atlas: set.atlasView, sampler: set.sampler, table: set.table }) });
+ */
+export function probeHitShading(device: GPUDevice, source: ProbeHitShadingSource): ProbeHitShading {
+  const layoutDesc = source.layout;
+  const C = 0x4;
+  const layout = device.createBindGroupLayout({
+    label: `rt hit shading (probes, ${layoutDesc.id})`,
+    entries: [
+      { binding: 0, visibility: C, texture: { sampleType: 'float', viewDimension: layoutDesc.viewDimension } },
+      { binding: 1, visibility: C, sampler: { type: 'filtering' } },
+      { binding: 2, visibility: C, buffer: { type: 'read-only-storage' } },
+      { binding: 3, visibility: C, buffer: { type: 'uniform' } },
+    ],
+  });
+  const { uniform, setLighting } = hitLightingUniform(device, 'rt hit probes');
+  const lookup = isProbeSet(source) ? source.wgsl({ group: 3 }) : probeLookupWgsl({ ...source, group: 3, binding: 0 });
+  return {
+    wgsl: lookup + PROBE_SHADE,
+    layout,
+    storageBufferCount: 1,
+    layoutId: layoutDesc.id,
+    createBindGroup({ atlas, sampler, table }) {
+      return device.createBindGroup({
+        label: 'rt hit probes', layout,
+        entries: [{ binding: 0, resource: atlas }, { binding: 1, resource: sampler }, { binding: 2, resource: { buffer: table } }, { binding: 3, resource: { buffer: uniform } }],
+      });
     },
     setLighting,
     destroy() { uniform.destroy(); },
