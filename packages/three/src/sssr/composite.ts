@@ -1,15 +1,23 @@
 // First cut of the hybrid composite (docs/SPEC.md section 5) in TSL on r187: three's lit image
 // with its specular image-based term swapped for SSR -> local probes (by coverage) -> environment.
 //
-// three's PhysicalLightingModel adds `radiance x singleScattering` for the environment, where
-// `singleScattering = F0 x DFG.x + DFG.y` (split sum, f90 = 1; F0 mixed from 0.04 and the base
-// colour by metalness), and `radiance` is the environment node sampled along the roughness-bent
-// reflection vector at three's roughness. So, per pixel,
+// three's PhysicalLightingModel adds `radiance x singleScattering x specularOcclusion` for the
+// environment, where `singleScattering = specularColorBlended x DFG.x + specularF90 x DFG.y` (split
+// sum at three's shading roughness), `radiance` is the environment node sampled along the
+// roughness-bent reflection vector at that roughness, times `materialEnvIntensity` (the material's
+// envMapIntensity when it has an envMap, else scene.environmentIntensity), and the occlusion is
+// Lagarde's from the AO map. The G-buffer's `specular` target holds those factors as three computed
+// them (W27, D603): rgb = singleScattering (`weight`), a = occlusion x env intensity (`scale`), and
+// `shadingRoughness` three's roughness. So, per pixel,
 //
 //   probeEnv = reflectionProbes lookup (volumes by coverage, then the atlas's environment slot)
-//              x environmentIntensity; without probes, pmremTexture(environment) x intensity
+//              x scale; without probes, pmremTexture(environment) x scale
 //   specular = mix(probeEnv, ssrHit, w) = ssrHit x w + (1 - w) x probeEnv
 //   final    = lit - weight x probeEnv + weight x specular
+//
+// Without that target (a device under 46 bytes per sample, or `specular: false`) the factors are
+// estimated as before: weight from F0 = mix(0.04, base, metalness) with f90 = 1 at the G-buffer's
+// roughness (max 0.045), scale = environmentIntensity, no occlusion.
 //
 // with w = confidence (FFX), or, with the depth-aware blend (W22, D2400, default), w raised toward
 // the screen-edge fade alone where the probe's box-projected surface lies behind the hit.
@@ -54,7 +62,10 @@ export interface ScreenSpaceCompositeOptions {
    * probes, the atlas's environment slot stands in for it, as in three's lit term). Null: black.
    */
   environment?: THREE.Texture | null;
-  /** `scene.environmentIntensity` (a number or a node). Default 1. */
+  /**
+   * `scene.environmentIntensity` (a number or a node). Default 1. Used only when the G-buffer has
+   * no `specular` target: with it, three's own per-material intensity is in the target.
+   */
   environmentIntensity?: number | N;
   /** The lit image (HDR, linear). Default: the G-buffer's `lit` target (throws if it has none). */
   lit?: N;
@@ -88,8 +99,12 @@ export interface ScreenSpaceComposite {
   final: N;
   /** three's lit image as rendered (the composite with SSR off). */
   lit: N;
-  /** Specular radiance weight (F0 x DFG.x + DFG.y). */
+  /** Specular radiance weight: three's single scattering (specularColorBlended x DFG.x + specularF90 x DFG.y), or the F0 estimate. */
   weight: N;
+  /** What three multiplied its environment radiance by besides `weight`: specular occlusion x env intensity (G-buffer), or `environmentIntensity`. */
+  scale: N;
+  /** 1 when `weight` / `scale` / the lookup roughness come from the G-buffer's `specular` target, 0 for the estimate. */
+  exact: N;
   /** Probe / environment radiance along the reflection (what three's term is assumed to be). */
   probeSpecular: N;
   /** What is composited: the denoised signal where `denoise` is 1, else `signal`. */
@@ -154,18 +169,27 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
   const P: N = (cameraWorld as N).mul(vec4(viewPosition, 1)).xyz.toVar();
   const Nw: N = normalize(nr.xyz).toVar();
   const V: N = normalize((cameraPosition as N).sub(P)).toVar();
-  // three's shading roughness is clamped to >= 0.0525 (plus geometry roughness, not modelled: D403)
-  const roughness: N = float(nr.w).max(0.0525).min(1).toVar();
+  // three's own weights when the G-buffer wrote them (D603), else the estimate
+  const exact = !!g.specular;
+  // three's shading roughness: the G-buffer's copy of it (geometry roughness included, D403), or the
+  // material's clamped to three's minimum (r187 getRoughness: >= 0.045)
+  const roughness: N = (g.shadingRoughness ? float(texture(g.shadingRoughness, at).x) : float(nr.w).max(0.045).min(1)).toVar();
   const dotNV: N = Nw.dot(V).clamp(1e-4, 1);
   // three's radiance direction: the reflection bent toward the normal by roughness^4 (EnvironmentNode)
   const R: N = mix(reflect(V.negate(), Nw), Nw, roughness.pow(4)).normalize().toVar();
 
-  const dfg: N = (DFGLUT as N)({ roughness, dotNV });
-  const F0: N = mix(vec3(0.04), am.rgb, am.w);
-  const weight: N = F0.mul(dfg.x).add(dfg.y).toVar();
-
-  const intensity: N = typeof options.environmentIntensity === 'number' || options.environmentIntensity === undefined
-    ? uniform(options.environmentIntensity ?? 1) : options.environmentIntensity;
+  let weight: N, scale: N;
+  if (exact) {
+    const sp: N = texture(g.specular!, at);
+    weight = sp.rgb.toVar();
+    scale = float(sp.a).toVar();
+  } else {
+    const dfg: N = (DFGLUT as N)({ roughness, dotNV });
+    const F0: N = mix(vec3(0.04), am.rgb, am.w);
+    weight = F0.mul(dfg.x).add(dfg.y).toVar();
+    scale = typeof options.environmentIntensity === 'number' || options.environmentIntensity === undefined
+      ? uniform(options.environmentIntensity ?? 1) : options.environmentIntensity;
+  }
   let probeSpecular: N;
   let coverage: N = float(0);
   if (options.probes) {
@@ -178,7 +202,7 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
   } else {
     probeSpecular = options.environment ? (pmremTexture as N)(options.environment, R, roughness).rgb : vec3(0);
   }
-  probeSpecular = probeSpecular.mul(intensity).toVar();
+  probeSpecular = probeSpecular.mul(scale).toVar();
 
   // Lagarde 2014 computeSpecOcclusion, a = perceptual^2 (same as core's probeSpecularOcclusion, D66)
   let specularOcclusion: N = float(1);
@@ -231,7 +255,7 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
   const delta: N = weight.mul(specular.sub(probeSpecular)).mul(amount);
   const final: N = vec4(geometry.select(lit.add(delta).max(0), lit), 1);
   return {
-    final, lit, weight, probeSpecular, specular, signal, denoised, denoise, specularOcclusion, coverage, roughness: float(nr.w),
+    final, lit, weight, scale, exact: float(exact ? 1 : 0), probeSpecular, specular, signal, denoised, denoise, specularOcclusion, coverage, roughness: float(nr.w),
     confidence, ssrWeight, hitFade, probeConsistency, depthAware, ssr: ssrRadiance, geometry, amount,
     hitDistance,
     source: texture(ssr.source, at).x,

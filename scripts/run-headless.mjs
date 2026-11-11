@@ -554,10 +554,10 @@ function f2Checks(r) {
     const c0 = Object.values(R).flatMap((v) => Object.values(v).map((m) => m.c0Max));
     check('specular swap: confidence 0 gives lit exactly (every term)', sw.litMismatch < 20 && c0.every((x) => x === 0), `max |final - lit| ${Math.max(...c0)}, mask mismatch ${sw.litMismatch} px`);
     for (const term of Object.keys(R.gbuffer)) {
-      const g = R.gbuffer[term], e = R.estimate?.[term];
+      const g = R.gbuffer[term], e = R.estimate?.[term], mr = R.materialRoughness?.[term];
       // 8-bit sRGB, mean / p99 / max over the sphere: the halo where SSR blends in (c = 0.5, black hit)
       check(`specular swap: ${term} halo (c 0.5) mean < 0.15, p99 < 1 /255`, g.blend.mean < 0.15 && g.blend.p99 < 1,
-        `${sw.specularTarget ? 'G-buffer' : 'estimate (no specular target)'}: ${fmt(g)}${e ? `; estimate: ${fmt(e)}` : ''}`);
+        `${sw.specularTarget ? 'G-buffer' : 'estimate (no specular target)'}: ${fmt(g)}${mr ? `; material roughness: ${fmt(mr)}` : ''}${e ? `; estimate: ${fmt(e)}` : ''}`);
     }
     check('specularSwap: no WebGPU errors', sw.gpuErrors.length === 0, sw.gpuErrors.slice(0, 2).join(' | '));
   }

@@ -60,7 +60,7 @@ function oracleMaterial(m: N, mode: OracleMode): N {
   o.transmission = 0; // the backdrop replaces totalDiffuse: keep it out of the oracle
   o.lightMap = null;
   o.setupLightingModel = function setupLightingModel() {
-    const model = new OracleModel(this.useClearcoat, this.useSheen, this.useIridescence, this.useAnisotropy, false, false, this.useRetroreflection, this.useDiffuseRoughness);
+    const model = new (OracleModel as N)(this.useClearcoat, this.useSheen, this.useIridescence, this.useAnisotropy, false, false, this.useRetroreflection, this.useDiffuseRoughness);
     model.mode = mode;
     return model;
   };
@@ -229,7 +229,10 @@ async function measure(rig: Rig, ssr: ScreenSpaceReflectionsPass, env: THREE.Tex
 function variantsOf(ssr: ScreenSpaceReflectionsPass): Record<string, N> {
   const v: Record<string, N> = { gbuffer: undefined };
   const tx = ssr.gbuffer.textures as N;
-  if (tx.specular) v.estimate = Object.create(ssr.gbuffer, { textures: { value: { ...tx, specular: undefined } } });
+  const without = (drop: Record<string, undefined>) => Object.create(ssr.gbuffer, { textures: { value: { ...tx, ...drop } } });
+  // three's weights but the material's roughness (what geometry roughness, D403, adds)
+  if (tx.shadingRoughness) v.materialRoughness = without({ shadingRoughness: undefined });
+  if (tx.specular) v.estimate = without({ specular: undefined, shadingRoughness: undefined });
   return v;
 }
 
