@@ -149,13 +149,18 @@ export interface BakeOptions {
    */
   irradiance?: boolean;
   /**
-   * Capture passes (not in #35046; the interior branch's `bounces`, D25). 1 (default): the captures
-   * see the scene lit without local probes (`capturing` switches them off), so probes don't
-   * reflect each other and the materials in a capture get only the environment slot as their
-   * image-based light. n > 1: n - 1 more passes over the captured probes, each rendered with every
-   * probe looking up the previous pass's atlas (a frozen copy: each pass prefilters into a scratch
-   * texture and copies it in when the pass is done, so the result doesn't depend on probe order).
-   * Each pass costs one bake of those probes.
+   * Capture passes (not in #35046; the interior branch's `bounces`, D25). 2 (default, D4300): a
+   * first pass whose captures see the scene lit without local probes (`capturing` switches them
+   * off), then one more pass over the captured probes rendered with every probe looking up the first
+   * pass's atlas, so a captured wall gets the room's bounce light and a captured mirror or glossy
+   * surface reflects the room instead of the environment slot (a frozen copy: each pass prefilters
+   * into a scratch texture and copies it in when the pass is done, so the result doesn't depend on
+   * probe order). n > 2 adds passes the same way. Each pass costs one bake of those probes, so 2
+   * doubles the bake: scenes without mirrors or glossy surfaces facing each other (and live,
+   * per-frame bakes) can use 1 to halve it; their probes then lack the interreflection
+   * (D3200: 1 -> 2 changes the rooms by mean 5.6-6.4 / 255, p99 42-49). With {@link probes} (a
+   * time-sliced bake), every pass covers only the slice, so a sliced 2-bounce bake differs from a
+   * full one (the slice's second pass sees the other probes' last bake): slice with 1.
    */
   bounces?: number;
 }
@@ -169,6 +174,8 @@ const DEFAULT_DISTANCE_ROUGHNESS = true;
 /** Default {@link BakeOptions.resolution} (D23, decided 2026-11-11: #35046's 256). */
 const DEFAULT_RESOLUTION = 256;
 const DEFAULT_ROUGHNESS_LERP = false;
+/** Default {@link BakeOptions.bounces} (D4300, decided 2026-11-11, maintainer Q1: 2, tunable). */
+const DEFAULT_BOUNCES = 2;
 
 export type SeamFix = 'warp' | 'none';
 /** How a probe set stores its cubes: a real cube array, or a 2D array of 6 layers per cube. */
@@ -465,7 +472,7 @@ export class ReflectionProbes extends THREE.Object3D {
       this.bake(renderer, scene, { ...options, probes: captured, environment: environmentOption === false ? false : true, bounces: 1 });
     }
     // D25: further passes in which the captures see the previous pass's probes
-    const bounces = Math.max(1, Math.floor(options.bounces ?? 1));
+    const bounces = Math.max(1, Math.floor(options.bounces ?? DEFAULT_BOUNCES));
     if (!this.bouncePass && bounces > 1 && captured.length > 0) {
       this.bouncePass = true;
       try {

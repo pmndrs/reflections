@@ -25,7 +25,7 @@ import * as THREE from 'three/webgpu';
 import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, type BakeOptions, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
   createPmndrsBvhTraceProviderFromObjects, type ThreePmndrsBvhTraceProvider,
 } from '@pmndrs/reflections/three';
 import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
@@ -356,6 +356,16 @@ async function main() {
     return { provider: p as ExampleProvider, pmndrs: null, refit: () => p.refit(), info: { kind, meshes: meshes.length, triangles: p.triangles, buildMs: performance.now() - t0 } };
   }
   let time = 0, paused = false;
+  /**
+   * The bake's options: `?probeRes=` (default 256), `?bounces=` (default 2, D25 / D4300; 1 halves
+   * the bake where no mirror or glossy surface faces another). The kit scenes keep their free-standing
+   * objects out of the captures (`userData.reflectionProbeExclude`, D4301).
+   */
+  const bakeOptions = (extra: Partial<BakeOptions> = {}): BakeOptions => ({
+    ...(q.has('probeRes') ? { resolution: Number(q.get('probeRes')) } : {}),
+    ...(q.has('bounces') ? { bounces: Number(q.get('bounces')) } : {}),
+    near: 0.05, far: 60, ...extra,
+  });
 
   async function load(id: string) {
     const factory = SCENES[id] ?? Object.values(ASSET_SCENES).find((a) => a.id === id)?.factory;
@@ -381,7 +391,7 @@ async function main() {
         probes.add(p);
       }
       kit.scene.add(probes);
-      probes.bake(renderer, kit.scene, { ...(q.has('probeRes') ? { resolution: Number(q.get('probeRes')) } : {}), near: 0.05, far: 60 });
+      probes.bake(renderer, kit.scene, bakeOptions());
       nextNodeFrame();
       kit.scene.environmentNode = reflectionProbes(probes) as N;
     }
@@ -567,6 +577,36 @@ async function main() {
       rtAnyHitOracle: (n?: number, rays?: RayKind) => rtAnyHitOracle(n, rays),
       rtShadowEffect: () => rtShadowEffect(),
       stop: stopLoop, start: startLoop,
+      get probes() { return probes; },
+      /**
+       * W37: re-bake the scene's probes with the page's options plus `extra` (`bounces`, `exclude`
+       * as a predicate over meshes or a list). `include: true` first clears every
+       * `userData.reflectionProbeExclude` (the kit's own exclusions), to bake with everything captured.
+       * Returns the bake's ms (wall clock to the queue draining, loop stopped), median of `repeat`.
+       */
+      async rebake(extra: N = {}, repeat = 1) {
+        if (!probes || !kit) return null;
+        stopLoop();
+        const { include, exclude, ...rest } = extra;
+        const saved: THREE.Object3D[] = [];
+        if (include) kit.scene.traverse((o) => { if (o.userData.reflectionProbeExclude) { saved.push(o); o.userData.reflectionProbeExclude = false; } });
+        let list: THREE.Object3D[] | undefined;
+        if (typeof exclude === 'function') { list = []; kit.scene.traverse((o) => { if ((o as THREE.Mesh).isMesh && exclude(o)) list!.push(o); }); } else list = exclude;
+        const ms: number[] = [];
+        try {
+          for (let i = 0; i < repeat; i++) {
+            await idle();
+            const t0 = performance.now();
+            probes.bake(renderer, kit.scene, bakeOptions({ ...rest, ...(list ? { exclude: list } : {}) }));
+            await idle();
+            ms.push(performance.now() - t0);
+          }
+        } finally { for (const o of saved) o.userData.reflectionProbeExclude = true; }
+        nextNodeFrame();
+        ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
+        ms.sort((a, b) => a - b);
+        return { ms: ms[ms.length >> 1], all: ms, excluded: list?.length ?? 0 };
+      },
       async step(n = 1) { for (let i = 0; i < n; i++) frame(); await idle(); },
       async shot() { frame(); const url = canvas.toDataURL('image/png'); await idle(); return url; },
       /** Median GPU ms per core pass over `n` frames, one frame per submit (loop stopped). */

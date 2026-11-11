@@ -97,6 +97,19 @@ export function add<T extends THREE.Object3D>(parent: THREE.Object3D, obj: T, po
   return obj;
 }
 
+/**
+ * Keeps `obj` out of the reflection-probe captures (`userData.reflectionProbeExclude`, which
+ * `ReflectionProbes.bake()` hides; D4301). The kit's rule: a probe captures what lies on its
+ * projection box (the walls, the floor, mirrors mounted on a face); objects standing inside the box
+ * are left out, because box projection paints whatever the capture saw onto the box faces, so a
+ * captured sphere in mid-room shows up smeared across the floor and walls wherever SSR misses.
+ * Animated objects are left out too (a bake is a still). Screen-space and traced rays still see them.
+ */
+export function noProbe<T extends THREE.Object3D>(obj: T): T {
+  obj.userData.reflectionProbeExclude = true;
+  return obj;
+}
+
 /** A horizontal floor plane at y = 0. */
 export function floor(parent: THREE.Object3D, material: THREE.Material, size = 20) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), material);

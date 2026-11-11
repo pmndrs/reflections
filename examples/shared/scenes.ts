@@ -7,9 +7,13 @@
 //   roughnessRamp  spheres and floor strips from roughness 0 to 1, metal and dielectric rows
 //   boxRoom        a closed room with windows: box-projected probe parallax
 //   moving         mirrorWall with animated objects: camera and object motion vectors
+//
+// Probe captures (D4301): each kit captures only what lies on its probe's projection box (walls,
+// floor, face-mounted mirrors); the objects standing inside the box are `noProbe()`, so where SSR
+// misses, the box-projected fallback shows the room behind them instead of their smeared capture.
 import * as THREE from 'three/webgpu';
 import {
-  type KitScene, type SceneOptions, type Vec3, add, floor, floorProbe, glow, gradientEnvironment, makeCamera, mirror, newScene, skyEnvironment, useSky,
+  type KitScene, type SceneOptions, type Vec3, add, floor, floorProbe, glow, gradientEnvironment, makeCamera, mirror, newScene, noProbe, skyEnvironment, useSky,
   patternTexture, std, studioLights,
 } from './kit';
 
@@ -22,10 +26,13 @@ export function mirrorWall(opts: SceneOptions = {}): KitScene {
   wall.castShadow = false;
   // coloured posts at the wall's ends and a few objects in between, for depth
   const post = new THREE.BoxGeometry(0.4, 3, 0.4);
+  // the posts stand 0.6 m off the projection box's back face (the wall) and stay in the probe: there
+  // the box projection is close, and the floor's off-screen rays past the frame edge need them (W37:
+  // without them the miss px moved away from ?rt=1, 'low' 32.9 -> 33.5, 'lowSphere' 21.7 -> 26.3 / 255)
   add(scene, new THREE.Mesh(post, std(0xd1495b, 0.5)), [-4.2, 1.5, -2.4]);
   add(scene, new THREE.Mesh(post, std(0x00798c, 0.5)), [4.2, 1.5, -2.4]);
-  add(scene, new THREE.Mesh(new THREE.SphereGeometry(0.45, 48, 24), std(0xedae49, 0.35)), [-1.6, 0.45, -1.2]);
-  add(scene, new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), std(0x66a182, 0.6)), [1.5, 0.4, -1.5], 0.5);
+  add(scene, noProbe(new THREE.Mesh(new THREE.SphereGeometry(0.45, 48, 24), std(0xedae49, 0.35))), [-1.6, 0.45, -1.2]);
+  add(scene, noProbe(new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), std(0x66a182, 0.6))), [1.5, 0.4, -1.5], 0.5);
   // an emissive strip along the wall's top: a bright, sharp feature to reflect
   add(scene, new THREE.Mesh(new THREE.BoxGeometry(9, 0.08, 0.05), glow(0xfff0d8, 4)), [0, 3.85, -2.95]);
   studioLights(scene, [3, 6, 6], 2.2);
@@ -62,17 +69,19 @@ export function offscreen(opts: SceneOptions = {}): KitScene {
   add(scene, new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.8, 0.04), std(0x1d1d1f, 0.4, 0.8)), [0, 1.2, -3.98]);
   add(scene, new THREE.Mesh(new THREE.PlaneGeometry(3, 1.6), mirror(0)), [0, 1.2, -3.95]);
   // on screen: a few matte objects
-  add(scene, new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.7, 40), std(0x8899aa, 0.6)), [-1.8, 0.35, -1.2]);
-  add(scene, new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.7), std(0xb5562f, 0.7)), [1.8, 0.25, -0.6], 0.4);
+  add(scene, noProbe(new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.7, 40), std(0x8899aa, 0.6))), [-1.8, 0.35, -1.2]);
+  add(scene, noProbe(new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.7), std(0xb5562f, 0.7))), [1.8, 0.25, -0.6], 0.4);
   // above the frame: a glowing ring and a lamp bar (the floor shows them, the screen doesn't)
-  const ring = add(scene, new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.07, 16, 80), glow(0xff8a2a, 5)), [0, 3.4, -2.5]);
+  // (in mid-air, 1.6-1.9 m below the projection box's top: out of the probe, D4301; the floor's
+  // misses vs ?rt=1 25.6 -> 14.5 / 255 with them out, the probe painted them onto the box's top)
+  const ring = add(scene, noProbe(new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.07, 16, 80), glow(0xff8a2a, 5))), [0, 3.4, -2.5]);
   ring.rotation.x = Math.PI / 2;
-  add(scene, new THREE.Mesh(new THREE.BoxGeometry(3, 0.1, 0.1), glow(0x7fe7ff, 5)), [-2.2, 3.1, 0.2]);
+  add(scene, noProbe(new THREE.Mesh(new THREE.BoxGeometry(3, 0.1, 0.1), glow(0x7fe7ff, 5))), [-2.2, 3.1, 0.2]);
   // behind the camera: three bright bars on a blue wall (only the wall mirror shows them)
   add(scene, new THREE.Mesh(new THREE.PlaneGeometry(14, 5), std(0x5a7690, 0.85)), [0, 2.5, 8], Math.PI);
   [[0xff3b5c, -1.2], [0x2ee6d6, 0], [0xffc93c, 1.2]].forEach(([c, x]) =>
     add(scene, new THREE.Mesh(new THREE.BoxGeometry(0.25, 1.4, 0.05), glow(c, 4)), [x, 1.3, 7.9]));
-  add(scene, new THREE.Mesh(new THREE.SphereGeometry(0.35, 32, 16), glow(0xfff0d0, 3)), [1.8, 1.4, 6.5]);
+  add(scene, noProbe(new THREE.Mesh(new THREE.SphereGeometry(0.35, 32, 16), glow(0xfff0d0, 3))), [1.8, 1.4, 6.5]);
   studioLights(scene, [-3, 7, 3], 1.6);
   const views = {
     default: { pos: [0, 1.6, 4] as Vec3, target: [0, 0.25, -0.5] as Vec3 },
@@ -92,14 +101,14 @@ export function contact(opts: SceneOptions = {}): KitScene {
   useSky(scene, new THREE.Vector3(3, 6, 4));
   floor(scene, mirror(0.02, 0xd8d8d8), 20);
   add(scene, new THREE.Mesh(new THREE.PlaneGeometry(14, 5), std(0xffffff, 0.8, 0, { map: patternTexture({ cells: [14, 5], size: [1400, 500] }) })), [0, 2.5, -5]);
-  add(scene, new THREE.Mesh(new THREE.SphereGeometry(0.5, 64, 32), std(0xe63946, 0.4)), [-2.2, 0.5, 0]);
-  add(scene, new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), std(0xf1faee, 0.6)), [-0.8, 0.45, -0.6], 0.6);
-  add(scene, new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 1.4, 48), std(0x457b9d, 0.3)), [0.5, 0.7, 0.2]);
-  const torus = add(scene, new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.15, 24, 64), std(0xf4a261, 0.35, 1)), [1.8, 0.15, -0.4]);
+  add(scene, noProbe(new THREE.Mesh(new THREE.SphereGeometry(0.5, 64, 32), std(0xe63946, 0.4))), [-2.2, 0.5, 0]);
+  add(scene, noProbe(new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), std(0xf1faee, 0.6))), [-0.8, 0.45, -0.6], 0.6);
+  add(scene, noProbe(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 1.4, 48), std(0x457b9d, 0.3))), [0.5, 0.7, 0.2]);
+  const torus = add(scene, noProbe(new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.15, 24, 64), std(0xf4a261, 0.35, 1))), [1.8, 0.15, -0.4]);
   torus.rotation.x = Math.PI / 2;
-  add(scene, new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.0, 6), std(0x2a9d8f, 0.5)), [3.0, 0.5, 0.4]);
+  add(scene, noProbe(new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.0, 6), std(0x2a9d8f, 0.5))), [3.0, 0.5, 0.4]);
   // a thin plate leaning on the box: a contact along an edge
-  const plate = add(scene, new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.8, 0.6), std(0x8d5fd3, 0.4)), [-1.4, 0.38, 0.1]);
+  const plate = add(scene, noProbe(new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.8, 0.6), std(0x8d5fd3, 0.4))), [-1.4, 0.38, 0.1]);
   plate.rotation.z = 0.25;
   studioLights(scene, [3, 6, 4], 2.4);
   const views = {
@@ -122,8 +131,8 @@ export function roughnessRamp(opts: SceneOptions = {}): KitScene {
   const sphere = new THREE.SphereGeometry(0.3, 64, 32);
   for (let i = 0; i < n; i++) {
     const r = i / (n - 1);
-    add(scene, new THREE.Mesh(sphere, std(0xffc36b, r, 1)), [x0 + i * dx, 0.3, -0.9]);  // metal (gold)
-    add(scene, new THREE.Mesh(sphere, std(0x2f6fd0, r, 0)), [x0 + i * dx, 0.3, 0.1]);   // dielectric (blue plastic)
+    add(scene, noProbe(new THREE.Mesh(sphere, std(0xffc36b, r, 1))), [x0 + i * dx, 0.3, -0.9]);  // metal (gold)
+    add(scene, noProbe(new THREE.Mesh(sphere, std(0x2f6fd0, r, 0))), [x0 + i * dx, 0.3, 0.1]);   // dielectric (blue plastic)
     // floor strips in front: chrome-like, same ramp (sit 1 mm up so they don't fight the floor)
     const strip = new THREE.Mesh(new THREE.PlaneGeometry(dx * 0.92, 2.2), std(0xdddddd, r, 1));
     strip.rotation.x = -Math.PI / 2;
@@ -184,11 +193,11 @@ export function boxRoom(opts: SceneOptions = {}): KitScene {
   box((W - bw) / 2, wh, T, wallZ, [-(bw / 2 + (W - bw) / 4), sill + wh / 2, -D / 2 - T / 2]);
   box((W - bw) / 2, wh, T, wallZ, [bw / 2 + (W - bw) / 4, sill + wh / 2, -D / 2 - T / 2]);
   // furniture: a sofa block, a pillar, a sphere, a low table
-  box(2.2, 0.45, 0.9, std(0x3d5a80, 0.8), [-2.6, 0.225, -1.8]);
-  box(2.2, 0.5, 0.2, std(0x3d5a80, 0.8), [-2.6, 0.65, -2.2]);
-  add(room, new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, H, 32), std(0xffffff, 0.6)), [1.2, H / 2, -0.6]);
-  add(room, new THREE.Mesh(new THREE.SphereGeometry(0.35, 48, 24), std(0xe0e0e0, 0.05, 1)), [-0.6, 0.35, 0.8]);
-  box(1.2, 0.06, 0.7, std(0x222222, 0.2), [2.2, 0.45, 1.2]);
+  noProbe(box(2.2, 0.45, 0.9, std(0x3d5a80, 0.8), [-2.6, 0.225, -1.8]));
+  noProbe(box(2.2, 0.5, 0.2, std(0x3d5a80, 0.8), [-2.6, 0.65, -2.2]));
+  add(room, noProbe(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, H, 32), std(0xffffff, 0.6))), [1.2, H / 2, -0.6]);
+  add(room, noProbe(new THREE.Mesh(new THREE.SphereGeometry(0.35, 48, 24), std(0xe0e0e0, 0.05, 1))), [-0.6, 0.35, 0.8]);
+  noProbe(box(1.2, 0.06, 0.7, std(0x222222, 0.2), [2.2, 0.45, 1.2]));
   // outside: a ground plane and the sun through the windows
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), std(0x8a9a6a, 0.95));
   ground.rotation.x = -Math.PI / 2; ground.position.y = -T - 0.01;
@@ -232,9 +241,11 @@ export function facingMirrors(opts: SceneOptions = {}): KitScene {
     add(scene, new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.6, 7.7), std(0x222226, 0.5)), [side * 1.83, 1.45, -0.25]);
     add(scene, new THREE.Mesh(new THREE.PlaneGeometry(7.5, 2.4), mirror(0)), [side * 1.79, 1.45, -0.25], -side * Math.PI / 2);
   }
-  add(scene, new THREE.Mesh(new THREE.SphereGeometry(0.4, 48, 24), std(0xe63946, 0.35)), [-0.7, 0.4, -1.6]);
-  add(scene, new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), std(0x2a9d8f, 0.6)), [0.8, 0.35, -2.2], 0.4);
-  add(scene, new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 1.2, 40), std(0xf4a261, 0.4)), [0.2, 0.6, -0.4]);
+  // the objects on the stage stay out of the probe; the mirrors (on the projection box's x faces,
+  // +-1.8) and the glow bar stay in (D4301)
+  add(scene, noProbe(new THREE.Mesh(new THREE.SphereGeometry(0.4, 48, 24), std(0xe63946, 0.35))), [-0.7, 0.4, -1.6]);
+  add(scene, noProbe(new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), std(0x2a9d8f, 0.6))), [0.8, 0.35, -2.2], 0.4);
+  add(scene, noProbe(new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 1.2, 40), std(0xf4a261, 0.4))), [0.2, 0.6, -0.4]);
   add(scene, new THREE.Mesh(new THREE.BoxGeometry(3, 0.08, 0.08), glow(0x9fd8ff, 5)), [0, 2.9, -2.5]).castShadow = false;
   studioLights(scene, [1, 6, 5], 2.0);
   const views = {
@@ -253,8 +264,9 @@ export function facingMirrors(opts: SceneOptions = {}): KitScene {
 /** mirrorWall with a sliding, turning knot and a bouncing ball (object motion), for motion vectors. */
 export function moving(opts: SceneOptions = {}): KitScene {
   const base = mirrorWall(opts);
-  const knot = add(base.scene, new THREE.Mesh(new THREE.TorusKnotGeometry(0.4, 0.13, 160, 24), std(0xc9a46a, 0.25, 1)), [0, 1.2, 0]);
-  const ball = add(base.scene, new THREE.Mesh(new THREE.SphereGeometry(0.3, 48, 24), std(0xff4fa0, 0.3)), [2, 0.3, 0.6]);
+  // animated: out of the (still) probe capture, or its t = 0 pose stays painted on the walls
+  const knot = add(base.scene, noProbe(new THREE.Mesh(new THREE.TorusKnotGeometry(0.4, 0.13, 160, 24), std(0xc9a46a, 0.25, 1))), [0, 1.2, 0]);
+  const ball = add(base.scene, noProbe(new THREE.Mesh(new THREE.SphereGeometry(0.3, 48, 24), std(0xff4fa0, 0.3))), [2, 0.3, 0.6]);
   const update = (t: number) => {
     knot.position.set(2.2 * Math.sin(t * 0.8), 1.2, 0.4 * Math.cos(t * 0.8));
     knot.rotation.set(0.4, t * 1.2, 0);

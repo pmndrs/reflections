@@ -306,7 +306,7 @@ async function main() {
       probes.add(p);
     }
     kit.scene.add(probes);
-    probes.bake(renderer, kit.scene, { resolution: 128, near: 0.05, far: 60 });
+    probes.bake(renderer, kit.scene, { resolution: 128, near: 0.05, far: 60, ...(q.has('bounces') ? { bounces: Number(q.get('bounces')) } : {}) });
     nextNodeFrame();
     kit.scene.environmentNode = reflectionProbes(probes) as N;
   }

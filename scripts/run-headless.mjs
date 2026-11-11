@@ -919,6 +919,7 @@ async function ssrRtChecks(pages) {
     if (id === 'contact') await rtShadingNormalChecks(p, 'three-mesh-bvh port');
   }
   if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '');
+  await missFillChecks(pages);
 
   // GPU ms vs miss count at 1080p: the same frame, misses varied with the miss-list threshold
   const big = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1&scene=offscreen&pose=mirror`);
@@ -936,6 +937,52 @@ async function ssrRtChecks(pages) {
   check('rt GPU ms scales with the miss count', r0.misses === 0 && rN.misses > 10000 && rN.ms > 4 * Math.max(r0.ms, 0.01) && rows.every((r, i) => i === 0 || r.misses >= rows[i - 1].misses),
     rows.map((r) => `${r.misses}: ${r.ms?.toFixed(3)} ms`).join(', '));
 }
+
+/**
+ * W37 (D4301): facingMirrors' SSR misses (rays behind an object or off screen) fall back to the
+ * probe. Mean abs difference (sRGB 0-255, per channel) of `final` over the miss px (the 'misses'
+ * view's red, RT off) against the same frame with the ray-traced fill (`setRT(true)`), per pose and
+ * probe bake: `all` = every object captured (main before W37), `kit` = the kit's own exclusions.
+ */
+const MISS_FILL = `async (poses, variants) => {
+  const p = window.__p;
+  const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+  const out = {};
+  for (const pose of poses) {
+    p.setPose(pose);
+    p.setRT(false); p.setView('misses'); await p.step(3);
+    const M = await px(await p.shot());
+    out[pose] = {};
+    for (const [name, v] of Object.entries(variants)) {
+      await p.rebake(v);
+      p.setView('final'); p.setRT(true); await p.step(3);
+      const R = await px(await p.shot());
+      p.setRT(false); await p.step(3);
+      const F = await px(await p.shot());
+      let n = 0, d = 0;
+      for (let k = 0; k < M.length; k += 4) {
+        if (!(M[k] > 200 && M[k + 1] < 80 && M[k + 2] < 80)) continue;
+        n++; d += (Math.abs(F[k] - R[k]) + Math.abs(F[k + 1] - R[k + 1]) + Math.abs(F[k + 2] - R[k + 2])) / 3;
+      }
+      out[pose][name] = { px: n, mad: n ? d / n : 0 };
+    }
+  }
+  p.setView('grid');
+  return out;
+}`;
+
+async function missFillChecks(pages) {
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=facingMirrors`);
+  pages.push(p);
+  const r = await p.T(`(${MISS_FILL})(['default', 'left'], { all: { include: true }, kit: {} })`);
+  const line = (k) => `${k}: ${r[k].kit.px} miss px, all captured ${r[k].all.mad.toFixed(2)} -> kit ${r[k].kit.mad.toFixed(2)}`;
+  check('facingMirrors: the probe fallback in the SSR misses stays near the ray-traced fill (objects out of the captures, D4301)',
+    ['default', 'left'].every((k) => r[k].kit.px > 10000 && r[k].kit.mad < MISS_FILL_MAX[k] && r[k].kit.mad < r[k].all.mad - 1),
+    `mean abs diff / 255 vs rt=1 over the misses; ${line('default')}; ${line('left')} (limits ${JSON.stringify(MISS_FILL_MAX)})`);
+}
+/** D4301: limits for {@link missFillChecks}, from W37's measurement (see DIVERGES D4301). */
+const MISS_FILL_MAX = { default: 22.5, left: 27 };
 
 /**
  * examples/ssr?rt=1&bvh=pmndrs (W14): core's @pmndrs/bvh provider.

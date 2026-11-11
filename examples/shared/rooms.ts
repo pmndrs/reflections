@@ -3,7 +3,7 @@
 // mirror ball on Ben's figure eight lowered to 1.2 m so its reflection lands next to it. The probe
 // setup (one per room plus a doorway probe) and the scenario poses are that page's.
 import * as THREE from 'three/webgpu';
-import { type KitScene, type SceneOptions, type Vec3, floorProbe, makeCamera } from './kit';
+import { type KitScene, type SceneOptions, type Vec3, floorProbe, makeCamera, noProbe } from './kit';
 
 export function rooms(opts: SceneOptions = {}): KitScene {
   const scene = new THREE.Scene();
@@ -58,8 +58,8 @@ export function rooms(opts: SceneOptions = {}): KitScene {
     scene.add(light);
   }
 
-  // the mirror ball (kept out of probe captures in the original)
-  const ball = add(new THREE.Mesh(new THREE.SphereGeometry(4.5 * 0.12, 48, 32), std(0xffffff, 0, 1)));
+  // the mirror ball (kept out of probe captures in the original, and here: D4301)
+  const ball = noProbe(add(new THREE.Mesh(new THREE.SphereGeometry(4.5 * 0.12, 48, 32), std(0xffffff, 0, 1))));
   ball.name = 'mirrorBall';
 
   const views: Record<string, { pos: Vec3; target: Vec3 }> = {

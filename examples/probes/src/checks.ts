@@ -60,7 +60,9 @@ async function diff(a: string, b: string) {
 
 export function makeChecks(p: Page) {
   const { renderer, scene } = p;
-  const bakeOptions = () => ({ resolution: p.params.resolution, near: 0.05, far: 30 });
+  // bounces 1 (the page's own, not the package's 2, D4300): these checks pin single-pass mechanics
+  // (capture counts, a time-sliced bake equal to the full one), which a second pass over a slice changes
+  const bakeOptions = () => ({ resolution: p.params.resolution, near: 0.05, far: 30, bounces: 1 });
   // With the loop stopped every bake falls in one frame, and three renders a shadow map at most once
   // per camera per frame, so the second bake would keep the first one's shadows. Advance the frame
   // the way the animation loop does (a sliced bake runs one slice per frame anyway).
