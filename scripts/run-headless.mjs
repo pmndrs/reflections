@@ -204,6 +204,16 @@ async function sssrCoreChecks(pages) {
   check('sssr cube-environment fallback: same rays and hits', se.rays === st.rays && Math.abs(se.mirrorHitFraction - st.mirrorHitFraction) < 1e-3,
     `rays ${se.rays}, hit ${(se.mirrorHitFraction * 100).toFixed(1)}%`);
   savePng('sssr-core-env.png', await env.T('window.__p.shot()'));
+  // fallbackRoughness (D1806): 'surface' takes misses' fallback at the pixel's roughness (the rough-path
+  // lookup), 'mirror' is FFX's roughness 0. Mirrors and confidence-1 pixels must not change.
+  const fr = await env.T('window.__p.fallbackRoughness()');
+  console.log('  fallbackRoughness', JSON.stringify(fr));
+  check("sssr fallbackRoughness 'surface': glossy misses at the probe lookup of their own roughness",
+    fr.misses > 1000 && fr.missSurface.p99 < 1 && fr.missMirror.mean > fr.missSurface.mean && fr.partialSurface.p99 < 1,
+    `misses ${fr.misses}: |radiance - lookup(r)| mean / p99 (/255) mirror ${fr.missMirror.mean} / ${fr.missMirror.p99}, surface ${fr.missSurface.mean} / ${fr.missSurface.p99}; ` +
+    `partial confidence ${fr.partials}: mirror ${fr.partialMirror.mean} / ${fr.partialMirror.p99}, surface ${fr.partialSurface.mean} / ${fr.partialSurface.p99}`);
+  check("sssr fallbackRoughness 'surface': mirrors and confidence-1 pixels unchanged", fr.mirrors > 1000 && fr.mirrorsDiffer === 0 && fr.confidentDiffer === 0,
+    `${fr.mirrorsDiffer} of ${fr.mirrors} mirror px, ${fr.confidentDiffer} of ${fr.confident} confidence-1 px differ`);
   // 4K, every surface a mirror: more than 65535 x 64 rays, so the intersect args must be 2-D
   // (D601). A 1-D dispatch over the limit is skipped without a validation error: radiance stays 0.
   const uhd = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?w=3840&h=2160&allmirror`);
@@ -697,6 +707,20 @@ async function rtAnyHitChecks(p, label) {
 }
 
 /**
+ * D1700 (W28): the provider's shading normal (`traceHitShadingNormal`) against three's interpolated
+ * `intersection.normal` on the same rays (contact: a 6-sided cone, a sphere, a torus, a cylinder);
+ * the flat geometric normal's mean angle to it is what the shading normal removes.
+ */
+async function rtShadingNormalChecks(p, label) {
+  for (const kind of ['camera', 'scene']) {
+    const o = await p.T(`window.__p.rtOracle(4096, '${kind}')`);
+    const s = o.shading;
+    check(`rt ${label}: shading normal = three's interpolated normal, contact, ${kind} rays (D1700)`, s.capability && s.compared > 0 && s.agree >= s.compared * 0.995,
+      `${s.agree}/${s.compared} hits within cos 0.999, mean ${s.meanDeg.toExponential(1)} deg (flat geometric normal: mean ${s.flatMeanDeg.toFixed(3)} deg)`);
+  }
+}
+
+/**
  * D903: hit shading vs the on-screen colour of the same hits, shadow rays off and on (one
  * reference frame, both shadings on the same rays). A shadow ray can only darken a hit.
  */
@@ -712,7 +736,15 @@ async function rtHitShadingLines(p, id) {
   const fx = await p.T('window.__p.rtShadowEffect()');
   check(`rt ${id}: shadow rays only darken shaded hits (D903)`, fx.on.pixels > 0 && fx.noise.darker + fx.noise.brighter < 0.001 && fx.on.brighter < 0.001 && fx.on.mean <= fx.on.meanOff + 1e-6,
     `${fx.on.pixels} shaded hits: ${(fx.on.darker * 100).toFixed(1)}% > 1% darker, ${(fx.on.brighter * 100).toFixed(2)}% brighter (same rays twice without shadows: ${(fx.noise.darker * 100).toFixed(2)}% / ${(fx.noise.brighter * 100).toFixed(2)}%); mean ${fx.on.meanOff.toFixed(3)} -> ${fx.on.mean.toFixed(3)}`);
-  return { on, off, fx };
+  // D901 (W28): the kit scenes are lit by their probes (scene.environmentNode), so traced hits are
+  // too; the environment mean (no bounce from the lit room) read 0.67-0.91x. Shadows on for both.
+  await p.T('window.__p.setHitProbes(false)'); await p.T('window.__p.step(2)'); // rebuilds the traced pass
+  const env = await p.T('window.__p.hitShadingError()');
+  await p.T('window.__p.setHitProbes(true)'); await p.T('window.__p.step(2)');
+  check(`rt ${id}: traced hits lit by the probes at the hit match the on-screen brightness (D901)`,
+    hs.source === 'probes' && env.source === 'environment' && Math.abs(1 - on.ratio) <= 0.1 && Math.abs(1 - on.ratio) < Math.abs(1 - env.ratio),
+    `${hs.source}: ${fmt(on)}; environment mean: ${fmt(env)}`);
+  return { on, off, fx, env };
 }
 
 /**
@@ -802,6 +834,7 @@ async function ssrRtChecks(pages) {
     const extra = id === 'mirrorWall' ? `; wall: ${(st.wall.confidentFraction * 100).toFixed(1)}% confident, corr ${st.wall.lumCorrelation.toFixed(3)}` : '';
     check(`rt ${id}: renders, finite, no validation errors`, e.length === 0 && st.nonFinite === 0, e.length ? e.slice(0, 2).join(' | ') : `${st.misses} misses -> ${JSON.stringify(st.rt)}${extra}`);
     await rtHitShadingLines(p, id);
+    if (id === 'contact') await rtShadingNormalChecks(p, 'three-mesh-bvh port');
   }
   if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '');
 
@@ -897,6 +930,7 @@ async function ssrRtBvhChecks(pages) {
       }
       // D903: the same hit-shading measurement as the ssr-rt section, on this provider
       if (['mirrorWall', 'contact', 'moving'].includes(id)) { await p.T('window.__p.step(2)'); await rtHitShadingLines(p, `${id} (@pmndrs/bvh)`); }
+      if (id === 'contact') await rtShadingNormalChecks(p, '@pmndrs/bvh');
     }
   }
   if (args.includes('--rt-shadow-timing')) await rtShadowTiming('@pmndrs/bvh', '&bvh=pmndrs');
@@ -1112,6 +1146,30 @@ async function babylonChecks(pages) {
       await p.T("window.__p.setView('final')");
       const t = await p.T('window.__p.time(20)').catch(() => null);
       if (t) console.log(`  babylon tracer GPU ms (960x540, loop stopped): ${Object.entries(t).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+    }
+  }
+  // D1804 (W29): the composite with SSR and probes off (environment slot only) against Babylon's own
+  // specular IBL, on AO / normal-mapped metal, rough, clear-coat, sheen and bent-normal materials.
+  for (const sky of ['flat', 'gradient']) {
+    const before = results.logs.length;
+    const p = await openPage(`http://127.0.0.1:${PORT}/babylon/?manual&scene=ibl&sky=${sky}`);
+    pages.push(p);
+    await p.T('window.__p.step(2)');
+    const c = await p.T('window.__p.iblCompare()');
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    const fmt = (g) => `${g.pixels} px: before mean ${g.before.mean} p99 ${g.before.p99} -> after mean ${g.after.mean} p99 ${g.after.p99} (/255)`;
+    console.log(`  babylon ibl (${sky} sky) vs Babylon's own specular IBL: geometry ${fmt(c.geometry)}; specular factor < 1 ${fmt(c.occluded)}; energy compensation only ${fmt(c.energyOnly)}`);
+    if (sky === 'flat') {
+      // flat sky: any prefilter of a constant is itself, so only the weight can differ
+      check('babylon: composite matches Babylon\'s own specular IBL (AO, horizon occlusion, multi-scatter applied)',
+        errs.length === 0 && c.occluded.pixels > 1000 && c.geometry.after.mean < 0.5 && c.geometry.after.mean < c.geometry.before.mean && c.occluded.after.mean < c.occluded.before.mean,
+        errs.length ? errs.slice(0, 2).join(' | ') : `geometry mean ${c.geometry.before.mean} -> ${c.geometry.after.mean}, p99 ${c.geometry.before.p99} -> ${c.geometry.after.p99} (/255)`);
+      const shot = async (name) => savePng(`babylon-ibl-${name}.png`, await p.T('window.__p.shot()'));
+      await p.T('window.__p.setSSR(false)');
+      await p.T('window.__p.setProbes(false)');
+      await shot('final');
+      await p.T("window.__p.setView('specularFactor')");
+      await shot('view-specularFactor');
     }
   }
 }

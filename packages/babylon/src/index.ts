@@ -8,8 +8,8 @@ export {
 export { asWebGPUEngine, getDevice, getGPUTexture, wrapGPUTexture } from './internal/babylonWebGPU';
 export { BabylonFrame, type BabylonFrameOptions, type BabylonGBuffer } from './frame';
 
-// Scene colour without specular IBL (sceneColorSpecular 'direct').
-export { StripSpecularIBLPlugin, stripSpecularIBL } from './material';
+// Scene colour without specular IBL (sceneColorSpecular 'direct'), its extra factors in velocity.z.
+export { DECODE_SPECULAR_FACTORS_WGSL, StripSpecularIBLPlugin, stripSpecularIBL } from './material';
 
 // Probes: core ProbeSet, captured by Babylon cube renders.
 export { BabylonCubeCapture, BabylonProbeSet, type BabylonProbe, type BabylonProbeSetOptions } from './probes';

@@ -1,6 +1,6 @@
 // three → core's @pmndrs/bvh trace provider (docs/SPEC.md "Trace seam"). The provider and its math
 // live in core (`createPmndrsBvhTraceProvider`); this file only turns three objects into the
-// engine-free inputs it takes: positions, indices, world matrices and material ids.
+// engine-free inputs it takes: positions, indices, vertex normals, world matrices and material ids.
 //
 // - One mesh tree per BufferGeometry, shared by every Mesh that uses it.
 // - One instance per Mesh, and per instance of an InstancedMesh (matrixWorld x instanceMatrix).
@@ -8,6 +8,8 @@
 //   by `defaultHitMaterial` unless `options.material` says otherwise.
 // - Positions are read through the attribute (interleaved, normalized and non-f32 work); morph
 //   targets and skinning are not applied (D1703).
+// - Vertex normals (the `normal` attribute, read the same way) shade traced hits (D1700); a
+//   geometry without them is shaded flat.
 import * as THREE from 'three/webgpu';
 import {
   createPmndrsBvhTraceProvider, type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceScene,
@@ -20,6 +22,8 @@ export interface PmndrsBvhFromObjectsOptions extends PmndrsBvhTraceProviderOptio
   material?: (mesh: THREE.Mesh) => HitMaterial;
   /** Which meshes to trace. Default: visible meshes that aren't helpers and don't set `userData.noTrace`. */
   filter?: (mesh: THREE.Mesh) => boolean;
+  /** Pass the geometries' vertex normals for the shading normal (D1700). Default true. */
+  shadingNormals?: boolean;
 }
 
 /** What {@link bvhTraceSceneFromObjects} built, with the three objects behind each instance. */
@@ -31,29 +35,33 @@ export interface ThreeBvhTraceScene {
 
 const defaultFilter = (m: THREE.Mesh) => !(m as unknown as { isHelper?: boolean }).isHelper && !m.userData.noTrace;
 
-function geometryInput(geometry: THREE.BufferGeometry): BvhMeshGeometry {
+/** An attribute as tightly packed `x, y, z` floats (the array itself when it already is). */
+function vec3Array(a: THREE.BufferAttribute | THREE.InterleavedBufferAttribute): Float32Array {
+  if (!(a as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute && a.array instanceof Float32Array && a.itemSize === 3 && !a.normalized) return a.array;
+  const out = new Float32Array(a.count * 3);
+  for (let i = 0; i < a.count; i++) out.set([a.getX(i), a.getY(i), a.getZ(i)], i * 3);
+  return out;
+}
+
+function geometryInput(geometry: THREE.BufferGeometry, shadingNormals: boolean): BvhMeshGeometry {
   const position = geometry.getAttribute('position') as THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
-  let positions: Float32Array;
-  if (!(position as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute && position.array instanceof Float32Array && position.itemSize === 3 && !position.normalized) {
-    positions = position.array;
-  } else {
-    positions = new Float32Array(position.count * 3);
-    for (let i = 0; i < position.count; i++) positions.set([position.getX(i), position.getY(i), position.getZ(i)], i * 3);
-  }
+  let positions = vec3Array(position);
+  const normal = shadingNormals ? geometry.getAttribute('normal') as THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined : undefined;
+  const normals = normal && normal.count === position.count && normal.itemSize >= 3 ? vec3Array(normal) : null;
   const index = geometry.getIndex();
   let indices: Uint16Array | Uint32Array | null = null;
   if (index) indices = index.array instanceof Uint16Array || index.array instanceof Uint32Array ? index.array : Uint32Array.from(index.array as ArrayLike<number>);
   // A trailing partial triangle (malformed input) is dropped rather than refused.
   if (indices && indices.length % 3) indices = indices.slice(0, indices.length - (indices.length % 3));
   if (!indices && positions.length % 9) positions = positions.slice(0, positions.length - (positions.length % 9));
-  return { positions, indices };
+  return { positions, indices, normals };
 }
 
 /**
  * Engine-free inputs for {@link createPmndrsBvhTraceProvider} from three objects (meshes, groups or
  * whole scenes; their world matrices must be current).
  */
-export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3D[], options: Pick<PmndrsBvhFromObjectsOptions, 'material' | 'filter'> = {}): ThreeBvhTraceScene {
+export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3D[], options: Pick<PmndrsBvhFromObjectsOptions, 'material' | 'filter' | 'shadingNormals'> = {}): ThreeBvhTraceScene {
   const filter = options.filter ?? defaultFilter;
   const materialOf = options.material ?? defaultHitMaterial;
   const meshes: BvhMeshGeometry[] = [];
@@ -69,7 +77,7 @@ export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3
     const position = mesh.geometry?.getAttribute('position');
     if (!position || position.count < 3) return;
     let mi = meshIds.get(mesh.geometry);
-    if (mi === undefined) { mi = meshes.length; meshes.push(geometryInput(mesh.geometry)); meshIds.set(mesh.geometry, mi); }
+    if (mi === undefined) { mi = meshes.length; meshes.push(geometryInput(mesh.geometry, options.shadingNormals !== false)); meshIds.set(mesh.geometry, mi); }
     // One entry per three material, unless a custom material function makes it per mesh.
     const key = options.material ? mesh : (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) ?? mesh;
     let material = materialIds.get(key);
