@@ -13,7 +13,7 @@ export function downsamplerFor(device: GPUDevice): Downsampler {
   return d;
 }
 
-/** Color-attachment bytes per sample the reflections G-buffer can use (three's base 28 + lit 8 + specular 10 = 46, rounded up to the next common limit). */
+/** Color-attachment bytes per sample the reflections G-buffer can use (three's base 28 + lit 8 + specular 10 + clear coat 4 = 50, rounded up to the next common limit). */
 export const REFLECTIONS_COLOR_BYTES_PER_SAMPLE = 64;
 
 /**
@@ -23,7 +23,7 @@ export const REFLECTIONS_COLOR_BYTES_PER_SAMPLE = 64;
  * - six storage textures per stage, so mip chains run six levels per dispatch (default 4 still
  *   works, with more dispatches);
  * - up to 64 color-attachment bytes per sample (WebGPU's default is 32), so a G-buffer can add the
- *   lit image and three's exact specular weights (46 B, D603). On an adapter that can't, the
+ *   lit image, three's exact specular weights (46 B, D603) and the clear coat target (50 B, D3541). On an adapter that can't, the
  *   G-buffer's `'auto'` targets stay off and the composite falls back to its estimate (D4600).
  */
 export function reflectionsRequiredLimits(adapter: GPUAdapter): Record<string, number> {

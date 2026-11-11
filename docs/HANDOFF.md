@@ -74,7 +74,7 @@ The working state of the project: who is on what, which interfaces the workstrea
 For the fine-tune pass once the phases are built and running. Nothing here blocks a phase or a decision; if one starts to, promote it. One line each, with a pointer.
 
 **Tracked fixes (known fix, waiting its turn; pick these up before new work in the same area)**
-- Sphere fringe in reflections (D4303): when RT is on, use FFX's thin thickness (0.015) so rays passing behind an object's edge miss and get traced instead of picking up its colour; keep 0.2 m without RT. The full fix is a back-face depth layer. Maintainer agreed 2026-11-11 (Q4). Check first whether the peer's W44 'trace' mode already covers it.
+- Sphere fringe in reflections (D4303), RT off only: W44 measured that RT already removes it (red px outside the RT silhouette: SSR-only 50, SSR + re-shade 35, RT 0, RT + re-shade 2), so the earlier 'thin thickness when RT is on' idea is dropped. Without RT, FFX's thin 0.015 cuts a hole in the sphere; the fix there is a back-face depth layer (one more depth target and a thickness test against it). Maintainer agreed to track it (2026-11-11, Q4).
 - A path-traced ground truth for the moving and mirror scenes (maintainer 2026-11-11, Q2): `?rt=1` isn't ground truth where traced hits are coloured from the probes (D901) or one mirror blocks another (D3513). Reuse the compare page's WebGPU path tracer (W21/W23) on the ssr kits, then retune W37/W38 thresholds against it.
 
 **Correctness polish (not visible yet)**
