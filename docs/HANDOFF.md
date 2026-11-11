@@ -77,10 +77,11 @@ For the fine-tune pass once the phases are built and running. Nothing here block
 **Tracked fixes (known fix, waiting its turn; pick these up before new work in the same area)**
 - Sphere fringe in reflections (D4303), RT off only: W44 measured that RT already removes it (red px outside the RT silhouette: SSR-only 50, SSR + re-shade 35, RT 0, RT + re-shade 2), so the earlier 'thin thickness when RT is on' idea is dropped. Without RT, FFX's thin 0.015 cuts a hole in the sphere; the fix there is a back-face depth layer (one more depth target and a thickness test against it). Maintainer agreed to track it (2026-11-11, Q4).
 - A path-traced ground truth for the moving and mirror scenes (maintainer 2026-11-11, Q2): `?rt=1` isn't ground truth where traced hits are coloured from the probes (D901) or one mirror blocks another (D3513). Reuse the compare page's WebGPU path tracer (W21/W23) on the ssr kits, then retune W37/W38 thresholds against it.
+- pixi composite drops material occlusion on reflections (D4512); fix: multiply the added-back term by the material occlusion the scene-colour bit removed it with: no test scene has occlusion maps yet.
+- Specular occlusion near mirrors (D4513, W39): Lagarde's term darkens a near-mirror's misses beside lit objects (contact: 23.8 -> 33.4 vs a traced reference); fade it out below the tracer's threshold when RT is on, or weight by the hit's confidence. Composite change, W44's lane.
 
 **Correctness polish (not visible yet)**
 - contact under the upscaler drifts at rest (W39): frame 120 vs 240 with the camera still, mean 1.5/255, 3% px > 8/255 in blocks on the floor reflection of the cylinder and torus (AA off: 0.12, 0.04%). Jitter changes which rays validate; the 128-frame history doesn't settle it. Time-boxed, not chased.
-- pixi composite drops material occlusion on reflections (D4512): no test scene has occlusion maps yet.
 - The 75/255 point-light highlight flake on instanced lit spheres (about 430 px, below our code, likely Dawn/Metal). D1 row; repro in `docs/research/d1/`. Clue: only the warm light's highlights change. Draft upstream report in the D1 row.
 - About 1,800 extra forward-Z misses on the sssr-core glossy floor (W9 row).
 - Reflected sphere stripe ratio still 8.0 (cube 1.7) after D1000; streaks behind objects 4.6% with the hybrid thickness (D1001). Visible in examples/ssr mirrorWall as a jagged comb on the reflected sphere's top edge, raw and denoised (W12).
@@ -95,7 +96,6 @@ For the fine-tune pass once the phases are built and running. Nothing here block
 - Probe captures after a layout and environment change: fixed by a second capture pass; revisit the cost.
 
 **Quality experiments**
-- Specular occlusion near mirrors (D4513, W39): Lagarde's term darkens a near-mirror's misses beside lit objects (contact: 23.8 -> 33.4 vs a traced reference); fade it out below the tracer's threshold when RT is on, or weight by the hit's confidence. Composite change, W44's lane.
 - Examples' GTAO (D4510) has no temporal filter or blur: its grain reaches rough surfaces undenoised when `?specOcc=1`; three's denoise node or the TRAA-friendly temporal mode would smooth it. 1080p cost not measured cleanly.
 - RT hit shading vs probe size: with 256 px probes (the default since W31) contact's traced hits read 1.10x the on-screen brightness with @pmndrs/bvh (1.084 at 128 px; mirrorWall / moving unchanged within 0.01). Both sides brighten; the hits' roughness-1 lookup moves more. The ssr-rt checks pin `probeRes=128` (run-headless `url`) until this is understood.
 - The SSR-to-probe step on glossy floors is mostly radiance, not blur: hit vs probe luma bias -10 to -14/255 on mirrorWall, +6 to +23 on contact / the strips (`pnpm check --only seam`, W26). Lagarde's options close 4-24 % of it. Look at hit shading vs the probe capture's lighting (D903's dark bias may be the same thing).
