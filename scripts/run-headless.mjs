@@ -6,6 +6,7 @@
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p: core on the 2D array (warp), core on the cube array, the pre-phase-2 TSL node
+//   pnpm check -- --only mirror-bias --mirror-bias   # W32 / D49: mirrorBias noise / bias sweep (minutes), JSON to out/mirror-bias.json
 //   pnpm check -- --only seam        # W26 / D53: the SSR-to-probe seam sweep (Lagarde's options off / on), JSON to out/seam.json (SEAM_SHOTS=1: images)
 //   pnpm check -- --only probes --probes-layout cube2d   # run the probe feature checks on the 2D array (default: 'auto', a cube array through the shim)
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
@@ -29,6 +30,7 @@ const args = process.argv.slice(2);
 const compareUrl = args.includes('--compare') ? args[args.indexOf('--compare') + 1] : null;
 const probeBenchFull = args.includes('--probe-bench');
 const ssrBenchFull = args.includes('--ssr-bench');
+const mirrorBiasFull = args.includes('--mirror-bias'); // W32 (D49): the full mirrorBias noise / bias sweep
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
 const runs = (section) => !only || only === section;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -499,6 +501,57 @@ async function ssrChecks(pages) {
   pages.push(big);
   const t = await big.T('window.__p.time(30)');
   console.log(`  GPU ms ${t.size.join('x')} through the three adapter (${t.variant}, mirrorWall, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
+  await mirrorBiasChecks(pages);
+}
+
+/**
+ * W32 (D49): `settings.mirrorBias`, examples/ssr `mirrorBiasStats` (8-bit luma of the final image,
+ * static camera: temporal std, flicker, bias against the mean of many bias-0 frames). The check:
+ * the knob is not a silent no-op, 0 is the default path, and 0.5 cuts the raw noise on the
+ * roughnessRamp strips (r 0.2-0.4). `--mirror-bias` runs the full sweep (roughnessRamp strips and
+ * the mirrorWall floor at r 0.2 / 0.3 / 0.4, bias 0 / 0.25 / 0.5 / 0.75, denoise off and on) into out/mirror-bias.json.
+ */
+async function mirrorBiasChecks(pages) {
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0`);
+  pages.push(p);
+  await p.T("window.__p.load('roughnessRamp')");
+  await p.T("window.__p.setPose('strips')");
+  // occupancy 0: with the occupancy exit, which rays share a subgroup (atomic list order) changes the output run to run (D301)
+  await p.T('window.__p.setSettings({ minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false })');
+  await p.T('window.__p.step(4)');
+  const h = {};
+  for (const [k, b] of [['unset', null], ['unset again', null], ['0', 0], ['0.5', 0.5]]) {
+    await p.T(b === null ? '(delete window.__p.ssr.settings.mirrorBias, true)' : `window.__p.setSettings({ mirrorBias: ${b} })`);
+    h[k] = await p.T('window.__p.radianceHash(7)');
+  }
+  await p.T('(["mirrorBias", "minTraversalOccupancy", "temporalVarianceGuidedTracing"].forEach((k) => delete window.__p.ssr.settings[k]), true)');
+  check('ssr mirrorBias: 0 is the default path, 0.5 changes the rays', h.unset === h['unset again'] && h.unset === h['0'] && h['0'] !== h['0.5'], JSON.stringify(h));
+  const q = await p.T('window.__p.mirrorBiasStats({ biases: [0, 0.5], bins: [0.2, 0.3, 0.4], frames: 16, refFrames: 32, denoise: [false] })');
+  const [b0, b5] = q.results;
+  const ratio = b0.bins.map((b, k) => b5.bins[k].std / b.std);
+  check('ssr mirrorBias 0.5: less raw noise on the roughnessRamp strips (r 0.2-0.4)', ratio.every((r) => r < 0.9) && b0.bins.every((b) => b.px > 1000),
+    b0.bins.map((b, k) => `r ${b.roughness}: std ${b.std.toFixed(2)} -> ${b5.bins[k].std.toFixed(2)} (${b.px} px)`).join('; '));
+  if (!mirrorBiasFull) return;
+  const all = [];
+  const cases = [
+    { scene: 'roughnessRamp', pose: 'strips', bins: [0.1, 0.2, 0.3, 0.4] },
+    ...[0.2, 0.3, 0.4].map((r) => ({ scene: 'mirrorWall', pose: 'default', floor: r, bins: [r] })),
+  ];
+  const p2 = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1`);
+  pages.push(p2);
+  for (const c of cases) {
+    await p2.T(`window.__p.load('${c.scene}')`);
+    await p2.T(`window.__p.setPose('${c.pose}')`);
+    if (c.floor !== undefined) await p2.T(`window.__p.setFloorRoughness(${c.floor})`);
+    const r = await p2.T(`window.__p.mirrorBiasStats({ bins: ${JSON.stringify(c.bins)} })`);
+    all.push({ ...c, ...r });
+    console.log(`  mirrorBias ${c.scene}${c.floor !== undefined ? ` floor r ${c.floor}` : ''} (${r.seconds.toFixed(0)} s, ${r.frames} frames vs a ${r.refFrames}-frame bias-0 raw reference; 8-bit luma):`);
+    for (const row of r.results) {
+      console.log(`    denoise ${row.denoise ? 'on ' : 'off'} bias ${row.mirrorBias.toFixed(2)}: ${row.bins.map((b) => `r ${b.roughness} std ${b.std.toFixed(2)} flicker ${b.flicker.toFixed(2)} bias ${b.bias.toFixed(2)} (signed ${b.signed.toFixed(2)}, added ${b.added?.toFixed(2) ?? '-'}) rmse ${b.rmse.toFixed(2)}`).join(' | ')}`);
+    }
+  }
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, 'mirror-bias.json'), JSON.stringify(all, null, 1));
 }
 
 /** examples/regressions, stream F2 (SSR / RT and probe-core review). Each check failed before its fix. */
@@ -1288,7 +1341,7 @@ async function pixi3dChecks(pages) {
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull || ssrBenchFull ? 3_600_000 : 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -1519,6 +1572,7 @@ async function main() {
     if (runs('sssr-core')) await sssrCoreChecks(pages);
     if (runs('ssr')) await ssrChecks(pages);
     if (runs('hybrid')) await hybridChecks(pages);
+    if (only === 'mirror-bias') await mirrorBiasChecks(pages); // W32: the mirrorBias check alone (also part of ssr)
     if (only === 'seam') {
       // W26: the D53 seam sweep alone (examples/ssr, denoised)
       const sp = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1`);

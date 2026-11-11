@@ -17,6 +17,9 @@
 // hands the specular signal to denoiser/ffx's FfxReflectionDenoiser through the denoise seam. The
 // denoiser comes from the sibling Denoiser repo's source (examples/vite.config.ts) when present.
 //
+// `?mirrorBias=0..1` (default 0, FFX): the tracer's bias of glossy rays toward the mirror direction
+// (core `settings.mirrorBias`, SSSR 2015 / PICA, D49); also a slider. `__p.mirrorBiasStats()` measures it.
+//
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `ssr`).
 import * as THREE from 'three/webgpu';
 import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
@@ -165,6 +168,7 @@ async function main() {
   const denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, q.has('timing')) : null;
   const hybrid = new HybridReflections(ssr, { denoiser });
   hybrid.denoise = wantDenoise && !!denoiser;
+  if (q.has('mirrorBias')) ssr.settings.mirrorBias = Number(q.get('mirrorBias'));
   const gpuErrors: string[] = [];
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });
   // With the loop stopped, three renders each shadow map once per camera per frame: advance it ourselves.
@@ -433,6 +437,9 @@ async function main() {
   const thr = document.createElement('input'); thr.type = 'range'; thr.min = '0'; thr.max = '1'; thr.step = '0.01'; thr.value = '0.447';
   thr.oninput = () => { ssr.settings.roughnessThreshold = Number(thr.value); refreshUI(); if (!looping) frame(); };
   row('Roughness threshold (perceptual)', thr);
+  const biasIn = document.createElement('input'); biasIn.type = 'range'; biasIn.min = '0'; biasIn.max = '1'; biasIn.step = '0.05'; biasIn.value = String(ssr.settings.mirrorBias ?? 0);
+  biasIn.oninput = () => { ssr.settings.mirrorBias = Number(biasIn.value); hybrid.resetHistory(); refreshUI(); if (!looping) frame(); };
+  row('Mirror bias (D49)', biasIn);
   const ssrBox = document.createElement('input'); ssrBox.type = 'checkbox'; ssrBox.checked = true;
   ssrBox.onchange = () => { composite!.amount.value = ssrBox.checked ? 1 : 0; if (!looping) frame(); };
   row('SSR', ssrBox);
@@ -465,7 +472,7 @@ async function main() {
     if (kit!.views[pose]) poseSel.value = pose;
     status.textContent = [
       `three r${THREE.REVISION} | ${kit!.title} | ${W}x${H}${manual ? ' | manual (loop stopped)' : ''}`,
-      `variant ${ssr.variant ?? '(first frame pending)'} | hit colour ${hitMode} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
+      `variant ${ssr.variant ?? '(first frame pending)'} | hit colour ${hitMode} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | mirrorBias ${ssr.settings.mirrorBias ?? 0} | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
       `specular IBL term: ${probes ? `${probes.bakedProbes.length} probe(s) by coverage, then scene.environment` : 'scene.environment'}`,
       `denoise: ${denoiser ? `${hybrid.denoise ? 'on' : 'off'} (${denoiser.name}, from ${denoiserSource})` : 'unavailable (no sibling Denoiser repo; raw signal)'}`,
       useRT ? `ray-traced misses: ${ssr.rayTracing ? 'on' : 'off'} (${bvhKind === 'pmndrs' ? '@pmndrs/bvh' : 'three-mesh-bvh'}${bvhInfo ? `, ${bvhInfo.meshes} meshes, ${bvhInfo.triangles} triangles, built in ${bvhInfo.buildMs.toFixed(0)} ms${bvhInfo.builder ? ` by ${bvhInfo.builder}${bvhInfo.fallbackReason ? ` (${bvhInfo.fallbackReason})` : ''}` : ''}` : ''}; &bvh=pmndrs|three-mesh-bvh)` : 'ray-traced misses: off (?rt=1)',
@@ -556,8 +563,127 @@ async function main() {
         return !!best;
       },
       seamStats: (o?: SeamOptions) => seamStats(o),
+      mirrorBiasStats: (o?: BiasOptions) => mirrorBiasStats(o),
+      radianceHash: (frameIndex?: number) => radianceHash(frameIndex),
     },
   });
+
+  /** W32: an FNV-1a hash of the tracer's radiance bytes at a fixed frame index (parity across builds). */
+  async function radianceHash(frameIndex = 7) {
+    const keep = (ssr.settings as N).frameIndex;
+    (ssr.settings as N).frameIndex = frameIndex;
+    frame(); await idle();
+    if (keep === undefined) delete (ssr.settings as N).frameIndex; else (ssr.settings as N).frameIndex = keep;
+    const tex = ssr.tracer!.outputs.radiance;
+    const bpr = Math.ceil((tex.width * 8) / 256) * 256;
+    const buf = device.createBuffer({ size: bpr * tex.height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = device.createCommandEncoder();
+    enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow: bpr }, [tex.width, tex.height]);
+    device.queue.submit([enc.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const b = new Uint8Array(buf.getMappedRange());
+    let h = 0x811c9dc5;
+    for (let y = 0; y < tex.height; y++) for (let x = y * bpr, e = x + tex.width * 8; x < e; x++) { h ^= b[x]; h = Math.imul(h, 0x01000193) >>> 0; }
+    buf.unmap(); buf.destroy();
+    return h.toString(16).padStart(8, '0');
+  }
+
+  /**
+   * W32 (D49): noise and bias of `settings.mirrorBias` on the final image (8-bit luma after tone
+   * mapping, Rec. 709), static camera, loop stopped, per roughness bin (G-buffer perceptual
+   * roughness within +-0.02 of each bin, geometry only). The reference R is the mean of `refFrames`
+   * raw (denoise off) frames at bias 0 (FFX's blue noise repeats every 256 frames). Per (denoise,
+   * bias): `warm` frames after a history reset, then `frames` frames, per px mean m and variance v:
+   * `std` = mean temporal std, `flicker` = mean |x_t - x_t-1| (the denoiser scorecard's), `bias` =
+   * RMS of (m - R) with the finite-sample noise taken out (sqrt(max(0, <(m-R)^2> - <v>/frames -
+   * <vR>/refFrames))), `signed` = <m - R>, `rmse` = RMS of a single frame against R (what one frame shows),
+   * `added` = the same bias estimate against this denoise mode's own bias-0 mean (the knob's share).
+   */
+  type BiasOptions = { biases?: number[]; bins?: number[]; frames?: number; refFrames?: number; warm?: number; denoise?: boolean[] };
+  async function mirrorBiasStats(o: BiasOptions = {}) {
+    const { biases = [0, 0.25, 0.5, 0.75], bins = [0.1, 0.2, 0.3, 0.4], frames = 64, refFrames = 256, warm = 32 } = o;
+    const denoiseModes = (o.denoise ?? [false, true]).filter((d) => !d || !!denoiser);
+    const keepBias = ssr.settings.mirrorBias, keepDenoise = hybrid.denoise, keepView = viewSel.value as View;
+    setView('final');
+    const c2 = new OffscreenCanvas(W, H); const g2 = c2.getContext('2d', { willReadFrequently: true })!;
+    const luma = new Float32Array(W * H);
+    const grab = async () => {
+      frame();
+      const u = canvas.toDataURL('image/png'); await idle();
+      const img = new Image(); img.src = u; await img.decode();
+      g2.drawImage(img, 0, 0);
+      const d = g2.getImageData(0, 0, W, H).data;
+      for (let i = 0; i < W * H; i++) luma[i] = 0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2];
+      return luma;
+    };
+    frame(); await idle();
+    const t = ssr.gbuffer.gpuTextures();
+    const [depth, nr] = await Promise.all([readTexture(device, t.depth), readTexture(device, t.normal)]);
+    const inverted = ssr.gbuffer.conventions.depthInverted;
+    const bin = new Int8Array(W * H).fill(-1);
+    const binPx = bins.map(() => 0);
+    for (let i = 0; i < W * H; i++) {
+      if (inverted ? depth[i] <= 0 : depth[i] >= 1) continue;
+      const r = nr[i * 4 + 3];
+      const k = bins.findIndex((b) => Math.abs(r - b) < 0.02);
+      if (k >= 0) { bin[i] = k; binPx[k]++; }
+    }
+    const run = async (bias: number, dn: boolean, n: number, ref: { mean: Float64Array; varr: Float64Array } | null) => {
+      ssr.settings.mirrorBias = bias;
+      hybrid.denoise = dn;
+      ssr.resetHistory(); hybrid.resetHistory();
+      for (let i = 0; i < (dn ? warm : 2); i++) frame();
+      await idle();
+      const sum = new Float64Array(W * H), sq = new Float64Array(W * H), prev = new Float32Array(W * H), fl = new Float64Array(W * H), se = new Float64Array(W * H);
+      for (let f = 0; f < n; f++) {
+        const x = await grab();
+        for (let i = 0; i < W * H; i++) {
+          if (bin[i] < 0) continue;
+          const v = x[i];
+          sum[i] += v; sq[i] += v * v;
+          if (f > 0) fl[i] += Math.abs(v - prev[i]);
+          prev[i] = v;
+          if (ref) se[i] += (v - ref.mean[i]) ** 2;
+        }
+      }
+      const mean = new Float64Array(W * H), varr = new Float64Array(W * H);
+      for (let i = 0; i < W * H; i++) if (bin[i] >= 0) { mean[i] = sum[i] / n; varr[i] = Math.max(0, sq[i] / n - mean[i] ** 2) * n / (n - 1); }
+      const per = bins.map((b, k) => {
+        let px = 0, std = 0, flick = 0, d2 = 0, vv = 0, vr = 0, sgn = 0, e2 = 0;
+        for (let i = 0; i < W * H; i++) {
+          if (bin[i] !== k) continue;
+          px++; std += Math.sqrt(varr[i]); flick += fl[i] / (n - 1); vv += varr[i];
+          if (ref) { const d = mean[i] - ref.mean[i]; d2 += d * d; sgn += d; vr += ref.varr[i]; e2 += se[i] / n; }
+        }
+        if (!px) return { roughness: b, px: 0 };
+        const out: N = { roughness: b, px, std: std / px, flicker: flick / px };
+        if (ref) Object.assign(out, { bias: Math.sqrt(Math.max(0, d2 / px - vv / px / n - vr / px / refFrames)), signed: sgn / px, rmse: Math.sqrt(e2 / px) });
+        return out;
+      });
+      return { mean, varr, per };
+    };
+    const t0 = performance.now();
+    const ref = await run(0, false, refFrames, null);
+    const results: N[] = [];
+    // `added`: the same noise-corrected RMS of (m_b - m_0) against this denoise mode's own bias-0 mean,
+    // i.e. what the knob adds on top of the denoiser's own (spatial) bias
+    const added = (a: { mean: Float64Array; varr: Float64Array }, z: { mean: Float64Array; varr: Float64Array }, k: number) => {
+      let px = 0, d2 = 0, v = 0;
+      for (let i = 0; i < W * H; i++) if (bin[i] === k) { px++; d2 += (a.mean[i] - z.mean[i]) ** 2; v += a.varr[i] + z.varr[i]; }
+      return px ? Math.sqrt(Math.max(0, d2 / px - v / px / frames)) : 0;
+    };
+    for (const dn of denoiseModes) {
+      let zero: Awaited<ReturnType<typeof run>> | null = null;
+      for (const b of biases) {
+        const r = await run(b, dn, frames, ref);
+        if (b === 0) zero = r;
+        results.push({ denoise: dn, mirrorBias: b, bins: r.per.map((x: N, k) => (zero ? { ...x, added: added(r, zero, k) } : x)) });
+      }
+    }
+    ssr.settings.mirrorBias = keepBias; if (keepBias === undefined) delete ssr.settings.mirrorBias;
+    hybrid.denoise = keepDenoise; hybrid.resetHistory(); setView(keepView);
+    return { scene: kit!.id, size: [W, H], frames, refFrames, warm, binPx, refStd: ref.per, results, seconds: (performance.now() - t0) / 1e3 };
+  }
 
   /**
    * W26 (D53): the SSR-to-probe seam, measured as the step a viewer sees where the hybrid's weight
