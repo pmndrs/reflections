@@ -12,7 +12,8 @@
 //    format in core WebGPU).
 //  - roughness: denoiser-core wants a texture with roughness in .r; ours is a channel of a material
 //    target. The same pass extracts it into r32float, in the space the denoiser asks for
-//    (`roughness: 'perceptual'` by default, FFX's `roughnessIsPerceptual: true` default).
+//    (`roughness: 'perceptual'` by default, FFX's `roughnessIsPerceptual: true` default), after the
+//    contract's `roughnessUnpack` (so a glossiness channel reaches the denoiser as roughness).
 //  - normal: unpacked with the contract's mul/add when that is not the identity (three's is).
 //  - hit distance: our tracer writes r32float; denoiser-core's docs say r16float. Both bind as
 //    `unfilterable-float` and are read with textureLoad, so it is passed as is.
@@ -92,7 +93,7 @@ export interface ReflectionDenoiseSeam {
 }
 
 const GUIDES_WGSL = /* wgsl */ `
-struct U { size: vec2u, roughChannel: u32, flags: u32, motionScale: vec2f, normalMul: f32, normalAdd: f32 };
+struct U { size: vec2u, roughChannel: u32, flags: u32, motionScale: vec2f, normalMul: f32, normalAdd: f32, roughMul: f32, roughAdd: f32 };
 // flags: bit 0 = motion out as NDC delta; bit 1 = square roughness (perceptual -> alpha);
 //        bit 2 = sqrt roughness (alpha -> perceptual); bit 3 = write the unpacked normal
 @group(0) @binding(0) var<uniform> u: U;
@@ -108,7 +109,7 @@ struct U { size: vec2u, roughChannel: u32, flags: u32, motionScale: vec2f, norma
   let duv = textureLoad(tMotion, id.xy, 0).xy * u.motionScale;
   let m = select(duv, vec2f(2.0, -2.0) * duv, (u.flags & 1u) != 0u);
   textureStore(oMotion, id.xy, vec4f(m, 0.0, 0.0));
-  var r = textureLoad(tRough, id.xy, 0)[u.roughChannel];
+  var r = textureLoad(tRough, id.xy, 0)[u.roughChannel] * u.roughMul + u.roughAdd;
   if ((u.flags & 2u) != 0u) { r = r * r; }
   if ((u.flags & 4u) != 0u) { r = sqrt(max(r, 0.0)); }
   textureStore(oRough, id.xy, vec4f(r, 0.0, 0.0, 0.0));
@@ -141,7 +142,7 @@ export function createReflectionDenoiseSeam(device: GPUDevice, options: Reflecti
     layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
     compute: { module: device.createShaderModule({ label: 'denoise seam guides', code: GUIDES_WGSL }), entryPoint: 'main' },
   });
-  const uniforms = device.createBuffer({ label: 'denoise seam guides', size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const uniforms = device.createBuffer({ label: 'denoise seam guides', size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   let width = 0, height = 0;
   let motion: GPUTexture | null = null, roughness: GPUTexture | null = null, normal: GPUTexture | null = null;
   let guides: DenoiseGuides | null = null;
@@ -169,10 +170,11 @@ export function createReflectionDenoiseSeam(device: GPUDevice, options: Reflecti
       if (c.roughnessIsPerceptual && roughOut === 'alpha') flags |= 2;
       if (!c.roughnessIsPerceptual && roughOut === 'perceptual') flags |= 4;
       if (unpackNormal) flags |= 8;
-      const buf = new ArrayBuffer(32);
+      const buf = new ArrayBuffer(48);
       const u32 = new Uint32Array(buf), f32 = new Float32Array(buf);
       u32[0] = width; u32[1] = height; u32[2] = frame.textures.roughness.channel; u32[3] = flags;
       f32[4] = c.motionVectorScale[0]; f32[5] = c.motionVectorScale[1]; f32[6] = c.normalUnpackMul; f32[7] = c.normalUnpackAdd;
+      f32[8] = c.roughnessUnpack?.mul ?? 1; f32[9] = c.roughnessUnpack?.add ?? 0;
       device.queue.writeBuffer(uniforms, 0, buf);
       const enc = device.createCommandEncoder({ label: 'denoise seam guides' });
       const pass = enc.beginComputePass({ label: 'denoise seam guides' });

@@ -18,8 +18,9 @@ import { createProbeLayout, type ProbeLayout, type ProbeLayoutId } from './layou
 import { LayoutPrefilter } from './layouts/prefilter';
 import { ProbeFormatWriter } from './layouts/formats';
 import { maxLodFor } from './lod';
-import { probeLookupWgsl, type ProbeLodMapping } from './lookup';
+import { probeLookupWgsl, type ProbeLodMapping, type ProbeLookupModuleOptions } from './lookup';
 import { ProbeIrradiance } from './irradiance';
+import { ProbeCaptureRemap, hasCaptureFaces, resolveCaptureTransform, type ProbeCaptureTransform } from './capture';
 import { packProbeTable, probeIrradianceRow, probeTableRows, sortProbeVolumes, type ProbeVolume } from './table';
 
 export type ProbeSetFormat = 'rgba16float' | 'rgb9e5ufloat';
@@ -27,7 +28,10 @@ export type ProbeSetFormat = 'rgba16float' | 'rgb9e5ufloat';
 export interface ProbeSetOptions {
   /** Probe volumes the set can hold (atlas slots 0 ... capacity - 1). */
   capacity: number;
-  /** Default 'cube-hw'. */
+  /**
+   * Default 'cube-hw' (a real cube array); 'cube2d-warp' on a compatibility-mode device (no
+   * 'core-features-and-limits'), which can't create cube-array views (D2204).
+   */
   layout?: ProbeLayoutId;
   /** Default 'rgba16float'. */
   format?: ProbeSetFormat;
@@ -40,8 +44,15 @@ export interface ProbeSetOptions {
   size?: number;
   /** Reserve the last slot for the environment. Default true. */
   environment?: boolean;
-  /** Captures are x-mirrored (three's CubeCamera). Default false. */
+  /** Captures are x-mirrored (three's CubeCamera): an alias of `captureTransform: CAPTURE_MIRROR_X`. Default false. */
   mirrorX?: boolean;
+  /**
+   * How the engine's captures relate to WebGPU's cube convention (./capture.ts, D1805 / D2104): `axes`
+   * mirror (or swap) directions at lookup, free; `faces` remap the capture's layers and flips as
+   * `capture()` reads it in (one compute pass in place of the copy; the capture then needs
+   * TEXTURE_BINDING). Default: none. Not together with `mirrorX`.
+   */
+  captureTransform?: ProbeCaptureTransform;
   /** Lookup options (./lookup.ts). */
   dominantDirection?: boolean;
   /** Re-fit by `frameIrradianceWgsl` (D803). Default: on when `frameIrradianceWgsl` is given, else off. */
@@ -83,6 +94,8 @@ export class ProbeSet {
   private readonly prefilter: LayoutPrefilter;
   private readonly writer: ProbeFormatWriter;
   private irradiance: ProbeIrradiance | null = null;
+  private readonly remap: ProbeCaptureRemap | null;
+  private readonly transform: ProbeCaptureTransform;
   private volumes: ProbeVolume[] = [];
   private packed: Float32Array<ArrayBuffer> = new Float32Array(0);
 
@@ -94,7 +107,10 @@ export class ProbeSet {
     this.sourceSize = options.sourceSize ?? 256;
     this.size = options.size ?? this.sourceSize;
     this.maxLod = maxLodFor(this.sourceSize);
-    this.layout = createProbeLayout(options.layout ?? 'cube-hw', { maxLod: this.maxLod });
+    this.transform = resolveCaptureTransform(options);
+    this.remap = hasCaptureFaces(this.transform) ? new ProbeCaptureRemap(device, this.transform) : null;
+    const compat = !device.features.has('core-features-and-limits' as GPUFeatureName);
+    this.layout = createProbeLayout(options.layout ?? (compat ? 'cube2d-warp' : 'cube-hw'), { maxLod: this.maxLod });
     this.environmentSlot = options.environment === false ? -1 : this.capacity;
     const slots = this.capacity + (this.environmentSlot >= 0 ? 1 : 0);
     const layers = slots * this.layout.layersPerProbe;
@@ -131,20 +147,29 @@ export class ProbeSet {
 
   /**
    * The lookup module (see probeLookupWgsl): bindings 0..2 of `@group(group)`, matching
-   * `bindGroupLayout` / `bindGroup`.
+   * `bindGroupLayout` / `bindGroup`. `suffix` renames its entry points (`probeRadiance<suffix>`, ...);
+   * for several sets in one module, use `probeLookupWgsl([a.lookupOptions(...), b.lookupOptions(...)])`.
    */
-  wgsl({ group = 0 }: { group?: number } = {}) {
-    const o = this.options;
-    return probeLookupWgsl({
-      layout: this.layout, group, mirrorX: o.mirrorX, dominantDirection: o.dominantDirection,
-      refit: o.refit, distanceRoughness: o.distanceRoughness, roughnessLerp: o.roughnessLerp, frameIrradianceWgsl: o.frameIrradianceWgsl, lodMapping: o.lodMapping,
-    });
+  wgsl({ group = 0, suffix }: { group?: number; suffix?: string } = {}) {
+    return probeLookupWgsl(this.lookupOptions({ group, suffix }));
   }
 
-  /** Records the prefilter of `cube` (`sourceSize` px faces, mip 0 read) into atlas slot `slot`. */
+  /** The lookup module options of this set (see {@link wgsl}), for `probeLookupWgsl([...])`. */
+  lookupOptions({ group = 0, suffix }: { group?: number; suffix?: string } = {}): ProbeLookupModuleOptions {
+    const o = this.options;
+    return {
+      layout: this.layout, group, suffix, captureTransform: this.transform, dominantDirection: o.dominantDirection,
+      refit: o.refit, distanceRoughness: o.distanceRoughness, roughnessLerp: o.roughnessLerp, frameIrradianceWgsl: o.frameIrradianceWgsl, lodMapping: o.lodMapping,
+    };
+  }
+
+  /**
+   * Records the prefilter of `cube` (`sourceSize` px faces, mip 0 read) into atlas slot `slot`,
+   * through the capture transform's face remap if it has one.
+   */
   capture(encoder: GPUCommandEncoder, slot: number, cube: GPUTexture) {
     if (slot < 0 || slot >= this.capacity + (this.environmentSlot >= 0 ? 1 : 0)) throw new Error(`ProbeSet: slot ${slot} out of range`);
-    this.prefilter.encodeScratch(encoder, cube);
+    this.prefilter.encodeScratch(encoder, cube, undefined, this.remap ?? undefined);
     this.writer.encode(encoder, this.prefilter.scratch, this.atlas, slot);
   }
 
@@ -159,7 +184,7 @@ export class ProbeSet {
    * into the table, for the re-fit. Run it after the captures, in their command buffer or later.
    */
   computeIrradiance(encoder: GPUCommandEncoder, slots?: readonly number[]) {
-    this.irradiance ??= new ProbeIrradiance(this.device, this.layout, { mirrorX: this.options.mirrorX });
+    this.irradiance ??= new ProbeIrradiance(this.device, this.layout, { captureTransform: this.transform });
     const all = slots ?? [...this.volumes.map((v) => v.slot), ...(this.environmentSlot >= 0 ? [this.environmentSlot] : [])];
     this.irradiance.encode(encoder, this.atlasView, this.table, this.irradianceRow, all);
   }
@@ -186,6 +211,7 @@ export class ProbeSet {
     this.prefilter.dispose();
     this.writer.dispose();
     this.irradiance?.dispose();
+    this.remap?.dispose();
     this.atlas.destroy();
     this.table.destroy();
   }

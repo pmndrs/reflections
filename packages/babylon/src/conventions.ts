@@ -21,17 +21,20 @@
 //                texel-uv `current - previous` is exactly -velocity on both axes: motionVectorScale
 //                [-1, -1] (the same value @pmndrs/upscaler verified with its jitter-sign test).
 //   normal       PREPASS_WORLD_NORMAL stores n * 0.5 + 0.5: normalUnpackMul 2, add -1.
-//   roughness    PREPASS_REFLECTIVITY.a is `microSurface` = glossiness = 1 - perceptual roughness. The
-//                contract reads roughness from a channel with no remap, so the adapter converts it in
-//                a one-dispatch pass (./frame.ts). D1802.
+//   roughness    PREPASS_REFLECTIVITY.a is `microSurface` = glossiness = 1 - perceptual roughness:
+//                roughnessUnpack { mul: -1, add: 1 }, read where core reads roughness. D1802.
 //   F0           PREPASS_REFLECTIVITY.rgb is F0 (Babylon's specularEnvironmentR0, metalness already
 //                applied). The contract wants albedo + metalness; the adapter passes albedo = F0 and
-//                metalness = 1, which gives F0 = mix(0.04, albedo, 1) exactly. D1803.
+//                metalness = 1 (a constant texture, ./frame.ts), which gives F0 = mix(0.04, albedo, 1)
+//                exactly. D1803.
 import type { Camera } from '@babylonjs/core/Cameras/camera.js';
 import { FrameCameraHistory, type FrameCamera, type FrameConventions } from '@pmndrs/reflections-core';
 
 /** motionVectorScale for PREPASS_VELOCITY_LINEAR on Babylon's Y-flipped render targets. */
 export const BABYLON_MOTION_SCALE: readonly [number, number] = [-1, -1];
+
+/** roughnessUnpack for PREPASS_REFLECTIVITY.a (glossiness): roughness = 1 - gloss. */
+export const BABYLON_ROUGHNESS_UNPACK = { mul: -1, add: 1 } as const;
 
 /** The contract conventions of the adapter's G-buffer (./frame.ts), given the engine's depth mode. */
 export function babylonFrameConventions(depthInverted: boolean, sceneColorSpecular: FrameConventions['sceneColorSpecular'] = 'direct'): FrameConventions {
@@ -41,6 +44,7 @@ export function babylonFrameConventions(depthInverted: boolean, sceneColorSpecul
     normalUnpackMul: 2,
     normalUnpackAdd: -1,
     roughnessIsPerceptual: true,
+    roughnessUnpack: BABYLON_ROUGHNESS_UNPACK,
     motionVectorScale: BABYLON_MOTION_SCALE,
     sceneColorSpecular,
   };

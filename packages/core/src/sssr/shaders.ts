@@ -91,7 +91,8 @@ struct Params {
   fallbackRoughnessSurface: u32,
   mirrorBias: f32,
   motionVectorScale: vec2f,
-  _pad2: vec2u,
+  roughnessUnpackMul: f32,
+  roughnessUnpackAdd: f32,
 };
 @group(0) @binding(0) var<uniform> P: Params;
 `;
@@ -198,7 +199,7 @@ fn isBaseRay(id: vec2u, samples_per_quad: u32) -> bool {
   }
 }
 fn loadRoughness(p: vec2i) -> f32 {
-  var r = textureLoad(t_material, p, 0)[min(P.roughnessChannel, 3u)];
+  var r = textureLoad(t_material, p, 0)[min(P.roughnessChannel, 3u)] * P.roughnessUnpackMul + P.roughnessUnpackAdd;
   if (P.isRoughnessPerceptual != 0u) { r *= r; }
   return r;
 }

@@ -3,14 +3,14 @@ export { ProbePrefilter, LOD_MIN, maxLodFor, lodToRoughness } from './probes/pre
 export { createBC6HEncoder, type BC6HEncodeOptions, type BC6HEncoder, type BC6HEncoderOptions } from './encode/bc6h';
 // Probe layouts (phase 1 bench, docs/research/probe-layouts.md): parameterizations, the
 // layout-generic prefilter, storage formats, and the brute-force GGX reference.
-export { createProbeLayout, probeBytes, bytesPerTexel, octaGutter, type ProbeLayout, type ProbeLayoutId, type ProbeLayoutOptions } from './probes/layouts';
+export { createProbeLayout, probeLayoutsWgsl, dedupeChunks, probeBytes, bytesPerTexel, octaGutter, type ProbeLayout, type ProbeLayoutId, type ProbeLayoutOptions, type ProbeWgslChunk } from './probes/layouts';
 export { LayoutPrefilter } from './probes/layouts/prefilter';
 export { ProbeFormatWriter, type ProbeFormat, type BC6HEncoderLike } from './probes/layouts/formats';
 export { GGXReference, lobeTexels, referenceModeFor, type ReferenceMode } from './probes/reference';
 // Probe core (phase 2): the atlas + volume table + WGSL lookup, the radiance-fallback seam, re-fit irradiance.
 export { ProbeSet, type ProbeSetOptions, type ProbeSetFormat } from './probes/set';
 export {
-  probeLookupWgsl, probeLookupIncludesWgsl, probeLookupFunctionWgsl, probeProxyShareFunctionWgsl, lodWgsl, DEFAULT_PROBE_LOD_MAPPING,
+  probeLookupWgsl, probeLookupIncludesWgsl, probeLookupIncludeChunks, probeLookupFunctionWgsl, probeProxyShareFunctionWgsl, lodWgsl, DEFAULT_PROBE_LOD_MAPPING,
   type ProbeLookupOptions, type ProbeLookupModuleOptions, type ProbeLodMapping,
 } from './probes/lookup';
 export {
@@ -18,6 +18,10 @@ export {
   type ProbeVolume, type ProbeTableHeader,
 } from './probes/table';
 export { ProbeIrradiance, type ProbeIrradianceOptions } from './probes/irradiance';
+export {
+  CAPTURE_MIRROR_X, CAPTURE_MIRROR_Y, CAPTURE_BABYLON_FACES, CAPTURE_CAMERA_FACES, ProbeCaptureRemap, resolveCaptureTransform, captureAxesWgsl,
+  type ProbeCaptureTransform, type ProbeCaptureFace, type ProbeAxis, type ProbeCaptureTransformOptions,
+} from './probes/capture';
 export { probeRadianceFallback, PROBE_FALLBACK_WGSL, type ProbeRadianceFallback } from './probes/fallback';
 export * from './sssr';
 // Mip chains and Hi-Z via `downsampler`: the device limits that let it run six levels per dispatch.
@@ -37,3 +41,8 @@ export {
   createReflectionDenoiseSeam,
   type ReflectionDenoiseSeam, type ReflectionDenoiseSeamOptions, type TemporalDenoiser, type SpecularInputs, type DenoiseGuides, type DenoiseCamera,
 } from './denoise/seam';
+
+// Split-sum environment BRDF (DFG) for adapters without an engine BRDF table (D2004).
+export {
+  SPLIT_SUM_DFG_WGSL, SPLIT_SUM_DFG_TABLES, SPLIT_SUM_DFG_SIZE, splitSumDFGWgsl, integrateSplitSumDFG, type SplitSumVisibility,
+} from './brdf/splitSum';

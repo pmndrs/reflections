@@ -3,7 +3,7 @@
 
 // Babylon conventions onto the frame contract (handedness, Y-flipped targets, velocity, gloss, F0).
 export {
-  BABYLON_MOTION_SCALE, babylonFrameCamera, babylonFrameConventions, tracerProjection, tracerView,
+  BABYLON_MOTION_SCALE, BABYLON_ROUGHNESS_UNPACK, babylonFrameCamera, babylonFrameConventions, tracerProjection, tracerView,
 } from './conventions';
 export { asWebGPUEngine, getDevice, getGPUTexture, wrapGPUTexture } from './internal/babylonWebGPU';
 export { BabylonFrame, type BabylonFrameOptions, type BabylonGBuffer } from './frame';

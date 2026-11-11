@@ -25,7 +25,7 @@ export interface FrameTextures {
   depth: GPUTexture;
   /** Unit world-space normal in xyz, after `normalUnpackMul` / `normalUnpackAdd`. */
   normal: GPUTexture;
-  /** Roughness, perceptual or alpha per `conventions.roughnessIsPerceptual`. */
+  /** Roughness, perceptual or alpha per `conventions.roughnessIsPerceptual`, after `conventions.roughnessUnpack`. */
   roughness: TextureChannel;
   /** Metalness in [0, 1]. F0 = mix(0.04, albedo, metalness). */
   metalness: TextureChannel;
@@ -52,6 +52,12 @@ export interface FrameConventions {
   normalUnpackAdd: number;
   /** Roughness is perceptual (artist) roughness; alpha = roughness². three: true. */
   roughnessIsPerceptual: boolean;
+  /**
+   * roughness = texel[channel] * mul + add, applied before `roughnessIsPerceptual` squares it (like
+   * the normal unpack). Default identity { mul: 1, add: 0 }. A glossiness channel (Babylon's
+   * `microSurface` = 1 - perceptual roughness) is { mul: -1, add: 1 }.
+   */
+  roughnessUnpack?: { readonly mul: number; readonly add: number };
   /**
    * Maps the stored motion to a uv-space offset: `uvPrevious = uv - motion.xy * motionVectorScale`
    * (uv: x right, y down, [0, 1]). A uv-space target uses [1, 1]; three's NDC velocity (current -
