@@ -40,6 +40,8 @@ export interface ShowcaseScene {
    * 2.6 cm thick. The black specks on raw car paint are hits on the dark sill, W17.)
    */
   thickness?: { depthBufferThickness: number; thicknessRoughnessFactor: number };
+  /** The stage's model (W38: `__p.setHeroCapture(false)` leaves it out of the probe captures). Absent for Sponza. */
+  hero?: THREE.Object3D;
 }
 
 export interface ShowcaseEntry { id: string; title: string; asset: string; hdri: string; build(aspect: number): Promise<ShowcaseScene> }
@@ -123,7 +125,7 @@ async function stage(asset: string, file: string, o: StageOptions, aspect: numbe
     setKind,
   };
   return {
-    id: o.id, title: o.title, credit: o.credit, scene, views, floor,
+    id: o.id, title: o.title, credit: o.credit, scene, views, floor, hero: model,
     camera: camera(views.hero, aspect, r * 0.01, r * 60),
     exposure: o.exposure ?? 1,
     // One probe over the whole floor disc, captured just above the model and projected onto a far
