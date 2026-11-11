@@ -164,12 +164,13 @@ async function main() {
     log.length = 0;
     const result: Record<string, unknown> = {};
     // ---- layouts x formats
-    const configs: { layout: ProbeLayoutId; format: ProbeSetFormat; size?: number; lodMapping?: 'alpha' }[] = [
+    const configs: { layout: ProbeLayoutId; format: ProbeSetFormat; size?: number; lodMapping?: 'r187' }[] = [
       { layout: 'cube-hw', format: 'rgba16float' }, { layout: 'cube-hw', format: 'rgb9e5ufloat' },
       { layout: 'cube2d-warp', format: 'rgba16float' }, { layout: 'cube2d-none', format: 'rgba16float' },
       { layout: 'octa', format: 'rgba16float', size: 160 },
-      // D101: the same atlas, blended linearly in r^2 between the sharp mips (differs only below r = 0.3)
-      { layout: 'cube-hw', format: 'rgba16float', lodMapping: 'alpha' },
+      // D101: the same atlas with r187's lod mapping (the default 'alpha' blends linearly in r^2
+      // between the sharp mips; they differ only below r = 0.3)
+      { layout: 'cube-hw', format: 'rgba16float', lodMapping: 'r187' },
     ];
     const ref = await evaluate(configs[0]);
     let coverageErr = 0, composeErr = 0;

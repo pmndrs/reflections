@@ -340,6 +340,8 @@ async function main() {
       setResolution(v: number) { params.resolution = v; install(); },
       /** W26 (D53): the set's Lagarde seam options (the environment node rebuilds itself). */
       setSeamOptions(distanceRoughness: boolean, roughnessLerp = distanceRoughness) { probes.distanceRoughness = distanceRoughness; probes.roughnessLerp = roughnessLerp; },
+      /** W31 (D101): the set's lod mapping ('alpha' default; 'r187' for parity with the pre-phase-2 node and other builds). */
+      setLodMapping(v: 'alpha' | 'r187') { probes.lodMapping = v; },
       setPose(p: { pos: number[]; target: number[]; fov?: number }) {
         camera.position.fromArray(p.pos); controls.target.fromArray(p.target);
         camera.fov = p.fov ?? 50; camera.updateProjectionMatrix(); controls.update();

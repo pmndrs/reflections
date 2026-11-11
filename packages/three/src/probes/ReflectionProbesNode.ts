@@ -38,7 +38,7 @@ import * as THREE from 'three/webgpu';
 import { bool, cameraPosition, code, cubeTexture, float, mat4, materialEnvRotation, nodeObject, normalWorld, positionWorld, reflectVector, sampler, storage, texture, vec3, vec4, wgslFn } from 'three/tsl';
 import {
   PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludesWgsl, probeProxyShareFunctionWgsl,
-  probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
+  probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLodMapping, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
 } from '@pmndrs/reflections-core';
 import { probeOrigin, probeWorldScale, type ReflectionProbes } from './ReflectionProbes';
 
@@ -96,6 +96,11 @@ export interface ProbeLookupOptions {
    * (D53). Default: the set's {@link ReflectionProbes.roughnessLerp}.
    */
   roughnessLerp?: boolean;
+  /**
+   * Roughness to mip ('alpha' or three r187's 'r187', D101). Default: the set's
+   * {@link ReflectionProbes.lodMapping} ('alpha').
+   */
+  lodMapping?: ProbeLodMapping;
 }
 
 // One wgslFn and include per lookup variant, shared by every node and material: three emits a
@@ -109,7 +114,7 @@ function lookupFor(options: CoreLookupOptions): { fn: N; includes: N } {
   let includes = _includes.get(source);
   if (!includes) _includes.set(source, (includes = code(source) as N));
   const layoutKey = `${options.layout.id}:${options.layout.mipLevelCount}`;
-  const key = `${layoutKey}:${options.dominantDirection === true}:${options.refit === true}:${options.distanceRoughness === true}:${options.roughnessLerp === true}:${options.count ?? -1}`;
+  const key = `${layoutKey}:${options.lodMapping}:${options.dominantDirection === true}:${options.refit === true}:${options.distanceRoughness === true}:${options.roughnessLerp === true}:${options.count ?? -1}`;
   let entry = _lookups.get(key);
   if (!entry) {
     entry = { fn: wgslFn(probeLookupFunctionWgsl({ ...options, mirrorX: true }, 'probesLookup'), [includes]) as N, includes };
@@ -240,6 +245,8 @@ export class ReflectionProbesNode extends THREE.Node {
   /** The lookup's own `distanceRoughness` / `roughnessLerp`; undefined: the set's. */
   readonly distanceRoughness: boolean | undefined;
   readonly roughnessLerp: boolean | undefined;
+  /** The lookup's own `lodMapping`; undefined: the set's. */
+  readonly lodMapping: ProbeLodMapping | undefined;
   private table: SetTable | null = null;
   private renderer: THREE.WebGPURenderer | null = null;
   private volumes = 0;
@@ -253,6 +260,7 @@ export class ReflectionProbesNode extends THREE.Node {
     this.coverage = options?.coverage === true;
     this.distanceRoughness = options?.distanceRoughness;
     this.roughnessLerp = options?.roughnessLerp;
+    this.lodMapping = options?.lodMapping;
     if (options) {
       if (options.position != null) this.positionNode = nodeObject(options.position);
       if (options.direction != null) this.directionNode = nodeObject(options.direction);
@@ -273,14 +281,17 @@ export class ReflectionProbesNode extends THREE.Node {
     // separate probe sets from sharing a program (#35046 6837c32abc); the texture id makes render
     // objects rebind after a bake that replaced the texture
     const probes = this.probes;
-    const { distanceRoughness, roughnessLerp } = this.seamOptions();
+    const { distanceRoughness, roughnessLerp, lodMapping } = this.seamOptions();
     return THREE.NodeUtils.hash(super.customCacheKey(), probes.bakedProbes.length, probes.bakedSeamFix === 'warp' ? 1 : 0, probes.bakedLayout === 'cube-array' ? 1 : 0, probes.texture?.id ?? 0,
-      distanceRoughness ? 1 : 0, roughnessLerp ? 1 : 0);
+      distanceRoughness ? 1 : 0, roughnessLerp ? 1 : 0, lodMapping === 'r187' ? 1 : 0);
   }
 
-  /** The seam options this lookup uses: its own, else the set's (D53). */
+  /** The set-wide lookup options this lookup uses: its own, else the set's (seam options D53, lod mapping D101). */
   seamOptions() {
-    return { distanceRoughness: this.distanceRoughness ?? this.probes.distanceRoughness, roughnessLerp: this.roughnessLerp ?? this.probes.roughnessLerp };
+    return {
+      distanceRoughness: this.distanceRoughness ?? this.probes.distanceRoughness, roughnessLerp: this.roughnessLerp ?? this.probes.roughnessLerp,
+      lodMapping: this.lodMapping ?? this.probes.lodMapping,
+    };
   }
 
   updateBefore(frame?: { renderId: number }): undefined {

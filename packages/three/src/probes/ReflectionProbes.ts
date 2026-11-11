@@ -47,7 +47,7 @@
 // environment fallback (docs/DIVERGES.md D20).
 
 import * as THREE from 'three/webgpu';
-import { PROBE_IRRADIANCE_ROWS, ProbeIrradiance, ProbePrefilter, createProbeLayout, maxLodFor } from '@pmndrs/reflections-core';
+import { DEFAULT_PROBE_LOD_MAPPING, PROBE_IRRADIANCE_ROWS, ProbeIrradiance, ProbePrefilter, createProbeLayout, maxLodFor, type ProbeLodMapping } from '@pmndrs/reflections-core';
 import { cubeArraySupported, cubeArraySupportStatus, cubeArrayTextureClass } from '../compat/cubeArray';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -192,6 +192,17 @@ export class ReflectionProbes extends THREE.Object3D {
   refitClamp = 4;
   private _distanceRoughness = DEFAULT_DISTANCE_ROUGHNESS;
   private _roughnessLerp = DEFAULT_ROUGHNESS_LERP;
+  private _lodMapping: ProbeLodMapping = DEFAULT_PROBE_LOD_MAPPING;
+  /**
+   * Roughness to mip for every lookup of this set (core's `lodMapping`, D101): 'alpha' (default)
+   * blends linearly in roughness^2 between the sharp mips (both below r = 0.3), which halves the
+   * error against a GGX reference there (p99 at r .05: 44.5 -> 19.7 / 255 at 128 px, 35.4 -> 21.9
+   * at 256 px, W7); above, the same as 'r187', three r187's PMREM mapping `maxLod * r * (2 - r)`
+   * everywhere (#35046's, so set 'r187' for #35046's look). A lookup's own `lodMapping` option
+   * overrides it. Changing it rebuilds the set's nodes, like {@link distanceRoughness}.
+   */
+  get lodMapping() { return this._lodMapping; }
+  set lodMapping(v: ProbeLodMapping) { if (v !== this._lodMapping) { this._lodMapping = v; this.touchUsers(); } }
   /**
    * Lagarde 2014's distance-based roughness on box-projected probes (not in #35046, D53): a glossy
    * lookup is sharp where the surface is near the projection box and keeps its roughness from the

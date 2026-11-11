@@ -1212,9 +1212,11 @@ async function main() {
       const ca = await p.T('window.__p.cubeArray');
       check('cube-array support installed and self-tested (W20 shim)', ca.mode === 'shim' || ca.mode === 'native', `${ca.mode}: ${ca.reason}`);
       // the storage and pre-phase-2 parity checks compare lookups without Lagarde's seam options (the
-      // 'hw' and legacy nodes don't have them; W26 made distanceRoughness the default, D53)
+      // 'hw' and legacy nodes don't have them; W26 made distanceRoughness the default, D53) and with
+      // r187's lod mapping (theirs; W31 made 'alpha' the default, D101)
       const seamDefaults = await p.T('[window.__p.probes.distanceRoughness, window.__p.probes.roughnessLerp]');
-      await p.T('(window.__p.setSeamOptions(false), true)');
+      const lodDefault = await p.T('window.__p.probes.lodMapping');
+      await p.T("(window.__p.setSeamOptions(false), window.__p.setLodMapping('r187'), true)");
       const shots = {};
       for (const lookup of ['warp', 'none', 'hw', 'cube-array', 'auto']) {
         await p.T(`(window.__p.setLookup('${lookup}'), window.__p.capture(), true)`);
@@ -1289,8 +1291,9 @@ async function main() {
         check('a failing self-test uninstalls the shim and reports false; auto falls back', st.ok === false && st.failed.mode === 'none' && st.layout === 'cube2d' && st.again === true && st.relayout === 'cube-array',
           `${st.failed.reason}; then auto ${st.layout}, re-install ${st.again} (${st.relayout})`);
       }
-      await p.T(`(window.__p.setSeamOptions(${seamDefaults[0]}, ${seamDefaults[1]}), true)`);
+      await p.T(`(window.__p.setSeamOptions(${seamDefaults[0]}, ${seamDefaults[1]}), window.__p.setLodMapping(${JSON.stringify(lodDefault)}), true)`);
       check('seam options default: distanceRoughness on, roughnessLerp off (W26, D53)', seamDefaults[0] === true && seamDefaults[1] === false, JSON.stringify(seamDefaults));
+      check("lod mapping default: 'alpha' (W31, D101)", lodDefault === 'alpha', JSON.stringify(lodDefault));
       // W20: the feature checks run on one storage: 'auto' (the cube array through the shim, default) or the 2D array
       const probesLayout = args.includes('--probes-layout') ? args[args.indexOf('--probes-layout') + 1] : 'cube-array';
       if (probesLayout === 'cube2d') await p.T("(async () => { await window.__p.setShim(false); window.__p.setLookup('warp'); return true; })()");
@@ -1394,7 +1397,8 @@ async function main() {
         pages.push(o);
         await o.T(FREEZE);
         await o.T("(window.__p.setLookup('warp'), window.__p.capture(), true)");
-        await p.T('(window.__p.setSeamOptions(false), window.__p.capture(), true)'); // the other build has no seam options (D53)
+        // the other build has no seam options (D53), r187's lod mapping (D101) and bakes at 128 px (D23)
+        await p.T("(window.__p.setSeamOptions(false), window.__p.setLodMapping('r187'), window.__p.setResolution(128), true)");
         const a = await p.T('window.__p.shot()');
         const b = await o.T('window.__p.shot()');
         savePng('probes-compare.png', b);

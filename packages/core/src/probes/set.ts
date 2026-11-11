@@ -47,6 +47,7 @@ export interface ProbeSetOptions {
   roughnessLerp?: boolean;
   /** `fn frameIrradiance(P: vec3f, N: vec3f) -> vec3f` for `refit`. */
   frameIrradianceWgsl?: string;
+  /** Roughness to mip. Default 'alpha' (D101); 'r187' for three r187's PMREM mapping everywhere. */
   lodMapping?: ProbeLodMapping;
   /** Shader stages the bind group is visible to. Default COMPUTE | FRAGMENT. */
   visibility?: number;
