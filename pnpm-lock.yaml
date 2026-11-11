@@ -26,6 +26,9 @@ importers:
       '@pmndrs/reflections-three':
         specifier: workspace:*
         version: link:packages/three
+      '@pmndrs/upscaler':
+        specifier: 0.5.0
+        version: 0.5.0(three@0.187.0)
       '@types/three':
         specifier: ^0.187.0
         version: 0.187.0
@@ -299,6 +302,11 @@ packages:
 
   '@pixi/colord@2.9.6':
     resolution: {integrity: sha512-nezytU2pw587fQstUu1AsJZDVEynjskwOL+kibwcdxsMBFqPsFFNA7xl0ii/gXuDi6M0xj3mfRJj8pBSc2jCfA==}
+
+  '@pmndrs/upscaler@0.5.0':
+    resolution: {integrity: sha512-bi3+OckPIpHYMGbvML5StLpZU7Eaqjhti4JEP/GIwonCvS35EsB+dKQhwgR18ymqP9lXTDf4md/P8RVtIuRJwg==}
+    peerDependencies:
+      three: '>=0.184.0'
 
   '@rollup/rollup-android-arm-eabi@4.68.2':
     resolution: {integrity: sha512-ItKrNMkEL3hy85kLBXwB0+M6CWWVI8vr7RV+Eb7oDlQIMXLaiEhGfdaj5jAUadYn2v3nwzAhIRl/nLyjAqV9vQ==}
@@ -905,6 +913,10 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.6.0
 
   '@pixi/colord@2.9.6': {}
+
+  '@pmndrs/upscaler@0.5.0(three@0.187.0)':
+    dependencies:
+      three: 0.187.0
 
   '@rollup/rollup-android-arm-eabi@4.68.2':
     optional: true
