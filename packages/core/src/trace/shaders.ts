@@ -105,7 +105,7 @@ fn main() {
  * `traceFirstHit` (group 2), `hitShadingWgsl` `shadeTracedHit` (group 3 if it binds anything),
  * `materialWgsl` `traceHitMaterial`.
  */
-export function rtTraceWgsl(parts: { fallbackWgsl: string; providerWgsl: string; materialWgsl: string; anyHitWgsl: string; hitShadingWgsl: string }): string {
+export function rtTraceWgsl(parts: { fallbackWgsl: string; providerWgsl: string; materialWgsl: string; anyHitWgsl: string; shadingNormalWgsl: string; hitShadingWgsl: string }): string {
   return /* wgsl */ `
 ${RT_PARAMS_WGSL}
 @group(0) @binding(1) var t_depth: texture_2d<f32>;
@@ -127,6 +127,7 @@ ${parts.fallbackWgsl}
 ${parts.providerWgsl}
 ${parts.materialWgsl}
 ${parts.anyHitWgsl}
+${parts.shadingNormalWgsl}
 
 // The shadow query hit shading calls (D903): false if geometry lies between the hit point and
 // P + L x tMax. The origin is offset along the normal by normalOffset x the view distance, as the
@@ -271,6 +272,12 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
   let hitP = origin + dir * hit.t;
   var hitN = select(-dir, hit.normal, dot(hit.normal, hit.normal) > 0.0);
   hitN = select(hitN, -hitN, dot(hitN, dir) > 0.0);
+  // the provider's interpolated vertex normal (D1700), on the side of the ray-facing geometric one
+  let sn = traceHitShadingNormal(hit);
+  if (dot(sn, sn) > 1e-20) {
+    let n = normalize(sn);
+    hitN = select(n, -n, dot(n, hitN) < 0.0);
+  }
   var L = vec3f(0.0);
   var source = ${RT_SOURCE.tracedHit}u;
   if (P.reuseOnScreen != 0u && onScreenRadiance(hitP, hitN, &L)) {

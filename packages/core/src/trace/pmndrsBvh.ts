@@ -9,12 +9,16 @@
 //   0 nodes      every mesh tree's 64-byte nodes                    (@pmndrs/bvh)
 //   1 triangles  every mesh's 48-byte triangles in tree order       (@pmndrs/bvh)
 //   2 top level  header, instance records, top-level nodes          (@pmndrs/bvh)
-//   3 materials  two vec4f per material: albedo, emissive            (ours; indexed by GiHit.material)
+//   3 shading    ours, array<vec4f>: a header row, the materials (albedo, emissive; indexed by
+//                GiHit.material), per instance its normal matrix + mesh, per mesh where its vertex
+//                normals and triangle corners are, then those corners and normals (D1700)
 //
 // What the walk gives back: `GiHit.t / triangle / barycentrics / frontFace` map one to one onto
 // core's `Hit`; `GiHit.instance` is the input instance's position; `GiHit.normal` is the world
 // geometric normal of the authored front side; `GiHit.material` is the instance's material.
-// `traceAny` (shadow rays, D903) is its `giTraceAny`.
+// `traceAny` (shadow rays, D903) is its `giTraceAny`. `traceHitShadingNormal` (D1700) interpolates
+// the caller's vertex normals (`BvhMeshGeometry.normals`) at `GiHit.triangle` (the input triangle,
+// not the tree-order slot) with `GiHit.barycentrics`, through the instance's normal matrix.
 import type { BindingSlot, ModuleBindingEntry, TraceProvider } from './provider';
 
 /** The @pmndrs/bvh GPU layout version this wrapper was written against (`GPU_LAYOUT_VERSION`). */
@@ -26,6 +30,11 @@ export interface BvhMeshGeometry {
   readonly positions: Float32Array;
   /** Three vertex indices per triangle; omit for a plain triangle list. */
   readonly indices?: Uint16Array | Uint32Array | null;
+  /**
+   * Object-space vertex normals, `x, y, z` per vertex (same count as `positions`): traced hits are
+   * shaded with them interpolated (D1700). Omit for flat shading with the geometric normal.
+   */
+  readonly normals?: Float32Array | null;
 }
 
 /** One placed copy of a mesh. */
@@ -117,11 +126,14 @@ export async function loadPmndrsBvh(module?: unknown): Promise<PmndrsBvhModule> 
 }
 
 const MATERIAL_VEC4S = 2;
+const INSTANCE_VEC4S = 3;
 const NO_MATERIAL = 0xffffffff;
 
-const providerWgsl = (bvh: PmndrsBvhModule, slot: BindingSlot) => /* wgsl */ `
+const providerWgsl = (bvh: PmndrsBvhModule, slot: BindingSlot, shadingNormal: boolean) => /* wgsl */ `
 ${bvh.traceModuleWgsl(slot)}
-@group(${slot.group}) @binding(${slot.firstBinding + bvh.TRACE_MODULE_ENTRIES.length}) var<storage, read> pbvhMaterials: array<vec4f>;
+@group(${slot.group}) @binding(${slot.firstBinding + bvh.TRACE_MODULE_ENTRIES.length}) var<storage, read> pbvhShading: array<vec4f>;
+// row 0: material count, first instance row, first mesh row, instance count
+fn pbvhHeader() -> vec4u { return bitcast<vec4u>(pbvhShading[0]); }
 
 fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
   let h = giTraceClosest(GiRay(origin, 0.0, dir, tMax));
@@ -135,10 +147,28 @@ fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool {
 }
 
 fn traceHitMaterial(hit: Hit) -> HitMaterial {
-  let count = arrayLength(&pbvhMaterials) / ${MATERIAL_VEC4S}u;
-  if (hit.material >= count) { return HitMaterial(vec3f(0.5), vec3f(0.0)); }
-  return HitMaterial(pbvhMaterials[hit.material * ${MATERIAL_VEC4S}u].rgb, pbvhMaterials[hit.material * ${MATERIAL_VEC4S}u + 1u].rgb);
+  if (hit.material >= pbvhHeader().x) { return HitMaterial(vec3f(0.5), vec3f(0.0)); }
+  let row = 1u + hit.material * ${MATERIAL_VEC4S}u;
+  return HitMaterial(pbvhShading[row].rgb, pbvhShading[row + 1u].rgb);
 }
+
+${shadingNormal ? `// D1700: the mesh's vertex normals at the triangle's corners, weighted by the barycentrics, through
+// the instance's normal matrix; 0 for a mesh without normals.
+fn traceHitShadingNormal(hit: Hit) -> vec3f {
+  let h = pbvhHeader();
+  if (hit.instance >= h.w) { return vec3f(0.0); }
+  let ib = h.y + hit.instance * ${INSTANCE_VEC4S}u;
+  let c0 = pbvhShading[ib];
+  // x: first corner row (indexed meshes), y: first normal row, z: 1 normals + 2 indexed
+  let mesh = bitcast<vec4u>(pbvhShading[h.z + bitcast<u32>(c0.w)]);
+  if ((mesh.z & 1u) == 0u) { return vec3f(0.0); }
+  var i = vec3u(hit.triangle * 3u) + vec3u(0u, 1u, 2u);
+  if ((mesh.z & 2u) != 0u) { i = bitcast<vec4u>(pbvhShading[mesh.x + hit.triangle]).xyz; }
+  let w = vec3f(1.0 - hit.barycentrics.x - hit.barycentrics.y, hit.barycentrics);
+  let n = pbvhShading[mesh.y + i.x].xyz * w.x + pbvhShading[mesh.y + i.y].xyz * w.y + pbvhShading[mesh.y + i.z].xyz * w.z;
+  return mat3x3f(c0.xyz, pbvhShading[ib + 1u].xyz, pbvhShading[ib + 2u].xyz) * n;
+}
+` : ''}
 `;
 
 /** Build stats, for labels and benches. */
@@ -165,12 +195,13 @@ export interface PmndrsBvhBuildInfo {
  */
 export class PmndrsBvhTraceProvider implements TraceProvider {
   readonly name = '@pmndrs/bvh';
-  readonly capabilities = { hitNormal: true, hitMaterial: true, anyHit: true } as const;
+  readonly capabilities: { readonly hitNormal: true; readonly hitMaterial: true; readonly anyHit: true; readonly shadingNormal: boolean };
   readonly layoutVersion: number;
   readonly entries: readonly ModuleBindingEntry[];
   readonly storageBufferCount: number;
   private buffers: GPUBuffer[];
   private _version = 1;
+  private shading: ShadingPack;
 
   /** @internal use {@link createPmndrsBvhTraceProvider} */
   constructor(
@@ -181,8 +212,11 @@ export class PmndrsBvhTraceProvider implements TraceProvider {
     private instances: readonly BvhTraceInstance[],
     materials: readonly BvhTraceMaterial[],
     readonly info: PmndrsBvhBuildInfo,
+    private readonly meshes: readonly BvhMeshGeometry[],
   ) {
     this.layoutVersion = bvh.GPU_LAYOUT_VERSION;
+    this.shading = packShading(materials, instances, meshes);
+    this.capabilities = { hitNormal: true, hitMaterial: true, anyHit: true, shadingNormal: this.shading.hasNormals };
     this.entries = [...bvh.TRACE_MODULE_ENTRIES, { visibility: 0x4, buffer: { type: 'read-only-storage' } }];
     this.storageBufferCount = this.entries.length;
     const upload = (label: string, data: ArrayBuffer | Float32Array) => {
@@ -194,13 +228,13 @@ export class PmndrsBvhTraceProvider implements TraceProvider {
       upload('nodes', scene.nodes),
       upload('triangles', scene.triangles),
       upload('top level', scene.topLevel.buffer),
-      upload('materials', packMaterials(materials)),
+      upload('shading', this.shading.data),
     ];
   }
 
   get version() { return this._version; }
 
-  code(slot: BindingSlot) { return providerWgsl(this.bvh, slot); }
+  code(slot: BindingSlot) { return providerWgsl(this.bvh, slot, this.capabilities.shadingNormal); }
 
   resources(): readonly GPUBindingResource[] { return this.buffers.map((buffer) => ({ buffer })); }
 
@@ -220,11 +254,16 @@ export class PmndrsBvhTraceProvider implements TraceProvider {
       material: instance.material,
     })));
     this.replace(2, top.buffer, 'top level');
+    // the instances' normal matrices only (the mesh normals and corners don't move)
+    const { data, instanceRow } = this.shading;
+    writeInstances(data, instanceRow, this.instances);
+    this.device.queue.writeBuffer(this.buffers[3], instanceRow * 16, data.buffer, data.byteOffset + instanceRow * 16, this.instances.length * INSTANCE_VEC4S * 16);
   }
 
   /** Material colours changed (same indices). */
   setMaterials(materials: readonly BvhTraceMaterial[]) {
-    this.replace(3, packMaterials(materials), 'materials');
+    this.shading = packShading(materials, this.instances, this.meshes);
+    this.replace(3, this.shading.data, 'shading');
   }
 
   private replace(index: number, data: ArrayBuffer | Float32Array, label: string) {
@@ -245,16 +284,62 @@ export class PmndrsBvhTraceProvider implements TraceProvider {
   }
 }
 
-function packMaterials(materials: readonly BvhTraceMaterial[]): Float32Array {
-  // At least one entry so the binding is never empty; an unused grey.
-  const out = new Float32Array(Math.max(1, materials.length) * MATERIAL_VEC4S * 4);
-  out.set([0.5, 0.5, 0.5, 1]);
-  materials.forEach((m, i) => {
-    const o = i * MATERIAL_VEC4S * 4;
-    out.set([m.albedo[0], m.albedo[1], m.albedo[2], 1], o);
-    out.set([m.emissive?.[0] ?? 0, m.emissive?.[1] ?? 0, m.emissive?.[2] ?? 0, 0], o + 4);
+interface ShadingPack { data: Float32Array<ArrayBuffer>; instanceRow: number; hasNormals: boolean }
+
+/** Normal matrix (inverse transpose of the upper 3x3, columns) of each instance + its mesh index, at `row`. */
+function writeInstances(out: Float32Array, row: number, instances: readonly BvhTraceInstance[]) {
+  const u = new Uint32Array(out.buffer, out.byteOffset, out.length);
+  instances.forEach((instance, k) => {
+    const e = instance.matrixWorld;
+    const a0 = [e[0], e[1], e[2]], a1 = [e[4], e[5], e[6]], a2 = [e[8], e[9], e[10]];
+    const cross = (a: number[], b: number[]) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const c0 = cross(a1, a2), c1 = cross(a2, a0), c2 = cross(a0, a1);
+    const det = a0[0] * c0[0] + a0[1] * c0[1] + a0[2] * c0[2];
+    const k1 = det !== 0 && Number.isFinite(det) ? 1 / det : 0;
+    const o = (row + k * INSTANCE_VEC4S) * 4;
+    out.set([c0[0] * k1, c0[1] * k1, c0[2] * k1, 0, c1[0] * k1, c1[1] * k1, c1[2] * k1, 0, c2[0] * k1, c2[1] * k1, c2[2] * k1, 0], o);
+    u[o + 3] = instance.mesh;
   });
-  return out;
+}
+
+/**
+ * The shading buffer (binding 3): header, materials (at least one entry, an unused grey, so the
+ * binding is never empty), instances, mesh records, then the corners and normals of meshes with
+ * normals. One buffer so the provider stays at 4 storage buffers (D1700).
+ */
+function packShading(materials: readonly BvhTraceMaterial[], instances: readonly BvhTraceInstance[], meshes: readonly BvhMeshGeometry[]): ShadingPack {
+  const materialRow = 1, instanceRow = materialRow + Math.max(1, materials.length) * MATERIAL_VEC4S;
+  const meshRow = instanceRow + instances.length * INSTANCE_VEC4S;
+  let rows = meshRow + meshes.length;
+  const records = meshes.map((m) => {
+    const vertices = m.positions.length / 3;
+    if (!m.normals || m.normals.length < vertices * 3) return null;
+    const corners = m.indices ? rows : 0;
+    rows += m.indices ? Math.floor(m.indices.length / 3) : 0;
+    const normals = rows;
+    rows += vertices;
+    return { corners, normals };
+  });
+  const data = new Float32Array(rows * 4);
+  const u = new Uint32Array(data.buffer);
+  u[0] = materials.length; u[1] = instanceRow; u[2] = meshRow; u[3] = instances.length;
+  data.set([0.5, 0.5, 0.5, 1], materialRow * 4);
+  materials.forEach((m, i) => {
+    const o = (materialRow + i * MATERIAL_VEC4S) * 4;
+    data.set([m.albedo[0], m.albedo[1], m.albedo[2], 1], o);
+    data.set([m.emissive?.[0] ?? 0, m.emissive?.[1] ?? 0, m.emissive?.[2] ?? 0, 0], o + 4);
+  });
+  writeInstances(data, instanceRow, instances);
+  meshes.forEach((m, i) => {
+    const r = records[i];
+    if (!r) return;
+    const o = (meshRow + i) * 4;
+    u[o] = r.corners; u[o + 1] = r.normals; u[o + 2] = 1 | (m.indices ? 2 : 0);
+    if (m.indices) for (let t = 0, n = Math.floor(m.indices.length / 3); t < n; t++) u.set([m.indices[t * 3], m.indices[t * 3 + 1], m.indices[t * 3 + 2]], (r.corners + t) * 4);
+    const nv = m.positions.length / 3;
+    for (let v = 0; v < nv; v++) data.set([m.normals![v * 3], m.normals![v * 3 + 1], m.normals![v * 3 + 2]], (r.normals + v) * 4);
+  });
+  return { data, instanceRow, hasNormals: records.some((r) => r !== null) };
 }
 
 /**
@@ -295,7 +380,7 @@ export async function createPmndrsBvhTraceProvider(
     skippedSingular: data.topLevel.skippedSingular,
     buildMs: 0,
   };
-  const provider = new PmndrsBvhTraceProvider(device, bvh, layouts, data, scene.instances, materials, info);
+  const provider = new PmndrsBvhTraceProvider(device, bvh, layouts, data, scene.instances, materials, info, scene.meshes);
   info.buildMs = performance.now() - t0;
   return provider;
 }

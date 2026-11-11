@@ -25,7 +25,7 @@ import {
   HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
   createPmndrsBvhTraceProviderFromObjects, type ThreePmndrsBvhTraceProvider,
 } from '@pmndrs/reflections/three';
-import { HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
+import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
 import { ASSET_SCENES, SCENES, type KitScene } from '../../shared';
 import { createReflectionDenoiser, denoiserAvailable, denoiserSource } from '../../shared/denoiser';
 
@@ -49,6 +49,8 @@ const useRT = q.get('rt') === '1';
 type BvhKind = 'three-mesh-bvh' | 'pmndrs';
 const bvhKind: BvhKind = q.get('bvh') === 'pmndrs' ? 'pmndrs' : 'three-mesh-bvh';
 const bvhBuilder = (q.get('bvhBuilder') ?? 'auto') as BvhBuilderPreference;
+/** `&shadingNormals=0`: traced hits shaded with the flat geometric normal (D1700 A/B). */
+const shadingNormals = q.get('shadingNormals') !== '0';
 const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
 
 const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'ssrWeight', 'hitFade', 'probeConsistency', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'coverage', 'source', 'rtSource', 'grid'] as const;
@@ -308,11 +310,11 @@ async function main() {
   async function buildProvider(kind: BvhKind, meshes: THREE.Mesh[]) {
     const t0 = performance.now();
     if (kind === 'pmndrs') {
-      const built = await createPmndrsBvhTraceProviderFromObjects(device, meshes, { builder: bvhBuilder });
+      const built = await createPmndrsBvhTraceProviderFromObjects(device, meshes, { builder: bvhBuilder, shadingNormals });
       const i = built.provider.info;
       return { provider: built.provider as ExampleProvider, pmndrs: built, refit: built.refit, info: { kind, meshes: meshes.length, triangles: i.triangles, buildMs: performance.now() - t0, builder: i.builder, fallbackReason: i.fallbackReason } };
     }
-    const p = await MeshBVHTraceProvider.fromObjects(device, meshes);
+    const p = await MeshBVHTraceProvider.fromObjects(device, meshes, { shadingNormals });
     return { provider: p as ExampleProvider, pmndrs: null, refit: () => p.refit(), info: { kind, meshes: meshes.length, triangles: p.triangles, buildMs: performance.now() - t0 } };
   }
   let time = 0, paused = false;
@@ -948,7 +950,8 @@ async function main() {
 
   /**
    * traceFirstHit of `p` in a one-off kernel. Per ray 8 words: t, material (u32), frontFace (0/1),
-   * instance (u32), normal xyz, triangle (u32).
+   * instance (u32), normal xyz, triangle (u32). `s`: per ray the provider's shading normal
+   * (`traceHitShadingNormal`, D1700; 0 without one), xyz + 0.
    */
   async function traceRays(p: TraceProvider, origins: Float32Array<ArrayBuffer>, dirs: Float32Array<ArrayBuffer>) {
     const n = origins.length / 4;
@@ -957,16 +960,18 @@ async function main() {
 @group(0) @binding(1) var<storage, read> rayD: array<vec4f>;
 @group(0) @binding(2) var<storage, read_write> outT: array<vec4f>;
 ${p.code({ group: 1, firstBinding: 0 })}
+${p.capabilities.shadingNormal ? '' : DEFAULT_SHADING_NORMAL_WGSL}
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
   if (id.x >= arrayLength(&rayO)) { return; }
   let h = traceFirstHit(rayO[id.x].xyz, rayD[id.x].xyz, 1000.0);
-  outT[id.x * 2u] = vec4f(h.t, bitcast<f32>(h.material), select(0.0, 1.0, h.frontFace), bitcast<f32>(h.instance));
-  outT[id.x * 2u + 1u] = vec4f(h.normal, bitcast<f32>(h.triangle));
+  outT[id.x * 3u] = vec4f(h.t, bitcast<f32>(h.material), select(0.0, 1.0, h.frontFace), bitcast<f32>(h.instance));
+  outT[id.x * 3u + 1u] = vec4f(h.normal, bitcast<f32>(h.triangle));
+  outT[id.x * 3u + 2u] = vec4f(select(vec3f(0.0), traceHitShadingNormal(h), h.t >= 0.0), 0.0);
 }`;
     const mk = (a: Float32Array<ArrayBuffer>, usage: number) => { const b = device.createBuffer({ size: a.byteLength, usage }); device.queue.writeBuffer(b, 0, a); return b; };
     const S = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
     const bo = mk(origins, S), bd = mk(dirs, S);
-    const bytes = n * 32;
+    const bytes = n * 48;
     const bt = device.createBuffer({ size: bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
     const bl0 = device.createBindGroupLayout({ entries: [0, 1, 2].map((binding) => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type: binding === 2 ? 'storage' as const : 'read-only-storage' as const } })) });
     const bl1 = device.createBindGroupLayout({ entries: p.entries.map((e, binding) => ({ ...e, binding } as GPUBindGroupLayoutEntry)) });
@@ -984,9 +989,12 @@ ${p.code({ group: 1, firstBinding: 0 })}
     device.queue.submit([enc.finish()]);
     await rb.mapAsync(GPUMapMode.READ);
     const gpuWallMs = performance.now() - t0;
-    const data = rb.getMappedRange().slice(0);
+    const all = new Float32Array(rb.getMappedRange().slice(0));
     rb.unmap(); [bo, bd, bt, rb].forEach((b) => b.destroy());
-    return { f: new Float32Array(data), u: new Uint32Array(data), gpuWallMs };
+    // split into the 8-word hit records and the shading normals
+    const f = new Float32Array(n * 8), s = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) { f.set(all.subarray(i * 12, i * 12 + 8), i * 8); s.set(all.subarray(i * 12 + 8, i * 12 + 12), i * 4); }
+    return { f, u: new Uint32Array(f.buffer), s, gpuWallMs };
   }
 
   /**
@@ -1059,7 +1067,8 @@ ${p.code({ group: 1, firstBinding: 0 })}
     const temp = which && which !== bvhInfo.kind ? await buildProvider(which, meshes) : null;
     const tested = temp?.provider ?? provider, pmndrs = temp ? temp.pmndrs : pmndrsBuild;
     const { origins, dirs } = makeRays(n, kind);
-    const { f, u, gpuWallMs } = await traceRays(tested, origins, dirs);
+    const { f, u, s, gpuWallMs } = await traceRays(tested, origins, dirs);
+    const shadingNormal = !!tested.capabilities.shadingNormal;
     temp?.provider.destroy();
     const sides = new Map<THREE.Material, THREE.Side>();
     for (const m of meshes) for (const mat of ([] as THREE.Material[]).concat(m.material)) { sides.set(mat, mat.side); mat.side = THREE.DoubleSide; }
@@ -1070,6 +1079,9 @@ ${p.code({ group: 1, firstBinding: 0 })}
     rc.far = 1000;
     let agree = 0, bothMiss = 0, gpuOnly = 0, cpuOnly = 0, maxRel = 0, compared = 0;
     let triangle = 0, normalSigned = 0, normalAbs = 0, frontFace = 0, instance = 0, material = 0;
+    // D1700: the shading normal vs three's interpolated intersection.normal (meshes with normals)
+    let shadedCompared = 0, shadedAgree = 0, shadedAngle = 0, flatAngle = 0;
+    const sn = new THREE.Vector3(), tn = new THREE.Vector3();
     const examples: string[] = [];
     const errs: number[] = [];
     const nm = new THREE.Matrix3(), wm = new THREE.Matrix4(), im = new THREE.Matrix4(), wn = new THREE.Vector3(), d = new THREE.Vector3();
@@ -1098,6 +1110,20 @@ ${p.code({ group: 1, firstBinding: 0 })}
       if (cos >= 0.999) normalSigned++;
       if (Math.abs(cos) >= 0.999) normalAbs++;
       if ((f[i * 8 + 2] > 0.5) === (wn.dot(d) < 0)) frontFace++;
+      if (hit.normal) {
+        // both turned to face the ray; angles in degrees
+        tn.copy(hit.normal).applyMatrix3(nm).normalize();
+        if (tn.dot(d) > 0) tn.negate();
+        sn.set(s[i * 4], s[i * 4 + 1], s[i * 4 + 2]);
+        if (sn.lengthSq() > 0) sn.normalize(); else sn.copy(wn);
+        if (sn.dot(d) > 0) sn.negate();
+        const g = wn.dot(d) > 0 ? wn.clone().negate() : wn;
+        const deg = (c: number) => (Math.acos(Math.min(1, Math.max(-1, c))) * 180) / Math.PI;
+        shadedCompared++;
+        if (sn.dot(tn) >= 0.999) shadedAgree++;
+        shadedAngle += deg(sn.dot(tn));
+        flatAngle += deg(g.dot(tn));
+      }
       if (pmndrs) {
         const want = instanceOf.get(hit.object)?.get(hit.instanceId ?? -1);
         if (want !== undefined && u[i * 8 + 3] === want) instance++;
@@ -1108,6 +1134,7 @@ ${p.code({ group: 1, firstBinding: 0 })}
     return {
       provider: which ?? bvhInfo.kind, rays: n, kind, agree, bothMiss, gpuOnly, cpuOnly, maxRel, p99Rel: pct(errs, 0.99), gpuWallMs,
       compared, triangle, normalSigned, normalAbs, frontFace, instance: pmndrs ? instance : null, material: pmndrs ? material : null, examples,
+      shading: { capability: shadingNormal, compared: shadedCompared, agree: shadedAgree, meanDeg: shadedCompared ? shadedAngle / shadedCompared : 0, flatMeanDeg: shadedCompared ? flatAngle / shadedCompared : 0 },
     };
   }
 

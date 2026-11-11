@@ -616,6 +616,20 @@ async function rtAnyHitChecks(p, label) {
 }
 
 /**
+ * D1700 (W28): the provider's shading normal (`traceHitShadingNormal`) against three's interpolated
+ * `intersection.normal` on the same rays (contact: a 6-sided cone, a sphere, a torus, a cylinder);
+ * the flat geometric normal's mean angle to it is what the shading normal removes.
+ */
+async function rtShadingNormalChecks(p, label) {
+  for (const kind of ['camera', 'scene']) {
+    const o = await p.T(`window.__p.rtOracle(4096, '${kind}')`);
+    const s = o.shading;
+    check(`rt ${label}: shading normal = three's interpolated normal, contact, ${kind} rays (D1700)`, s.capability && s.compared > 0 && s.agree >= s.compared * 0.995,
+      `${s.agree}/${s.compared} hits within cos 0.999, mean ${s.meanDeg.toExponential(1)} deg (flat geometric normal: mean ${s.flatMeanDeg.toFixed(3)} deg)`);
+  }
+}
+
+/**
  * D903: hit shading vs the on-screen colour of the same hits, shadow rays off and on (one
  * reference frame, both shadings on the same rays). A shadow ray can only darken a hit.
  */
@@ -729,6 +743,7 @@ async function ssrRtChecks(pages) {
     const extra = id === 'mirrorWall' ? `; wall: ${(st.wall.confidentFraction * 100).toFixed(1)}% confident, corr ${st.wall.lumCorrelation.toFixed(3)}` : '';
     check(`rt ${id}: renders, finite, no validation errors`, e.length === 0 && st.nonFinite === 0, e.length ? e.slice(0, 2).join(' | ') : `${st.misses} misses -> ${JSON.stringify(st.rt)}${extra}`);
     await rtHitShadingLines(p, id);
+    if (id === 'contact') await rtShadingNormalChecks(p, 'three-mesh-bvh port');
   }
   if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '');
 
@@ -824,6 +839,7 @@ async function ssrRtBvhChecks(pages) {
       }
       // D903: the same hit-shading measurement as the ssr-rt section, on this provider
       if (['mirrorWall', 'contact', 'moving'].includes(id)) { await p.T('window.__p.step(2)'); await rtHitShadingLines(p, `${id} (@pmndrs/bvh)`); }
+      if (id === 'contact') await rtShadingNormalChecks(p, '@pmndrs/bvh');
     }
   }
   if (args.includes('--rt-shadow-timing')) await rtShadowTiming('@pmndrs/bvh', '&bvh=pmndrs');

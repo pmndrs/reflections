@@ -14,7 +14,8 @@
 //               the slot's material into the pad words (albedo rgba8, emissive as 3 halves), the
 //               hook three-mesh-bvh's writeTransformData comment names for this.
 //   index       u32 triangle corners (rebased into the packed attributes)
-//   attributes  the interleaved per-vertex struct; we only read `position` (first vec4f).
+//   attributes  the interleaved per-vertex struct: `position` (first vec4f) and, when packed (the
+//               default of `fromObjects`), `normal` for the interpolated shading normal (D1700).
 //
 // The layout is three-mesh-bvh's internals, not its public API: `LAYOUT` below pins what we read,
 // and the constructor checks it, so a layout change fails loudly instead of tracing garbage.
@@ -45,6 +46,11 @@ export interface MeshBVHComputeDataLike {
 const LAYOUT = { nodeWords: 16, transformWords: 36, stackDepth: 60 } as const;
 
 export interface MeshBVHTraceProviderOptions {
+  /**
+   * Shade hits with the meshes' interpolated vertex normals (`traceHitShadingNormal`, D1700) when
+   * the packed attributes carry `normal` (`fromObjects` packs it unless this is false). Default true.
+   */
+  shadingNormals?: boolean;
   /**
    * The material a mesh contributes to traced-hit shading. Default {@link defaultHitMaterial}:
    * diffuse albedo `color x mean(map) x (1 - metalness)` and `emissive x mean(emissiveMap) x
@@ -110,7 +116,27 @@ export function defaultHitMaterial(mesh: THREE.Mesh): HitMaterial {
   return { albedo, emissive };
 }
 
-const providerWgsl = (slot: BindingSlot, attributeVec4s: number) => /* wgsl */ `
+/** vec4f slot of `normal` in the attribute struct (every member a vec4f), or -1. */
+function normalSlot(data: MeshBVHComputeDataLike): number {
+  const attrs = (data as unknown as { attributes?: Record<string, string> }).attributes;
+  if (!attrs || Object.values(attrs).some((t) => t !== 'vec4f')) return -1;
+  return Object.keys(attrs).indexOf('normal');
+}
+
+const shadingNormalWgsl = (normal: number) => /* wgsl */ `
+// D1700: the vertex normals at the hit triangle's corners (packed attribute ${normal}), weighted by
+// the barycentrics, through the instance's normal matrix (transpose of its inverse).
+fn traceHitShadingNormal(hit: Hit) -> vec3f {
+  let i = vec3u(tmbIndex[hit.triangle * 3u], tmbIndex[hit.triangle * 3u + 1u], tmbIndex[hit.triangle * 3u + 2u]);
+  let w = vec3f(1.0 - hit.barycentrics.x - hit.barycentrics.y, hit.barycentrics);
+  let n = tmbAttributes[i.x * TMB_ATTRIBUTE_VEC4S + ${normal}u].xyz * w.x
+        + tmbAttributes[i.y * TMB_ATTRIBUTE_VEC4S + ${normal}u].xyz * w.y
+        + tmbAttributes[i.z * TMB_ATTRIBUTE_VEC4S + ${normal}u].xyz * w.z;
+  return (transpose(tmbInverseMatrix(hit.instance)) * vec4f(n, 0.0)).xyz;
+}
+`;
+
+const providerWgsl = (slot: BindingSlot, attributeVec4s: number, normal: number) => /* wgsl */ `
 @group(${slot.group}) @binding(${slot.firstBinding}) var<storage, read> tmbNodes: array<u32>;
 @group(${slot.group}) @binding(${slot.firstBinding + 1}) var<storage, read> tmbTransforms: array<vec4f>;
 @group(${slot.group}) @binding(${slot.firstBinding + 2}) var<storage, read> tmbIndex: array<u32>;
@@ -373,7 +399,7 @@ fn traceHitMaterial(hit: Hit) -> HitMaterial {
   let w = tmbExtra(hit.material);
   return HitMaterial(unpack4x8unorm(w.y).rgb, vec3f(unpack2x16float(w.z), unpack2x16float(w.w).x));
 }
-`;
+${normal >= 0 ? shadingNormalWgsl(normal) : ''}`;
 
 const toHalf = THREE.DataUtils.toHalfFloat;
 const unorm8 = (x: number) => Math.round(Math.min(1, Math.max(0, x)) * 255);
@@ -390,31 +416,37 @@ const unorm8 = (x: number) => Math.round(Math.min(1, Math.max(0, x)) * 255);
 export class MeshBVHTraceProvider implements TraceProvider {
   readonly name = 'three-mesh-bvh';
   readonly storageBufferCount = 4;
-  readonly capabilities = { hitNormal: true, hitMaterial: true, anyHit: true } as const;
+  readonly capabilities: { readonly hitNormal: true; readonly hitMaterial: true; readonly anyHit: true; readonly shadingNormal: boolean };
   readonly entries: readonly ModuleBindingEntry[] = [0, 1, 2, 3].map(() => ({ visibility: 0x4, buffer: { type: 'read-only-storage' as const } }));
   readonly data: MeshBVHComputeDataLike;
   private buffers: GPUBuffer[] = [];
   private attributeVec4s = 1;
+  /** vec4f slot of `normal` in the packed attributes, -1 without shading normals. */
+  private readonly normal: number;
   private _version = 0;
   /** Triangles in the packed index buffer. */
   triangles = 0;
 
   constructor(readonly device: GPUDevice, data: MeshBVHComputeDataLike, private readonly options: MeshBVHTraceProviderOptions = {}) {
     this.data = data;
+    this.normal = options.shadingNormals === false ? -1 : normalSlot(data);
+    this.capabilities = { hitNormal: true, hitMaterial: true, anyHit: true, shadingNormal: this.normal >= 0 };
     this.upload();
   }
 
   /** Build a BVH over `objects` (meshes or groups; only meshes are traced) and wrap it. */
   static async fromObjects(device: GPUDevice, objects: THREE.Object3D | THREE.Object3D[], options: MeshBVHTraceProviderOptions = {}) {
     const { BVHComputeData } = await import('three-mesh-bvh/webgpu');
-    const data = new BVHComputeData(objects as never, { attributes: { position: 'vec4f' } }) as unknown as MeshBVHComputeDataLike;
+    // normals ride along in the interleaved attributes (16 B per vertex) for the shading normal
+    const attributes: Record<string, string> = options.shadingNormals === false ? { position: 'vec4f' } : { position: 'vec4f', normal: 'vec4f' };
+    const data = new BVHComputeData(objects as never, { attributes }) as unknown as MeshBVHComputeDataLike;
     data.update();
     return new MeshBVHTraceProvider(device, data, options);
   }
 
   get version() { return this._version; }
 
-  code(slot: BindingSlot) { return providerWgsl(slot, this.attributeVec4s); }
+  code(slot: BindingSlot) { return providerWgsl(slot, this.attributeVec4s, this.normal); }
 
   resources(): readonly GPUBindingResource[] { return this.buffers.map((buffer) => ({ buffer })); }
 
