@@ -12,23 +12,30 @@
 
 The tool is `examples/showcase/compare.html`. The data is in `docs/research/showcase-compare.json`, the screenshots in `docs/research/showcase-compare/`. The machine was Apple Silicon with Chrome headless (WebGPU on Metal, WebGL on ANGLE/Metal), at 960x540.
 
+> **Update (W23).** The reference is now three-gpu-pathtracer's **WebGPU** tracer (0.0.28) plus an **OIDN denoise** (the Denoiser repo's `denoiser` package), and it **stops**: at rest it traces to *Max samples* (default 8), denoises once, shows that, and goes idle. Moving the camera restarts it. **Clearcoat renders correctly in this tracer and is back in the reference.** The A / B sides are picked in a bar above the image, with one-click pairs. The numbers below were measured by W21 against the old WebGL reference (clearcoat dropped, 592-2109 spp, not denoised) and have not been re-run. A quick check on carConcept at 32 denoised spp gives the same MADs for ours (20.8 against 21.0) and ours + RT (17.5 against 17.5).
+
 ## The tool
 
 `http://127.0.0.1:<port>/showcase/compare.html?scene=carConcept&left=ours-rt&right=pathtraced`. There is also a link in the showcase panel.
 
 - **Methods** (either side): ours raw / denoised / hybrid with RT, probes only, three r187 `SSRNode` raw (stochastic) / with its own denoiser (`TemporalReprojectNode` + `RecurrentDenoiseNode`, example parameters) / with FFX (`ffxReflections()` from denoiser/three, wired as `Denoiser/examples/three-temporal/src/ssr.ts` side B), and path traced.
-- **Isolation.** Each method has its own canvas, its own renderer (WebGPU device, or a WebGL context for the path tracer) and its own fresh load of the scene and HDRI. Nothing is shared between renderers.
-- **Split view.** The two canvases are stacked, and the right one is clipped with `clip-path: inset(0 0 0 x%)` at a draggable divider, with labels on each side. One `OrbitControls` camera is copied into every method each frame. "Freeze camera" lets the path tracer converge, and its label shows the sample count.
+- **Isolation.** Each method has its own canvas, its own renderer and WebGPU device (the path tracer and its OIDN denoiser share one) and its own fresh load of the scene and HDRI. Nothing is shared between renderers.
+- **Split view.** The two canvases are stacked, and the right one is clipped with `clip-path: inset(0 0 0 x%)` at a draggable divider. **A** is left of the divider and **B** right of it. Each has a picker in the bar above the image (A over the left half, B over the right), with a swap button and quick pairs: ours + RT vs path traced, ours vs path traced, ours vs three SSR + FFX, ours vs ours + RT. The labels on the image repeat the A / B badge, the method and its status. One `OrbitControls` camera is copied into every method each frame. "Freeze camera" stops the orbit.
 - **Display.** Every method is AgX + sRGB at the scene's exposure (one slider for all). There is no TRAA, sharpen or grade anywhere (D2302).
-- **Path tracer.** three-gpu-pathtracer's `WebGLPathTracer`, from the sibling checkout (`$PATHTRACER_REPO` overrides). It runs MIS, 8 bounces, `filterGlossyFactor` 0 and 3x3 tiles. Clearcoat is dropped, because it renders black on these assets (D2303).
-- **Readout ("Measure").** With the camera frozen, it path-traces the reference to N spp and takes the glossy mask from our G-buffer (perceptual roughness < 0.447). Each method then runs from reset: 48 warm-up frames, then 32 measured. The columns:
+- **Path tracer (W23).** three-gpu-pathtracer's `WebGPUPathTracer` 0.0.28 (a devDependency; `$PATHTRACER_REPO` overrides) in its own canvas and device, with MIS, 8 bounces and `filterGlossyFactor` 0.
+  - **When it traces:** while the camera moves it restarts each frame, so you see raw samples. At rest it accumulates to **Max samples** (panel, default 8, 1-512, `?ptMax=`).
+  - **At the cap:** it stops dispatching, rasterizes albedo + view normal, and runs OIDN once (the Denoiser repo's `denoiser` package on the same device, zero copy, linear out, AgX on present like every other method). The layer then stays idle.
+  - **Show denoised** switches raw / denoised (`?ptRaw=1`).
+  - **Timing:** still to denoised takes 0.35 s on toyCar, 0.44 s on carConcept and 4.4 s on Sponza (headless, 960x540, 8 spp). A blank denoise at load warms the network, so the cap doesn't wait for it.
+  - **Clearcoat** is kept (D2303). The denoise biases the reference (D2305).
+- **Readout ("Measure").** With the camera frozen, it path-traces the reference to N spp (then OIDN, since W23) and takes the glossy mask from our G-buffer (perceptual roughness < 0.447). Each method then runs from reset: 48 warm-up frames, then 32 measured. The columns:
   - **MAD**: mean |frame − reference|, noise included.
   - **bias**: |temporal mean − reference|.
   - **std**: per-pixel temporal std of luma, mean and p99.
   - **orbit**: the mean |second temporal difference| of luma over a 0.05°/frame orbit. It needs no reference. Smooth motion cancels and frame-to-frame noise doesn't.
   - **Units:** 8-bit display (0–255): what the eye gets (D2304).
-- **Headless hooks.** `window.__p.measure()`, `flickerMap(id)`, `shot()`, `shotOf(id)` and `converge(spp)`.
-- **URL overrides** for experiments (never defaults): `?spq=`, `?tsf=`, `?hit=`, `?motionScale=`, `?mirrorBias=`, `?ssrMaxDistance=`, `?ssrThickness=`, `?floorRoughness=`, `?ptBounces=`, `?ptTiles=`, `?ptClearcoat=1`.
+- **Headless hooks.** `window.__p.measure()`, `flickerMap(id)`, `shot()`, `shotOf(id)`, `converge(spp)` (traces to the cap, denoises, returns the tracer's info), `ptInfo()`, `showDenoised(v)` and `setSides(a, b)`.
+- **URL overrides** for experiments (never defaults): `?spq=`, `?tsf=`, `?hit=`, `?motionScale=`, `?mirrorBias=`, `?ssrMaxDistance=`, `?ssrThickness=`, `?floorRoughness=`, `?ptBounces=`, `?ptMax=`, `?ptRaw=1`, `?ptDenoise=0`, `?ptClearcoat=0`.
 - **Smoke:** `pnpm check -- --only showcase-compare`.
 
 Two bugs in the tool were found and fixed while building it, so they are not in the numbers below:
