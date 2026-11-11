@@ -1181,7 +1181,8 @@ async function babylonChecks(pages) {
  * page is a setup notice, and the check asserts that the notice renders. With it: renders, no
  * validation errors, finite outputs, rays traced; the glossy floor reflects the signs (confident SSR);
  * the G-buffer carries the material values; the contract's camera reprojects onto pixi-3d's own
- * pixels and its normals agree with the depth; the probe captures sample as world directions; the
+ * pixels and its normals agree with the depth; the probe captures sample as world directions and
+ * draw the view's sky behind the geometry (W33: black-sky texels and the composite's change logged); the
  * motion texture reprojects with motionVectorScale [1, 1]. Screenshots of the final image (denoised
  * when the sibling Denoiser repo is there, and raw), SSR off, probes off and the debug views.
  */
@@ -1223,6 +1224,17 @@ async function pixi3dChecks(pages) {
       const o = await p.T('window.__p.orientation()');
       check('pixi3d: probe captures (six pixi-3d cameras) sample as world directions', o.ok,
         o.ok ? `${o.rows.length} directions` : o.rows.filter((r) => !r.ok).slice(0, 4).map((r) => `${r.dir.join(',')}: got ${r.got.join('')} want ${r.expect.join('')}`).join('; '));
+      // W33 (D2104): the capture cameras draw the view's background behind the geometry
+      const ps = await p.T('window.__p.probeSkyCheck()');
+      check("pixi3d: probe faces draw the view's sky, equal to the environment slot's", ps.sky.maxError < 2e-3 * Math.max(1, ps.sky.maxValue),
+        `${ps.sky.texels} texels, max |faces - captureHemisphere| ${ps.sky.maxError.toExponential(2)} (mean ${ps.sky.meanError.toExponential(2)}, sky up to ${ps.sky.maxValue.toFixed(3)})`);
+      const pct = (k) => `${(100 * k / ps.probe.texels).toFixed(1)}%`;
+      check('pixi3d: the arcade probe sees the sky (no black-sky texels)', ps.probe.skyTexels > 0 && ps.probe.skyBlackAfter === 0,
+        `${ps.probe.skyTexels} sky texels (${pct(ps.probe.skyTexels)} of ${ps.probe.texels}); black texels ${ps.probe.blackBefore} (${pct(ps.probe.blackBefore)}) without the sky -> ${ps.probe.blackAfter} (${pct(ps.probe.blackAfter)}) with it; black sky texels ${ps.probe.skyBlackBefore} -> ${ps.probe.skyBlackAfter}`);
+      for (const [k, label] of [['ssr', 'SSR on'], ['ssrOff', 'SSR off']]) {
+        const c = ps.composite[k], aa = ps.composite[`${k}AA`];
+        console.log(`  pixi3d probe sky, composite ${label} (${c.glossyPx} glossy px, 0-255): black sky -> sky mean ${c.mean.toFixed(2)} / p99 ${c.p99} / max ${c.max}; ${c.changedPx} px change >= 2 (mean ${c.changedMean.toFixed(2)}, p99 ${c.changedP99}); A/A mean ${aa.mean.toFixed(3)} / p99 ${aa.p99} / max ${aa.max}`);
+      }
       const mc = await p.T('window.__p.motionCheck()');
       const err = Object.fromEntries(mc.rows.map((r) => [r.scale, r.meanError]));
       check('pixi3d: motion reprojects with motionVectorScale [1, 1]', mc.best === '1,1' && err['1,1'] < 0.5 * err['0,0'],
