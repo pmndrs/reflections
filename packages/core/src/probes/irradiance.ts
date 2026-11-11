@@ -13,9 +13,15 @@ import type { ProbeLayout } from './layouts/types';
 import { captureAxesWgsl, resolveCaptureTransform, type ProbeCaptureTransform } from './capture';
 import { PROBE_IRRADIANCE_ROWS } from './table';
 
-const WG = 256;
 
-const shaderWgsl = (layout: ProbeLayout, transform: ProbeCaptureTransform) => /* wgsl */ `${layout.wgsl}
+/** Workgroup size: 256, or the device's limit below it (compatibility mode's default is 128). */
+const workgroupFor = (device: GPUDevice) => {
+  let wg = 256;
+  while (wg > device.limits.maxComputeWorkgroupSizeX || wg > device.limits.maxComputeInvocationsPerWorkgroup) wg >>= 1;
+  return wg;
+};
+
+const shaderWgsl = (layout: ProbeLayout, transform: ProbeCaptureTransform, WG: number) => /* wgsl */ `${layout.wgsl}
 struct U { slot: u32, row: u32, samples: u32, pad: u32, lod: f32, pad1: f32, pad2: f32, pad3: f32 }
 @group(0) @binding(0) var atlas: ${layout.textureType};
 @group(0) @binding(1) var samp: sampler;
@@ -64,7 +70,11 @@ export interface ProbeIrradianceOptions {
 
 /**
  * Computes L1 SH radiance coefficients of atlas slots into a volume table (rows `irradianceRow +
- * 3 * slot`). The table buffer needs STORAGE usage; the atlas view is the layout's view dimension.
+ * 3 * slot`). The table buffer needs STORAGE usage. The atlas is read as the layout's texture type
+ * through a view of the layout's view dimension: a `cube-hw` atlas as 'cube-array', the others as
+ * '2d-array'. Pass the texture and the pass makes that view; a cube array is then never bound as a
+ * 2D array, which compatibility-mode WebGPU (a texture's binding view dimension is fixed) rejects
+ * (D2204).
  */
 export class ProbeIrradiance {
   readonly layout: ProbeLayout;
@@ -80,7 +90,7 @@ export class ProbeIrradiance {
     this.sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear' });
     this.pipe = device.createComputePipeline({
       label: `ProbeIrradiance.${layout.id}`, layout: 'auto',
-      compute: { module: device.createShaderModule({ code: shaderWgsl(layout, resolveCaptureTransform(options)), label: `probe-irradiance.${layout.id}` }), entryPoint: 'main' },
+      compute: { module: device.createShaderModule({ code: shaderWgsl(layout, resolveCaptureTransform(options), workgroupFor(device)), label: `probe-irradiance.${layout.id}` }), entryPoint: 'main' },
     });
   }
 
@@ -88,13 +98,15 @@ export class ProbeIrradiance {
   defaultLod() { return Math.max(0, this.layout.mipLevelCount - 3); }
 
   /**
-   * Records the integration of `slots` of `atlas` into `table`. Each call gets its own parameter
+   * Records the integration of `slots` of `atlas` (the texture, or a view of the layout's view
+   * dimension) into `table`. Each call gets its own parameter
    * buffer, filled at creation (not by queue.writeBuffer, which would run before the submit and
    * let a later call in the same encoder overwrite it). It is left to the garbage collector: the
    * command buffer keeps it alive until it ran.
    */
-  encode(encoder: GPUCommandEncoder, atlas: GPUTextureView, table: GPUBuffer, irradianceRow: number, slots: readonly number[], lod = this.defaultLod()) {
+  encode(encoder: GPUCommandEncoder, atlas: GPUTexture | GPUTextureView, table: GPUBuffer, irradianceRow: number, slots: readonly number[], lod = this.defaultLod()) {
     if (slots.length === 0) return;
+    const view = isTexture(atlas) ? atlas.createView({ dimension: this.layout.viewDimension }) : atlas;
     const stride = Math.max(32, this.device.limits.minUniformBufferOffsetAlignment);
     const params = this.device.createBuffer({ label: 'ProbeIrradiance.params', size: stride * slots.length, usage: GPUBufferUsage.UNIFORM, mappedAtCreation: true });
     const mapped = params.getMappedRange();
@@ -108,7 +120,7 @@ export class ProbeIrradiance {
     slots.forEach((_, k) => {
       pass.setBindGroup(0, this.device.createBindGroup({
         layout: this.pipe.getBindGroupLayout(0),
-        entries: [{ binding: 0, resource: atlas }, { binding: 1, resource: this.sampler }, { binding: 2, resource: { buffer: table } }, { binding: 3, resource: { buffer: params, offset: k * stride, size: 32 } }],
+        entries: [{ binding: 0, resource: view }, { binding: 1, resource: this.sampler }, { binding: 2, resource: { buffer: table } }, { binding: 3, resource: { buffer: params, offset: k * stride, size: 32 } }],
       }));
       pass.dispatchWorkgroups(1);
     });
@@ -116,4 +128,8 @@ export class ProbeIrradiance {
   }
 
   dispose() {}
+}
+
+function isTexture(t: GPUTexture | GPUTextureView): t is GPUTexture {
+  return typeof (t as GPUTexture).createView === 'function';
 }

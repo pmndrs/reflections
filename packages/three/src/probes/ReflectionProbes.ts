@@ -441,7 +441,7 @@ export class ReflectionProbes extends THREE.Object3D {
       device.queue.submit([encoder.finish()]);
     }
 
-    if (options.irradiance !== false) this.computeIrradiance(device, target, probes.length + 1, warp);
+    if (options.irradiance !== false) this.computeIrradiance(device, target, probes.length + 1, cubeArray ? 'cube-hw' : warp ? 'cube2d-warp' : 'cube2d-none');
 
     this.environmentTexture = environmentTexture;
     this.environmentVersion = environmentTexture?.version ?? -1;
@@ -501,11 +501,12 @@ export class ReflectionProbes extends THREE.Object3D {
   }
 
   /**
-   * L1 SH of every slot into `irradiance` (core ProbeIrradiance over a 2D-array view of the atlas, x
-   * mirrored; a cube array has cube2d-none's texels, so it reads as that layout).
+   * L1 SH of every slot into `irradiance` (core ProbeIrradiance, x mirrored), reading the atlas as
+   * the layout it was baked in: a cube array through a 'cube-array' view (`cube-hw`), never as a 2D
+   * array, which compatibility-mode WebGPU rejects (D2204); a 2D array through '2d-array'.
    */
-  private computeIrradiance(device: GPUDevice, target: GPUTexture, slots: number, warp: boolean) {
-    const layout = createProbeLayout(warp ? 'cube2d-warp' : 'cube2d-none', { maxLod: target.mipLevelCount - 1 });
+  private computeIrradiance(device: GPUDevice, target: GPUTexture, slots: number, id: 'cube-hw' | 'cube2d-warp' | 'cube2d-none') {
+    const layout = createProbeLayout(id, { maxLod: target.mipLevelCount - 1 });
     if (this.irradianceFilter === null || this.irradianceFilter.layout.id !== layout.id || this.irradianceFilter.layout.mipLevelCount !== layout.mipLevelCount) {
       this.irradianceFilter?.dispose();
       this.irradianceFilter = new ProbeIrradiance(device, layout, { mirrorX: true });
@@ -516,7 +517,7 @@ export class ReflectionProbes extends THREE.Object3D {
       this.irradiance = device.createBuffer({ label: 'ReflectionProbes.irradiance', size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     }
     const encoder = device.createCommandEncoder({ label: 'ReflectionProbes.irradiance' });
-    this.irradianceFilter.encode(encoder, target.createView({ dimension: '2d-array' }), this.irradiance, 0, Array.from({ length: slots }, (_, i) => i));
+    this.irradianceFilter.encode(encoder, target, this.irradiance, 0, Array.from({ length: slots }, (_, i) => i));
     device.queue.submit([encoder.finish()]);
     this.irradianceVersion++;
   }

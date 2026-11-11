@@ -13,7 +13,7 @@
 //             probe set holding the constant c must give the image of the constant fallback c, bit for
 //             bit; a structured capture must change the fallback pixels
 import {
-  ProbeSet, probeLookupWgsl, ProbeCaptureRemap, CAPTURE_MIRROR_X, CAPTURE_MIRROR_Y, CAPTURE_BABYLON_FACES, CAPTURE_CAMERA_FACES, type ProbeCaptureTransform,
+  ProbeSet, probeLookupWgsl, ProbeCaptureRemap, LayoutPrefilter, createProbeLayout, maxLodFor, CAPTURE_MIRROR_X, CAPTURE_MIRROR_Y, CAPTURE_BABYLON_FACES, CAPTURE_CAMERA_FACES, type ProbeCaptureTransform,
   createScreenSpaceReflections, createTracedReflections, constantRadianceFallback, type TraceProvider, type TracedReflectionsStats, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
   type FrameInputs, type ProbeLayoutId, type ProbeSetFormat, type ProbeVolume, type ScreenSpaceReflectionsInputs, reflectionsRequiredLimits,
 } from '@pmndrs/reflections/core';
@@ -445,8 +445,119 @@ fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
     return res;
   }
 
+  // ---- D2204 (W35): compatibility mode. A device without 'core-features-and-limits' fixes each
+  // texture's binding view dimension at creation (textureBindingViewDimension).
+  async function compat() {
+    const a = await navigator.gpu.requestAdapter({ featureLevel: 'compatibility' } as GPURequestAdapterOptions);
+    if (!a) return { available: false };
+    const dev = await a.requestDevice({});
+    const isCompat = !dev.features.has('core-features-and-limits' as GPUFeatureName);
+    const errors: string[] = [];
+    dev.addEventListener('uncapturederror', (e) => errors.push((e as GPUUncapturedErrorEvent).error.message));
+    // which binding view dimensions does it allow a 6-layer texture to be created with and bound as?
+    const bind = async (declared: GPUTextureViewDimension, dim: GPUTextureViewDimension) => {
+      dev.pushErrorScope('validation');
+      const t = dev.createTexture({ size: [8, 8, 6], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING, textureBindingViewDimension: declared } as GPUTextureDescriptor);
+      const created = await dev.popErrorScope();
+      if (created) { t.destroy(); return `create: ${created.message.split('\n')[0].slice(0, 120)}`; }
+      dev.pushErrorScope('validation');
+      const bgl = dev.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { viewDimension: dim } }] });
+      dev.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: t.createView({ dimension: dim }) }] });
+      const e = await dev.popErrorScope();
+      t.destroy();
+      return e ? `bind: ${e.message.split('\n')[0].slice(0, 120)}` : 'ok';
+    };
+    const dims = {
+      cubeArrayAsCubeArray: await bind('cube-array', 'cube-array'), cubeArrayAs2dArray: await bind('cube-array', '2d-array'),
+      cubeAsCube: await bind('cube', 'cube'), arrayAs2dArray: await bind('2d-array', '2d-array'), arrayAsCube: await bind('2d-array', 'cube'),
+    };
+    // the probe core on this device: the same capture and lookups as evaluate() on the core device
+    const cubeOn = dev.createComputePipeline({ layout: 'auto', compute: { module: dev.createShaderModule({ code: CUBE_WGSL }), entryPoint: 'main' } });
+    const cube = dev.createTexture({ size: [SOURCE, SOURCE, 6], format: 'rgba16float', usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC });
+    {
+      const u = dev.createBuffer({ size: 16, usage: U.UNIFORM | U.COPY_DST });
+      dev.queue.writeBuffer(u, 0, new Uint32Array([SOURCE, 0, 0, 0]));
+      const enc = dev.createCommandEncoder();
+      const p = enc.beginComputePass(); p.setPipeline(cubeOn);
+      p.setBindGroup(0, dev.createBindGroup({ layout: cubeOn.getBindGroupLayout(0), entries: [{ binding: 0, resource: cube.createView({ dimension: '2d-array' }) }, { binding: 1, resource: { buffer: u } }] }));
+      p.dispatchWorkgroups(SOURCE / 8, SOURCE / 8, 6); p.end();
+      dev.queue.submit([enc.finish()]);
+    }
+    const ptsOn = dev.createBuffer({ size: pts.byteLength, usage: U.STORAGE | U.COPY_DST });
+    dev.queue.writeBuffer(ptsOn, 0, pts);
+    const outOn = dev.createBuffer({ size: pts.byteLength, usage: U.STORAGE | U.COPY_SRC });
+    const readOn = async (b: GPUBuffer) => {
+      const r = dev.createBuffer({ size: b.size, usage: U.MAP_READ | U.COPY_DST });
+      const enc = dev.createCommandEncoder(); enc.copyBufferToBuffer(b, 0, r, 0, b.size); dev.queue.submit([enc.finish()]);
+      await r.mapAsync(GPUMapMode.READ);
+      const o = new Float32Array(r.getMappedRange().slice(0)); r.destroy();
+      return o;
+    };
+    const sets: Record<string, unknown>[] = [];
+    for (const layout of [undefined, 'cube2d-none', 'cube-hw'] as (ProbeLayoutId | undefined)[]) {
+      const row: Record<string, unknown> = { asked: layout ?? 'default' };
+      dev.pushErrorScope('validation');
+      try {
+        const set = new ProbeSet(dev, { capacity: 3, sourceSize: SOURCE, layout });
+        row.layout = set.layout.id;
+        const enc = dev.createCommandEncoder();
+        for (let k = 0; k < 3; k++) set.capture(enc, k, cube);
+        set.captureEnvironment(enc, cube);
+        set.setVolumes(volumes); set.update();
+        set.computeIrradiance(enc);
+        const bgl = dev.createBindGroupLayout({ entries: [
+          { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+          { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+        ] });
+        const pipe = dev.createComputePipeline({
+          layout: dev.createPipelineLayout({ bindGroupLayouts: [bgl, set.bindGroupLayout] }),
+          compute: { module: dev.createShaderModule({ code: set.wgsl({ group: 1 }) + EVAL_WGSL }), entryPoint: 'main' },
+        });
+        const p = enc.beginComputePass(); p.setPipeline(pipe);
+        p.setBindGroup(0, dev.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: { buffer: ptsOn } }, { binding: 1, resource: { buffer: outOn } }] }));
+        p.setBindGroup(1, set.bindGroup); p.dispatchWorkgroups(COUNT / 64); p.end();
+        dev.queue.submit([enc.finish()]);
+        const out = await readOn(outOn);
+        set.dispose();
+        // against the same set on the core device
+        const ref = await evaluate({ layout: set.layout.id, kinds: [0, 0, 0, 0] });
+        let m = 0; for (let i = 0; i < out.length; i++) m = Math.max(m, Number.isFinite(out[i]) ? Math.abs(out[i] - ref[i]) : Infinity);
+        row.vsCore = m;
+      } catch (e) { row.throws = String((e as Error).message).slice(0, 160); }
+      const e = await dev.popErrorScope();
+      if (e) row.error = e.message.split('\n').slice(0, 2).join(' / ').slice(0, 200);
+      sets.push(row);
+    }
+    cube.destroy(); ptsOn.destroy(); outOn.destroy();
+    dev.destroy();
+    // the compatibility-mode prefilter path (GGX levels from a cube-only copy of the source chain),
+    // run on the core device, against the default path: the scratch must be identical
+    const scratchOf = async (cubeSourceCopy: boolean) => {
+      const lf = new LayoutPrefilter(device, createProbeLayout('cube2d-none', { maxLod: maxLodFor(SOURCE) }), SOURCE, SOURCE, { cubeSourceCopy });
+      const t = lf.scratch;
+      let bytes = 0;
+      for (let m = 0; m < t.mipLevelCount; m++) { const w = Math.max(1, t.width >> m); bytes += Math.ceil((w * 8) / 256) * 256 * w * 6; }
+      const b = device.createBuffer({ size: bytes, usage: U.COPY_DST | U.MAP_READ });
+      const enc = device.createCommandEncoder();
+      lf.encodeScratch(enc, cubes[0]);
+      let off = 0;
+      for (let m = 0; m < t.mipLevelCount; m++) {
+        const w = Math.max(1, t.width >> m), row = Math.ceil((w * 8) / 256) * 256;
+        enc.copyTextureToBuffer({ texture: t, mipLevel: m }, { buffer: b, offset: off, bytesPerRow: row, rowsPerImage: w }, [w, w, 6]);
+        off += row * w * 6;
+      }
+      device.queue.submit([enc.finish()]);
+      await b.mapAsync(GPUMapMode.READ);
+      const out = new Uint16Array(b.getMappedRange().slice(0)); b.destroy(); lf.dispose();
+      return out;
+    };
+    const plain = await scratchOf(false), copied = await scratchOf(true);
+    let prefilterDiffering = 0; for (let i = 0; i < plain.length; i++) if (plain[i] !== copied[i]) prefilterDiffering++;
+    return { available: true, isCompat, dims, sets, prefilterDiffering, prefilterValues: plain.length, errors: errors.slice(0, 4) };
+  }
+
   say('ready: window.__p.run()');
-  Object.assign(window, { __p: { run, device } });
+  Object.assign(window, { __p: { run, compat, device } });
 }
 
 function mul(a: Float32Array, b: Float32Array) {

@@ -28,7 +28,10 @@ export type ProbeSetFormat = 'rgba16float' | 'rgb9e5ufloat';
 export interface ProbeSetOptions {
   /** Probe volumes the set can hold (atlas slots 0 ... capacity - 1). */
   capacity: number;
-  /** Default 'cube-hw'. */
+  /**
+   * Default 'cube-hw' (a real cube array); 'cube2d-warp' on a compatibility-mode device (no
+   * 'core-features-and-limits'), which can't create cube-array views (D2204).
+   */
   layout?: ProbeLayoutId;
   /** Default 'rgba16float'. */
   format?: ProbeSetFormat;
@@ -106,7 +109,8 @@ export class ProbeSet {
     this.maxLod = maxLodFor(this.sourceSize);
     this.transform = resolveCaptureTransform(options);
     this.remap = hasCaptureFaces(this.transform) ? new ProbeCaptureRemap(device, this.transform) : null;
-    this.layout = createProbeLayout(options.layout ?? 'cube-hw', { maxLod: this.maxLod });
+    const compat = !device.features.has('core-features-and-limits' as GPUFeatureName);
+    this.layout = createProbeLayout(options.layout ?? (compat ? 'cube2d-warp' : 'cube-hw'), { maxLod: this.maxLod });
     this.environmentSlot = options.environment === false ? -1 : this.capacity;
     const slots = this.capacity + (this.environmentSlot >= 0 ? 1 : 0);
     const layers = slots * this.layout.layersPerProbe;

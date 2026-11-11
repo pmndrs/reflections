@@ -187,10 +187,16 @@ export class LayoutPrefilter {
   readonly scratch: GPUTexture;
   private readonly device: GPUDevice;
   private readonly src: GPUTexture;
+  /** Compatibility mode only: the source chain again, bound as 'cube' (see the constructor). */
+  private readonly srcCubeCopy: GPUTexture | null = null;
   private readonly passes: Pass[] = [];
   private readonly owned: (GPUTexture | GPUBuffer)[] = [];
 
-  constructor(device: GPUDevice, layout: ProbeLayout, size: number, sourceSize: number) {
+  /**
+   * `options.cubeSourceCopy`: sample the GGX levels from a copy of the source chain bound only as
+   * 'cube' (default: on for compatibility-mode devices, which need it, off otherwise; D4100).
+   */
+  constructor(device: GPUDevice, layout: ProbeLayout, size: number, sourceSize: number, options: { cubeSourceCopy?: boolean } = {}) {
     if (!Number.isInteger(Math.log2(sourceSize)) || sourceSize < Math.max(MIN_SOURCE_SIZE, 2 * INTEGRATION_SIZE)) throw new Error(`LayoutPrefilter: sourceSize must be a power of two >= ${Math.max(MIN_SOURCE_SIZE, 2 * INTEGRATION_SIZE)}, got ${sourceSize}.`);
     this.device = device;
     this.layout = layout;
@@ -204,12 +210,23 @@ export class LayoutPrefilter {
     const U = GPUTextureUsage;
     const srcMips = Math.log2(sourceSize) + 1;
     const layers = layout.layersPerProbe;
-    this.src = device.createTexture({ label: 'LayoutPrefilter.source', size: [sourceSize, sourceSize, 6], format: 'rgba16float', mipLevelCount: srcMips, usage: U.STORAGE_BINDING | U.TEXTURE_BINDING | U.COPY_DST });
+    this.src = device.createTexture({ label: 'LayoutPrefilter.source', size: [sourceSize, sourceSize, 6], format: 'rgba16float', mipLevelCount: srcMips, usage: U.STORAGE_BINDING | U.TEXTURE_BINDING | U.COPY_DST | U.COPY_SRC });
     this.scratch = device.createTexture({ label: `LayoutPrefilter.${layout.id}.out`, size: [size, size, layers], format: 'rgba16float', mipLevelCount: this.maxLod + 1, usage: U.STORAGE_BINDING | U.TEXTURE_BINDING | U.COPY_SRC });
     this.owned.push(this.src, this.scratch);
     const level = (t: GPUTexture, mip: number) => t.createView({ dimension: '2d-array', baseMipLevel: mip, mipLevelCount: 1 });
     const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear' });
-    const srcCube = this.src.createView({ dimension: 'cube' });
+    // The GGX levels sample the chain as a cube, the integration levels read it as a 2D array (as
+    // the downsampler does). A compatibility-mode device fixes each texture's binding view dimension
+    // at creation, so there the cube reads go to a copy of the chain made per capture (D4100);
+    // core devices bind the one texture both ways.
+    if (options.cubeSourceCopy ?? !device.features.has('core-features-and-limits' as GPUFeatureName)) {
+      this.srcCubeCopy = device.createTexture({
+        label: 'LayoutPrefilter.source (cube)', size: [sourceSize, sourceSize, 6], format: 'rgba16float', mipLevelCount: srcMips,
+        usage: U.TEXTURE_BINDING | U.COPY_DST, textureBindingViewDimension: 'cube',
+      } as GPUTextureDescriptor);
+      this.owned.push(this.srcCubeCopy);
+    }
+    const srcCube = (this.srcCubeCopy ?? this.src).createView({ dimension: 'cube' });
     const srcInteg = level(this.src, Math.log2(sourceSize / INTEGRATION_SIZE));
 
     for (let lod = 0; lod <= this.maxLod; lod++) {
@@ -241,10 +258,24 @@ export class LayoutPrefilter {
     const n = this.sourceSize;
     if (remap) remap.encode(encoder, source, this.src);
     else encoder.copyTextureToTexture({ texture: source, mipLevel: 0 }, { texture: this.src, mipLevel: 0 }, [n, n, 6]);
-    const pass = encoder.beginComputePass({ label: `LayoutPrefilter.${this.layout.id}`, timestampWrites });
-    // Box-filtered source chain (2x2 average per level, the 6 faces as array layers) by downsampler,
-    // up to six levels per dispatch, in this pass ahead of the GGX dispatches that sample it.
-    downsamplerFor(this.device).encodePass(pass, this.src);
+    let pass: GPUComputePassEncoder;
+    if (this.srcCubeCopy === null) {
+      pass = encoder.beginComputePass({ label: `LayoutPrefilter.${this.layout.id}`, timestampWrites });
+      // Box-filtered source chain (2x2 average per level, the 6 faces as array layers) by downsampler,
+      // up to six levels per dispatch, in this pass ahead of the GGX dispatches that sample it.
+      downsamplerFor(this.device).encodePass(pass, this.src);
+    } else {
+      // compatibility mode: the chain, then its copy for the cube reads, then the filters
+      const tw = timestampWrites;
+      const chain = encoder.beginComputePass({ label: `LayoutPrefilter.${this.layout.id}.chain`, timestampWrites: tw && tw.beginningOfPassWriteIndex !== undefined ? { querySet: tw.querySet, beginningOfPassWriteIndex: tw.beginningOfPassWriteIndex } : undefined });
+      downsamplerFor(this.device).encodePass(chain, this.src);
+      chain.end();
+      for (let m = 0; m < this.src.mipLevelCount; m++) {
+        const s = Math.max(1, n >> m);
+        encoder.copyTextureToTexture({ texture: this.src, mipLevel: m }, { texture: this.srcCubeCopy, mipLevel: m }, [s, s, 6]);
+      }
+      pass = encoder.beginComputePass({ label: `LayoutPrefilter.${this.layout.id}`, timestampWrites: tw && tw.endOfPassWriteIndex !== undefined ? { querySet: tw.querySet, endOfPassWriteIndex: tw.endOfPassWriteIndex } : undefined });
+    }
     for (const p of this.passes) {
       pass.setPipeline(p.pipe);
       pass.setBindGroup(0, p.group);

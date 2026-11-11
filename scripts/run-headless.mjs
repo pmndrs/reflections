@@ -1493,6 +1493,14 @@ async function main() {
       // (to float rounding: the shader compiler may fold a function differently next to another one)
       check(`probe sets of ${ml.sets.length} layouts in one shader match their own lookups (D805)`, ml.sets.length >= 2 && ml.sets.every((s) => s.q255 === 0 && s.maxAbs < 1e-6 && s.lum > 0),
         ml.sets.map((s) => `${s.layout} max ${s.q255} / 255 (float ${s.maxAbs.toExponential(1)}, tone-mapped ${s.max255.toExponential(1)} / 255, lum ${s.lum.toFixed(2)})`).join(', '));
+      // W35 (D2204): the cube-array atlas is only ever bound as 'cube-array' (bake, irradiance, materials)
+      const ab = await C('atlasBindings');
+      check("probe atlas bound only as its layout's view dimension (D2204)", ab.dims.every((d) => d.length > 0 && d.every((x) => x === (ab.layout === 'cube-array' ? 'cube-array' : '2d-array'))),
+        `${ab.layout}: ${ab.dims.map((d) => d.join('+')).join(', ')}`);
+      check('bake irradiance through the cube-array view = the 2D-array path (D2204)', ab.irradiance.rel < 1e-2 && ab.irradiance.scale > 0,
+        `max |diff| ${ab.irradiance.maxErr.toExponential(2)} of ${ab.irradiance.scale.toFixed(3)} (rel ${ab.irradiance.rel.toExponential(2)})`);
+      const cs = await C('compatShim');
+      check("compatibility-mode renderer: the cube-array shim declines, 'auto' bakes the 2D array (D2204)", cs.available && cs.compat && cs.installed === false && cs.supported === false && cs.storage === 'cube2d', JSON.stringify(cs));
       const ck = await C('cacheKey');
       check('two probe sets of equal size keep their own programs', ck.left[0] > 200 && ck.left[2] < 50 && ck.right[2] > 200 && ck.right[0] < 50 && ck.keysDiffer,
         `left ${ck.left}, right ${ck.right}, keys differ ${ck.keysDiffer}`);
@@ -1660,6 +1668,17 @@ async function main() {
         for (const n of ['babylon faces', 'pixi-3d camera faces']) check(`capture transform: ${n} = the plain set`, row(n).exact === 0, `max ${row(n).exact}`);
         // a mirror at lookup: the same world, prefiltered mirrored (up to the GGX sample pattern, D1805)
         for (const n of ['three axes', 'babylon axes']) check(`capture transform: ${n} looks up the plain set's world`, row(n).full.mean < 0.05 && row(n).full.max <= 1 && row(n).irr < 1e-3, fmt(row(n)));
+      }
+      {
+        // W35 (D2204): a compatibility-mode device (headless Chrome gives one: featureLevel
+        // 'compatibility', no 'core-features-and-limits') fixes each texture's binding view dimension
+        const cm = await pc.T('window.__p.compat()');
+        check('compat mode: the device enforces the binding view dimension and has no cube-array views', cm.available && cm.isCompat && cm.dims.arrayAsCube.startsWith('bind:')
+          && cm.dims.arrayAs2dArray === 'ok' && cm.dims.cubeAsCube === 'ok' && cm.dims.cubeArrayAsCubeArray.startsWith('create:'), JSON.stringify(cm.dims).slice(0, 200));
+        check('compat mode: ProbeSet defaults to cube2d-warp there (D2204)', cm.sets[0].layout === 'cube2d-warp', JSON.stringify(cm.sets[0]).slice(0, 120));
+        check('compat mode: the prefilter path for it (GGX levels from a cube-only source copy) = the default path (D4100)', cm.prefilterDiffering === 0, `${cm.prefilterDiffering} of ${cm.prefilterValues} half values differ`);
+        // not yet: the downsampler reads and writes mips of one texture in one dispatch, which compat rejects (D4100)
+        console.log(`  compat mode, open (D4100): ${cm.sets.map((x) => `${x.asked}: ${(x.error ?? x.throws ?? `ok, vs core max ${x.vsCore}`).slice(0, 110)}`).join(' | ')}`);
       }
       check('sssr probe fallback: constant probes = constant fallback (to one f16 step)', r.sssr.constantVsProbes === 0, `${r.sssr.constantVsProbes} px differ`);
       check('sssr probe fallback: structured probes reach the fallback pixels', r.sssr.structuredVsConstant > r.sssr.pixels * 0.05, `${r.sssr.structuredVsConstant} of ${r.sssr.pixels} px`);
