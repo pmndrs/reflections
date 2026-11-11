@@ -85,9 +85,14 @@ fn hitShadeSurface(hit: Hit, P: vec3f, N: vec3f, dir: vec3f, emissive: vec3f, di
   if (max(s.color.x, max(s.color.y, s.color.z)) <= 0.0 && s.clearcoat <= 0.0) { return emissive + diffuse; }
   let R = reflect(dir, N);
   let NdotV = clamp(dot(N, -dir), 1e-4, 1.0);
-  let envBase = hitSpecularRadiance(P, R, s.roughness);
+  // Specular visibility (D2753): one any-hit ray along R; where geometry blocks it, what the lobe sees
+  // is not the environment / probe (a car's sill over a mirror floor sees its own underside). Rough
+  // lobes leak around the blocker, so the occlusion fades out from roughness 0.3 to 1.
+  var vis = 1.0;
+  if (!traceLightVisible(P, N, R, HIT_SHADOW_RAY_LENGTH)) { vis = smoothstep(0.3, 1.0, s.roughness); }
+  let envBase = hitSpecularRadiance(P, R, s.roughness) * vis;
   var envCoat = envBase;
-  if (s.clearcoat > 0.0 && abs(s.clearcoatRoughness - s.roughness) > 0.02) { envCoat = hitSpecularRadiance(P, R, s.clearcoatRoughness); }
+  if (s.clearcoat > 0.0 && abs(s.clearcoatRoughness - s.roughness) > 0.02) { envCoat = hitSpecularRadiance(P, R, s.clearcoatRoughness) * select(smoothstep(0.3, 1.0, s.clearcoatRoughness), 1.0, vis >= 1.0); }
   return emissive + hitLayered(s, diffuse, envBase, envCoat, NdotV);
 }
 `;
