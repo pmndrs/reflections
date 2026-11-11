@@ -11,7 +11,11 @@
 // "Reflections off" is the composite minus its whole specular image-based term (direct-light
 // highlights stay).
 //
-// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?denoise=0 ?off ?view=<view> ?w=&h= (fixed size) ?manual
+// Display: temporal anti-aliasing (../../shared/taa.ts, W26) after the composite, as the FFX sample and the
+// denoiser repo's demo run TRAA: without it every edge, normal-mapped highlight and the reflections of them
+// crawl in motion, and the denoised reflections keep a 1-3/255 shimmer at rest. ?taa=0 turns it off.
+//
+// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?denoise=0 ?taa=0 ?off ?view=<view> ?w=&h= (fixed size) ?manual
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
 import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';
@@ -21,6 +25,7 @@ import {
 } from '@pmndrs/reflections/three';
 import { availableAssets } from '../../shared';
 import { createReflectionDenoiser, denoiserAvailable } from '../../shared/denoiser';
+import { TemporalAA } from '../../shared/taa';
 import { SHOWCASE, type FloorKind, type ShowcaseEntry, type ShowcaseScene } from './scenes';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -108,6 +113,8 @@ async function main() {
   const historyMaterial = new THREE.MeshBasicNodeMaterial();
   historyMaterial.toneMapped = false;
   const historyQuad = new THREE.QuadMesh(historyMaterial);
+  const taa = new TemporalAA(renderer, ssr.gbuffer.textures.motion!, W, H);
+  taa.enabled = q.get('taa') !== '0';
 
   function buildDisplay() {
     const tone = (c: N) => (renderOutput(c, TONE[state.tone], THREE.SRGBColorSpace) as N).rgb;
@@ -158,6 +165,7 @@ async function main() {
     ssr.settings.hitColor = m === 'current' ? 'current' : 'history';
     ssr.historySource = m === 'final' ? historyRT.texture : null;
     ssr.resetHistory();
+    taa.reset();
   }
   function applySources() {
     // SSR off + RT on: no screen-space march, so every traced pixel is a miss and goes to the ray tracer
@@ -168,6 +176,7 @@ async function main() {
     if (historyAmount) historyAmount.value = amount;
     uProbes.value = state.probes && probes ? 1 : 0;
     ssr.resetHistory();
+    taa.reset();
   }
   function setProbes(on: boolean) {
     state.probes = on;
@@ -263,6 +272,7 @@ async function main() {
     ssr.gbuffer.resetHistory();
     ssr.resetHistory();
     hybrid.resetHistory();
+    taa.reset();
     refreshUI();
     const u = new URL(location.href); u.searchParams.set('scene', id); history.replaceState(null, '', u);
     return { id, probes: probes.bakedProbes.length, bakeMs, layout: probes.bakedLayout };
@@ -277,6 +287,7 @@ async function main() {
     controls.update();
     ssr.resetHistory();
     hybrid.resetHistory();
+    taa.reset();
     currentPose = name;
   }
   let currentPose = '';
@@ -292,14 +303,22 @@ async function main() {
       W = w; H = h;
       renderer.setSize(W, H, false);
       historyRT.setSize(W, H);
+      taa.setSize(W, H);
       ssr.resetHistory();
       hybrid.resetHistory();
     }
     controls.update();
     kit.camera.aspect = W / H; kit.camera.updateProjectionMatrix(); kit.camera.updateMatrixWorld();
-    ssr.render(kit.scene, kit.camera);
+    ssr.render(kit.scene, kit.camera, taa.jitter(kit.camera, W, H));
+    taa.restore(kit.camera);
     hybrid.update();
-    pipeline.render();
+    if (taa.enabled) {
+      const prev = renderer.getRenderTarget();
+      renderer.setRenderTarget(taa.input);
+      pipeline.render();
+      renderer.setRenderTarget(prev);
+      taa.resolve();
+    } else pipeline.render();
     if (state.hit === 'final') {
       const prev = renderer.getRenderTarget();
       renderer.setRenderTarget(historyRT);
@@ -358,17 +377,18 @@ async function main() {
   const probesBox = check('Reflection probes', state.probes, (v) => setProbes(v));
   const ssrBox = check('Screen-space (SSR)', state.ssr, (v) => { state.ssr = v; applySources(); });
   const rtBox = check('Ray-traced fallback (BVH)', state.rt, (v) => { setRT(v).catch(fail); });
-  const denoiseBox = check(denoiser ? `Denoise (${denoiser.name})` : 'Denoise (no denoiser found)', hybrid.denoise, (v) => { hybrid.denoise = v && !!denoiser; });
+  const denoiseBox = check(denoiser ? `Denoise (${denoiser.name})` : 'Denoise (no denoiser found)', hybrid.denoise, (v) => { hybrid.denoise = v && !!denoiser; taa.reset(); });
   denoiseBox.disabled = !denoiser;
+  const taaBox = check('Temporal anti-aliasing', taa.enabled, (v) => { taa.enabled = v; taa.reset(); });
   row('Hit colour', select(HIT_MODES, state.hit, (v) => setHit(v as HitMode)));
   check('Show probe volumes', state.helpers, (v) => setHelpers(v));
 
   h2('Floor');
-  const kindSel = select({ mirror: 'Mirror (metal)', lacquer: 'Black lacquer' }, 'mirror', (v) => { kit?.floor.setKind?.(v as FloorKind); ssr.resetHistory(); });
+  const kindSel = select({ mirror: 'Mirror (metal)', lacquer: 'Black lacquer' }, 'mirror', (v) => { kit?.floor.setKind?.(v as FloorKind); ssr.resetHistory(); taa.reset(); });
   const kindRow = row('Material', kindSel);
-  const polishBox = check('Polished floor override', true, (v) => { kit?.floor.setPolished?.(v); bake(); ssr.resetHistory(); });
+  const polishBox = check('Polished floor override', true, (v) => { kit?.floor.setPolished?.(v); bake(); ssr.resetHistory(); taa.reset(); });
   const polishRow = polishBox.parentElement!;
-  const rough = slider('Roughness', 0, 0.6, 0.01, 0.03, (v) => { kit?.floor.setRoughness(v); });
+  const rough = slider('Roughness', 0, 0.6, 0.01, 0.03, (v) => { kit?.floor.setRoughness(v); taa.reset(); });
   rough.input.onchange = () => bake();
 
   h2('Debug view');
@@ -393,6 +413,7 @@ async function main() {
 
   function setView(v: View) {
     state.view = v;
+    taa.reset();
     uView.value = VIEW_IDS.indexOf(v);
     viewSel.value = v;
     onBtn.classList.toggle('on', v !== 'off');
@@ -468,12 +489,13 @@ async function main() {
         refreshUI();
       },
       setHit: (m: HitMode) => setHit(m),
+      taa, setTAA(on: boolean) { taa.enabled = on; taa.reset(); taaBox.checked = on; },
       stop: stopLoop, start: startLoop,
       async step(n = 1) { for (let i = 0; i < n; i++) { frame(); await idle(); } },
       async shot() { frame(); const url = canvas.toDataURL('image/png'); await idle(); return url; },
       async info() {
         await idle();
-        return { scene: kit!.id, denoiser: hybrid.denoise ? denoiser?.name ?? null : null, size: [W, H], probes: probes?.bakedProbes.length ?? 0, bakeMs, bvh: bvhInfo, rt: ssr.rayTracing, gpuErrors: gpuErrors.length, timings: Object.fromEntries(timings), trace: await ssr.readTraceStats() };
+        return { scene: kit!.id, denoiser: hybrid.denoise ? denoiser?.name ?? null : null, taa: taa.enabled, size: [W, H], probes: probes?.bakedProbes.length ?? 0, bakeMs, bvh: bvhInfo, rt: ssr.rayTracing, gpuErrors: gpuErrors.length, timings: Object.fromEntries(timings), trace: await ssr.readTraceStats() };
       },
     },
   });
