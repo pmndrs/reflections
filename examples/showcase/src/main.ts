@@ -17,7 +17,11 @@
 // temporal path at ratio 1 (NativeAA); ?aa=taa is W40's resolve (D3500), ?aa=off (or ?taa=0) none.
 // ?upscale=quality|balanced|performance|ultra|<ratio>: G-buffer and reflections at the render size, upscaled.
 //
-// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
+// Specular occlusion (W39, D66 / D4510): ?specOcc=1 (default off) hands the composite a screen-space AO (three's GTAO
+// on the G-buffer, ../../shared/ao.ts) for Lagarde's specular occlusion on the probe / environment part; also a
+// checkbox, and the 'ao' / 'specularOcclusion' views.
+//
+// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
 import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';
@@ -28,6 +32,7 @@ import {
 import { availableAssets } from '../../shared';
 import { createReflectionDenoiser, denoiserAvailable } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
+import { ScreenSpaceAO } from '../../shared/ao';
 import { SHOWCASE, type FloorKind, type ShowcaseEntry, type ShowcaseScene } from './scenes';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -51,6 +56,8 @@ const VIEWS = {
   hitRadiance: 'Hit radiance (tracer, x confidence)',
   specular: 'Specular radiance (composited, unweighted)',
   probeSpecular: 'Probe / environment radiance (subtracted)',
+  ao: 'AO input (GTAO, for specular occlusion)',
+  specularOcclusion: 'Specular occlusion factor (1 = none)',
 } as const;
 type View = keyof typeof VIEWS;
 const VIEW_IDS = Object.keys(VIEWS) as View[];
@@ -105,7 +112,10 @@ async function main() {
     tone: ((q.get('tone') as Tone) ?? 'agx') as Tone,
     exposure: 1,
     helpers: false,
+    /** W39: Lagarde's specular occlusion from GTAO on the composite's probe part (D66, D4510). */
+    specOcc: q.get('specOcc') === '1',
   };
+  let ssao: ScreenSpaceAO | null = null;
   let kit: ShowcaseScene | null = null;
   let entry: ShowcaseEntry | null = null;
   let probes: ReflectionProbes | null = null;
@@ -137,7 +147,12 @@ async function main() {
     aa.setTone(tone);
     // tone-mapped views: linear while the upscaler runs, which tone-maps after it
     const T = (x: N): N => aa.linear.equal(1).select(x, tone(x));
-    Object.assign(hybrid.options, { probes: state.probes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity });
+    ssao?.dispose();
+    const ao = ssao = new ScreenSpaceAO(ssr.gbuffer, kit!.camera);
+    Object.assign(hybrid.options, {
+      probes: state.probes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity,
+      ao: state.specOcc ? (u: N) => ao.sample(u) : null,
+    });
     hybrid.rebuild();
     const c = composite = hybrid.composite();
     c.amount.value = state.ssr || state.rt ? 1 : 0;
@@ -167,6 +182,8 @@ async function main() {
       hitRadiance: c.geometry.select(tone(c.ssr), vec3(0)),
       specular: c.geometry.select(tone(c.specular), vec3(0)),
       probeSpecular: c.geometry.select(tone(c.probeSpecular), vec3(0)),
+      ao: c.geometry.select(vec3(ao.sample(at)), vec3(0)),
+      specularOcclusion: c.geometry.select(vec3(c.specularOcclusion), vec3(0)),
       hitDistance: (() => { const d: N = c.hitDistance; return d.greaterThan(0).select((vec3(1, 0.8, 0.5) as N).mul(d.div(d.add(2))), vec3(0)); })(),
     };
     let out: N = vec3(0);
@@ -417,6 +434,8 @@ async function main() {
   row('Hit colour', select(HIT_MODES, state.hit, (v) => setHit(v as HitMode)));
   const reshadeSel = select(HIT_SHADING_MODES, state.reshade, (v) => setReshade(v as HitShadingMode));
   row('Hit specular', reshadeSel);
+  const soBox = check('Specular occlusion (GTAO)', state.specOcc, (v) => setSpecOcc(v));
+  function setSpecOcc(on: boolean) { state.specOcc = on; soBox.checked = on; buildDisplay(); hybrid.resetHistory(); aa.reset(); }
   check('Show probe volumes', state.helpers, (v) => setHelpers(v));
 
   h2('Floor');
@@ -534,6 +553,8 @@ async function main() {
       setHit: (m: HitMode) => setHit(m),
       /** W44: 'reshade' (default) | 'off'. */
       setReshade: (m: HitShadingMode) => { setReshade(m); reshadeSel.value = m; },
+      /** W39: Lagarde's specular occlusion from GTAO on the composite's probe part (D66, D4510). */
+      setSpecOcc: (on: boolean) => setSpecOcc(on),
       aa,
       /** W36: 'upscaler' (default) | 'taa' (W40's resolve) | 'off'. */
       setAA: (m: AAMode) => setAA(m),

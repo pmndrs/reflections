@@ -2,13 +2,15 @@
 // per scene, ScreenSpaceReflectionsPass (hit colour from last frame's final image), HybridReflections
 // with the FFX reflection denoiser behind the denoise seam, and the BVH ray-traced fallback for
 // 'ours-rt'. Same settings as the showcase defaults; `ctx.params` only carries explicit experiment
-// overrides (?spq= samples per quad, ?tsf= the denoiser's temporal stability, ?hit=current|lit|final).
+// overrides (?spq= samples per quad, ?tsf= the denoiser's temporal stability, ?hit=current|lit|final,
+// ?specOcc=1 Lagarde's specular occlusion from GTAO on the probe part, W39 / D4510).
 import * as THREE from 'three/webgpu';
 import { renderOutput, vec3, vec4 } from 'three/tsl';
 import {
   HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, installCubeArraySupport, reflectionProbes,
 } from '@pmndrs/reflections/three';
 import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
+import { ScreenSpaceAO } from '../../../shared/ao';
 import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, applySceneParams, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -93,7 +95,8 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   }
 
   // display: the composite, AgX + sRGB (as the showcase's 'final' view); 'probes' = SSR amount 0
-  Object.assign(hybrid.options, { probes, environment: kit.scene.environment, environmentIntensity: kit.scene.environmentIntensity });
+  const ao = params.get('specOcc') === '1' ? new ScreenSpaceAO(ssr.gbuffer, camera) : null;
+  Object.assign(hybrid.options, { probes, environment: kit.scene.environment, environmentIntensity: kit.scene.environmentIntensity, ao: ao ? (u: N) => ao.sample(u) : null });
   hybrid.rebuild();
   const amount = id === 'probes' ? 0 : 1;
   const c = hybrid.composite();

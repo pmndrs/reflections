@@ -20,6 +20,10 @@
 // `?mirrorBias=0..1` (default 0, FFX): the tracer's bias of glossy rays toward the mirror direction
 // (core `settings.mirrorBias`, SSSR 2015 / PICA, D49); also a slider. `__p.mirrorBiasStats()` measures it.
 //
+// `?specOcc=1` (default 0): Lagarde's specular occlusion (D66) on the probe / environment part of the
+// composite, from a screen-space AO (three's GTAO on the G-buffer, ../../shared/ao.ts); also a checkbox,
+// and the views `ao` (the AO input) and `specularOcclusion` (the factor applied). See D4510.
+//
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `ssr`).
 import * as THREE from 'three/webgpu';
 import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
@@ -32,6 +36,7 @@ import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuil
 import { ASSET_SCENES, SCENES, type KitScene } from '../../shared';
 import { createReflectionDenoiser, denoiserAvailable, denoiserSource } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
+import { ScreenSpaceAO } from '../../shared/ao';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -68,7 +73,7 @@ const bvhBuilder = (q.get('bvhBuilder') ?? 'auto') as BvhBuilderPreference;
 const shadingNormals = q.get('shadingNormals') !== '0';
 const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
 
-const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'ssrWeight', 'hitFade', 'probeConsistency', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'coverage', 'source', 'rtSource', 'grid'] as const;
+const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'ssrWeight', 'hitFade', 'probeConsistency', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'coverage', 'source', 'rtSource', 'grid', 'ao', 'specularOcclusion'] as const;
 type View = (typeof VIEWS)[number];
 /** Views that are a tone-mapped image: fed to the upscaler linear, tone-mapped after it. */
 const LINEAR_VIEWS: View[] = ['final', 'raw', 'split', 'signal', 'noSSR', 'ssr', 'specular', 'probeSpecular'];
@@ -255,6 +260,9 @@ async function main() {
   const aa = new DisplayAA(renderer, ssr.gbuffer, { ...aaQuery, displayWidth: DW, displayHeight: DH, tone });
   await aa.init();
   let hitMode: HitColorMode = (q.get('hit') as HitColorMode) ?? 'current';
+  /** W39: Lagarde's specular occlusion from a screen-space AO (GTAO) on the composite's probe part (D66, D4510). */
+  let specOcc = q.get('specOcc') === '1';
+  let ssao: ScreenSpaceAO | null = null;
   function setHitColor(m: HitColorMode) {
     if (!HIT_MODES.includes(m)) throw new Error(`hit colour ${m}?`);
     hitMode = m;
@@ -271,7 +279,13 @@ async function main() {
     const gridUV = uv().mul(3);
     const cell = gridUV.floor();
     const at = uGrid.equal(1).select(gridUV.fract(), uv());
-    Object.assign(hybrid.options, { probes: useProbes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity });
+    // the AO source follows the scene's camera; only rendered while something samples it (specOcc or the ao view)
+    ssao?.dispose();
+    const ao = ssao = new ScreenSpaceAO(ssr.gbuffer, kit!.camera);
+    Object.assign(hybrid.options, {
+      probes: useProbes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity,
+      ao: specOcc ? (u: N) => ao.sample(u) : null,
+    });
     hybrid.rebuild();
     const c = composite = hybrid.composite({ uv: at });
     // the raw (undenoised) composite from the same terms, for 'raw' and 'split'
@@ -313,6 +327,9 @@ async function main() {
           return src.equal(1).select(vec3(0.2, 0.4, 1), src.equal(4).select(vec3(0.2, 0.9, 0.95),
             src.equal(2).select(vec3(0.95, 0.2, 0.85), src.equal(3).select(vec3(1, 0.55, 0.1), ssrHit))));
         }
+        // W39: the AO input (GTAO on the G-buffer) and the specular occlusion factor the composite applies (1 with specOcc off)
+        case 'ao': return c.geometry.select(vec3(ao.sample(at)), vec3(0.02, 0.03, 0.08));
+        case 'specularOcclusion': return c.geometry.select(vec3(c.specularOcclusion), vec3(0.02, 0.03, 0.08));
         default: return vec3(0);
       }
     };
@@ -502,6 +519,10 @@ async function main() {
   hybrid.depthAware.value = depthBox.checked ? 1 : 0;
   depthBox.onchange = () => { hybrid.depthAware.value = depthBox.checked ? 1 : 0; if (!looping) frame(); };
   row('Depth-aware blend', depthBox);
+  const soBox = document.createElement('input'); soBox.type = 'checkbox'; soBox.checked = specOcc;
+  const setSpecOcc = (on: boolean) => { specOcc = on; soBox.checked = on; buildDisplay(); hybrid.resetHistory(); aa.reset(); refreshUI(); };
+  soBox.onchange = () => { setSpecOcc(soBox.checked); if (!looping) frame(); };
+  row('Specular occlusion (GTAO, D66)', soBox);
   const pauseBox = document.createElement('input'); pauseBox.type = 'checkbox'; pauseBox.onchange = () => { paused = pauseBox.checked; };
   row('Pause', pauseBox);
   function refreshUI() {
@@ -512,7 +533,7 @@ async function main() {
     status.textContent = [
       `three r${THREE.REVISION} | ${kit!.title} | ${W}x${H}${manual ? ' | manual (loop stopped)' : ''}`,
       `variant ${ssr.variant ?? '(first frame pending)'} | hit colour ${hitMode} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | mirrorBias ${ssr.settings.mirrorBias ?? 0} | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
-      `specular IBL term: ${probes ? `${probes.bakedProbes.length} probe(s) by coverage, then scene.environment` : 'scene.environment'}`,
+      `specular IBL term: ${probes ? `${probes.bakedProbes.length} probe(s) by coverage, then scene.environment` : 'scene.environment'} | specular occlusion ${specOcc ? 'on (GTAO, probe part)' : 'off'} (?specOcc=1)`,
       `denoise: ${denoiser ? `${hybrid.denoise ? 'on' : 'off'} (${denoiser.name}, from ${denoiserSource})` : 'unavailable (no sibling Denoiser repo; raw signal)'}`,
       useRT ? `ray-traced misses: ${ssr.rayTracing ? 'on' : 'off'} (${bvhKind === 'pmndrs' ? '@pmndrs/bvh' : 'three-mesh-bvh'}${bvhInfo ? `, ${bvhInfo.meshes} meshes, ${bvhInfo.triangles} triangles, built in ${bvhInfo.buildMs.toFixed(0)} ms${bvhInfo.builder ? ` by ${bvhInfo.builder}${bvhInfo.fallbackReason ? ` (${bvhInfo.fallbackReason})` : ''}` : ''}` : ''}; &bvh=pmndrs|three-mesh-bvh)` : 'ray-traced misses: off (?rt=1)',
     ].join('\n');
@@ -544,6 +565,10 @@ async function main() {
       setDepthAware(on: boolean) { hybrid.depthAware.value = on ? 1 : 0; depthBox.checked = on; },
       setSettings(s: N) { Object.assign(ssr.settings, s); },
       setHitColor: (m: HitColorMode) => setHitColor(m),
+      /** W39: Lagarde's specular occlusion from GTAO on the composite's probe part (D66, D4510); rebuilds the display. */
+      setSpecOcc: (on: boolean) => setSpecOcc(on),
+      get specOcc() { return specOcc; },
+      get ssao() { return ssao; },
       setRT(on: boolean) { ssr.rayTracing = on; },
       hybrid, get denoiserName() { return denoiser?.name ?? null; },
       /** D1402: the perceptual threshold the current denoiser was built with (its alpha gate is this squared). */
