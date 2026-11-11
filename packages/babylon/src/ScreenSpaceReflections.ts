@@ -8,7 +8,9 @@
 // (local probes + the environment slot, captured from Babylon) or, without probes, the constant
 // `settings.fallbackColor`. So `radiance` is FFX SSSR's lerp(fallback, hit, confidence) for every
 // reflective pixel, rough ones included (classify writes the fallback at their roughness), and a
-// composite only multiplies it by the split-sum weight (./composite.ts).
+// composite only multiplies it by the split-sum weight (./composite.ts). Glossy misses take the
+// fallback at the pixel's roughness too (core's `fallbackRoughness`, default 'surface', D3100;
+// 'mirror' is FFX's roughness-0 lookup).
 //
 //   const ssr = new ScreenSpaceReflections({ engine, probes });
 //   ssr.configure(width, height);              // allocates; rebuild the frame graph after
