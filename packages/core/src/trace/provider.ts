@@ -216,7 +216,7 @@ fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f {
   let m = traceHitMaterial(hit);
   let s = traceHitSpecular(hit);
   let diffuse = m.albedo * sampleRadianceFallback(P, N, 1.0);
-  if (P.hitSpecular == 0u || (max(s.color.x, max(s.color.y, s.color.z)) <= 0.0 && s.clearcoat <= 0.0)) { return m.emissive + diffuse; }
+  if (!rtHitSpecularOn() || (max(s.color.x, max(s.color.y, s.color.z)) <= 0.0 && s.clearcoat <= 0.0)) { return m.emissive + diffuse; }
   let R = reflect(dir, N);
   let NdotV = clamp(dot(N, -dir), 1e-4, 1.0);
   let envBase = sampleRadianceFallback(P, R, s.roughness);

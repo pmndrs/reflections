@@ -82,7 +82,7 @@ const SPECULAR = /* wgsl */ `
 // hitSpecularRadiance(P, R, roughness), the radiance along R at a perceptual roughness.
 fn hitShadeSurface(hit: Hit, P: vec3f, N: vec3f, dir: vec3f, emissive: vec3f, diffuse: vec3f) -> vec3f {
   let s = traceHitSpecular(hit);
-  if (P.hitSpecular == 0u || (max(s.color.x, max(s.color.y, s.color.z)) <= 0.0 && s.clearcoat <= 0.0)) { return emissive + diffuse; }
+  if (!rtHitSpecularOn() || (max(s.color.x, max(s.color.y, s.color.z)) <= 0.0 && s.clearcoat <= 0.0)) { return emissive + diffuse; }
   let R = reflect(dir, N);
   let NdotV = clamp(dot(N, -dir), 1e-4, 1.0);
   // Specular visibility (D3513): one any-hit ray along R; where geometry blocks it, what the lobe sees

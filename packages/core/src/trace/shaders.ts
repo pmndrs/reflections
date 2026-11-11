@@ -139,6 +139,9 @@ fn traceLightVisible(hitP: vec3f, N: vec3f, L: vec3f, tMax: f32) -> bool {
   return !traceAny(origin, L, tMax);
 }
 
+// The pass's hitSpecular setting (W41, D3510); a function, since hit shading names its point P.
+fn rtHitSpecularOn() -> bool { return P.hitSpecular != 0u; }
+
 ${parts.hitShadingWgsl}
 
 // A fixed position in [0, 1) per tile (PCG hash), the order the rotating remainder walks.
