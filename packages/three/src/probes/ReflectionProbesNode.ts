@@ -82,8 +82,14 @@ export interface ProbeLookupOptions {
    * each probe's radiance by `clamp( frameIrradiance / probeIrradiance( N ), 0, probes.refitClamp )`,
    * with probeIrradiance the probe's L1 SH from its own capture (SPEC "Probe re-fit"). Needs the
    * probes baked with `irradiance: true` (the default). Uses `normal`, or the material's normal.
+   * Passing it turns the re-fit on (D803); `refit: false` keeps it off.
    */
   frameIrradiance?: N;
+  /**
+   * Re-fit by `frameIrradiance` (D803). Default: on when `frameIrradiance` is given, else off (there
+   * is nothing to re-fit by). `false` keeps the lookup plain while still passing a frame irradiance.
+   */
+  refit?: boolean;
   /**
    * Lagarde 2014's distance-based roughness on box-projected probes (D53): sharp near the projection
    * box, the set's roughness from the capture point's distance on. Default: the set's
@@ -257,6 +263,8 @@ export class ReflectionProbesNode extends THREE.Node {
   readonly aoNode: N = null;
   readonly viewNode: N = null;
   readonly frameIrradianceNode: N = null;
+  /** The explicit `refit` option; undefined: on exactly when `frameIrradianceNode` is set. */
+  readonly refit: boolean | undefined;
   /** Whether the output is `vec4( radiance, coverage )` without environment fallback. */
   readonly coverage: boolean;
   /** The lookup's own `distanceRoughness` / `roughnessLerp`; undefined: the set's. */
@@ -278,6 +286,7 @@ export class ReflectionProbesNode extends THREE.Node {
     this.distanceRoughness = options?.distanceRoughness;
     this.roughnessLerp = options?.roughnessLerp;
     this.lodMapping = options?.lodMapping;
+    this.refit = options?.refit;
     if (options) {
       if (options.position != null) this.positionNode = nodeObject(options.position);
       if (options.direction != null) this.directionNode = nodeObject(options.direction);
@@ -340,7 +349,8 @@ export class ReflectionProbesNode extends THREE.Node {
     const position: N = this.positionNode ?? positionWorld;
     const direction: N = this.directionNode ?? (context.getUV ? context.getUV(this, builder) : reflectVector);
     const roughness: N = float(this.roughnessNode ?? (context.getTextureLevel ? context.getTextureLevel(this) : 0)).clamp();
-    const refit = this.frameIrradianceNode !== null;
+    // re-fit: on with a frame irradiance unless switched off (D803)
+    const refit = this.frameIrradianceNode !== null && this.refit !== false;
     const dominant = this.normalNode !== null;
     const normal: N = this.normalNode ?? (refit ? normalWorld : direction);
     // the environment slot is unrotated: the material's direction gets its environment rotation,

@@ -126,7 +126,7 @@ async function main() {
     set.captureEnvironment(enc, cubes[kinds[3]]);
     set.setVolumes(volumes);
     set.update();
-    if (options.refit) set.computeIrradiance(enc);
+    if (options.refit ?? options.frameIrradianceWgsl !== undefined) set.computeIrradiance(enc);
     const pipe = device.createComputePipeline({
       layout: device.createPipelineLayout({ bindGroupLayouts: [evalBgl, set.bindGroupLayout] }),
       compute: { module: device.createShaderModule({ code: set.wgsl({ group: 1 }) + EVAL_WGSL }), entryPoint: 'main' },
@@ -194,18 +194,24 @@ async function main() {
 
     // ---- constant capture: lookups give C everywhere; re-fit by 2 pi C doubles them
     const constant = await evaluate({ kinds: [2, 2, 2, 2] });
-    const refit = await evaluate({ kinds: [2, 2, 2, 2], refit: true, dominantDirection: true, frameIrradianceWgsl: `fn frameIrradiance(P: vec3f, N: vec3f) -> vec3f { return 6.283185307 * vec3f(${C.join(', ')}); }` });
-    let constErr = 0, refitErr = 0, soErr = 0;
+    const frameIrradianceWgsl = `fn frameIrradiance(P: vec3f, N: vec3f) -> vec3f { return 6.283185307 * vec3f(${C.join(', ')}); }`;
+    const refit = await evaluate({ kinds: [2, 2, 2, 2], refit: true, dominantDirection: true, frameIrradianceWgsl });
+    // D803: a frame irradiance provider turns the re-fit on by itself; refit: false keeps it off
+    const auto = await evaluate({ kinds: [2, 2, 2, 2], frameIrradianceWgsl });
+    const off = await evaluate({ kinds: [2, 2, 2, 2], refit: false, frameIrradianceWgsl });
+    let constErr = 0, refitErr = 0, soErr = 0, autoErr = 0, offErr = 0;
     for (let i = 0; i < COUNT; i++) {
       for (let c = 0; c < 3; c++) {
         constErr = Math.max(constErr, Math.abs(constant[i * 12 + 4 + c] - C[c]) / C[c]);
         refitErr = Math.max(refitErr, Math.abs(refit[i * 12 + 8 + c] - 2 * C[c]) / C[c]);
+        autoErr = Math.max(autoErr, Math.abs(auto[i * 12 + 4 + c] - 2 * C[c]) / C[c]);
+        offErr = Math.max(offErr, Math.abs(off[i * 12 + 4 + c] - C[c]) / C[c]);
       }
       const NdotV = pts[i * 12 + 11], ao = pts[i * 12 + 3], r = pts[i * 12 + 7], a = r * r;
       const so = Math.min(1, Math.max(0, Math.pow(Math.max(NdotV + ao, 0), Math.pow(2, -16 * a - 1)) - 1 + ao));
       soErr = Math.max(soErr, Math.abs(refit[i * 12 + 11] - so));
     }
-    result.refit = { constErr, refitErr, soErr };
+    result.refit = { constErr, refitErr, soErr, autoErr, offErr };
     say(`constant capture: max rel err ${constErr.toExponential(2)}; re-fit x2: ${refitErr.toExponential(2)}; specular occlusion: ${soErr.toExponential(2)}`);
 
     result.sssr = await sssr();

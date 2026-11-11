@@ -184,12 +184,12 @@ export function makeChecks(p: Page) {
       const n = points.length, K = 1;
       // one input and one output array (a compute stage binds at most 8 storage buffers)
       const input = instancedArray(new Float32Array(points.flatMap((q, i) => [...q, aos[i], ...dirs[i], 0, ...normals[i], 0, ...views[i], 0])) as never, 'vec4') as N;
-      const output = instancedArray(n * 7, 'vec4') as N;
+      const output = instancedArray(n * 8, 'vec4') as N;
       const kernel = Fn(() => {
         const at = (k: number) => input.element(instanceIndex.mul(4).add(k));
         const P = at(0).xyz.toVar(), ao = at(0).w.toVar(), R = at(1).xyz.toVar(), Nn = at(2).xyz.toVar(), V = at(3).xyz.toVar();
         const look = (dir: N, r: number, o: object = {}) => sampleReflectionProbesLocal(p.probes, P, dir, r, o);
-        const put = (k: number, v: N) => output.element(instanceIndex.mul(7).add(k)).assign(v);
+        const put = (k: number, v: N) => output.element(instanceIndex.mul(8).add(k)).assign(v);
         put(0, look(R, 0));
         put(1, look(R, 0, { normal: Nn }));
         put(2, look(Nn, 1));
@@ -197,15 +197,17 @@ export function makeChecks(p: Page) {
         put(4, look(R, 0, { normal: Nn, view: V, ao }));
         put(5, look(R, 0, { normal: Nn, frameIrradiance: vec3(K) }));
         put(6, look(R, 0, { normal: Nn, frameIrradiance: vec3(1e6) }));
+        // D803: an explicit refit: false wins over a passed frame irradiance (= the normal-only lookup)
+        put(7, look(R, 0, { normal: Nn, frameIrradiance: vec3(K), refit: false }));
       })().compute(n) as N;
       // a frame first, so the set's table holds the bake's irradiance
       await p.shot();
       await renderer.computeAsync(kernel);
       await renderer.computeAsync(kernel);
       const all = new Float32Array(await renderer.getArrayBufferAsync(output.value));
-      const O = Array.from({ length: 7 }, (_, k) => {
+      const O = Array.from({ length: 8 }, (_, k) => {
         const o = new Float32Array(n * 4);
-        for (let i = 0; i < n; i++) o.set(all.subarray((i * 7 + k) * 4, (i * 7 + k) * 4 + 4), i * 4);
+        for (let i = 0; i < n; i++) o.set(all.subarray((i * 8 + k) * 4, (i * 8 + k) * 4 + 4), i * 4);
         return o;
       });
       // the bake's L1 SH per slot
@@ -221,7 +223,7 @@ export function makeChecks(p: Page) {
         return [0, 1, 2].every((k) => Math.abs(q[k] - c.getComponent(k)) < h.getComponent(k) / 2 - probe.blendDistance);
       });
       const rel = (a: number, b: number) => Math.abs(a - b) / Math.max(1e-4, Math.abs(b));
-      let dom0 = 0, dom1 = 0, so = 0, refit = 0, clampErr = 0;
+      let dom0 = 0, dom1 = 0, so = 0, refit = 0, clampErr = 0, refitOff = 0;
       const ratios: number[] = [];
       for (let i = 0; i < n; i++) {
         const nn = normals[i], vv = views[i];
@@ -241,11 +243,12 @@ export function makeChecks(p: Page) {
           ratios.push(+(O[5][i * 4 + c] / plain).toFixed(3));
           refit = Math.max(refit, rel(O[5][i * 4 + c], plain * expect));
           clampErr = Math.max(clampErr, rel(O[6][i * 4 + c], plain * p.probes.refitClamp));
+          refitOff = Math.max(refitOff, rel(O[7][i * 4 + c], O[1][i * 4 + c]));
         }
       }
       // guard: a shader that failed to compile leaves zeros, which every relative error above passes
       const lum = O[0].reduce((a, x, i) => a + ((i & 3) === 3 ? 0 : x), 0);
-      return { dom0, dom1, so, refit, clampErr, ratios, lum, slots: points.map(slotAt) };
+      return { dom0, dom1, so, refit, clampErr, refitOff, ratios, lum, slots: points.map(slotAt) };
     },
 
     /**

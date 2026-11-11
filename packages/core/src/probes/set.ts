@@ -44,11 +44,12 @@ export interface ProbeSetOptions {
   mirrorX?: boolean;
   /** Lookup options (./lookup.ts). */
   dominantDirection?: boolean;
+  /** Re-fit by `frameIrradianceWgsl` (D803). Default: on when `frameIrradianceWgsl` is given, else off. */
   refit?: boolean;
   /** Lagarde's distance-based roughness and roughness lerp on box-projected volumes (D53). Default false. */
   distanceRoughness?: boolean;
   roughnessLerp?: boolean;
-  /** `fn frameIrradiance(P: vec3f, N: vec3f) -> vec3f` for `refit`. */
+  /** `fn frameIrradiance(P: vec3f, N: vec3f) -> vec3f` for `refit` (turns the re-fit on unless `refit: false`). */
   frameIrradianceWgsl?: string;
   /** Roughness to mip. Default 'alpha' (D101); 'r187' for three r187's PMREM mapping everywhere. */
   lodMapping?: ProbeLodMapping;

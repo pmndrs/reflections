@@ -1378,6 +1378,7 @@ async function main() {
       check("lookup option ao: Lagarde's specular occlusion", lo.so < 1e-3, `max rel err ${lo.so.toExponential(1)}`);
       check('lookup option frameIrradiance: re-fit by k / probe L1 irradiance, clamped', lo.refit < 2e-3 && lo.clampErr < 1e-4 && lo.lum > 0 && lo.ratios.every(Number.isFinite) && lo.slots.every((s) => s >= 0),
         `max rel err ${lo.refit.toExponential(1)} (ratios ${lo.ratios.slice(0, 6).join(' ')} ...), clamp ${lo.clampErr.toExponential(1)}`);
+      check('lookup option refit: false keeps a lookup with frameIrradiance plain (D803)', lo.refitOff < 1e-5, `max rel err ${lo.refitOff.toExponential(1)}`);
       // W26 (D53): Lagarde's seam options against the plain lookup fed the CPU's r' and lerped direction
       const so = await C('seamOptions');
       check("lookup options distanceRoughness / roughnessLerp: Lagarde 2014 Listing 25 / App. F", so.err.dist < 2e-3 && so.err.lerp < 2e-3 && so.err.both < 2e-3 && so.err.off < 2e-3 && so.lum > 0 && so.changedDist > 0.01 && so.changedLerp > 0.01,
@@ -1541,6 +1542,8 @@ async function main() {
       check('probe core: a constant capture looks up as that constant', r.refit.constErr < 2e-3, `max rel err ${r.refit.constErr.toExponential(2)}`);
       check('probe core: re-fit by 2x the probe L1 irradiance doubles the lookup', r.refit.refitErr < 2e-2, `max rel err ${r.refit.refitErr.toExponential(2)}`);
       check("probe core: Lagarde's specular occlusion", r.refit.soErr < 1e-4, `max err ${r.refit.soErr.toExponential(2)}`);
+      check('probe core: a frame irradiance provider turns the re-fit on; refit: false keeps it off (D803)', r.refit.autoErr < 2e-2 && r.refit.offErr < 2e-3,
+        `auto x2 max rel err ${r.refit.autoErr.toExponential(2)}, off x1 ${r.refit.offErr.toExponential(2)}`);
       check('sssr probe fallback: constant probes = constant fallback (to one f16 step)', r.sssr.constantVsProbes === 0, `${r.sssr.constantVsProbes} px differ`);
       check('sssr probe fallback: structured probes reach the fallback pixels', r.sssr.structuredVsConstant > r.sssr.pixels * 0.05, `${r.sssr.structuredVsConstant} of ${r.sssr.pixels} px`);
       const rt = r.sssr.rt;

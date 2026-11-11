@@ -22,7 +22,7 @@
 // between the sharp mips (both below r = 0.3), where the default 'alpha' mapping blends linearly in
 // r^2 (D101, decided 2026-11-11); `lodMapping: 'r187'` keeps r187's mapping everywhere.
 //
-// Options, each off by default:
+// Options, each off by default (the re-fit: on when the module gets a frame irradiance provider, D803):
 //   dominantDirection  Lagarde 2014's specular dominant direction, mix(N, R, s * (sqrt(s) + a)),
 //                      s = 1 - a, a = perceptual^2 (Frostbite's `roughness`), D57. Needs N. The probe
 //                      volumes and the environment slot sample the same bent direction (F2).
@@ -61,7 +61,13 @@ export interface ProbeLookupOptions {
   mirrorX?: boolean;
   /** Lagarde's dominant direction (D57). Default false. */
   dominantDirection?: boolean;
-  /** Re-fit by frame irradiance (SPEC "Probe re-fit", D60). Default false. */
+  /**
+   * Re-fit by frame irradiance (SPEC "Probe re-fit", D60, D803). Default: on when the lookup has a
+   * frame irradiance provider ({@link ProbeLookupModuleOptions.frameIrradianceWgsl}), else off; the
+   * function form ({@link probeLookupFunctionWgsl}) has no provider option, so there the default is
+   * off and the caller decides (a negative `frameIrr` also switches it off at run time). An explicit
+   * value wins.
+   */
   refit?: boolean;
   /**
    * Lagarde 2014's distance-based roughness on box-projected volumes (Listing 25, D53): the
@@ -331,7 +337,7 @@ export interface ProbeLookupModuleOptions extends ProbeLookupOptions {
   binding?: number;
   /**
    * WGSL defining `fn frameIrradiance(P: vec3f, N: vec3f) -> vec3f`, the frame's irradiance from
-   * the app's GI, for `refit`. Default: none (re-fit then uses each probe's own irradiance, a no-op).
+   * the app's GI, for `refit`; given, the re-fit is on unless `refit: false` (D803). Default: none.
    */
   frameIrradianceWgsl?: string;
 }
@@ -354,7 +360,9 @@ export interface ProbeLookupModuleOptions extends ProbeLookupOptions {
  * `roughness` is perceptual. Without N (the first two), N = R: no dominant-direction bend, and the
  * re-fit evaluates irradiance about R.
  */
-export function probeLookupWgsl(options: ProbeLookupModuleOptions): string {
+export function probeLookupWgsl(moduleOptions: ProbeLookupModuleOptions): string {
+  // the re-fit defaults on with a frame irradiance provider, off without (D803); explicit wins
+  const options = { ...moduleOptions, refit: moduleOptions.refit ?? moduleOptions.frameIrradianceWgsl !== undefined };
   const g = options.group ?? 0, b = options.binding ?? 0;
   const frame = options.refit ? (options.frameIrradianceWgsl ?? '') : '';
   // without a provider, a negative frame irradiance switches the re-fit off
