@@ -40,6 +40,11 @@ export interface FrameTextures {
   sceneColor: GPUTexture;
   /** Optional: the engine's full lit frame (with its own specular), for debug and comparison. */
   lit?: GPUTexture;
+  /**
+   * Optional: the clear coat layer (KHR_materials_clearcoat: F0 0.04 over the base), r = factor,
+   * g = perceptual roughness; 0 where there is none. Screen-space hits re-shade it along the ray (W44).
+   */
+  clearcoat?: GPUTexture;
 }
 
 export interface FrameConventions {

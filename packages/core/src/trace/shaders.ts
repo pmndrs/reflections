@@ -5,6 +5,7 @@
 // length cap (100 exp(-5 roughness)) follow that sample's hybrid intersect (sources.md section 3).
 // Copyright (C) 2024 Advanced Micro Devices, Inc., MIT, for those two formulas; see NOTICE.
 import { HIT_WGSL } from './provider';
+import { shadeLobeWgslFor } from './hitShading';
 
 /** Byte size of the uniform block (struct RtParams). */
 export const RT_PARAMS_SIZE = 256;
@@ -63,6 +64,7 @@ struct RtParams {
   useHistory: u32,
   fallbackRoughnessSurface: u32,
   hitSpecular: u32,
+  reshadeOnScreen: u32,
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
@@ -133,8 +135,12 @@ ${parts.shadingNormalWgsl}
 // The shadow query hit shading calls (D903): false if geometry lies between the hit point and
 // P + L x tMax. The origin is offset along the normal by normalOffset x the view distance, as the
 // reflection ray's own origin (D8). With hitShadows off, every light is visible.
+// W44 (D3542): false while re-shading an on-screen hit, whose lobe takes no visibility ray (as the
+// screen-space re-shade, which has none): a blocked lobe goes black (D3513, no second bounce), which
+// turned a mirror seen in a mirror black and the black car paint over a mirror floor darker.
+var<private> rtLobeVisibility: bool = true;
 fn traceLightVisible(hitP: vec3f, N: vec3f, L: vec3f, tMax: f32) -> bool {
-  if (P.hitShadows == 0u) { return true; }
+  if (P.hitShadows == 0u || !rtLobeVisibility) { return true; }
   let origin = hitP + N * (P.normalOffset * length(hitP - P.cameraPosition));
   return !traceAny(origin, L, tMax);
 }
@@ -143,6 +149,7 @@ fn traceLightVisible(hitP: vec3f, N: vec3f, L: vec3f, tMax: f32) -> bool {
 fn rtHitSpecularOn() -> bool { return P.hitSpecular != 0u; }
 
 ${parts.hitShadingWgsl}
+${shadeLobeWgslFor(parts.hitShadingWgsl)}
 
 // A fixed position in [0, 1) per tile (PCG hash), the order the rotating remainder walks.
 fn rtTileHash(tile: u32) -> f32 {
@@ -238,8 +245,9 @@ fn onScreenRadiance(hitP: vec3f, hitN: vec3f, out_color: ptr<function, vec3f>) -
   if (dot(loadNormal(c), hitN) < 0.5) { return false; }
   *out_color = textureLoad(t_color, c, 0).rgb;
   // With the SSSR tracer's hitColor 'history' (D1002), on-screen hits take last frame's colour too,
-  // reprojected through motion; off screen last frame keeps this frame's scene colour.
-  if (P.useHistory != 0u) {
+  // reprojected through motion; off screen last frame keeps this frame's scene colour. Not when the
+  // hit is re-shaded (W44): its view-independent part is this frame's scene colour.
+  if (P.useHistory != 0u && P.reshadeOnScreen == 0u) {
     let prev = (vec2f(c) + 0.5) * P.inverseRenderSize - textureLoad(t_motion, c, 0).xy * P.motionVectorScale;
     if (all(prev >= vec2f(0.0)) && all(prev < vec2f(1.0))) {
       *out_color = textureLoad(t_history, vec2i(prev * vec2f(textureDimensions(t_history))), 0).rgb;
@@ -307,6 +315,13 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
   if (P.reuseOnScreen != 0u && onScreenRadiance(hitP, hitN, &L)) {
     source = ${RT_SOURCE.onScreenHit}u;
     atomicAdd(&state[${RT_STATE.onScreen}], 1u);
+    // W44 (D3540): the screen's diffuse plus the hit material's specular along the ray, as the
+    // screen-space re-shade does for its own hits (no visibility ray, D3542).
+    if (P.reshadeOnScreen != 0u) {
+      rtLobeVisibility = false;
+      L = hitShadeSurface(hit, hitP, hitN, dir, vec3f(0.0), L);
+      rtLobeVisibility = true;
+    }
   } else {
     L = shadeTracedHit(hit, hitP, hitN, dir);
   }

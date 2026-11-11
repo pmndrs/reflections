@@ -1,8 +1,8 @@
 // TSL nodes for the frame-contract G-buffer (see ./FrameGBuffer.ts). Each is evaluated per material
 // at build time, so materials without a channel (basic, custom) get a sensible constant.
 import {
-  DFGLUT, F_Schlick, Fn, ambientOcclusion, clearcoat, clearcoatNormalView, emissive, float, materialEnvIntensity, materialMetalness, materialRoughness, normalView, output,
-  positionViewDirection, property, roughness, specularColorBlended, specularF90, vec3, vec4,
+  DFGLUT, F_Schlick, Fn, ambientOcclusion, clearcoat, clearcoatNormalView, clearcoatRoughness, emissive, float, materialEnvIntensity, materialMetalness, materialRoughness, normalView, output,
+  positionViewDirection, property, roughness, specularColorBlended, specularF90, vec2, vec3, vec4,
 } from 'three/tsl';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -116,3 +116,15 @@ export const gbufferSpecular = /*@__PURE__*/ (Fn((builder: Builder) => {
 
 /** three's shading roughness (`roughness`: the material's, raised by geometry roughness, >= 0.045), D403. */
 export const gbufferShadingRoughness = /*@__PURE__*/ (Fn((builder: Builder) => (physicalLit(builder) ? float(roughness) : gbufferRoughness)) as N)();
+
+/**
+ * The clear coat layer for a screen-space hit's re-shade (W44, D3541): three's `clearcoat` factor and
+ * `clearcoatRoughness` (perceptual, after three's geometry adjustment) of a lit physical material with
+ * a clear coat; 0 for everything else.
+ */
+export const gbufferClearcoat = /*@__PURE__*/ (Fn((builder: Builder) => {
+  const m = builder.material;
+  const coated = m != null && ((typeof m.clearcoat === 'number' && m.clearcoat > 0) || m.clearcoatNode != null);
+  if (!coated || !physicalLit(builder)) return vec2(0);
+  return vec2(clearcoat as N, clearcoatRoughness as N);
+}) as N)();

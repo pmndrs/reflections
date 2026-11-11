@@ -264,6 +264,8 @@ async function main() {
     aa.reset();
   }
   setHitColor(hitMode);
+  // W44 (D3540): ?reshade=reshade|off, how a screen-space hit accounts for the view direction (default the package's 'reshade')
+  if (q.has('reshade')) ssr.settings.hitShading = q.get('reshade') as 'reshade' | 'off';
   function buildDisplay() {
     // one composite, sampled at the full-screen uv or at a grid cell's local uv
     const gridUV = uv().mul(3);
