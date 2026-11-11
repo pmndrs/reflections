@@ -24,7 +24,13 @@
 //
 // (true if any triangle lies along the ray within tMax; the walk may stop at the first one), the
 // occlusion query hit shading uses for shadow rays (D903). Without it the pass derives one from
-// `traceFirstHit` (same answer, a full closest-hit walk).
+// `traceFirstHit` (same answer, a full closest-hit walk); if `capabilities.shadingNormal`, also
+//
+//   fn traceHitShadingNormal(hit: Hit) -> vec3f
+//
+// (the world shading normal: the caller's vertex normals at `hit.triangle`, interpolated with
+// `hit.barycentrics`, D1700; need not be unit or face the ray, 0 when the mesh has none). Without it
+// the pass shades with the geometric `hit.normal`.
 // Hit shading itself belongs to the pass (HitShading below), not the provider.
 
 /** Where a module's bindings land inside a kernel (same shape as @pmndrs/ddgi's `BindingSlot`). */
@@ -53,6 +59,13 @@ export interface TraceProviderCapabilities {
    * from `traceFirstHit`. Default false.
    */
   readonly anyHit?: boolean;
+  /**
+   * The provider defines `fn traceHitShadingNormal(hit: Hit) -> vec3f`: the interpolated vertex
+   * normal at the hit in world space (any length, any side; vec3f(0) where the mesh has no normals).
+   * The pass shades with it, turned to the side of the ray-facing geometric normal. Otherwise the
+   * pass uses `Hit.normal` (flat shading, D1700). Default false.
+   */
+  readonly shadingNormal?: boolean;
 }
 
 /** A BVH ray walk behind the trace seam. */
@@ -152,6 +165,11 @@ export const DEFAULT_HIT_SPECULAR_WGSL = /* wgsl */ `
 fn traceHitSpecular(hit: Hit) -> HitSpecular { return HitSpecular(vec3f(0.0), 1.0, 0.0, 0.0); }
 `;
 
+/** `traceHitShadingNormal` for providers without vertex normals: none (the pass keeps the geometric normal). */
+export const DEFAULT_SHADING_NORMAL_WGSL = /* wgsl */ `
+fn traceHitShadingNormal(hit: Hit) -> vec3f { return vec3f(0.0); }
+`;
+
 /** `traceAny` for providers without an any-hit walk: the closest-hit walk, hit or not. */
 export const DEFAULT_TRACE_ANY_WGSL = /* wgsl */ `
 fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool { return traceFirstHit(origin, dir, tMax).t >= 0.0; }
@@ -162,7 +180,8 @@ fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool { return traceFirstHit
  *
  *   fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f
  *
- * (world hit point, world normal facing the ray, unit ray direction; returns the radiance leaving
+ * (world hit point, world normal facing the ray (the shading normal if the provider has one, D1700),
+ * unit ray direction; returns the radiance leaving
  * P toward the ray origin). It may call `traceHitMaterial(hit)`, `traceHitSpecular(hit)`, `hitLayered`, the pass's
  * `sampleRadianceFallback(P, dir, roughness)` and the pass's shadow query
  *

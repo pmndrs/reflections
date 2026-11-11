@@ -61,7 +61,7 @@ struct RtParams {
   fallbackColor: vec4f,
   motionVectorScale: vec2f,
   useHistory: u32,
-  _pad1: u32,
+  fallbackRoughnessSurface: u32,
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
@@ -105,7 +105,7 @@ fn main() {
  * `traceFirstHit` (group 2), `hitShadingWgsl` `shadeTracedHit` (group 3 if it binds anything),
  * `materialWgsl` `traceHitMaterial`.
  */
-export function rtTraceWgsl(parts: { fallbackWgsl: string; providerWgsl: string; materialWgsl: string; anyHitWgsl: string; hitShadingWgsl: string }): string {
+export function rtTraceWgsl(parts: { fallbackWgsl: string; providerWgsl: string; materialWgsl: string; anyHitWgsl: string; shadingNormalWgsl: string; hitShadingWgsl: string }): string {
   return /* wgsl */ `
 ${RT_PARAMS_WGSL}
 @group(0) @binding(1) var t_depth: texture_2d<f32>;
@@ -127,6 +127,7 @@ ${parts.fallbackWgsl}
 ${parts.providerWgsl}
 ${parts.materialWgsl}
 ${parts.anyHitWgsl}
+${parts.shadingNormalWgsl}
 
 // The shadow query hit shading calls (D903): false if geometry lies between the hit point and
 // P + L x tMax. The origin is offset along the normal by normalOffset x the view distance, as the
@@ -182,6 +183,28 @@ fn store(packed: u32, c: vec2u, radiance: vec4f, hit: f32, confidence: f32, sour
   if (((packed >> 29u) & 1u) != 0u) { storePixel(vec2u(t.x, c.y), radiance, hit, confidence, source); }
   if (((packed >> 30u) & 1u) != 0u) { storePixel(vec2u(c.x, t.y), radiance, hit, confidence, source); }
   if (((packed >> 31u) & 1u) != 0u) { storePixel(t, radiance, hit, confidence, source); }
+}
+// A traced miss: radiance = the fallback, confidence 0 (D900). With fallbackRoughness 'surface'
+// (default, as the SSSR tracer's, D3100) every stored pixel (the ray's and its quad copies) takes
+// the rough-pixel lookup of its own: mirror direction from its depth and normal, sqrt(alpha).
+// Mirror pixels (alpha < 1e-4) and 'mirror' keep the ray's direction at roughness 0 (FFX).
+fn storeTracedMiss(packed: u32, c0: vec2u, origin: vec3f, dir: vec3f) {
+  let t = c0 ^ vec2u(1u);
+  for (var k = 0u; k < 4u; k++) {
+    if (k > 0u && ((packed >> (28u + k)) & 1u) == 0u) { continue; }
+    let c = select(select(select(t, vec2u(c0.x, t.y), k == 2u), vec2u(t.x, c0.y), k == 1u), c0, k == 0u);
+    var o = origin;
+    var d = dir;
+    var roughness = 0.0;
+    let alpha = textureLoad(t_roughness, c, 0).x;
+    if (P.fallbackRoughnessSurface != 0u && alpha >= 0.0001) {
+      let s = worldFromDepth((vec2f(c) + 0.5) * P.inverseRenderSize, textureLoad(t_depth, c, 0).x);
+      d = reflect(normalize(s - P.cameraPosition), loadNormal(c));
+      o = s;
+      roughness = sqrt(alpha);
+    }
+    storePixel(c, vec4f(sampleRadianceFallback(o, d, roughness), 0.0), 0.0, 0.0, ${RT_SOURCE.tracedMiss}u);
+  }
 }
 // Capped entries keep what intersect wrote (its radiance is already mix(fallback, hit, confidence));
 // only the source code changes.
@@ -259,18 +282,22 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
   let hit = traceFirstHit(origin, dir, tMax);
 
   if (hit.t < 0.0) {
-    // A traced miss leaves the scene: the fallback along the ray, as an SSR miss (roughness 0, as
-    // intersect). Confidence 0 keeps "radiance = mix(fallback, hit, confidence)" true, so a resolve
+    // A traced miss leaves the scene: the fallback, as an SSR miss (fallbackRoughness, D3100). Confidence 0 keeps "radiance = mix(fallback, hit, confidence)" true, so a resolve
     // that blends its own fallback by confidence does the same here.
     atomicAdd(&state[${RT_STATE.misses}], 1u);
-    let L = sampleRadianceFallback(origin, dir, 0.0);
-    store(packed, coords, vec4f(L, 0.0), 0.0, 0.0, ${RT_SOURCE.tracedMiss}u);
+    storeTracedMiss(packed, coords, origin, dir);
     return;
   }
   atomicAdd(&state[${RT_STATE.hits}], 1u);
   let hitP = origin + dir * hit.t;
   var hitN = select(-dir, hit.normal, dot(hit.normal, hit.normal) > 0.0);
   hitN = select(hitN, -hitN, dot(hitN, dir) > 0.0);
+  // the provider's interpolated vertex normal (D1700), on the side of the ray-facing geometric one
+  let sn = traceHitShadingNormal(hit);
+  if (dot(sn, sn) > 1e-20) {
+    let n = normalize(sn);
+    hitN = select(n, -n, dot(n, hitN) < 0.0);
+  }
   var L = vec3f(0.0);
   var source = ${RT_SOURCE.tracedHit}u;
   // On-screen reuse only for hits whose diffuse outweighs their specular lobe (W27b, D2751): the

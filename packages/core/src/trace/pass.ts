@@ -12,7 +12,7 @@
 import { constantRadianceFallback, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs } from '../sssr/sssr';
 import { mat4Invert, mat4Mul } from '../sssr/math';
 import { PassTimer } from '../sssr/timer';
-import { DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, DEFAULT_TRACE_ANY_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
+import { DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, DEFAULT_SHADING_NORMAL_WGSL, DEFAULT_TRACE_ANY_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
 import { RT_BEGIN_WGSL, RT_PARAMS_SIZE, RT_STATE, RT_STATE_HEADER, rtTraceWgsl } from './shaders';
 
 export interface TracedReflectionsOptions {
@@ -54,6 +54,13 @@ export interface TracedReflectionsSettings {
    * Pass the tracer's setting so both sources agree.
    */
   hitColor?: 'current' | 'history';
+  /**
+   * Roughness a traced miss takes its fallback at, as the SSSR tracer's `fallbackRoughness` (pass
+   * the tracer's setting so both agree): 'surface' (default) = each pixel's own rough-pixel lookup
+   * (mirror direction, its perceptual roughness), quad copies included; 'mirror' = the ray's
+   * direction at roughness 0 (FFX). Mirror pixels and a constant fallback are the same either way.
+   */
+  fallbackRoughness?: 'mirror' | 'surface';
   /**
    * Hit shading may trace shadow rays (`traceLightVisible`, D903): `environmentHitShading` sends
    * one per directional light from each traced hit it shades (not from on-screen reused hits, whose
@@ -203,6 +210,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     providerWgsl: provider.code({ group: 2, firstBinding: 0 }),
     materialWgsl: (provider.capabilities.hitMaterial ? '' : DEFAULT_HIT_MATERIAL_WGSL) + (provider.capabilities.hitSpecular ? '' : DEFAULT_HIT_SPECULAR_WGSL),
     anyHitWgsl: provider.capabilities.anyHit ? '' : DEFAULT_TRACE_ANY_WGSL,
+    shadingNormalWgsl: provider.capabilities.shadingNormal ? '' : DEFAULT_SHADING_NORMAL_WGSL,
     hitShadingWgsl: shading.wgsl,
   });
   const traceModule = device.createShaderModule({ label: `rt trace (${provider.name})`, code });
@@ -254,6 +262,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     const mvs = frame.inputs.motionVectorScale ?? [1, 1];
     f[56] = mvs[0]; f[57] = mvs[1];
     u[58] = (s.hitColor ?? 'current') === 'history' ? 1 : 0;
+    u[59] = (s.fallbackRoughness ?? 'surface') === 'surface' ? 1 : 0;
     device.queue.writeBuffer(params, 0, data);
   }
 
