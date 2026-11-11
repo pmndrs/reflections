@@ -9,7 +9,8 @@
 //   0 nodes      every mesh tree's 64-byte nodes                    (@pmndrs/bvh)
 //   1 triangles  every mesh's 48-byte triangles in tree order       (@pmndrs/bvh)
 //   2 top level  header, instance records, top-level nodes          (@pmndrs/bvh)
-//   3 materials  two vec4f per material: albedo, emissive            (ours; indexed by GiHit.material)
+//   3 materials  three vec4f per material: albedo + clear coat, emissive + clear coat roughness,
+//                specular F0 + roughness                              (ours; indexed by GiHit.material)
 //
 // What the walk gives back: `GiHit.t / triangle / barycentrics / frontFace` map one to one onto
 // core's `Hit`; `GiHit.instance` is the input instance's position; `GiHit.normal` is the world
@@ -37,10 +38,18 @@ export interface BvhTraceInstance {
   readonly material?: number;
 }
 
-/** Linear diffuse albedo and emitted radiance of a traced hit (WGSL `HitMaterial`). */
+/**
+ * Linear diffuse albedo and emitted radiance of a traced hit (WGSL `HitMaterial`), and its specular
+ * lobe (WGSL `HitSpecular`, W27): F0 (linear), perceptual roughness, clear coat factor and roughness.
+ * Without `specular` the hit has no specular lobe (diffuse only, as before W27).
+ */
 export interface BvhTraceMaterial {
   readonly albedo: readonly [number, number, number];
   readonly emissive?: readonly [number, number, number];
+  readonly specular?: readonly [number, number, number];
+  readonly roughness?: number;
+  readonly clearcoat?: number;
+  readonly clearcoatRoughness?: number;
 }
 
 export interface BvhTraceScene {
@@ -115,7 +124,7 @@ export async function loadPmndrsBvh(module?: unknown): Promise<PmndrsBvhModule> 
   return bvh;
 }
 
-const MATERIAL_VEC4S = 2;
+const MATERIAL_VEC4S = 3;
 const NO_MATERIAL = 0xffffffff;
 
 const providerWgsl = (bvh: PmndrsBvhModule, slot: BindingSlot) => /* wgsl */ `
@@ -132,6 +141,14 @@ fn traceHitMaterial(hit: Hit) -> HitMaterial {
   let count = arrayLength(&pbvhMaterials) / ${MATERIAL_VEC4S}u;
   if (hit.material >= count) { return HitMaterial(vec3f(0.5), vec3f(0.0)); }
   return HitMaterial(pbvhMaterials[hit.material * ${MATERIAL_VEC4S}u].rgb, pbvhMaterials[hit.material * ${MATERIAL_VEC4S}u + 1u].rgb);
+}
+
+fn traceHitSpecular(hit: Hit) -> HitSpecular {
+  let count = arrayLength(&pbvhMaterials) / ${MATERIAL_VEC4S}u;
+  if (hit.material >= count) { return HitSpecular(vec3f(0.0), 1.0, 0.0, 0.0); }
+  let o = hit.material * ${MATERIAL_VEC4S}u;
+  let spec = pbvhMaterials[o + 2u];
+  return HitSpecular(spec.rgb, spec.w, pbvhMaterials[o].w, pbvhMaterials[o + 1u].w);
 }
 `;
 
@@ -159,7 +176,7 @@ export interface PmndrsBvhBuildInfo {
  */
 export class PmndrsBvhTraceProvider implements TraceProvider {
   readonly name = '@pmndrs/bvh';
-  readonly capabilities = { hitNormal: true, hitMaterial: true } as const;
+  readonly capabilities = { hitNormal: true, hitMaterial: true, hitSpecular: true } as const;
   readonly layoutVersion: number;
   readonly entries: readonly ModuleBindingEntry[];
   readonly storageBufferCount: number;
@@ -242,11 +259,12 @@ export class PmndrsBvhTraceProvider implements TraceProvider {
 function packMaterials(materials: readonly BvhTraceMaterial[]): Float32Array {
   // At least one entry so the binding is never empty; an unused grey.
   const out = new Float32Array(Math.max(1, materials.length) * MATERIAL_VEC4S * 4);
-  out.set([0.5, 0.5, 0.5, 1]);
+  out.set([0.5, 0.5, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
   materials.forEach((m, i) => {
     const o = i * MATERIAL_VEC4S * 4;
-    out.set([m.albedo[0], m.albedo[1], m.albedo[2], 1], o);
-    out.set([m.emissive?.[0] ?? 0, m.emissive?.[1] ?? 0, m.emissive?.[2] ?? 0, 0], o + 4);
+    out.set([m.albedo[0], m.albedo[1], m.albedo[2], m.clearcoat ?? 0], o);
+    out.set([m.emissive?.[0] ?? 0, m.emissive?.[1] ?? 0, m.emissive?.[2] ?? 0, m.clearcoatRoughness ?? 0], o + 4);
+    out.set([m.specular?.[0] ?? 0, m.specular?.[1] ?? 0, m.specular?.[2] ?? 0, m.roughness ?? 1], o + 8);
   });
   return out;
 }

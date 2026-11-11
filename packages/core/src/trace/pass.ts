@@ -12,7 +12,7 @@
 import { constantRadianceFallback, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs } from '../sssr/sssr';
 import { mat4Invert, mat4Mul } from '../sssr/math';
 import { PassTimer } from '../sssr/timer';
-import { DEFAULT_HIT_MATERIAL_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
+import { DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
 import { RT_BEGIN_WGSL, RT_PARAMS_SIZE, RT_STATE, RT_STATE_HEADER, rtTraceWgsl } from './shaders';
 
 export interface TracedReflectionsOptions {
@@ -195,7 +195,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   const code = rtTraceWgsl({
     fallbackWgsl: fallback.wgsl,
     providerWgsl: provider.code({ group: 2, firstBinding: 0 }),
-    materialWgsl: provider.capabilities.hitMaterial ? '' : DEFAULT_HIT_MATERIAL_WGSL,
+    materialWgsl: (provider.capabilities.hitMaterial ? '' : DEFAULT_HIT_MATERIAL_WGSL) + (provider.capabilities.hitSpecular ? '' : DEFAULT_HIT_SPECULAR_WGSL),
     hitShadingWgsl: shading.wgsl,
   });
   const traceModule = device.createShaderModule({ label: `rt trace (${provider.name})`, code });

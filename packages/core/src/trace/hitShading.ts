@@ -7,6 +7,11 @@
 //   L = emissive + albedo x (envMean(N) x intensity + sum_hemi mix(ground, sky, 0.5 N.up + 0.5) / pi
 //                            + sum_dir colour x max(N.l, 0) / pi)
 //
+// plus, for providers with `traceHitSpecular` (W27, D2700), the specular lobe and clear coat by
+// `hitLayered`: the environment along the mirror direction R, as the mean over a cone around R
+// whose width follows the roughness (one sample below ~0.1). Without it a metal hit (albedo
+// x (1 - metalness) = 0) was black: a mirror floor or metal car paint seen by a ray.
+//
 // envMean is the cosine-weighted mean of the environment over the hemisphere around N (= E / pi),
 // estimated with a fixed 32-direction Fibonacci set (same set every pixel: no noise, a small bias
 // on sharp environments). The light terms are three's (BRDF_Lambert = albedo / pi, hemisphere
@@ -40,7 +45,10 @@ const UNIFORM_BYTES = 16 + 16 + 32 * HIT_MAX_DIRECTIONAL + 48 * HIT_MAX_HEMISPHE
 
 const SHADE = /* wgsl */ `
 const HIT_ENV_SAMPLES: u32 = 32u;
-fn hitEnvMean(N: vec3f) -> vec3f {
+fn hitEnvMean(N: vec3f) -> vec3f { return hitEnvLobe(N, 1.0, false); }
+// Mean of the environment over a cone around N: disk radius 'spread' in the tangent plane (1 = the
+// cosine-weighted hemisphere). 'sharp' reads the full-resolution environment (specular).
+fn hitEnvLobe(N: vec3f, spread: f32, sharp: bool) -> vec3f {
   // tangent frame (Duff et al. 2017)
   let s = select(-1.0, 1.0, N.z >= 0.0);
   let a = -1.0 / (s + N.z);
@@ -51,10 +59,10 @@ fn hitEnvMean(N: vec3f) -> vec3f {
   for (var i = 0u; i < HIT_ENV_SAMPLES; i++) {
     // cosine-weighted: r = sqrt(u), phi = golden angle x i
     let u = (f32(i) + 0.5) / f32(HIT_ENV_SAMPLES);
-    let r = sqrt(u);
+    let r = sqrt(u) * spread;
     let phi = f32(i) * 2.39996323;
-    let d = T * (r * cos(phi)) + B * (r * sin(phi)) + N * sqrt(max(0.0, 1.0 - u));
-    sum += hitEnvSample(d);
+    let d = T * (r * cos(phi)) + B * (r * sin(phi)) + N * sqrt(max(0.0, 1.0 - r * r));
+    if (sharp) { sum += hitEnvSampleSharp(d); } else { sum += hitEnvSample(d); }
   }
   return sum / f32(HIT_ENV_SAMPLES);
 }
@@ -68,9 +76,24 @@ fn hitLights(N: vec3f) -> vec3f {
   }
   return E * 0.31830989;
 }
+// The environment along R at perceptual roughness r: one sample for near-mirrors, else a cone whose
+// radius follows alpha (a rough stand-in for the prefiltered GGX lobe).
+fn hitEnvSpecular(R: vec3f, roughness: f32) -> vec3f {
+  let alpha = roughness * roughness;
+  if (alpha < 0.01) { return hitEnvSampleSharp(R); }
+  return hitEnvLobe(R, min(1.0, 2.0 * alpha), true);
+}
 fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f {
   let m = traceHitMaterial(hit);
-  return m.emissive + m.albedo * (hitEnvMean(N) * hitEnv.intensity.x + hitLights(N));
+  let s = traceHitSpecular(hit);
+  let diffuse = m.albedo * (hitEnvMean(N) * hitEnv.intensity.x + hitLights(N));
+  if (max(s.color.x, max(s.color.y, s.color.z)) <= 0.0 && s.clearcoat <= 0.0) { return m.emissive + diffuse; }
+  let R = reflect(dir, N);
+  let NdotV = clamp(dot(N, -dir), 1e-4, 1.0);
+  let envBase = hitEnvSpecular(R, s.roughness) * hitEnv.intensity.x;
+  var envCoat = envBase;
+  if (s.clearcoat > 0.0 && abs(s.clearcoatRoughness - s.roughness) > 0.02) { envCoat = hitEnvSpecular(R, s.clearcoatRoughness) * hitEnv.intensity.x; }
+  return m.emissive + hitLayered(s, diffuse, envBase, envCoat, NdotV);
 }
 `;
 
@@ -93,6 +116,7 @@ fn hitEnvSample(d: vec3f) -> vec3f {
   return mix(mix(hitEnvTexel(i, size), hitEnvTexel(i + vec2i(1, 0), size), f.x),
              mix(hitEnvTexel(i + vec2i(0, 1), size), hitEnvTexel(i + vec2i(1, 1), size), f.x), f.y);
 }
+fn hitEnvSampleSharp(d: vec3f) -> vec3f { return hitEnvSample(d); }
 `;
 
 const CUBE = /* wgsl */ `${UNIFORM_WGSL}
@@ -104,6 +128,7 @@ fn hitEnvSample(d: vec3f) -> vec3f {
   let mip = max(0.0, f32(textureNumLevels(hitEnvTexture)) - 4.0);
   return textureSampleLevel(hitEnvTexture, hitEnvSampler, d, mip).rgb;
 }
+fn hitEnvSampleSharp(d: vec3f) -> vec3f { return textureSampleLevel(hitEnvTexture, hitEnvSampler, d, 0.0).rgb; }
 `;
 
 export interface EnvironmentHitShading extends HitShading {

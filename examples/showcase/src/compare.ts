@@ -460,6 +460,12 @@ async function main() {
     __p: {
       THREE, entries: () => entries.map((e) => e.id),
       load, setPose, poses: () => [...poseSel.options].map((o) => o.value),
+      /** The orbit camera as [pos, target] (scene units), and setting it (resets every method). */
+      view: () => [camera.position.toArray(), controls.target.toArray()],
+      setView(pos: [number, number, number], target: [number, number, number]) {
+        camera.position.set(...pos); controls.target.set(...target); controls.update();
+        for (const m of live.values()) m.reset();
+      },
       setSides,
       setSplit: (x: number) => { split = x; layout(); },
       freeze: (v = true) => { frozen = v; freezeBox.checked = v; },
