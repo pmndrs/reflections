@@ -278,6 +278,88 @@ fn tmbRaycastFirstHit(shape: TmbRay, result: ptr<function, TmbResult>) -> bool {
   return didHit;
 }
 
+// getRaycastAnyHitFn.js rayIntersectsBoundsAnyHit: no closest-so-far test.
+fn tmbIntersectsBoundsAny(ray: TmbRay, base: u32, scalar: f32) -> bool {
+  let dist = tmbRayBoundsDistance(ray, base) * scalar;
+  return dist >= 0.0 && (ray.maxDist <= 0.0 || dist < ray.maxDist);
+}
+
+// getRaycastAnyHitFn.js intersectRangeAnyHit: the first triangle within maxDist stops the walk.
+fn tmbIntersectRangeAny(ray: TmbRay, offset: u32, count: u32, scalar: f32) -> bool {
+  for (var ti = offset; ti < offset + count; ti++) {
+    let a = tmbAttributes[tmbIndex[ti * 3u] * TMB_ATTRIBUTE_VEC4S].xyz;
+    let b = tmbAttributes[tmbIndex[ti * 3u + 1u] * TMB_ATTRIBUTE_VEC4S].xyz;
+    let c = tmbAttributes[tmbIndex[ti * 3u + 2u] * TMB_ATTRIBUTE_VEC4S].xyz;
+    var tri: TmbResult;
+    if (tmbIntersectTriangle(ray, a, b, c, &tri) && (ray.maxDist <= 0.0 || tri.dist * scalar < ray.maxDist)) { return true; }
+  }
+  return false;
+}
+
+// getShapecastFn.js with getRaycastAnyHitFn.js's callbacks (bvh_RaycastAnyHit): the same TLAS +
+// BLAS loop and near-first order, returning at the first triangle found (STOP_TRAVERSAL).
+fn tmbRaycastAnyHit(shape: TmbRay) -> bool {
+  var isTLAS = true;
+  var pointer: i32 = 0;
+  var stack: array<u32, ${LAYOUT.stackDepth}>;
+  stack[0] = 0u;
+  var localShape = shape;
+  var scalar = 1.0;
+  var tlasReset: i32 = 0;
+  loop {
+    if (!isTLAS && tlasReset == pointer) {
+      scalar = 1.0;
+      isTLAS = true;
+      localShape = shape;
+    }
+    if (pointer < 0 || pointer >= TMB_STACK_DEPTH) { break; }
+    let nodeIndex = stack[pointer];
+    let base = nodeIndex * TMB_NODE_WORDS;
+    pointer -= 1;
+    let infoX = tmbNodes[base + 13u];
+    let infoY = tmbNodes[base + 12u];
+    if ((infoX & 0xffff0000u) != 0u) {
+      if (isTLAS) {
+        let objectIndex = infoX & 0x00ffffffu;
+        if (tmbExtra(objectIndex).x != 0u) {
+          tlasReset = pointer;
+          isTLAS = false;
+          let toLocal = tmbInverseMatrix(objectIndex);
+          localShape = shape;
+          localShape.origin = (toLocal * vec4f(shape.origin, 1.0)).xyz;
+          let d = (toLocal * vec4f(shape.direction, 0.0)).xyz;
+          let len = length(d);
+          localShape.direction = d / len;
+          scalar = 1.0 / len;
+          pointer += 1;
+          stack[pointer] = infoY;
+        }
+      } else if (tmbIntersectRangeAny(localShape, infoY, infoX & 0x0000ffffu, scalar)) {
+        return true;
+      }
+    } else {
+      let leftIndex = nodeIndex + 1u;
+      let splitAxis = infoX & 0x0000ffffu;
+      let rightIndex = nodeIndex + infoY;
+      let hitLeft = tmbIntersectsBoundsAny(localShape, base, scalar);
+      let hitRight = tmbIntersectsBoundsAny(localShape, base + 6u, scalar);
+      let axisDir = select(select(localShape.direction.z, localShape.direction.y, splitAxis == 1u), localShape.direction.x, splitAxis == 0u);
+      let leftToRight = axisDir >= 0.0;
+      let c1 = select(rightIndex, leftIndex, leftToRight);
+      let c2 = select(leftIndex, rightIndex, leftToRight);
+      let hit1 = select(hitRight, hitLeft, leftToRight);
+      let hit2 = select(hitLeft, hitRight, leftToRight);
+      if (hit2) { pointer += 1; stack[pointer] = c2; }
+      if (hit1) { pointer += 1; stack[pointer] = c1; }
+    }
+  }
+  return false;
+}
+
+fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool {
+  return tmbRaycastAnyHit(TmbRay(origin, dir, tMax));
+}
+
 fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
   var r: TmbResult;
   r.didHit = false;
@@ -308,7 +390,7 @@ const unorm8 = (x: number) => Math.round(Math.min(1, Math.max(0, x)) * 255);
 export class MeshBVHTraceProvider implements TraceProvider {
   readonly name = 'three-mesh-bvh';
   readonly storageBufferCount = 4;
-  readonly capabilities = { hitNormal: true, hitMaterial: true } as const;
+  readonly capabilities = { hitNormal: true, hitMaterial: true, anyHit: true } as const;
   readonly entries: readonly ModuleBindingEntry[] = [0, 1, 2, 3].map(() => ({ visibility: 0x4, buffer: { type: 'read-only-storage' as const } }));
   readonly data: MeshBVHComputeDataLike;
   private buffers: GPUBuffer[] = [];
