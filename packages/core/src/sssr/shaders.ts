@@ -455,7 +455,6 @@ fn loadHitColor(hit_uv: vec2f) -> vec3f {
 // shading's probes / environment, or the radiance fallback), as traced hits are shaded (D3510).
 // No visibility ray here (no BVH in this pass).
 const HIT_SHADING_RESHADE: u32 = 1u;
-const HIT_SHADING_TRACE: u32 = 2u;
 fn hitMaterialSpecular(p: vec2i) -> HitSpecular {
   let roughness = sqrt(max(textureLoad(t_roughness, p, 0).x, 0.0));
   var f0 = vec3f(0.04);
@@ -472,13 +471,6 @@ fn reshadeHit(hit_uv: vec2f, world_hit: vec3f, ray_direction: vec3f) -> vec3f {
   let p = clamp(vec2i(vec2f(P.renderSize) * hit_uv), vec2i(0), vec2i(P.renderSize) - 1);
   let N = loadWorldSpaceNormal(p);
   return hitShadeLobe(hitMaterialSpecular(p), world_hit, N, ray_direction, vec3f(0.0), loadInputColor(p));
-}
-// 'trace': a hit whose own surface is glossy or metal goes to the ray-traced pass, which shades it
-// with the provider's material (and its visibility ray) instead of reusing the screen.
-fn isGlossyHit(hit_uv: vec2f) -> bool {
-  let p = clamp(vec2i(vec2f(P.renderSize) * hit_uv), vec2i(0), vec2i(P.renderSize) - 1);
-  let s = hitMaterialSpecular(p);
-  return s.roughness < 0.5 || s.clearcoat > 0.1 || max(s.color.x, max(s.color.y, s.color.z)) > 0.2;
 }
 fn sampleRandomVector2D(p: vec2u) -> vec2f { return textureLoad(t_blue_noise, vec2i(p % 128u), 0).xy; }
 
@@ -745,9 +737,7 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
     storeRadiance((*r).packed, (*r).coords, vec4f(mix(environment_lookup, hit_radiance, confidence), world_ray_length), hit_distance, confidence);
   }
   // Hybrid sample: low confidence, not marched into the background, and not too rough to trace.
-  // 'trace' (W44): glossy hits too, so the traced pass shades them along the ray.
-  let glossy_hit = P.hitShadingMode == HIT_SHADING_TRACE && confidence > 0.0 && isGlossyHit(hit.xy);
-  return (confidence < P.missConfidenceThreshold || glossy_hit) && !isBackground(hit.z) && (*r).roughness <= P.missRoughnessThreshold;
+  return confidence < P.missConfidenceThreshold && !isBackground(hit.z) && (*r).roughness <= P.missRoughnessThreshold;
 }
 
 fn missEntry(r: ptr<function, Ray>) -> vec2u {

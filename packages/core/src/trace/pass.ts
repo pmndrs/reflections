@@ -74,11 +74,10 @@ export interface TracedReflectionsSettings {
    */
   hitSpecular?: boolean;
   /**
-   * As the SSSR tracer's `hitShading` (pass the tracer's, W44, D3540): with 'reshade' or 'trace' an
-   * on-screen hit takes this frame's scene colour (its diffuse) plus its specular lobe along the ray
+   * As the SSSR tracer's `hitShading` (pass the tracer's, W44, D3540): with 'reshade' an on-screen hit takes this frame's scene colour (its diffuse) plus its specular lobe along the ray
    * (`hitShadeSurface`, without the visibility ray, D3542), not the screen colour as is. Default 'reshade'.
    */
-  hitShading?: 'reshade' | 'trace' | 'off';
+  hitShading?: 'reshade' | 'off';
   /** Relative view-distance tolerance for that test. Default 0.02. */
   onScreenDepthTolerance?: number;
   /** The fallback's `P.iblFactor`. Default 1. */

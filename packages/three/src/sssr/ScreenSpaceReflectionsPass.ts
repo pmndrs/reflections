@@ -237,8 +237,6 @@ export class ScreenSpaceReflectionsPass {
     const hitShading = this.settings.hitShading ?? 'reshade';
     const out = core.dispatch(cmd, inputs, {
       frameIndex: frame.frameIndex, ...this.settings, hitColor: useHistory ? 'history' : 'current', fallbackColor: [0, 0, 0],
-      // 'trace' without a traced pass would list glossy hits for nobody
-      hitShading: hitShading === 'trace' && !(this.rt && this.rayTracing) ? 'off' : hitShading,
     });
     if (this.rt && this.rayTracing) {
       // traced misses take black like the tracer's fallback: the composite adds probes /

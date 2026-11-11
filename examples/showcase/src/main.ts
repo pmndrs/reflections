@@ -57,8 +57,8 @@ const VIEW_IDS = Object.keys(VIEWS) as View[];
 type HitMode = 'current' | 'lit' | 'final';
 const HIT_MODES: Record<HitMode, string> = { final: "last frame's image", lit: "last frame's lit (no SSR)", current: 'this frame, no specular' };
 /** W44 (D3540): how a screen-space hit accounts for the view direction (`ssr.settings.hitShading`). `?reshade=` */
-type HitShadingMode = 'reshade' | 'trace' | 'off';
-const HIT_SHADING_MODES: Record<HitShadingMode, string> = { reshade: 'specular along the ray (re-shade)', trace: 'glossy hits to the ray tracer', off: 'screen colour as is' };
+type HitShadingMode = 'reshade' | 'off';
+const HIT_SHADING_MODES: Record<HitShadingMode, string> = { reshade: 'specular along the ray (re-shade)', off: 'screen colour as is' };
 const TONE = { agx: THREE.AgXToneMapping, neutral: THREE.NeutralToneMapping, aces: THREE.ACESFilmicToneMapping } as const;
 type Tone = keyof typeof TONE;
 
@@ -532,7 +532,7 @@ async function main() {
         refreshUI();
       },
       setHit: (m: HitMode) => setHit(m),
-      /** W44: 'reshade' (default) | 'trace' | 'off'. */
+      /** W44: 'reshade' (default) | 'off'. */
       setReshade: (m: HitShadingMode) => { setReshade(m); reshadeSel.value = m; },
       aa,
       /** W36: 'upscaler' (default) | 'taa' (W40's resolve) | 'off'. */

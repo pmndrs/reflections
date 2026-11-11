@@ -21,7 +21,7 @@
 //
 // URL: ?scene=<id> ?pose=<name> ?left=<method> ?right=<method> ?split=0.5 ?w=960&h=540 ?freeze ?manual
 // Experiment overrides (not product defaults): ?spq=1|2|4 ?tsf=<FFX temporalStabilityFactor>
-// ?hit=final|lit|current ?reshade=reshade|trace|off (ours), ?mirrorBias= ?ssrMaxDistance= ?ssrThickness= (three's SSR), ?ptBounces=
+// ?hit=final|lit|current ?reshade=reshade|off (ours), ?mirrorBias= ?ssrMaxDistance= ?ssrThickness= (three's SSR), ?ptBounces=
 // ?ptMax= ?ptRaw=1 ?ptDenoise=0 ?ptClearcoat=0 (path tracer), ?floorRoughness= (every method's floor, before the bake)
 import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';

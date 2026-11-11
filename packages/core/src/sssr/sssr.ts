@@ -108,14 +108,14 @@ export interface ScreenSpaceReflectionsOptions {
 
 /**
  * What a screen-space hit returns (W44, D3540; `ScreenSpaceReflectionsSettings.hitShading`):
- * - 'reshade' (default): the hit's view-independent part (scene colour without specular) plus its
- *   specular lobe evaluated along the reflected ray, from the G-buffer's F0 / roughness and the
- *   radiance along R (`hitSpecularShading`). Needs `inputs.albedo` (else F0 0.04).
- * - 'trace': hits whose surface is glossy or metal also go to the miss list, so a traced pass
- *   shades them; the rest (and every hit without a traced pass) keep the screen colour.
+ * - 'reshade' (default): the hit's view-independent part (this frame's scene colour without
+ *   specular) plus its specular lobe and clear coat evaluated along the reflected ray, from the
+ *   G-buffer's F0 / roughness / clear coat and the radiance along R (`hitSpecularShading`). Needs
+ *   `inputs.albedo` (else F0 0.04); `hitColor` no longer applies to these hits.
  * - 'off': the screen colour as is (FFX SSSR), `hitColor` picks which.
+ * (A third mode, glossy hits sent to the ray-traced pass, was measured and dropped: D3543.)
  */
-export type ScreenSpaceHitShading = 'reshade' | 'trace' | 'off';
+export type ScreenSpaceHitShading = 'reshade' | 'off';
 
 /** The intersect pass's view of a hit shading: the module (or the fallback lobe) plus stubs for what only a traced pass has. */
 export function screenSpaceHitShadingWgsl(shading?: HitShading): string {
@@ -195,8 +195,8 @@ export interface ScreenSpaceReflectionsSettings {
   frameIndex?: number;
   /**
    * How a hit's colour accounts for the view direction (W44, D3540): 'reshade' (default) keeps the
-   * hit's diffuse from the screen and evaluates its specular along the reflected ray; 'trace' sends
-   * glossy hits to the ray-traced pass; 'off' reuses the screen colour (FFX). See {@link ScreenSpaceHitShading}.
+   * hit's diffuse from the screen and evaluates its specular along the reflected ray; 'off' reuses
+   * the screen colour (FFX). See {@link ScreenSpaceHitShading}.
    */
   hitShading?: ScreenSpaceHitShading;
 }
@@ -503,7 +503,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     f[128] = mvs[0]; f[129] = mvs[1];
     f[130] = inputs.roughnessUnpack?.mul ?? 1; f[131] = inputs.roughnessUnpack?.add ?? 0;
     const mode = s.hitShading ?? 'reshade';
-    u[132] = mode === 'reshade' ? 1 : mode === 'trace' ? 2 : 0;
+    u[132] = mode === 'reshade' ? 1 : 0;
     u[133] = inputs.metalness?.channel ?? 0;
     u[134] = inputs.albedo ? 1 : 0;
     u[135] = inputs.clearcoat ? 1 : 0;
