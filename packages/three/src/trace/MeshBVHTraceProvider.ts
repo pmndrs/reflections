@@ -14,7 +14,8 @@
 //               the slot's material into the pad words (albedo rgba8, emissive as 3 halves), the
 //               hook three-mesh-bvh's writeTransformData comment names for this.
 //   index       u32 triangle corners (rebased into the packed attributes)
-//   attributes  the interleaved per-vertex struct; we only read `position` (first vec4f).
+//   attributes  the interleaved per-vertex struct: `position` (first vec4f) and, when packed (the
+//               default of `fromObjects`), `normal` for the interpolated shading normal (D1700).
 //
 // The layout is three-mesh-bvh's internals, not its public API: `LAYOUT` below pins what we read,
 // and the constructor checks it, so a layout change fails loudly instead of tracing garbage.
@@ -45,6 +46,11 @@ export interface MeshBVHComputeDataLike {
 const LAYOUT = { nodeWords: 16, transformWords: 36, stackDepth: 60 } as const;
 
 export interface MeshBVHTraceProviderOptions {
+  /**
+   * Shade hits with the meshes' interpolated vertex normals (`traceHitShadingNormal`, D1700) when
+   * the packed attributes carry `normal` (`fromObjects` packs it unless this is false). Default true.
+   */
+  shadingNormals?: boolean;
   /**
    * The material a mesh contributes to traced-hit shading. Default {@link defaultHitMaterial}:
    * diffuse albedo `color x mean(map) x (1 - metalness)` and `emissive x mean(emissiveMap) x
@@ -110,7 +116,27 @@ export function defaultHitMaterial(mesh: THREE.Mesh): HitMaterial {
   return { albedo, emissive };
 }
 
-const providerWgsl = (slot: BindingSlot, attributeVec4s: number) => /* wgsl */ `
+/** vec4f slot of `normal` in the attribute struct (every member a vec4f), or -1. */
+function normalSlot(data: MeshBVHComputeDataLike): number {
+  const attrs = (data as unknown as { attributes?: Record<string, string> }).attributes;
+  if (!attrs || Object.values(attrs).some((t) => t !== 'vec4f')) return -1;
+  return Object.keys(attrs).indexOf('normal');
+}
+
+const shadingNormalWgsl = (normal: number) => /* wgsl */ `
+// D1700: the vertex normals at the hit triangle's corners (packed attribute ${normal}), weighted by
+// the barycentrics, through the instance's normal matrix (transpose of its inverse).
+fn traceHitShadingNormal(hit: Hit) -> vec3f {
+  let i = vec3u(tmbIndex[hit.triangle * 3u], tmbIndex[hit.triangle * 3u + 1u], tmbIndex[hit.triangle * 3u + 2u]);
+  let w = vec3f(1.0 - hit.barycentrics.x - hit.barycentrics.y, hit.barycentrics);
+  let n = tmbAttributes[i.x * TMB_ATTRIBUTE_VEC4S + ${normal}u].xyz * w.x
+        + tmbAttributes[i.y * TMB_ATTRIBUTE_VEC4S + ${normal}u].xyz * w.y
+        + tmbAttributes[i.z * TMB_ATTRIBUTE_VEC4S + ${normal}u].xyz * w.z;
+  return (transpose(tmbInverseMatrix(hit.instance)) * vec4f(n, 0.0)).xyz;
+}
+`;
+
+const providerWgsl = (slot: BindingSlot, attributeVec4s: number, normal: number) => /* wgsl */ `
 @group(${slot.group}) @binding(${slot.firstBinding}) var<storage, read> tmbNodes: array<u32>;
 @group(${slot.group}) @binding(${slot.firstBinding + 1}) var<storage, read> tmbTransforms: array<vec4f>;
 @group(${slot.group}) @binding(${slot.firstBinding + 2}) var<storage, read> tmbIndex: array<u32>;
@@ -278,6 +304,88 @@ fn tmbRaycastFirstHit(shape: TmbRay, result: ptr<function, TmbResult>) -> bool {
   return didHit;
 }
 
+// getRaycastAnyHitFn.js rayIntersectsBoundsAnyHit: no closest-so-far test.
+fn tmbIntersectsBoundsAny(ray: TmbRay, base: u32, scalar: f32) -> bool {
+  let dist = tmbRayBoundsDistance(ray, base) * scalar;
+  return dist >= 0.0 && (ray.maxDist <= 0.0 || dist < ray.maxDist);
+}
+
+// getRaycastAnyHitFn.js intersectRangeAnyHit: the first triangle within maxDist stops the walk.
+fn tmbIntersectRangeAny(ray: TmbRay, offset: u32, count: u32, scalar: f32) -> bool {
+  for (var ti = offset; ti < offset + count; ti++) {
+    let a = tmbAttributes[tmbIndex[ti * 3u] * TMB_ATTRIBUTE_VEC4S].xyz;
+    let b = tmbAttributes[tmbIndex[ti * 3u + 1u] * TMB_ATTRIBUTE_VEC4S].xyz;
+    let c = tmbAttributes[tmbIndex[ti * 3u + 2u] * TMB_ATTRIBUTE_VEC4S].xyz;
+    var tri: TmbResult;
+    if (tmbIntersectTriangle(ray, a, b, c, &tri) && (ray.maxDist <= 0.0 || tri.dist * scalar < ray.maxDist)) { return true; }
+  }
+  return false;
+}
+
+// getShapecastFn.js with getRaycastAnyHitFn.js's callbacks (bvh_RaycastAnyHit): the same TLAS +
+// BLAS loop and near-first order, returning at the first triangle found (STOP_TRAVERSAL).
+fn tmbRaycastAnyHit(shape: TmbRay) -> bool {
+  var isTLAS = true;
+  var pointer: i32 = 0;
+  var stack: array<u32, ${LAYOUT.stackDepth}>;
+  stack[0] = 0u;
+  var localShape = shape;
+  var scalar = 1.0;
+  var tlasReset: i32 = 0;
+  loop {
+    if (!isTLAS && tlasReset == pointer) {
+      scalar = 1.0;
+      isTLAS = true;
+      localShape = shape;
+    }
+    if (pointer < 0 || pointer >= TMB_STACK_DEPTH) { break; }
+    let nodeIndex = stack[pointer];
+    let base = nodeIndex * TMB_NODE_WORDS;
+    pointer -= 1;
+    let infoX = tmbNodes[base + 13u];
+    let infoY = tmbNodes[base + 12u];
+    if ((infoX & 0xffff0000u) != 0u) {
+      if (isTLAS) {
+        let objectIndex = infoX & 0x00ffffffu;
+        if (tmbExtra(objectIndex).x != 0u) {
+          tlasReset = pointer;
+          isTLAS = false;
+          let toLocal = tmbInverseMatrix(objectIndex);
+          localShape = shape;
+          localShape.origin = (toLocal * vec4f(shape.origin, 1.0)).xyz;
+          let d = (toLocal * vec4f(shape.direction, 0.0)).xyz;
+          let len = length(d);
+          localShape.direction = d / len;
+          scalar = 1.0 / len;
+          pointer += 1;
+          stack[pointer] = infoY;
+        }
+      } else if (tmbIntersectRangeAny(localShape, infoY, infoX & 0x0000ffffu, scalar)) {
+        return true;
+      }
+    } else {
+      let leftIndex = nodeIndex + 1u;
+      let splitAxis = infoX & 0x0000ffffu;
+      let rightIndex = nodeIndex + infoY;
+      let hitLeft = tmbIntersectsBoundsAny(localShape, base, scalar);
+      let hitRight = tmbIntersectsBoundsAny(localShape, base + 6u, scalar);
+      let axisDir = select(select(localShape.direction.z, localShape.direction.y, splitAxis == 1u), localShape.direction.x, splitAxis == 0u);
+      let leftToRight = axisDir >= 0.0;
+      let c1 = select(rightIndex, leftIndex, leftToRight);
+      let c2 = select(leftIndex, rightIndex, leftToRight);
+      let hit1 = select(hitRight, hitLeft, leftToRight);
+      let hit2 = select(hitLeft, hitRight, leftToRight);
+      if (hit2) { pointer += 1; stack[pointer] = c2; }
+      if (hit1) { pointer += 1; stack[pointer] = c1; }
+    }
+  }
+  return false;
+}
+
+fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool {
+  return tmbRaycastAnyHit(TmbRay(origin, dir, tMax));
+}
+
 fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
   var r: TmbResult;
   r.didHit = false;
@@ -291,7 +399,7 @@ fn traceHitMaterial(hit: Hit) -> HitMaterial {
   let w = tmbExtra(hit.material);
   return HitMaterial(unpack4x8unorm(w.y).rgb, vec3f(unpack2x16float(w.z), unpack2x16float(w.w).x));
 }
-`;
+${normal >= 0 ? shadingNormalWgsl(normal) : ''}`;
 
 const toHalf = THREE.DataUtils.toHalfFloat;
 const unorm8 = (x: number) => Math.round(Math.min(1, Math.max(0, x)) * 255);
@@ -308,31 +416,37 @@ const unorm8 = (x: number) => Math.round(Math.min(1, Math.max(0, x)) * 255);
 export class MeshBVHTraceProvider implements TraceProvider {
   readonly name = 'three-mesh-bvh';
   readonly storageBufferCount = 4;
-  readonly capabilities = { hitNormal: true, hitMaterial: true } as const;
+  readonly capabilities: { readonly hitNormal: true; readonly hitMaterial: true; readonly anyHit: true; readonly shadingNormal: boolean };
   readonly entries: readonly ModuleBindingEntry[] = [0, 1, 2, 3].map(() => ({ visibility: 0x4, buffer: { type: 'read-only-storage' as const } }));
   readonly data: MeshBVHComputeDataLike;
   private buffers: GPUBuffer[] = [];
   private attributeVec4s = 1;
+  /** vec4f slot of `normal` in the packed attributes, -1 without shading normals. */
+  private readonly normal: number;
   private _version = 0;
   /** Triangles in the packed index buffer. */
   triangles = 0;
 
   constructor(readonly device: GPUDevice, data: MeshBVHComputeDataLike, private readonly options: MeshBVHTraceProviderOptions = {}) {
     this.data = data;
+    this.normal = options.shadingNormals === false ? -1 : normalSlot(data);
+    this.capabilities = { hitNormal: true, hitMaterial: true, anyHit: true, shadingNormal: this.normal >= 0 };
     this.upload();
   }
 
   /** Build a BVH over `objects` (meshes or groups; only meshes are traced) and wrap it. */
   static async fromObjects(device: GPUDevice, objects: THREE.Object3D | THREE.Object3D[], options: MeshBVHTraceProviderOptions = {}) {
     const { BVHComputeData } = await import('three-mesh-bvh/webgpu');
-    const data = new BVHComputeData(objects as never, { attributes: { position: 'vec4f' } }) as unknown as MeshBVHComputeDataLike;
+    // normals ride along in the interleaved attributes (16 B per vertex) for the shading normal
+    const attributes: Record<string, string> = options.shadingNormals === false ? { position: 'vec4f' } : { position: 'vec4f', normal: 'vec4f' };
+    const data = new BVHComputeData(objects as never, { attributes }) as unknown as MeshBVHComputeDataLike;
     data.update();
     return new MeshBVHTraceProvider(device, data, options);
   }
 
   get version() { return this._version; }
 
-  code(slot: BindingSlot) { return providerWgsl(slot, this.attributeVec4s); }
+  code(slot: BindingSlot) { return providerWgsl(slot, this.attributeVec4s, this.normal); }
 
   resources(): readonly GPUBindingResource[] { return this.buffers.map((buffer) => ({ buffer })); }
 

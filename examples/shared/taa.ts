@@ -1,4 +1,4 @@
-// Temporal anti-aliasing for the example pages (W26): the resolve the FidelityFX SSSR sample and
+// Temporal anti-aliasing for the example pages (W31): the resolve the FidelityFX SSSR sample and
 // the denoiser repo's reflection demo run after the reflections (TRAA there), here as a small pass
 // that fits our frame order (the scene is rasterised by FrameGBuffer before the display pipeline,
 // so three's TRAANode, which jitters the camera from inside a RenderPipeline, can't be used as is).
@@ -18,7 +18,7 @@
 // frames with a clip box that widens as it settles, since the jittered 3x3 box moves with the jitter.
 // Luminance-weighted against flicker (Karis 2014), Catmull-Rom history taps. It runs on the display
 // image (tone-mapped), so it treats residual reflection noise and edge / specular aliasing alike.
-// No closest-depth motion dilation or disocclusion test (TRAANode has both): DIVERGES D2600.
+// No closest-depth motion dilation or disocclusion test (TRAANode has both): DIVERGES D3200.
 import * as THREE from 'three/webgpu';
 import { Fn, float, ivec2, max, mix, texture, uniform, uv, vec2, vec4 } from 'three/tsl';
 

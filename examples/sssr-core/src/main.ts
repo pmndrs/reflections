@@ -382,6 +382,70 @@ async function main() {
     };
   }
 
+  /**
+   * `fallbackRoughness` 'mirror' vs 'surface' (D1806, use with ?env). The reference is the lookup at
+   * the pixel's own roughness along its mirror direction: a dispatch with roughnessThreshold 0 sends
+   * every pixel down the rough path. iblFactor 0 isolates the hit part (confidence x hit), so for any
+   * confidence the expected 'surface' radiance is (1 - c) ref + that. Distances are per channel in
+   * the page's display tone (0-255), over traced floor pixels.
+   */
+  async function fallbackRoughness() {
+    const base = { ...settings, frameIndex: 7, minTraversalOccupancy: 0 };
+    const run = async (s: ScreenSpaceReflectionsSettings) => {
+      const enc = device.createCommandEncoder();
+      main.dispatch(enc, inputs, { ...base, ...s });
+      device.queue.submit([enc.finish()]);
+      const counter = u32(await readBuffer(main.outputs.rayCounter));
+      return {
+        rad: await readTexture(main.outputs.radiance), conf: new Float32Array((await readTexture(main.outputs.confidence)).buffer),
+        rough: new Float32Array((await readTexture(main.outputs.extractedRoughness)).buffer), rays: u32(await readBuffer(main.outputs.rayList), counter[1]),
+      };
+    };
+    const ref = await run({ roughnessThreshold: 0 });
+    const zero = await run({ iblFactor: 0 });
+    const mir = await run({ fallbackRoughness: 'mirror' });
+    const sur = await run({ fallbackRoughness: 'surface' });
+    const mat = await readTexture(material);
+    const traced = new Uint8Array(W * H);
+    for (const r of mir.rays) {
+      const x = r & 32767, y = (r >>> 15) & 16383;
+      traced[y * W + x] = 1;
+      if ((r >>> 29) & 1) traced[y * W + (x ^ 1)] = 1;
+      if ((r >>> 30) & 1) traced[(y ^ 1) * W + x] = 1;
+      if ((r >>> 31) & 1) traced[(y ^ 1) * W + (x ^ 1)] = 1;
+    }
+    const h16 = (b: Uint8Array) => new Uint16Array(b.buffer, b.byteOffset, b.byteLength / 2);
+    const R = h16(ref.rad), Z = h16(zero.rad), M = h16(mir.rad), S = h16(sur.rad);
+    const tone = (c: number) => 255 * Math.pow(Math.max(c, 0) / (1 + Math.max(c, 0)), 1 / 2.2);
+    const groups = { mirror: [] as number[], surface: [] as number[] }, partial = { mirror: [] as number[], surface: [] as number[] };
+    let misses = 0, partials = 0, mirrors = 0, mirrorsDiffer = 0, confident = 0, confidentDiffer = 0;
+    const same = (i: number) => M[i * 4] === S[i * 4] && M[i * 4 + 1] === S[i * 4 + 1] && M[i * 4 + 2] === S[i * 4 + 2] && M[i * 4 + 3] === S[i * 4 + 3];
+    for (let i = 0; i < W * H; i++) {
+      const id = mat[i * 4 + 3];
+      if (!traced[i] || (id !== 1 && id !== 2)) continue;
+      const c = mir.conf[i];
+      if (mir.rough[i] < 0.0001) { mirrors++; if (!same(i)) mirrorsDiffer++; continue; }
+      if (c >= 1) { confident++; if (!same(i)) confidentDiffer++; continue; }
+      const into = c > 0 ? partial : groups;
+      if (c > 0) partials++; else misses++;
+      for (let k = 0; k < 3; k++) {
+        const want = tone((1 - c) * f16(R[i * 4 + k]) + f16(Z[i * 4 + k]));
+        into.mirror.push(Math.abs(tone(f16(M[i * 4 + k])) - want));
+        into.surface.push(Math.abs(tone(f16(S[i * 4 + k])) - want));
+      }
+    }
+    const sum = (a: number[]) => {
+      if (!a.length) return { mean: 0, p99: 0, max: 0 };
+      const s = Float64Array.from(a).sort();
+      return { mean: +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(3), p99: +s[Math.floor(0.99 * (s.length - 1))].toFixed(3), max: +s[s.length - 1].toFixed(3) };
+    };
+    frame();
+    return {
+      misses, partials, mirrors, mirrorsDiffer, confident, confidentDiffer,
+      missMirror: sum(groups.mirror), missSurface: sum(groups.surface), partialMirror: sum(partial.mirror), partialSurface: sum(partial.surface),
+    };
+  }
+
   /** Median GPU ms per pass over n on-demand frames (each submitted and awaited alone). */
   async function time(n = 20) {
     const runs: Record<string, number[]> = {};
@@ -417,12 +481,20 @@ async function main() {
     `rays ${st.rays}, denoiser tiles ${st.tiles}, misses ${st.misses}; mirror-floor hit fraction ${(st.mirrorHitFraction * 100).toFixed(1)}%`);
 
   (window as unknown as { __p: unknown }).__p = {
-    device, main, hasSubgroups, parity, stats, time,
+    device, main, hasSubgroups, parity, stats, time, fallbackRoughness,
     render: (s: ScreenSpaceReflectionsSettings = {}) => { settings = { ...baseSettings, ...s }; frame(); return true; },
     setView: (name: string) => { viewIndex = Math.max(0, VIEWS.indexOf(name)); frame(); return true; },
     setMip: (m: number) => { pyramidMip = m; frame(); return true; },
     shot: async () => { await device.queue.onSubmittedWorkDone(); frame(); await device.queue.onSubmittedWorkDone(); return canvas.toDataURL('image/png'); },
   };
+}
+
+/** f16 bits -> number. */
+function f16(h: number): number {
+  const e = (h >> 10) & 31, m = h & 1023, s = h & 0x8000 ? -1 : 1;
+  if (e === 0) return s * m * 2 ** -24;
+  if (e === 31) return m ? NaN : s * Infinity;
+  return s * (1 + m / 1024) * 2 ** (e - 15);
 }
 
 /** f32 -> f16 bits (round to nearest, no denormals; enough for a test sky). */

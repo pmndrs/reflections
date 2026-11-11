@@ -1,9 +1,12 @@
 // The trace seam and the ray-traced reflection pass (docs/SPEC.md "Trace seam", section 4).
 export {
-  HIT_WGSL, DEFAULT_HIT_MATERIAL_WGSL, fallbackHitShading,
+  HIT_WGSL, DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_TRACE_ANY_WGSL, DEFAULT_SHADING_NORMAL_WGSL, fallbackHitShading,
   type BindingSlot, type ModuleBindingEntry, type TraceProvider, type TraceProviderCapabilities, type HitShading,
 } from './provider';
-export { environmentHitShading, HIT_MAX_DIRECTIONAL, HIT_MAX_HEMISPHERE, type EnvironmentHitShading, type EnvironmentMapping, type HitLights } from './hitShading';
+export {
+  environmentHitShading, probeHitShading, HIT_MAX_DIRECTIONAL, HIT_MAX_HEMISPHERE,
+  type EnvironmentHitShading, type EnvironmentMapping, type HitLights, type ProbeHitShading, type ProbeHitShadingSource, type ProbeHitShadingResources,
+} from './hitShading';
 export {
   createTracedReflections,
   type TracedReflections, type TracedReflectionsOptions, type TracedReflectionsSettings, type TracedReflectionsDispatch, type TracedReflectionsStats,

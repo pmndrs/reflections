@@ -140,6 +140,14 @@ export interface BakeOptions {
   irradiance?: boolean;
 }
 
+/**
+ * Defaults of {@link ReflectionProbes.distanceRoughness} / {@link ReflectionProbes.roughnessLerp} (W26,
+ * D53): distance roughness on (closer to a path-traced reference on every showcase stage and a
+ * narrower SSR-to-probe step on glossy floors); the lerp off (it moved every stage away from the reference).
+ */
+const DEFAULT_DISTANCE_ROUGHNESS = true;
+const DEFAULT_ROUGHNESS_LERP = false;
+
 export type SeamFix = 'warp' | 'none';
 /** How a probe set stores its cubes: a real cube array, or a 2D array of 6 layers per cube. */
 export type ProbeStorage = 'cube-array' | 'cube2d';
@@ -182,6 +190,27 @@ export class ReflectionProbes extends THREE.Object3D {
   capturing = false;
   /** Upper bound of the re-fit ratio frameIrradiance / probeIrradiance (lookups with `frameIrradiance`). */
   refitClamp = 4;
+  private _distanceRoughness = DEFAULT_DISTANCE_ROUGHNESS;
+  private _roughnessLerp = DEFAULT_ROUGHNESS_LERP;
+  /**
+   * Lagarde 2014's distance-based roughness on box-projected probes (not in #35046, D53): a glossy
+   * lookup is sharp where the surface is near the projection box and keeps its roughness from the
+   * capture point's distance on, `r' = mix( clamp( dHit / dCapture * r, 0, r ), r, r )`, as an SSR
+   * hit there would be. Default true. The default of every lookup of this set (`reflectionProbes()`,
+   * `sampleReflectionProbes()`, the hybrid composite), so lit and composite agree; a lookup's own
+   * `distanceRoughness` option overrides it. Changing it rebuilds the set's nodes (an environment
+   * node at once; a composite on its next rebuild). Not in #35046 (set it false for #35046's look).
+   */
+  get distanceRoughness() { return this._distanceRoughness; }
+  set distanceRoughness(v: boolean) { if (v !== this._distanceRoughness) { this._distanceRoughness = v; this.touchUsers(); } }
+  /**
+   * Lagarde 2014's lerp of the box-projected direction back toward the unprojected one by roughness
+   * (Appendix F, D53): rough lookups lose the parallax a centre-convolved probe can't honour. The
+   * set-wide default, like {@link distanceRoughness}. Default false: it narrowed the SSR-to-probe
+   * step on glossy floors but moved every showcase stage away from the path-traced reference (W26).
+   */
+  get roughnessLerp() { return this._roughnessLerp; }
+  set roughnessLerp(v: boolean) { if (v !== this._roughnessLerp) { this._roughnessLerp = v; this.touchUsers(); } }
   /** L1 SH radiance coefficients per slot (3 vec4 rows each, core's table layout), from the last bake; null before. */
   irradiance: GPUBuffer | null = null;
   /** Bumped when `irradiance` is recomputed. */
@@ -212,6 +241,15 @@ export class ReflectionProbes extends THREE.Object3D {
    */
   track(node: THREE.Node) {
     this.users.add(new WeakRef(node));
+  }
+
+  /** Marks every tracked node for rebuild (its cache key changed). */
+  private touchUsers() {
+    for (const ref of this.users) {
+      const node = ref.deref();
+      if (node === undefined) this.users.delete(ref);
+      else node.needsUpdate = true;
+    }
   }
 
   /**
@@ -367,11 +405,7 @@ export class ReflectionProbes extends THREE.Object3D {
     if (layoutChanged) {
       // the cache key of each node changes with the texture and probe count; bump the nodes so the
       // next frame sees it before drawing anything (updateBefore would be one frame late)
-      for (const ref of this.users) {
-        const node = ref.deref();
-        if (node === undefined) this.users.delete(ref);
-        else node.needsUpdate = true;
-      }
+      this.touchUsers();
     }
     // The captures above were lit through the previous array (materials sample it until the bake
     // ends), whose environment slot still holds the old environment: when both changed, capture

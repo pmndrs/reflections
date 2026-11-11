@@ -42,6 +42,9 @@ export interface ProbeSetOptions {
   /** Lookup options (./lookup.ts). */
   dominantDirection?: boolean;
   refit?: boolean;
+  /** Lagarde's distance-based roughness and roughness lerp on box-projected volumes (D53). Default false. */
+  distanceRoughness?: boolean;
+  roughnessLerp?: boolean;
   /** `fn frameIrradiance(P: vec3f, N: vec3f) -> vec3f` for `refit`. */
   frameIrradianceWgsl?: string;
   lodMapping?: ProbeLodMapping;
@@ -129,7 +132,7 @@ export class ProbeSet {
     const o = this.options;
     return probeLookupWgsl({
       layout: this.layout, group, mirrorX: o.mirrorX, dominantDirection: o.dominantDirection,
-      refit: o.refit, frameIrradianceWgsl: o.frameIrradianceWgsl, lodMapping: o.lodMapping,
+      refit: o.refit, distanceRoughness: o.distanceRoughness, roughnessLerp: o.roughnessLerp, frameIrradianceWgsl: o.frameIrradianceWgsl, lodMapping: o.lodMapping,
     });
   }
 

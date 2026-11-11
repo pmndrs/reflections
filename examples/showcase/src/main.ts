@@ -11,7 +11,7 @@
 // "Reflections off" is the composite minus its whole specular image-based term (direct-light
 // highlights stay).
 //
-// Display: temporal anti-aliasing (../../shared/taa.ts, W26) after the composite, as the FFX sample and the
+// Display: temporal anti-aliasing (../../shared/taa.ts, W31) after the composite, as the FFX sample and the
 // denoiser repo's demo run TRAA: without it every edge, normal-mapped highlight and the reflections of them
 // crawl in motion, and the denoised reflections keep a 1-3/255 shimmer at rest. ?taa=0 turns it off.
 //

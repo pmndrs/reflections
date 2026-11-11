@@ -18,12 +18,14 @@
 import * as THREE from 'three/webgpu';
 import { uniform } from 'three/tsl';
 import {
-  createScreenSpaceReflections, createTracedReflections, environmentHitShading, screenSpaceInputsFromFrame,
-  type EnvironmentHitShading, type EnvironmentMapping, type FrameInputs, type HitLights, type ScreenSpaceReflections as CoreTracer,
+  createScreenSpaceReflections, createTracedReflections, screenSpaceInputsFromFrame,
+  type FrameInputs, type HitLights, type ScreenSpaceReflections as CoreTracer,
   type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant, type TraceProvider, type TracedReflections,
   type TracedReflectionsSettings, type TracedReflectionsStats,
 } from '@pmndrs/reflections-core';
 import { FrameGBuffer, getDevice, getGPUTexture, type FrameGBufferOptions } from '../frame/FrameGBuffer';
+import type { ReflectionProbes } from '../probes/ReflectionProbes';
+import { ThreeHitShading, sceneLightingProbes } from '../trace/hitShading';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -60,11 +62,20 @@ export interface ScreenSpaceTraceOptions {
   /** Default: the scene's `environmentIntensity` at `render()` (1 if `trace()` is called directly). */
   environmentIntensity?: number;
   /**
-   * Light traced hits with the scene's visible directional and hemisphere lights too (Lambert, no
-   * shadows; up to 4 + 2), gathered at `render()`. Default true.
+   * Reflection probes the hit shading lights hits with (the lookup at the hit along N at roughness
+   * 1, the environment slot for the rest; D901), instead of the environment's hemisphere mean.
+   * Default: the scene's, when `scene.environmentNode` is `reflectionProbes(probes)` at `render()`
+   * (what three lights the same surfaces with on screen). null: always the environment.
+   */
+  probes?: ReflectionProbes | null;
+  /**
+   * Light traced hits with the scene's visible directional and hemisphere lights too (Lambert; up
+   * to 4 + 2), gathered at `render()`. Directional lights are shadowed by one ray each through the
+   * provider (`settings.hitShadows`, default on; every traced mesh casts, `castShadow` is not read);
+   * hemisphere lights and the environment are not. Default true.
    */
   lights?: boolean;
-  /** Ray budget, length cap, origin offset, on-screen reuse. */
+  /** Ray budget, length cap, origin offset, on-screen reuse, hit shadows. */
   settings?: TracedReflectionsSettings;
 }
 
@@ -133,10 +144,9 @@ export class ScreenSpaceReflectionsPass {
   private readonly options: ScreenSpaceReflectionsPassOptions;
   private core: CoreTracer | null = null;
   private rt: TracedReflections | null = null;
-  private hitShading: EnvironmentHitShading | null = null;
-  private hitGroup: GPUBindGroup | null = null;
-  private hitGroupFor: GPUTexture | null = null;
+  private hitShading: ThreeHitShading | null = null;
   private sceneEnvironment: THREE.Texture | null = null;
+  private sceneProbes: ReflectionProbes | null = null;
   private sceneEnvironmentIntensity = 1;
   private sceneLights: HitLights = {};
   private blackEnvironment: THREE.DataTexture | null = null;
@@ -163,6 +173,8 @@ export class ScreenSpaceReflectionsPass {
   get tracer(): CoreTracer | null { return this.core; }
   /** The core ray-traced pass (null without `trace`, or before the first frame). */
   get traced(): TracedReflections | null { return this.rt; }
+  /** What traced hits are lit with this frame: the probes at the hit (D901) or the environment mean; null before the first traced frame. */
+  get hitShadingSource(): 'probes' | 'environment' | null { return this.rt && this.hitShading ? this.hitShading.kind : null; }
   get device(): GPUDevice { return getDevice(this.renderer); }
   /** 'subgroups' or 'workgroup' once the first frame ran. */
   get variant(): ScreenSpaceVariant | null { return this.core?.variant ?? null; }
@@ -191,6 +203,7 @@ export class ScreenSpaceReflectionsPass {
   render(scene: THREE.Scene, camera: THREE.Camera, opts: { jitter?: readonly [number, number]; projection?: ArrayLike<number> } = {}): FrameInputs {
     this.sceneEnvironment = scene.environment;
     this.sceneEnvironmentIntensity = scene.environmentIntensity ?? 1;
+    this.sceneProbes = sceneLightingProbes(scene);
     if (this.traceOptions && this.traceOptions.lights !== false) this.sceneLights = ScreenSpaceReflectionsPass.gatherLights(scene);
     const frame = this.gbuffer.render(scene, camera, opts);
     this.trace(frame, camera);
@@ -309,39 +322,25 @@ export class ScreenSpaceReflectionsPass {
     return lights;
   }
 
-  private static mappingOf(t: THREE.Texture): EnvironmentMapping {
-    return (t as THREE.CubeTexture).isCubeTexture ? 'cube' : 'equirect';
-  }
-
   private hitShadingGroup(): GPUBindGroup {
-    const gpu = this.gpu(this.environmentTexture());
-    if (!this.hitGroup || this.hitGroupFor !== gpu) {
-      const view = this.hitShading!.mapping === 'cube' ? gpu.createView({ dimension: 'cube' }) : gpu.createView({ dimension: '2d', baseMipLevel: 0, mipLevelCount: 1 });
-      this.hitGroup = this.hitShading!.createBindGroup(view);
-      this.hitGroupFor = gpu;
-    }
-    this.hitShading!.setLighting(this.traceOptions?.environmentIntensity ?? this.sceneEnvironmentIntensity, this.traceOptions?.lights === false ? {} : this.sceneLights);
-    return this.hitGroup;
+    return this.hitShading!.bindGroup(this.traceOptions?.environmentIntensity ?? this.sceneEnvironmentIntensity, this.traceOptions?.lights === false ? {} : this.sceneLights);
   }
 
   private createTraced(w: number, h: number) {
     const trace = this.traceOptions!;
     this.rt = createTracedReflections(this.device, {
-      width: w, height: h, provider: trace.provider, hitShading: this.hitShading!, timestamps: this.options.timestamps ?? false,
+      width: w, height: h, provider: trace.provider, hitShading: this.hitShading!.shading, timestamps: this.options.timestamps ?? false,
     });
   }
 
   private ensure(w: number, h: number, inverted: boolean) {
     const trace = this.traceOptions;
     if (trace) {
-      // the hit shading is compiled into the trace pipeline: a cube <-> equirect switch rebuilds it
-      const mapping = ScreenSpaceReflectionsPass.mappingOf(this.environmentTexture());
-      if (this.hitShading?.mapping !== mapping) {
-        this.rt?.destroy(); this.rt = null;
-        this.hitShading?.destroy();
-        this.hitShading = environmentHitShading(this.device, mapping);
-        this.hitGroup = null; this.hitGroupFor = null;
-      }
+      // the hit shading is compiled into the trace pipeline: a new source (cube / equirect / probe
+      // layout or count) rebuilds it
+      this.hitShading ??= new ThreeHitShading(this.device, (t) => this.gpu(t));
+      const probes = trace.probes !== undefined ? trace.probes : this.sceneProbes;
+      if (this.hitShading.prepare(this.environmentTexture(), probes)) { this.rt?.destroy(); this.rt = null; }
     }
     const c = this.core;
     if (c && c.width === w && c.height === h && c.depthInverted === inverted) {
