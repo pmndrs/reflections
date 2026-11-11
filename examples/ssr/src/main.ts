@@ -503,6 +503,8 @@ async function main() {
       },
       stats: () => stats(),
       blendStats: () => blendStats(),
+      /** W26 (D53): the probe set's seam options, [distanceRoughness, roughnessLerp] (null without probes). */
+      getSeamOptions() { return probes ? [probes.distanceRoughness, probes.roughnessLerp] : null; },
       /** W26 (D53): Lagarde's seam options on the probe set (lit and composite rebuilt together). */
       setSeamOptions(distanceRoughness: boolean, roughnessLerp = distanceRoughness) {
         if (!probes) return false;

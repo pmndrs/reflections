@@ -347,8 +347,8 @@ async function hybridChecks(pages) {
 /**
  * W26 (D53): the SSR-to-probe seam, examples/ssr `seamStats` (8-bit luma step |final - lit| on 8x8
  * blocks of confident glossy hits: the jump the image makes where the hit's weight fades to the
- * probe), with Lagarde's options off and on. The check: glossy mirrorWall (floor r 0.3) with both
- * options on does not widen the seam, and the options reach both the lit image and the composite.
+ * probe), with Lagarde's options off and on. The check: glossy mirrorWall (floor r 0.3), distance
+ * roughness (the default since W26) narrows the step (W26: 15.87 -> 15.21).
  * `--seam` sweeps scenes, poses, floor roughness and each option alone (the D53 numbers).
  */
 const SEAM_MODES = { off: [false, false], dist: [true, false], lerp: [false, true], both: [true, true], 'off again': [false, false] };
@@ -357,6 +357,7 @@ async function seamChecks(p, sweep = args.includes('--seam')) {
     await p.T(`window.__p.load(${JSON.stringify(scene)})`);
     if (pose) await p.T(`window.__p.setPose(${JSON.stringify(pose)})`);
     if (floor !== null) await p.T(`window.__p.setFloorRoughness(${floor})`);
+    const defaults = await p.T('window.__p.getSeamOptions()');
     const out = {};
     for (const m of modes) {
       const [d, l] = SEAM_MODES[m];
@@ -368,14 +369,16 @@ async function seamChecks(p, sweep = args.includes('--seam')) {
         delete out[m].shots;
       }
     }
-    await p.T('window.__p.setSeamOptions(false, false)');
+    await p.T(`window.__p.setSeamOptions(${defaults[0]}, ${defaults[1]})`);
     return out;
   };
   const fmt = (r) => Object.entries(r).map(([m, v]) => `${m} ${v.step.toFixed(2)} (bias ${v.bias.toFixed(2)})`).join(', ');
-  const r = await run('mirrorWall', null, 0.3, ['off', 'both']);
+  // `final - lit` at confident hits is w (hit - the composite's probe term), so a change here also
+  // shows the composite follows the set's option (lit and composite call one lookup, D1501)
+  const r = await run('mirrorWall', null, 0.3, ['off', 'dist']);
   console.log(`  seam mirrorWall floor r 0.3: ${r.off.blocks} blocks, step ${fmt(r)} / 255 luma`);
-  check('hybrid seam (D53): glossy mirrorWall floor, Lagarde options on do not widen the SSR-to-probe step', r.off.blocks > 100 && r.both.blocks > 100 && r.both.step <= r.off.step * 1.05 + 0.1,
-    `step off ${r.off.step.toFixed(2)} -> on ${r.both.step.toFixed(2)} / 255 over ${r.both.blocks} blocks`);
+  check('hybrid seam (D53): glossy mirrorWall floor, distance roughness (the default) narrows the SSR-to-probe step', r.off.blocks > 1000 && r.dist.blocks > 1000 && r.dist.step < r.off.step - 0.2,
+    `step off ${r.off.step.toFixed(2)} -> distanceRoughness ${r.dist.step.toFixed(2)} / 255 over ${r.dist.blocks} blocks (run-to-run <= 0.15)`);
   if (!sweep) return;
   const cases = [
     ['mirrorWall', null, 0.1], ['mirrorWall', null, 0.2], ['mirrorWall', null, 0.3], ['mirrorWall', null, 0.4],
@@ -1180,6 +1183,10 @@ async function main() {
       check('probes baked', info.probes === 3, JSON.stringify(info));
       const ca = await p.T('window.__p.cubeArray');
       check('cube-array support installed and self-tested (W20 shim)', ca.mode === 'shim' || ca.mode === 'native', `${ca.mode}: ${ca.reason}`);
+      // the storage and pre-phase-2 parity checks compare lookups without Lagarde's seam options (the
+      // 'hw' and legacy nodes don't have them; W26 made distanceRoughness the default, D53)
+      const seamDefaults = await p.T('[window.__p.probes.distanceRoughness, window.__p.probes.roughnessLerp]');
+      await p.T('(window.__p.setSeamOptions(false), true)');
       const shots = {};
       for (const lookup of ['warp', 'none', 'hw', 'cube-array', 'auto']) {
         await p.T(`(window.__p.setLookup('${lookup}'), window.__p.capture(), true)`);
@@ -1254,6 +1261,8 @@ async function main() {
         check('a failing self-test uninstalls the shim and reports false; auto falls back', st.ok === false && st.failed.mode === 'none' && st.layout === 'cube2d' && st.again === true && st.relayout === 'cube-array',
           `${st.failed.reason}; then auto ${st.layout}, re-install ${st.again} (${st.relayout})`);
       }
+      await p.T(`(window.__p.setSeamOptions(${seamDefaults[0]}, ${seamDefaults[1]}), true)`);
+      check('seam options default: distanceRoughness on, roughnessLerp off (W26, D53)', seamDefaults[0] === true && seamDefaults[1] === false, JSON.stringify(seamDefaults));
       // W20: the feature checks run on one storage: 'auto' (the cube array through the shim, default) or the 2D array
       const probesLayout = args.includes('--probes-layout') ? args[args.indexOf('--probes-layout') + 1] : 'cube-array';
       if (probesLayout === 'cube2d') await p.T("(async () => { await window.__p.setShim(false); window.__p.setLookup('warp'); return true; })()");
@@ -1357,7 +1366,7 @@ async function main() {
         pages.push(o);
         await o.T(FREEZE);
         await o.T("(window.__p.setLookup('warp'), window.__p.capture(), true)");
-        await p.T('(window.__p.capture(), true)');
+        await p.T('(window.__p.setSeamOptions(false), window.__p.capture(), true)'); // the other build has no seam options (D53)
         const a = await p.T('window.__p.shot()');
         const b = await o.T('window.__p.shot()');
         savePng('probes-compare.png', b);

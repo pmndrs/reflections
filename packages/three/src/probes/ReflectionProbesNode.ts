@@ -25,7 +25,8 @@
 // Extra lookup options (each off by default, see ProbeLookupOptions): the shading `normal` (Lagarde's
 // dominant direction), `ao` (Lagarde's specular occlusion), `frameIrradiance` (the re-fit); and two
 // that default to the set's own setting, so a material and the composite agree: `distanceRoughness`
-// and `roughnessLerp` (Lagarde's SSR-to-probe seam techniques, D53).
+// (on by default) and `roughnessLerp` (off) (Lagarde's SSR-to-probe seam techniques, D53). With
+// distance roughness on, the lookup is no longer #35046's (D2700).
 //
 // The volume table is a storage buffer (one per probe set, shared by its nodes) written with
 // queue.writeBuffer before every render (updateBefore), not a uniform in a per-object group: r186/r187 re-upload per-object uniforms
