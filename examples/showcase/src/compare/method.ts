@@ -123,4 +123,20 @@ export function applySceneParams(kit: ShowcaseScene, params: URLSearchParams) {
   // like-for-like reflections of it; ?bgBlur=0.35 restores the showcase look. Lighting is never affected.
   kit.scene.backgroundBlurriness = Number(params.get('bgBlur') ?? 0);
   if (params.has('bgIntensity')) kit.scene.backgroundIntensity = Number(params.get('bgIntensity'));
+  // ?keyLight=<scale> scales every directional / spot / point light, every method alike (W45: what share of
+  // a reference's brightness is the key light, e.g. its glint in a mirror floor seen in the car's paint)
+  if (params.has('keyLight')) {
+    const s = Number(params.get('keyLight'));
+    kit.scene.traverse((o) => { if ((o as THREE.Light).isLight && !(o as THREE.Light & { isAmbientLight?: boolean }).isAmbientLight) (o as THREE.Light).intensity *= s; });
+  }
+  // ?paintRoughness=<r> sets every clear-coated material's roughness and drops its normal map (W45: what a paint lobe sees)
+  if (params.has('paintRoughness')) {
+    const r = Number(params.get('paintRoughness'));
+    kit.scene.traverse((o) => {
+      for (const m of ([] as THREE.Material[]).concat((o as THREE.Mesh).material ?? [])) {
+        const p = m as THREE.MeshPhysicalMaterial;
+        if (p.clearcoat > 0) { p.roughness = r; p.roughnessMap = null; p.normalMap = null; p.needsUpdate = true; }
+      }
+    });
+  }
 }

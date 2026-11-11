@@ -54,6 +54,8 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   // W44 (D3540): ?reshade=reshade|off (default the package's 'reshade')
   const reshade = (params.get('reshade') ?? 'reshade') as 'reshade' | 'off';
   ssr.settings.hitShading = reshade;
+  // W45 (D3550): ?lobeFilter=<k> filtered importance sampling at hits (default: the package's)
+  if (params.has('lobeFilter')) ssr.settings.hitLobeFilter = Number(params.get('lobeFilter'));
   const motionScale = Number(params.get('motionScale') ?? 1);
 
   // probes, as the showcase bakes them

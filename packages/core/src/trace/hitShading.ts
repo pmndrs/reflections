@@ -94,9 +94,9 @@ fn hitShadeLobe(s: HitSpecular, P: vec3f, N: vec3f, dir: vec3f, emissive: vec3f,
   // lobes leak around the blocker, so the occlusion fades out from roughness 0.3 to 1.
   var vis = 1.0;
   if (!traceLightVisible(P, N, R, HIT_SHADOW_RAY_LENGTH)) { vis = smoothstep(0.3, 1.0, s.roughness); }
-  let envBase = hitSpecularRadiance(P, R, s.roughness) * vis;
+  let envBase = hitSpecularRadiance(P, R, hitLookupRoughness(s.roughness)) * vis;
   var envCoat = envBase;
-  if (s.clearcoat > 0.0 && abs(s.clearcoatRoughness - s.roughness) > 0.02) { envCoat = hitSpecularRadiance(P, R, s.clearcoatRoughness) * select(smoothstep(0.3, 1.0, s.clearcoatRoughness), 1.0, vis >= 1.0); }
+  if (s.clearcoat > 0.0 && abs(s.clearcoatRoughness - s.roughness) > 0.02) { envCoat = hitSpecularRadiance(P, R, hitLookupRoughness(s.clearcoatRoughness)) * select(smoothstep(0.3, 1.0, s.clearcoatRoughness), 1.0, vis >= 1.0); }
   return emissive + hitLayered(s, diffuse, envBase, envCoat, NdotV);
 }
 `;

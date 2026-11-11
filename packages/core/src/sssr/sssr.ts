@@ -21,7 +21,7 @@ import {
 } from './shaders';
 import { PassTimer } from './timer';
 import type { FrameInputs } from '../frame/contract';
-import { DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, HIT_WGSL, type HitShading } from '../trace/provider';
+import { DEFAULT_HIT_LOBE_FILTER, DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, HIT_WGSL, type HitShading } from '../trace/provider';
 import { shadeLobeWgslFor } from '../trace/hitShading';
 
 export type ScreenSpaceVariant = Variant;
@@ -199,6 +199,15 @@ export interface ScreenSpaceReflectionsSettings {
    * the screen colour (FFX). See {@link ScreenSpaceHitShading}.
    */
   hitShading?: ScreenSpaceHitShading;
+  /**
+   * Filtered importance sampling at re-shaded hits (W45, D3550; Colbert & Krivanek 2007). One ray
+   * sampled from a glossy pixel's lobe stands for the lobe's whole cone, so the hit's specular lobe
+   * looks its radiance up wider: alpha^2 + (hitLobeFilter x the pixel's alpha)^2. The mean stays,
+   * the variance goes: a softbox seen sharply through a mirror floor by one ray in fifty no longer
+   * reaches the denoiser as a firefly it clips (carConcept's skirt lost 39-46 % of its reflection
+   * that way). Default {@link DEFAULT_HIT_LOBE_FILTER}; 0 = the hit's own roughness (W44).
+   */
+  hitLobeFilter?: number;
 }
 
 export interface ScreenSpaceCamera {
@@ -507,6 +516,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[133] = inputs.metalness?.channel ?? 0;
     u[134] = inputs.albedo ? 1 : 0;
     u[135] = inputs.clearcoat ? 1 : 0;
+    f[136] = Math.max(0, s.hitLobeFilter ?? DEFAULT_HIT_LOBE_FILTER);
     device.queue.writeBuffer(params, 0, data);
   }
 

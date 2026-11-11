@@ -65,6 +65,7 @@ struct RtParams {
   fallbackRoughnessSurface: u32,
   hitSpecular: u32,
   reshadeOnScreen: u32,
+  hitLobeFilter: f32,
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
@@ -312,6 +313,8 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
   }
   var L = vec3f(0.0);
   var source = ${RT_SOURCE.tracedHit}u;
+  let spread = P.hitLobeFilter * alpha; // D3550: the ray stands for its lobe
+  hitLobeSpread = spread * spread;
   if (P.reuseOnScreen != 0u && onScreenRadiance(hitP, hitN, &L)) {
     source = ${RT_SOURCE.onScreenHit}u;
     atomicAdd(&state[${RT_STATE.onScreen}], 1u);

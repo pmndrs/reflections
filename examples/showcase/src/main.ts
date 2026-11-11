@@ -25,9 +25,10 @@
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
 import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';
+import * as TSL from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, installCubeArraySupport, reflectionProbes,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, installCubeArraySupport, reflectionProbes, sampleReflectionProbes,
 } from '@pmndrs/reflections/three';
 import { availableAssets } from '../../shared';
 import { createReflectionDenoiser, denoiserAvailable } from '../../shared/denoiser';
@@ -532,6 +533,8 @@ async function main() {
     __p: {
       THREE, renderer, ssr, gpuErrors,
       get kit() { return kit; }, get entry() { return entry; },
+      /** The display composite's nodes (W45: linear readbacks of its terms in measurement scripts). */
+      get composite() { return composite; }, hybrid, get probes() { return probes; }, TSL, sampleReflectionProbes,
       entries: () => entries.map((e) => e.id),
       load: (id: string) => load(id),
       poses: () => Object.keys(kit!.views),

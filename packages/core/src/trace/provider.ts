@@ -107,6 +107,12 @@ export interface TraceProvider {
  * - `normal`: world geometric normal if `capabilities.hitNormal`, else vec3f(0).
  * - `frontFace`: the ray hit the side the mesh was authored as front.
  */
+/**
+ * Default `hitLobeFilter` of the SSSR re-shade and the traced pass (W45, D3550): the hit lobe's radiance
+ * lookup is widened by this many times the reflecting pixel's alpha (0 = the hit's own roughness).
+ */
+export const DEFAULT_HIT_LOBE_FILTER = 1;
+
 export const HIT_WGSL = /* wgsl */ `
 struct Hit {
   t: f32,
@@ -152,6 +158,18 @@ fn hitLayered(s: HitSpecular, diffuse: vec3f, envBase: vec3f, envCoat: vec3f, Nd
   let fcc = 0.04 + 0.96 * pow(1.0 - NdotV, 5.0);
   let coat = envCoat * hitEnvBRDF(vec3f(0.04), s.clearcoatRoughness, NdotV);
   return base * (1.0 - s.clearcoat * fcc) + s.clearcoat * coat;
+}
+
+// Filtered importance sampling at a hit (W45, D3550; Colbert & Krivanek 2007, Stachowiak 2015's
+// pre-convolved hit colour): a ray sampled from a glossy pixel's lobe stands for that lobe's whole
+// cone, so the hit's own lobe looks its radiance up wider by the ray's spread: alpha^2 + spread,
+// spread = (k x the reflecting pixel's alpha)^2, set by the pass before it shades (0: as sampled).
+// The mean is unchanged (a prefilter is a convolution); what goes is the rare very bright sample
+// (a softbox seen sharply through a mirror floor) that the denoiser clips as a firefly.
+var<private> hitLobeSpread: f32 = 0.0;
+fn hitLookupRoughness(roughness: f32) -> f32 {
+  let a = roughness * roughness;
+  return min(1.0, sqrt(sqrt(a * a + hitLobeSpread)));
 }
 `;
 
@@ -219,8 +237,8 @@ fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f {
   if (!rtHitSpecularOn() || (max(s.color.x, max(s.color.y, s.color.z)) <= 0.0 && s.clearcoat <= 0.0)) { return m.emissive + diffuse; }
   let R = reflect(dir, N);
   let NdotV = clamp(dot(N, -dir), 1e-4, 1.0);
-  let envBase = sampleRadianceFallback(P, R, s.roughness);
-  let envCoat = select(envBase, sampleRadianceFallback(P, R, s.clearcoatRoughness), s.clearcoat > 0.0);
+  let envBase = sampleRadianceFallback(P, R, hitLookupRoughness(s.roughness));
+  let envCoat = select(envBase, sampleRadianceFallback(P, R, hitLookupRoughness(s.clearcoatRoughness)), s.clearcoat > 0.0);
   return m.emissive + hitLayered(s, diffuse, envBase, envCoat, NdotV);
 }
 `,

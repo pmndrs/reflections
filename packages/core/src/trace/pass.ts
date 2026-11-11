@@ -12,7 +12,7 @@
 import { constantRadianceFallback, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs } from '../sssr/sssr';
 import { mat4Invert, mat4Mul } from '../sssr/math';
 import { PassTimer } from '../sssr/timer';
-import { DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, DEFAULT_SHADING_NORMAL_WGSL, DEFAULT_TRACE_ANY_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
+import { DEFAULT_HIT_LOBE_FILTER, DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, DEFAULT_SHADING_NORMAL_WGSL, DEFAULT_TRACE_ANY_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
 import { RT_BEGIN_WGSL, RT_PARAMS_SIZE, RT_STATE, RT_STATE_HEADER, rtTraceWgsl } from './shaders';
 
 export interface TracedReflectionsOptions {
@@ -78,6 +78,12 @@ export interface TracedReflectionsSettings {
    * (`hitShadeSurface`, without the visibility ray, D3542), not the screen colour as is. Default 'reshade'.
    */
   hitShading?: 'reshade' | 'off';
+  /**
+   * Filtered importance sampling at hits (W45, D3550), as the SSSR tracer's `hitLobeFilter` (pass the
+   * tracer's): a hit's specular radiance is looked up wider by this many times the reflecting pixel's
+   * alpha. Default {@link DEFAULT_HIT_LOBE_FILTER}; 0 = the hit's own roughness.
+   */
+  hitLobeFilter?: number;
   /** Relative view-distance tolerance for that test. Default 0.02. */
   onScreenDepthTolerance?: number;
   /** The fallback's `P.iblFactor`. Default 1. */
@@ -276,6 +282,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     u[59] = (s.fallbackRoughness ?? 'surface') === 'surface' ? 1 : 0;
     u[60] = s.hitSpecular ?? true ? 1 : 0;
     u[61] = (s.hitShading ?? 'reshade') === 'off' ? 0 : 1;
+    f[62] = Math.max(0, s.hitLobeFilter ?? DEFAULT_HIT_LOBE_FILTER);
     device.queue.writeBuffer(params, 0, data);
   }
 

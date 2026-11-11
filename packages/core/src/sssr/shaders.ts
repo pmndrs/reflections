@@ -53,7 +53,7 @@
 //   direction is `fallbackRoughness: 'mirror'` (D1806).
 
 /** Byte size of the uniform block (struct Params below). */
-export const PARAMS_SIZE = 544;
+export const PARAMS_SIZE = 560;
 
 export const PARAMS_WGSL = /* wgsl */ `
 struct Params {
@@ -97,6 +97,7 @@ struct Params {
   metalnessChannel: u32,
   hasHitMaterial: u32,
   hasClearcoat: u32,
+  hitLobeFilter: f32,
 };
 @group(0) @binding(0) var<uniform> P: Params;
 `;
@@ -722,6 +723,8 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
   if (confidence > 0.0) {
     if (P.hitShadingMode == HIT_SHADING_RESHADE) {
+      let spread = P.hitLobeFilter * (*r).roughness; // D3550: the ray stands for its lobe
+      hitLobeSpread = spread * spread;
       hit_radiance = reshadeHit(hit.xy, world_space_hit, normalize(world_space_reflected_direction));
     } else {
       hit_radiance = loadHitColor(hit.xy);
