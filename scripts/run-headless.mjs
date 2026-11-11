@@ -6,11 +6,13 @@
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare)
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p: core on the 2D array (warp), core on the cube array, the pre-phase-2 TSL node
+//   pnpm check -- --only seam        # W26 / D53: the SSR-to-probe seam sweep (Lagarde's options off / on), JSON to out/seam.json (SEAM_SHOTS=1: images)
 //   pnpm check -- --only probes --probes-layout cube2d   # run the probe feature checks on the 2D array (default: 'auto', a cube array through the shim)
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
 //   pnpm check -- --only ssr-bench --ssr-bench   # the phase 3 gate bench: ours vs three's SSRNode (minutes); JSON to out/ssr-bench.json
 //                                    # (--ssr-scenes rooms,mirrorWall to narrow it)
+//   pnpm check -- --only ssr-rt --rt-shadow-timing   # D903: GPU ms of hit shadow rays, kit scenes, 960x540 + 1080p (also ssr-rt-bvh)
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
 import { spawn } from 'node:child_process';
@@ -202,6 +204,16 @@ async function sssrCoreChecks(pages) {
   check('sssr cube-environment fallback: same rays and hits', se.rays === st.rays && Math.abs(se.mirrorHitFraction - st.mirrorHitFraction) < 1e-3,
     `rays ${se.rays}, hit ${(se.mirrorHitFraction * 100).toFixed(1)}%`);
   savePng('sssr-core-env.png', await env.T('window.__p.shot()'));
+  // fallbackRoughness (D1806): 'surface' takes misses' fallback at the pixel's roughness (the rough-path
+  // lookup), 'mirror' is FFX's roughness 0. Mirrors and confidence-1 pixels must not change.
+  const fr = await env.T('window.__p.fallbackRoughness()');
+  console.log('  fallbackRoughness', JSON.stringify(fr));
+  check("sssr fallbackRoughness 'surface': glossy misses at the probe lookup of their own roughness",
+    fr.misses > 1000 && fr.missSurface.p99 < 1 && fr.missMirror.mean > fr.missSurface.mean && fr.partialSurface.p99 < 1,
+    `misses ${fr.misses}: |radiance - lookup(r)| mean / p99 (/255) mirror ${fr.missMirror.mean} / ${fr.missMirror.p99}, surface ${fr.missSurface.mean} / ${fr.missSurface.p99}; ` +
+    `partial confidence ${fr.partials}: mirror ${fr.partialMirror.mean} / ${fr.partialMirror.p99}, surface ${fr.partialSurface.mean} / ${fr.partialSurface.p99}`);
+  check("sssr fallbackRoughness 'surface': mirrors and confidence-1 pixels unchanged", fr.mirrors > 1000 && fr.mirrorsDiffer === 0 && fr.confidentDiffer === 0,
+    `${fr.mirrorsDiffer} of ${fr.mirrors} mirror px, ${fr.confidentDiffer} of ${fr.confident} confidence-1 px differ`);
   // 4K, every surface a mirror: more than 65535 x 64 rays, so the intersect args must be 2-D
   // (D601). A 1-D dispatch over the limit is skipped without a validation error: radiance stays 0.
   const uhd = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?w=3840&h=2160&allmirror`);
@@ -338,6 +350,58 @@ async function hybridChecks(pages) {
   const b = blend.true, f = blend.false;
   check('hybrid mirrorWall lowSphere: the probe does not show through the reflected sphere', b.sphere.px > 5000 && b.sphereProbe < 0.02 && b.behindSSR < 0.2,
     `${b.sphere.px} px reflect the sphere: probe weight ${b.sphereProbe.toFixed(3)} (FFX blend ${f.sphereProbe.toFixed(3)}); ${b.behind.px} px reflect the wall behind it: hit weight ${b.behindSSR.toFixed(3)} (FFX ${f.behindSSR.toFixed(3)})`);
+  await p.T('window.__p.setDepthAware(true)');
+  await seamChecks(p);
+}
+
+/**
+ * W26 (D53): the SSR-to-probe seam, examples/ssr `seamStats` (8-bit luma step |final - lit| on 8x8
+ * blocks of confident glossy hits: the jump the image makes where the hit's weight fades to the
+ * probe), with Lagarde's options off and on. The check: glossy mirrorWall (floor r 0.3), distance
+ * roughness (the default since W26) narrows the step (W26: 15.87 -> 15.21).
+ * `--seam` sweeps scenes, poses, floor roughness and each option alone (the D53 numbers).
+ */
+const SEAM_MODES = { off: [false, false], dist: [true, false], lerp: [false, true], both: [true, true], 'off again': [false, false] };
+async function seamChecks(p, sweep = args.includes('--seam')) {
+  const run = async (scene, pose, floor, modes) => {
+    await p.T(`window.__p.load(${JSON.stringify(scene)})`);
+    if (pose) await p.T(`window.__p.setPose(${JSON.stringify(pose)})`);
+    if (floor !== null) await p.T(`window.__p.setFloorRoughness(${floor})`);
+    const defaults = await p.T('window.__p.getSeamOptions()');
+    const out = {};
+    for (const m of modes) {
+      const [d, l] = SEAM_MODES[m];
+      await p.T(`window.__p.setSeamOptions(${d}, ${l})`);
+      out[m] = await p.T(`window.__p.seamStats({ rmin: 0.05, rmax: 0.45, shots: ${!!process.env.SEAM_SHOTS} })`);
+      if (out[m].shots) {
+        const tag = `seam-${scene}${pose ? '-' + pose : ''}${floor !== null ? '-r' + floor : ''}-${m.replace(' ', '-')}`;
+        savePng(`${tag}-final.png`, out[m].shots.final); savePng(`${tag}-lit.png`, out[m].shots.lit);
+        delete out[m].shots;
+      }
+    }
+    await p.T(`window.__p.setSeamOptions(${defaults[0]}, ${defaults[1]})`);
+    return out;
+  };
+  const fmt = (r) => Object.entries(r).map(([m, v]) => `${m} ${v.step.toFixed(2)} (bias ${v.bias.toFixed(2)})`).join(', ');
+  // `final - lit` at confident hits is w (hit - the composite's probe term), so a change here also
+  // shows the composite follows the set's option (lit and composite call one lookup, D1501)
+  const r = await run('mirrorWall', null, 0.3, ['off', 'dist']);
+  console.log(`  seam mirrorWall floor r 0.3: ${r.off.blocks} blocks, step ${fmt(r)} / 255 luma`);
+  check('hybrid seam (D53): glossy mirrorWall floor, distance roughness (the default) narrows the SSR-to-probe step', r.off.blocks > 1000 && r.dist.blocks > 1000 && r.dist.step < r.off.step - 0.2,
+    `step off ${r.off.step.toFixed(2)} -> distanceRoughness ${r.dist.step.toFixed(2)} / 255 over ${r.dist.blocks} blocks (run-to-run <= 0.15)`);
+  if (!sweep) return;
+  const cases = [
+    ['mirrorWall', null, 0.1], ['mirrorWall', null, 0.2], ['mirrorWall', null, 0.3], ['mirrorWall', null, 0.4],
+    ['mirrorWall', 'low', 0.2], ['contact', null, 0.2], ['contact', 'low', 0.3], ['roughnessRamp', 'strips', null], ['boxRoom', null, 0.25],
+  ];
+  const all = [];
+  for (const [scene, pose, floor] of cases) {
+    const res = await run(scene, pose, floor, Object.keys(SEAM_MODES));
+    all.push({ scene, pose, floor, res });
+    console.log(`  seam ${scene}${pose ? ' ' + pose : ''}${floor !== null ? ` floor r ${floor}` : ''}: ${res.off.blocks} blocks; ${fmt(res)}`);
+  }
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, 'seam.json'), JSON.stringify(all, null, 1));
 }
 
 /**
@@ -546,6 +610,34 @@ function f2Checks(r) {
       `wrong size: ${rh.wrongSize.threw ?? 'no error'}${rh.wrongSize.validationError ? ` (validation: ${rh.wrongSize.validationError.slice(0, 80)})` : ''}; missing: ${rh.missing.threw ?? 'no error'}`);
     check('rtHistory: no WebGPU errors', rh.gpuErrors.length === 0, rh.gpuErrors.slice(0, 2).join(' | '));
   }
+  // W27 (D603): the composite's specular swap vs three's own term (examples/regressions/src/swap.ts)
+  const sw = section('specularSwap');
+  if (sw) {
+    const fmt = (m) => `blend ${m.blend.mean}/${m.blend.p99}/${m.blend.max} (lin ${m.blend.meanLinear} of T ${m.blend.meanT}), full ${m.full.mean}/${m.full.p99}/${m.full.max}`;
+    const R = sw.results;
+    const c0 = Object.values(R).flatMap((v) => Object.values(v).map((m) => m.c0Max));
+    check('specular swap: confidence 0 gives lit exactly (every term)', sw.litMismatch < 20 && c0.every((x) => x === 0), `max |final - lit| ${Math.max(...c0)}, mask mismatch ${sw.litMismatch} px`);
+    for (const term of Object.keys(R.gbuffer)) {
+      const g = R.gbuffer[term], e = R.estimate?.[term], mr = R.materialRoughness?.[term];
+      // 8-bit sRGB, mean / p99 / max over the sphere: the halo where SSR blends in (c = 0.5, black hit)
+      check(`specular swap: ${term} halo (c 0.5) mean < 0.15, p99 < 1 /255`, g.blend.mean < 0.15 && g.blend.p99 < 1,
+        `${sw.specularTarget ? 'G-buffer' : 'estimate (no specular target)'}: ${fmt(g)}${mr ? `; material roughness: ${fmt(mr)}` : ''}${e ? `; estimate: ${fmt(e)}` : ''}`);
+    }
+    check('specularSwap: no WebGPU errors', sw.gpuErrors.length === 0, sw.gpuErrors.slice(0, 2).join(' | '));
+  }
+  const sa = section('specularSwapAssets');
+  if (sa) {
+    const fmt = (m) => `${m.blend.mean}/${m.blend.p99}/${m.blend.max} (${m.blend.px} px)`;
+    for (const [id, s] of Object.entries(sa)) {
+      if (id === 'gpuErrors') continue;
+      if (s.skipped) { console.log(`  specular swap ${id}: skipped (${s.skipped})`); continue; }
+      const g = s.results.gbuffer, e = s.results.estimate;
+      const parts = ['inScope', 'specularOrIor', 'aoMap', 'outOfScope', 'all'].map((k) => `${k} ${fmt(g[k])}${e ? ` [estimate ${fmt(e[k])}]` : ''}`);
+      check(`specular swap ${id}: confidence 0 gives lit exactly; in-scope halo (c 0.5) mean < 0.25 /255`, g.all.c0Max === 0 && g.inScope.blend.mean < 0.25,
+        `census ${JSON.stringify(s.census)}; blend mean/p99/max: ${parts.join('; ')}`);
+    }
+    check('specularSwapAssets: no WebGPU errors', sa.gpuErrors.length === 0, sa.gpuErrors.slice(0, 2).join(' | '));
+  }
   const rs = section('rtStats');
   if (rs) {
     check('rt readStats() reports the last dispatched frame while an earlier read is pending',
@@ -604,6 +696,69 @@ async function regressionChecks(pages) {
  *  - GPU ms of the trace pass grows with the miss count (same frame, miss threshold varied);
  *  - traced rays never exceed the per-tile cap or the frame budget.
  */
+/** D903: the provider's any-hit walk (`traceAny`) agrees with its own first-hit walk, camera + scene rays. */
+async function rtAnyHitChecks(p, label) {
+  for (const kind of ['camera', 'scene']) {
+    const a = await p.T(`window.__p.rtAnyHitOracle(4096, '${kind}')`);
+    check(`rt ${label}: traceAny agrees with traceFirstHit, ${kind} rays`,
+      a.agree === a.rays && a.nearOk >= a.positive * 0.999 && a.farOk >= a.positive * 0.999,
+      `hit/miss ${a.agree}/${a.rays} (${a.hits} hits); nothing before 0.5 t ${a.nearOk}/${a.positive}, something before 1.5 t ${a.farOk}/${a.positive}`);
+  }
+}
+
+/**
+ * D903: hit shading vs the on-screen colour of the same hits, shadow rays off and on (one
+ * reference frame, both shadings on the same rays). A shadow ray can only darken a hit.
+ */
+async function rtHitShadingLines(p, id) {
+  const fmt = (hs) => `mean ${hs.meanShaded.toFixed(3)} vs ${hs.meanScreen.toFixed(3)} (ratio ${hs.ratio.toFixed(3)}), mean abs rel ${hs.meanAbsRel.toFixed(3)}`;
+  // off, on, off again: the second 'off' is the frame-to-frame noise of this per-pixel comparison
+  // (not zero with reuse off on 'contact'); information, the check is on the shaded hits below
+  const hs = await p.T('window.__p.hitShadingError({}, [{ hitShadows: false }, { hitShadows: true }, { hitShadows: false }])');
+  const [off, on, again] = hs.variants;
+  console.log(`  rt ${id}: hit shading vs on-screen colour over ${on.pixels} traced hits the camera sees: shadows off ${fmt(off)}; on ${fmt(on)}; `
+    + `> 1% darker with shadows ${(on.darker * 100).toFixed(1)}% (off vs off ${(again.darker * 100).toFixed(1)}%), brighter ${(on.brighter * 100).toFixed(2)}% (off vs off ${(again.brighter * 100).toFixed(2)}%)`);
+  // the hits the hit shading shades this frame (reuse on): deterministic, a shadow ray can only darken
+  const fx = await p.T('window.__p.rtShadowEffect()');
+  check(`rt ${id}: shadow rays only darken shaded hits (D903)`, fx.on.pixels > 0 && fx.noise.darker + fx.noise.brighter < 0.001 && fx.on.brighter < 0.001 && fx.on.mean <= fx.on.meanOff + 1e-6,
+    `${fx.on.pixels} shaded hits: ${(fx.on.darker * 100).toFixed(1)}% > 1% darker, ${(fx.on.brighter * 100).toFixed(2)}% brighter (same rays twice without shadows: ${(fx.noise.darker * 100).toFixed(2)}% / ${(fx.noise.brighter * 100).toFixed(2)}%); mean ${fx.on.meanOff.toFixed(3)} -> ${fx.on.mean.toFixed(3)}`);
+  return { on, off, fx };
+}
+
+/**
+ * D903: GPU ms of the trace pass with shadow rays on vs off, per kit scene, at 960x540 and 1080p
+ * (loop stopped, median of 20 frames, alternating off / on twice and averaging). With on-screen
+ * reuse (default) only off-screen hits are shaded; 'all shaded' turns reuse off (every hit sends one).
+ * Opt-in (`--rt-shadow-timing`): ~2 minutes per provider.
+ */
+async function rtShadowTiming(label, bvhParam) {
+  const scenes = [['offscreen', 'mirror'], ['mirrorWall', ''], ['contact', ''], ['moving', '']];
+  const url = (w, h, scene, pose) => `http://127.0.0.1:${PORT}/ssr/?manual&timing&w=${w}&h=${h}&rt=1${bvhParam}&scene=${scene}${pose ? `&pose=${pose}` : ''}`;
+  const page = await openPage(url(960, 540, ...scenes[0]));
+  for (const [w, h] of [[960, 540], [1920, 1080]]) {
+    const parts = [];
+    for (const [scene, pose] of scenes) {
+      if (!(w === 960 && scene === scenes[0][0])) await page.navigate(url(w, h, scene, pose));
+      const row = [];
+      for (const reuse of [true, false]) {
+        const ms = { on: [], off: [] };
+        for (const shadows of [false, true, false, true]) {
+          await page.T(`window.__p.setTraceSettings({ hitShadows: ${shadows}, reuseOnScreenHits: ${reuse} })`);
+          const t = await page.T('window.__p.time(20)');
+          ms[shadows ? 'on' : 'off'].push(t.ms['rt trace'] ?? NaN);
+        }
+        await page.T('window.__p.step(1)');
+        const st = await page.T('window.__p.traceStats()');
+        const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+        row.push(`${reuse ? 'reuse' : 'all shaded'} ${(st.hits - st.onScreenHits)} shaded hits: ${mean(ms.off).toFixed(3)} -> ${mean(ms.on).toFixed(3)} ms (+${(mean(ms.on) - mean(ms.off)).toFixed(3)})`);
+      }
+      parts.push(`${scene}: ${row.join(', ')}`);
+    }
+    console.log(`  rt ${label} shadow rays, GPU ms of 'rt trace' at ${w}x${h} (off -> on, median of 20, loop stopped): ${parts.join('; ')}`);
+  }
+  page.close();
+}
+
 async function ssrRtChecks(pages) {
   console.log('examples/ssr (?rt=1):');
   const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1`);
@@ -614,6 +769,7 @@ async function ssrRtChecks(pages) {
   const oracle = await p.T('window.__p.rtOracle(4096)');
   check('rt provider (three-mesh-bvh port) agrees with THREE.Raycaster', oracle.agree / oracle.rays > 0.995 && oracle.gpuOnly + oracle.cpuOnly <= oracle.rays * 0.003,
     `${oracle.agree}/${oracle.rays} agree (${oracle.bothMiss} both miss), gpu-only ${oracle.gpuOnly}, cpu-only ${oracle.cpuOnly}, p99 rel ${oracle.p99Rel.toExponential(1)}, max rel ${oracle.maxRel.toExponential(1)}; BVH ${bvh.meshes} meshes, ${bvh.triangles} tris, ${bvh.buildMs.toFixed(0)} ms`);
+  await rtAnyHitChecks(p, 'three-mesh-bvh port');
   await p.T("window.__p.setPose('mirror')");
   await p.T('window.__p.setRT(false)');
   await p.T('window.__p.step(2)');
@@ -655,9 +811,9 @@ async function ssrRtChecks(pages) {
     const e = results.logs.slice(b).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
     const extra = id === 'mirrorWall' ? `; wall: ${(st.wall.confidentFraction * 100).toFixed(1)}% confident, corr ${st.wall.lumCorrelation.toFixed(3)}` : '';
     check(`rt ${id}: renders, finite, no validation errors`, e.length === 0 && st.nonFinite === 0, e.length ? e.slice(0, 2).join(' | ') : `${st.misses} misses -> ${JSON.stringify(st.rt)}${extra}`);
-    const hs = await p.T('window.__p.hitShadingError()');
-    console.log(`  rt ${id}: hit shading vs on-screen colour over ${hs.pixels} traced hits the camera sees: mean ${hs.meanShaded.toFixed(3)} vs ${hs.meanScreen.toFixed(3)} (ratio ${hs.ratio.toFixed(3)}), mean abs rel ${hs.meanAbsRel.toFixed(3)}`);
+    await rtHitShadingLines(p, id);
   }
+  if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '');
 
   // GPU ms vs miss count at 1080p: the same frame, misses varied with the miss-list threshold
   const big = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1&scene=offscreen&pose=mirror`);
@@ -704,6 +860,7 @@ async function ssrRtBvhChecks(pages) {
         `${fmtOracle(o)}; BVH ${bvh.meshes} meshes, ${bvh.triangles} tris, ${bvh.buildMs.toFixed(0)} ms${bvh.fallbackReason ? ` (${bvh.fallbackReason})` : ''}`);
     }
     if (builder !== 'auto') continue;
+    await rtAnyHitChecks(p, `@pmndrs/bvh (${bvh.builder})`);
     await p.T("window.__p.setPose('mirror')");
     await p.T('window.__p.setRT(false)');
     await p.T('window.__p.step(2)');
@@ -748,8 +905,11 @@ async function ssrRtBvhChecks(pages) {
           e.length === 0 && c.agree / c.rays > 0.995 && c.pmndrsOnly + c.tmbOnly <= c.rays * 0.003 && c.normal >= c.compared * 0.995,
           e.length ? e.slice(0, 2).join(' | ') : detail);
       }
+      // D903: the same hit-shading measurement as the ssr-rt section, on this provider
+      if (['mirrorWall', 'contact', 'moving'].includes(id)) { await p.T('window.__p.step(2)'); await rtHitShadingLines(p, `${id} (@pmndrs/bvh)`); }
     }
   }
+  if (args.includes('--rt-shadow-timing')) await rtShadowTiming('@pmndrs/bvh', '&bvh=pmndrs');
 
   // Information, not a gate: trace-pass GPU ms of both walks on the same frame (1080p, offscreen
   // 'mirror', every confidence below 1.01 traced), loop stopped, median of 20.
@@ -964,6 +1124,30 @@ async function babylonChecks(pages) {
       if (t) console.log(`  babylon tracer GPU ms (960x540, loop stopped): ${Object.entries(t).map(([k, v]) => `${k} ${v}`).join(', ')}`);
     }
   }
+  // D1804 (W29): the composite with SSR and probes off (environment slot only) against Babylon's own
+  // specular IBL, on AO / normal-mapped metal, rough, clear-coat, sheen and bent-normal materials.
+  for (const sky of ['flat', 'gradient']) {
+    const before = results.logs.length;
+    const p = await openPage(`http://127.0.0.1:${PORT}/babylon/?manual&scene=ibl&sky=${sky}`);
+    pages.push(p);
+    await p.T('window.__p.step(2)');
+    const c = await p.T('window.__p.iblCompare()');
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    const fmt = (g) => `${g.pixels} px: before mean ${g.before.mean} p99 ${g.before.p99} -> after mean ${g.after.mean} p99 ${g.after.p99} (/255)`;
+    console.log(`  babylon ibl (${sky} sky) vs Babylon's own specular IBL: geometry ${fmt(c.geometry)}; specular factor < 1 ${fmt(c.occluded)}; energy compensation only ${fmt(c.energyOnly)}`);
+    if (sky === 'flat') {
+      // flat sky: any prefilter of a constant is itself, so only the weight can differ
+      check('babylon: composite matches Babylon\'s own specular IBL (AO, horizon occlusion, multi-scatter applied)',
+        errs.length === 0 && c.occluded.pixels > 1000 && c.geometry.after.mean < 0.5 && c.geometry.after.mean < c.geometry.before.mean && c.occluded.after.mean < c.occluded.before.mean,
+        errs.length ? errs.slice(0, 2).join(' | ') : `geometry mean ${c.geometry.before.mean} -> ${c.geometry.after.mean}, p99 ${c.geometry.before.p99} -> ${c.geometry.after.p99} (/255)`);
+      const shot = async (name) => savePng(`babylon-ibl-${name}.png`, await p.T('window.__p.shot()'));
+      await p.T('window.__p.setSSR(false)');
+      await p.T('window.__p.setProbes(false)');
+      await shot('final');
+      await p.T("window.__p.setView('specularFactor')");
+      await shot('view-specularFactor');
+    }
+  }
 }
 
 /**
@@ -1061,6 +1245,10 @@ async function main() {
       check('probes baked', info.probes === 3, JSON.stringify(info));
       const ca = await p.T('window.__p.cubeArray');
       check('cube-array support installed and self-tested (W20 shim)', ca.mode === 'shim' || ca.mode === 'native', `${ca.mode}: ${ca.reason}`);
+      // the storage and pre-phase-2 parity checks compare lookups without Lagarde's seam options (the
+      // 'hw' and legacy nodes don't have them; W26 made distanceRoughness the default, D53)
+      const seamDefaults = await p.T('[window.__p.probes.distanceRoughness, window.__p.probes.roughnessLerp]');
+      await p.T('(window.__p.setSeamOptions(false), true)');
       const shots = {};
       for (const lookup of ['warp', 'none', 'hw', 'cube-array', 'auto']) {
         await p.T(`(window.__p.setLookup('${lookup}'), window.__p.capture(), true)`);
@@ -1135,6 +1323,8 @@ async function main() {
         check('a failing self-test uninstalls the shim and reports false; auto falls back', st.ok === false && st.failed.mode === 'none' && st.layout === 'cube2d' && st.again === true && st.relayout === 'cube-array',
           `${st.failed.reason}; then auto ${st.layout}, re-install ${st.again} (${st.relayout})`);
       }
+      await p.T(`(window.__p.setSeamOptions(${seamDefaults[0]}, ${seamDefaults[1]}), true)`);
+      check('seam options default: distanceRoughness on, roughnessLerp off (W26, D53)', seamDefaults[0] === true && seamDefaults[1] === false, JSON.stringify(seamDefaults));
       // W20: the feature checks run on one storage: 'auto' (the cube array through the shim, default) or the 2D array
       const probesLayout = args.includes('--probes-layout') ? args[args.indexOf('--probes-layout') + 1] : 'cube-array';
       if (probesLayout === 'cube2d') await p.T("(async () => { await window.__p.setShim(false); window.__p.setLookup('warp'); return true; })()");
@@ -1161,6 +1351,10 @@ async function main() {
       check("lookup option ao: Lagarde's specular occlusion", lo.so < 1e-3, `max rel err ${lo.so.toExponential(1)}`);
       check('lookup option frameIrradiance: re-fit by k / probe L1 irradiance, clamped', lo.refit < 2e-3 && lo.clampErr < 1e-4 && lo.lum > 0 && lo.ratios.every(Number.isFinite) && lo.slots.every((s) => s >= 0),
         `max rel err ${lo.refit.toExponential(1)} (ratios ${lo.ratios.slice(0, 6).join(' ')} ...), clamp ${lo.clampErr.toExponential(1)}`);
+      // W26 (D53): Lagarde's seam options against the plain lookup fed the CPU's r' and lerped direction
+      const so = await C('seamOptions');
+      check("lookup options distanceRoughness / roughnessLerp: Lagarde 2014 Listing 25 / App. F", so.err.dist < 2e-3 && so.err.lerp < 2e-3 && so.err.both < 2e-3 && so.err.off < 2e-3 && so.lum > 0 && so.changedDist > 0.01 && so.changedLerp > 0.01,
+        `max rel err dist ${so.err.dist.toExponential(1)}, lerp ${so.err.lerp.toExponential(1)}, both ${so.err.both.toExponential(1)}, geometry ${so.err.off.toExponential(1)}; changes the lookup by up to ${f(so.changedDist)} / ${f(so.changedLerp)}`);
       const rf = await p.T(`(async () => { const P = window.__p; P.setGrid(true, 0.3); P.setLookup('${probesLayout === 'cube2d' ? 'warp' : 'auto'}'); for (let i = 0; i < 3; i++) await P.shot(); const off = await P.shot();
         P.setRefit(true); for (let i = 0; i < 3; i++) await P.shot(); const on = await P.shot(); P.setRefit(false); P.setGrid(false); return { on, off }; })()`);
       savePng('probes-refit-off.png', rf.off);
@@ -1211,9 +1405,11 @@ async function main() {
         pages.push(t);
         await t.T(FREEZE);
         const rows = await t.T(`(async () => {
-          const P = window.__p, out = { warp: [], 'cube-array': [], 'legacy-warp': [] };
-          for (let k = 0; k < 5; k++) for (const lookup of ['legacy-warp', 'warp', 'cube-array']) {
-            P.setLookup(lookup); P.setGrid(true, 0.08);
+          const P = window.__p, out = { warp: [], 'cube-array': [], 'cube-array+seam': [], 'legacy-warp': [] };
+          // 'cube-array+seam': the same with Lagarde's distanceRoughness + roughnessLerp (W26, D53)
+          for (let k = 0; k < 5; k++) for (const lookup of ['legacy-warp', 'warp', 'cube-array', 'cube-array+seam']) {
+            P.setSeamOptions(lookup.endsWith('+seam'));
+            P.setLookup(lookup.replace('+seam', '')); P.setGrid(true, 0.08);
             const on = await P.timeFrames(30, 7); P.setEnvNode(false); const off = await P.timeFrames(30, 7); P.setEnvNode(true);
             out[lookup].push({ on: on.wall, off: off.wall, lookup: on.wall - off.wall, gpu: on.gpu - off.gpu, gpuOn: on.gpu });
           }
@@ -1232,7 +1428,7 @@ async function main() {
         pages.push(o);
         await o.T(FREEZE);
         await o.T("(window.__p.setLookup('warp'), window.__p.capture(), true)");
-        await p.T('(window.__p.capture(), true)');
+        await p.T('(window.__p.setSeamOptions(false), window.__p.capture(), true)'); // the other build has no seam options (D53)
         const a = await p.T('window.__p.shot()');
         const b = await o.T('window.__p.shot()');
         savePng('probes-compare.png', b);
@@ -1262,6 +1458,33 @@ async function main() {
     if (runs('sssr-core')) await sssrCoreChecks(pages);
     if (runs('ssr')) await ssrChecks(pages);
     if (runs('hybrid')) await hybridChecks(pages);
+    if (only === 'seam') {
+      // W26: the D53 seam sweep alone (examples/ssr, denoised)
+      const sp = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1`);
+      pages.push(sp);
+      if (!args.includes('--seam-pt-only')) await seamChecks(sp, true);
+      if (args.includes('--seam-pt') || args.includes('--seam-pt-only')) {
+        // vs the path-traced reference (examples/showcase/compare.html Measure, W21/W23): MAD / bias of
+        // 'probes only' and 'ours denoised' over the glossy px, Lagarde's options off (?seam=0), each alone, both
+        const rows = [];
+        // SEAM_PT_SCENES=chess,sponza runs a subset (the four together pass the script's 10 min limit)
+        const ptScenes = process.env.SEAM_PT_SCENES?.split(',');
+        for (const [scene, floor] of [['toyCar', 0.25], ['carConcept', 0.25], ['chess', 0.25], ['sponza', null]].filter(([id]) => !ptScenes || ptScenes.includes(id))) {
+          for (const seam of ['0', 'dist', 'lerp', '1']) {
+            const page = await openPage(`http://127.0.0.1:${PORT}/showcase/compare.html?manual&scene=${scene}&left=ours-denoised&right=probes&seam=${seam}${floor !== null ? `&floorRoughness=${floor}` : ''}`);
+            if (!(await page.T('window.__p.entries()')).length) { page.close(); console.log('  (no showcase assets: --seam-pt skipped)'); break; }
+            await page.T('window.__p.freeze(true)');
+            const m = await page.T("window.__p.measure({ samples: 32, warmup: 24, frames: 8, methods: ['probes', 'ours-denoised'], orbitFrames: 0 })");
+            page.close();
+            const fmt = m.rows.map((r) => `${r.method} MAD ${r.mad.toFixed(2)} bias ${r.bias.toFixed(2)}`).join(', ');
+            console.log(`  vs path traced ${scene}${floor !== null ? ` floor r ${floor}` : ''} seam ${seam}: ${m.glossyPixels} glossy px, ${fmt}`);
+            rows.push({ scene, floor, seam, glossyPixels: m.glossyPixels, rows: m.rows.map(({ method, mad, bias, stdMean }) => ({ method, mad, bias, stdMean })) });
+          }
+        }
+        fs.mkdirSync(OUT, { recursive: true });
+        fs.writeFileSync(path.join(OUT, 'seam-pt.json'), JSON.stringify(rows, null, 1));
+      }
+    }
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (runs('babylon')) await babylonChecks(pages);
     if (runs('ssr-rt-bvh')) await ssrRtBvhChecks(pages);

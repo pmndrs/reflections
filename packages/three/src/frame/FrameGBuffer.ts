@@ -15,15 +15,19 @@
 //                                  `textures.motion`. The MRT slot must be named 'velocity': three only
 //                                  moves `positionPrevious` by last frame's instance / bone / batch
 //                                  matrices when `builder.needsPreviousData()`, i.e. `mrt.has('velocity')`.
-//   lit (optional)   rgba16float   three's full lit output (+8 bytes: needs a raised limit, see `lit`); a =
-//                                  the base specular's scale under a clear coat (1 - cc Fcc; opacity if blended)
+//   lit (optional)   rgba16float   three's full lit output (+8 bytes: needs a raised limit, see `lit`)
+//   specular (opt.)  rgba16float   three's environment-specular weights (with `lit`, +8 bytes, D603):
+//                                  rgb = single scattering (specularColorBlended x DFG.x + specularF90 x DFG.y)
+//                                        x the clear coat's base scale (1 - cc Fcc, D2752),
+//                                  a = specular occlusion x material env intensity (./nodes.ts `gbufferSpecular`)
+//   shadingRoughness r16float      three's shading roughness (geometry-adjusted, >= 0.045; with `specular`, +2 bytes, D403)
 //   depth            depth32float  hardware depth (reverse-Z if the renderer uses it)
 import * as THREE from 'three/webgpu';
 import { diffuseColor, mrt, nodeObject, normalWorld, output, uniform, vec2, vec4 } from 'three/tsl';
 import {
   FrameCameraHistory, type FrameCamera, type FrameConventions, type FrameInputs, type FrameTextures,
 } from '@pmndrs/reflections-core';
-import { gbufferBaseSpecularScale, gbufferMetalness, gbufferRoughness, sceneColorNoSpecular } from './nodes';
+import { gbufferMetalness, gbufferRoughness, gbufferShadingRoughness, gbufferSpecular, sceneColorNoSpecular } from './nodes';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -45,7 +49,7 @@ export function getGPUTexture(renderer: THREE.WebGPURenderer, texture: THREE.Tex
   return gpu;
 }
 
-export type FrameTargetName = 'output' | 'normalRoughness' | 'albedoMetalness' | 'motion' | 'lit';
+export type FrameTargetName = 'output' | 'normalRoughness' | 'albedoMetalness' | 'motion' | 'lit' | 'specular' | 'shadingRoughness';
 
 export interface FrameGBufferOptions {
   /** Render size in pixels. Default: the renderer's drawing-buffer size, followed on each render(). */
@@ -57,11 +61,19 @@ export interface FrameGBufferOptions {
    * `new WebGPURenderer({ requiredLimits: { maxColorAttachmentBytesPerSample: 64 } })`).
    */
   lit?: boolean | 'auto';
+  /**
+   * Also write three's own environment-specular weights (`specular`, rgba16float) and shading
+   * roughness (`shadingRoughness`, r16float): 10 more bytes per sample on top of `lit` (46 in all).
+   * The hybrid composite then removes exactly the term three added (specularIntensity / Color, ior,
+   * AO-map occlusion, envMapIntensity, geometry roughness) instead of estimating it (D603).
+   * `'auto'` (default): on when `lit` is on and the device allows 46 bytes. Needs `lit`.
+   */
+  specular?: boolean | 'auto';
   /** 'uv' (default): uv-space motion, scale [1, 1]. 'ndc': three's velocity as is, scale [0.5, -0.5] (what denoiser/three expects). */
   motion?: 'uv' | 'ndc';
 }
 
-const BYTES = { base: 8 + 8 + 8 + 4, lit: 8 };
+const BYTES = { base: 8 + 8 + 8 + 4, lit: 8, specular: 8 + 2 };
 
 /**
  * three's VelocityNode with the camera half of its history taken from our FrameCamera instead of
@@ -105,6 +117,8 @@ export class FrameGBuffer {
   readonly renderTarget: THREE.RenderTarget;
   readonly mrt: N;
   readonly lit: boolean;
+  /** The `specular` and `shadingRoughness` targets are written (see the option). */
+  readonly specular: boolean;
   readonly motionMode: 'uv' | 'ndc';
   /** three textures by target name (plus `depth`), for TSL sampling (debug views, composites). */
   readonly textures: Record<FrameTargetName, THREE.Texture | undefined> & { depth: THREE.DepthTexture };
@@ -128,6 +142,13 @@ export class FrameGBuffer {
     if (this.lit && limit < BYTES.base + BYTES.lit) {
       throw new Error(`FrameGBuffer: lit needs maxColorAttachmentBytesPerSample >= ${BYTES.base + BYTES.lit}, device has ${limit}`);
     }
+    const withSpecular = BYTES.base + BYTES.lit + BYTES.specular;
+    const wantSpecular = options.specular ?? 'auto';
+    this.specular = wantSpecular === 'auto' ? this.lit && limit >= withSpecular : wantSpecular;
+    if (this.specular && !this.lit) throw new Error('FrameGBuffer: specular needs the lit target');
+    if (this.specular && limit < withSpecular) {
+      throw new Error(`FrameGBuffer: specular needs maxColorAttachmentBytesPerSample >= ${withSpecular}, device has ${limit}`);
+    }
     this.motionMode = options.motion ?? 'uv';
     this.fixedSize = options.width !== undefined && options.height !== undefined;
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -135,6 +156,7 @@ export class FrameGBuffer {
 
     const names: FrameTargetName[] = ['output', 'normalRoughness', 'albedoMetalness', 'motion'];
     if (this.lit) names.push('lit');
+    if (this.specular) names.push('specular', 'shadingRoughness');
     const depth = new THREE.DepthTexture(w, h, THREE.FloatType);
     depth.name = 'depth';
     const rt = new THREE.RenderTarget(w, h, { count: names.length, type: THREE.HalfFloatType, depthTexture: depth, depthBuffer: true });
@@ -147,6 +169,7 @@ export class FrameGBuffer {
     albedo.type = THREE.UnsignedByteType; // rgba8unorm
     const motion = rt.textures[3];
     motion.format = THREE.RGFormat; // rg16float
+    if (this.specular) rt.textures[names.indexOf('shadingRoughness')].format = THREE.RedFormat; // r16float
     this.renderTarget = rt;
     this.textures = Object.fromEntries([...names.map((n, i) => [n, rt.textures[i]]), ['depth', depth]]) as never;
 
@@ -159,11 +182,11 @@ export class FrameGBuffer {
       albedoMetalness: vec4((diffuseColor as N).rgb, gbufferMetalness),
       velocity: motionNode, // must be 'velocity', see the header
     };
-    // alpha: the base layer's specular scale under a clear coat (W27b, D2752), not the opacity
-    if (this.lit) outputs.lit = vec4((output as N).rgb, gbufferBaseSpecularScale);
+    if (this.lit) outputs.lit = output;
+    if (this.specular) { outputs.specular = gbufferSpecular; outputs.shadingRoughness = gbufferShadingRoughness; }
     this.mrt = mrt(outputs);
     // guides clear to zero (no surface); scene colour keeps the renderer's clear / background
-    for (const n of ['normalRoughness', 'albedoMetalness', 'velocity', 'lit']) this.mrt.setClearColor(n, 0x000000, 0);
+    for (const n of ['normalRoughness', 'albedoMetalness', 'velocity', 'lit', 'specular', 'shadingRoughness']) this.mrt.setClearColor(n, 0x000000, 0);
   }
 
   /** The contract's convention flags for this G-buffer. */

@@ -15,6 +15,7 @@
 // What the walk gives back: `GiHit.t / triangle / barycentrics / frontFace` map one to one onto
 // core's `Hit`; `GiHit.instance` is the input instance's position; `GiHit.normal` is the world
 // geometric normal of the authored front side; `GiHit.material` is the instance's material.
+// `traceAny` (shadow rays, D903) is its `giTraceAny`.
 import type { BindingSlot, ModuleBindingEntry, TraceProvider } from './provider';
 
 /** The @pmndrs/bvh GPU layout version this wrapper was written against (`GPU_LAYOUT_VERSION`). */
@@ -137,6 +138,11 @@ fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
   return Hit(h.t, h.triangle, h.barycentrics, h.material, h.instance, h.normal, h.frontFace);
 }
 
+// any-hit: @pmndrs/bvh's own occlusion walk (stops at the first triangle, far child first)
+fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool {
+  return giTraceAny(GiRay(origin, 0.0, dir, tMax));
+}
+
 fn traceHitMaterial(hit: Hit) -> HitMaterial {
   let count = arrayLength(&pbvhMaterials) / ${MATERIAL_VEC4S}u;
   if (hit.material >= count) { return HitMaterial(vec3f(0.5), vec3f(0.0)); }
@@ -176,7 +182,7 @@ export interface PmndrsBvhBuildInfo {
  */
 export class PmndrsBvhTraceProvider implements TraceProvider {
   readonly name = '@pmndrs/bvh';
-  readonly capabilities = { hitNormal: true, hitMaterial: true, hitSpecular: true } as const;
+  readonly capabilities = { hitNormal: true, hitMaterial: true, hitSpecular: true, anyHit: true } as const;
   readonly layoutVersion: number;
   readonly entries: readonly ModuleBindingEntry[];
   readonly storageBufferCount: number;

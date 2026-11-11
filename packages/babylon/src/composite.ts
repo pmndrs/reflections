@@ -8,8 +8,15 @@
 // height-correlated form (`getReflectanceFromBRDFLookup` with BRDF_V_HEIGHT_CORRELATED, the PBR
 // default), so a material reads as Babylon's own IBL would have lit it. `radiance` already holds
 // lerp(probes / environment, SSR hit, confidence) from core (see ./ScreenSpaceReflections.ts), so no
-// probe maths happens here. Missing vs Babylon's term (D1804): specular AO / horizon occlusion and the
-// multi-scatter energy factor.
+// probe maths happens here. Babylon's own term also carries specular AO, horizon / bent-normal
+// occlusion, the clear coat's and sheen's attenuation and the multi-scatter energy factor; the strip
+// plugin (./material.ts) writes those per pixel into velocity.z and the weight takes them too
+// (`specularFactors`, D1804):
+//
+//   weight *= specularFactor * (energy compensation ? 1 + F0 (1 / brdf.y - 1) : 1)
+//
+// (Babylon's getEnergyConservationFactor). Pixels of materials without the plugin read factor 1, no
+// compensation: the bare split-sum weight.
 //
 // Debug views (`debugView`): see COMPOSITE_VIEWS.
 import type { Camera } from '@babylonjs/core/Cameras/camera.js';
@@ -24,6 +31,7 @@ import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import { ThinCustomPostProcess } from '@babylonjs/core/PostProcesses/thinCustomPostProcess.js';
 import { GetEnvironmentBRDFTexture } from '@babylonjs/core/Misc/brdfTextureTools.js';
 import type { Scene } from '@babylonjs/core/scene.js';
+import { DECODE_SPECULAR_FACTORS_WGSL } from './material';
 
 /** Debug views of the composite, by index. */
 export const COMPOSITE_VIEWS = [
@@ -38,6 +46,7 @@ export const COMPOSITE_VIEWS = [
   'f0', // F0 (PREPASS_REFLECTIVITY.rgb)
   'weight', // split-sum weight
   'motion', // linear velocity x 20 + 0.5
+  'specularFactor', // the strip plugin's scalar factor (specular AO, horizon occlusion, ...); red where energy compensation is on
 ] as const;
 export type CompositeView = (typeof COMPOSITE_VIEWS)[number];
 
@@ -61,6 +70,8 @@ uniform debugView: f32;
 uniform amount: f32;
 uniform brdfRGBD: f32;
 uniform depthInverted: f32;
+uniform specularFactors: f32;
+${DECODE_SPECULAR_FACTORS_WGSL}
 
 #define CUSTOM_FRAGMENT_DEFINITIONS
 @fragment
@@ -83,7 +94,14 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
   let NdotV = clamp(dot(n, V), 1e-4, 1.0);
   var brdf = textureSampleLevel(brdfSampler, brdfSamplerSampler, vec2f(NdotV, roughness), 0.0);
   if (uniforms.brdfRGBD > 0.5) { brdf = vec4f(pow(brdf.rgb, vec3f(2.2)) / max(brdf.a, 1e-4), 1.0); }
-  let weight = mix(brdf.xxx, brdf.yyy, f0);
+  let velocity = textureLoad(velocitySampler, px, 0);
+  let factors = decodeSpecularFactors(velocity.z);
+  var weight = mix(brdf.xxx, brdf.yyy, f0);
+  if (uniforms.specularFactors > 0.5) {
+    // Babylon's getEnergyConservationFactor when the material has it on, times the scalar factor
+    let energy = select(vec3f(1.0), 1.0 + f0 * (1.0 / max(brdf.y, 1e-4) - 1.0), factors.y > 0.5);
+    weight *= factors.x * energy;
+  }
   let radiance = textureLoad(radianceSampler, px, 0);
   let reflection = select(vec3f(0.0), weight * radiance.rgb * uniforms.amount, geometry);
   let view = i32(uniforms.debugView + 0.5);
@@ -98,7 +116,8 @@ fn main(input: FragmentInputs) -> FragmentOutputs {
     case 7: { c = select(vec3f(0.0), vec3f(roughness), geometry); }
     case 8: { c = select(vec3f(0.0), f0, geometry); }
     case 9: { c = select(vec3f(0.0), weight, geometry); }
-    case 10: { c = vec3f(textureLoad(velocitySampler, px, 0).xy * 20.0 + 0.5, 0.0); }
+    case 10: { c = vec3f(velocity.xy * 20.0 + 0.5, 0.0); }
+    case 11: { c = select(vec3f(0.0), vec3f(max(factors.x, factors.y), factors.x, factors.x), geometry); }
     default: {}
   }
   fragmentOutputs.color = vec4f(c, 1.0);
@@ -122,6 +141,12 @@ export class FrameGraphReflectionsCompositeTask extends FrameGraphPostProcessTas
   debugView = 0;
   /** 0..1: how much of the reflection term is added. */
   amount = 1;
+  /**
+   * Apply the strip plugin's per-pixel factors (specular AO, horizon occlusion, clear coat / sheen
+   * attenuation, multi-scatter energy compensation) to the weight, as Babylon does to its own
+   * specular IBL. Off: the bare split-sum weight.
+   */
+  specularFactors = true;
   declare readonly postProcess: ThinCustomPostProcess;
   private readonly brdf: BaseTexture;
   private readonly invViewProjection = new Matrix();
@@ -131,7 +156,7 @@ export class FrameGraphReflectionsCompositeTask extends FrameGraphPostProcessTas
     super(name, frameGraph, new ThinCustomPostProcess(name, frameGraph.engine, {
       fragmentShader: NAME,
       shaderLanguage: 1, // WGSL
-      uniforms: ['invViewProjection', 'cameraPosition', 'debugView', 'amount', 'brdfRGBD', 'depthInverted'],
+      uniforms: ['invViewProjection', 'cameraPosition', 'debugView', 'amount', 'brdfRGBD', 'depthInverted', 'specularFactors'],
       samplers: ['depthSampler', 'normalSampler', 'reflectivitySampler', 'radianceSampler', 'confidenceSampler', 'hitDistanceSampler', 'velocitySampler', 'brdfSampler'],
     }));
     this.brdf = GetEnvironmentBRDFTexture(scene);
@@ -157,6 +182,7 @@ export class FrameGraphReflectionsCompositeTask extends FrameGraphPostProcessTas
     effect.setFloat('amount', this.amount);
     effect.setFloat('brdfRGBD', this.brdf.isRGBD ? 1 : 0);
     effect.setFloat('depthInverted', this._frameGraph.engine.useReverseDepthBuffer ? 1 : 0);
+    effect.setFloat('specularFactors', this.specularFactors ? 1 : 0);
     effect.setTexture('brdfSampler', this.brdf);
   }
 

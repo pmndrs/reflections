@@ -5,7 +5,7 @@
 // The traced hit is shaded as a Lambert surface (D11, D903):
 //
 //   L = emissive + albedo x (envMean(N) x intensity + sum_hemi mix(ground, sky, 0.5 N.up + 0.5) / pi
-//                            + sum_dir colour x max(N.l, 0) / pi)
+//                            + sum_dir colour x max(N.l, 0) x V(P, l) / pi)
 //
 // plus, for providers with `traceHitSpecular` (W27b, D2750), the specular lobe and clear coat by
 // `hitLayered`: the environment along the mirror direction R, as the mean over a cone around R
@@ -15,7 +15,9 @@
 // envMean is the cosine-weighted mean of the environment over the hemisphere around N (= E / pi),
 // estimated with a fixed 32-direction Fibonacci set (same set every pixel: no noise, a small bias
 // on sharp environments). The light terms are three's (BRDF_Lambert = albedo / pi, hemisphere
-// weight 0.5 N.up + 0.5). No shadows, no probes yet (W7 brings a probe snippet; D901).
+// weight 0.5 N.up + 0.5). V is a shadow ray toward each directional light (the pass's
+// `traceLightVisible`, any-hit; 1 with `hitShadows` off; D903). The environment and hemisphere
+// terms are unshadowed. No probes yet (W7 brings a probe snippet; D901).
 import type { HitShading } from './provider';
 
 export type EnvironmentMapping = 'equirect' | 'cube';
@@ -66,10 +68,16 @@ fn hitEnvLobe(N: vec3f, spread: f32, sharp: bool) -> vec3f {
   }
   return sum / f32(HIT_ENV_SAMPLES);
 }
-fn hitLights(N: vec3f) -> vec3f {
+// Shadow rays toward directional lights: far enough to leave any scene.
+const HIT_SHADOW_RAY_LENGTH: f32 = 1e30;
+fn hitLights(P: vec3f, N: vec3f) -> vec3f {
   var E = vec3f(0.0);
   for (var i = 0u; i < min(hitEnv.counts.x, ${HIT_MAX_DIRECTIONAL}u); i++) {
-    E += hitEnv.dirColor[i].rgb * max(dot(N, hitEnv.dirDirection[i].xyz), 0.0);
+    let l = hitEnv.dirDirection[i].xyz;
+    let nl = dot(N, l);
+    if (nl <= 0.0) { continue; }
+    if (!traceLightVisible(P, N, l, HIT_SHADOW_RAY_LENGTH)) { continue; }
+    E += hitEnv.dirColor[i].rgb * nl;
   }
   for (var i = 0u; i < min(hitEnv.counts.y, ${HIT_MAX_HEMISPHERE}u); i++) {
     E += mix(hitEnv.hemiGround[i].rgb, hitEnv.hemiSky[i].rgb, dot(N, hitEnv.hemiUp[i].xyz) * 0.5 + 0.5);
@@ -86,7 +94,7 @@ fn hitEnvSpecular(R: vec3f, roughness: f32) -> vec3f {
 fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f {
   let m = traceHitMaterial(hit);
   let s = traceHitSpecular(hit);
-  let diffuse = m.albedo * (hitEnvMean(N) * hitEnv.intensity.x + hitLights(N));
+  let diffuse = m.albedo * (hitEnvMean(N) * hitEnv.intensity.x + hitLights(P, N));
   if (max(s.color.x, max(s.color.y, s.color.z)) <= 0.0 && s.clearcoat <= 0.0) { return m.emissive + diffuse; }
   let R = reflect(dir, N);
   let NdotV = clamp(dot(N, -dir), 1e-4, 1.0);

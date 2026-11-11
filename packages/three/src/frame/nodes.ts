@@ -1,10 +1,13 @@
 // TSL nodes for the frame-contract G-buffer (see ./FrameGBuffer.ts). Each is evaluated per material
 // at build time, so materials without a channel (basic, custom) get a sensible constant.
-import { F_Schlick, Fn, clearcoat, clearcoatNormalView, emissive, float, materialMetalness, materialRoughness, output, positionViewDirection, property, vec3 } from 'three/tsl';
+import {
+  DFGLUT, F_Schlick, Fn, ambientOcclusion, clearcoat, clearcoatNormalView, emissive, float, materialEnvIntensity, materialMetalness, materialRoughness, normalView, output,
+  positionViewDirection, property, roughness, specularColorBlended, specularF90, vec3, vec4,
+} from 'three/tsl';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any; // TSL's node typings are too strict for builder-time branching
-interface Builder { material?: N; renderer: N }
+interface Builder { material?: N; renderer: N; environmentNode?: N }
 
 /**
  * Lighting without the specular lobe: emissive + direct diffuse + indirect diffuse.
@@ -52,19 +55,64 @@ export const gbufferMetalness = /*@__PURE__*/ (Fn((builder: Builder) => {
 }) as N)();
 
 /**
- * How much of the base layer's specular survives the clear coat, three's `PhysicalLightingModel.finish`:
- * `1 - clearcoat x F_Schlick(0.04, 1, dot(clearcoatNormal, V))` (W27b, D2752). The composite scales its
- * estimate of three's specular IBL term by it, so it swaps the base layer's term at the weight three
- * gave it, not more (which over-subtracted red car paint to black / cyan at grazing angles).
- * 1 for materials without a clear coat. Transparent (blended) materials keep their alpha, which the
- * blend needs: the composite reads it there as an approximate 1.
+ * How much of the base layer's specular survives a clear coat, three's `PhysicalLightingModel.finish`:
+ * `1 - clearcoat x F_Schlick(0.04, 1, dot(clearcoatNormal, V))` (W27b, D2752); 1 without one. Folded
+ * into `gbufferSpecular`'s weight, so the composite swaps the base layer's term at the weight three gave
+ * it, not more (the full weight over-subtracted carConcept's red paint to black / cyan at grazing angles).
  */
-export const gbufferBaseSpecularScale = /*@__PURE__*/ (Fn((builder: Builder) => {
+function clearcoatBaseScale(builder: Builder): N {
   const m = builder.material;
-  if (m?.transparent === true) return (output as N).a;
   const coated = m != null && ((typeof m.clearcoat === 'number' && m.clearcoat > 0) || m.clearcoatNode != null);
   if (!coated) return float(1);
-  const dotNVcc = (clearcoatNormalView as N).dot(positionViewDirection).clamp();
-  const Fcc = (F_Schlick as N)({ dotVH: dotNVcc, f0: vec3(0.04), f90: float(1) }).x;
+  const dotNVcc: N = (clearcoatNormalView as N).dot(positionViewDirection).clamp();
+  const Fcc: N = (F_Schlick as N)({ dotVH: dotNVcc, f0: vec3(0.04), f90: float(1) }).x;
   return float(1).sub((clearcoat as N).mul(Fcc));
+}
+
+/**
+ * Materials whose lit colour carries three's physical environment specular (MeshStandard /
+ * MeshPhysical and their node twins, lit, no custom fragment or output node).
+ */
+function physicalLit(builder: Builder) {
+  const m = builder.material;
+  if (!m || m.fragmentNode != null || m.outputNode != null || m.lights === false) return false;
+  if (builder.renderer.lighting?.enabled === false) return false;
+  return m.isMeshStandardMaterial === true || m.isMeshStandardNodeMaterial === true;
+}
+
+/**
+ * three's environment specular term, per pixel, as its PhysicalLightingModel adds it (r187
+ * `indirectSpecular` + `ambientOcclusion`): `radiance x singleScattering x specularOcclusion`, with
+ * `radiance = env(R, roughness) x materialEnvIntensity` and
+ * `singleScattering = specularColorBlended x DFG.x + specularF90 x DFG.y` (DFG at three's
+ * `roughness` and dot(N, V)). The shader properties are three's own, read in the same MRT render
+ * (like `totalDiffuse` above), so specularIntensity / specularColor / ior (F0 and F90), the
+ * geometry-adjusted roughness, the AO map's (or `aoNode`'s, or a context `getAO`'s) specular
+ * occlusion and the env intensity are three's exact values, not re-derived per material.
+ *
+ * rgb = singleScattering (the radiance weight: what a reflection hit should be multiplied by);
+ * a = specularOcclusion x materialEnvIntensity (what three's environment radiance was multiplied by
+ * besides that weight; 0 where the material has no environment). Materials without three's physical
+ * lighting (basic, phong, lambert, unlit, custom output) write 0: their lit image has no such term,
+ * so the composite leaves them as lit. rgb includes a clear coat's attenuation of the base layer
+ * (W27b, D2752); the coat's own layer is not swapped. Not included (DIVERGES D603): sheen's energy compensation, iridescence's Fresnel, anisotropy's bent normal,
+ * retroreflection, and a per-material `envMap` (the weight is right, the radiance the composite
+ * looks up is the scene's).
+ */
+export const gbufferSpecular = /*@__PURE__*/ (Fn((builder: Builder) => {
+  if (!physicalLit(builder)) return vec4(0);
+  const m = builder.material;
+  const dotNV: N = (normalView as N).dot(positionViewDirection).clamp();
+  const dfg: N = (DFGLUT as N)({ roughness, dotNV });
+  const single: N = (specularColorBlended as N).mul(dfg.x).add((specularF90 as N).mul(dfg.y)).mul(clearcoatBaseScale(builder));
+  const hasEnvironment = m.envNode != null || m.envMap != null || builder.environmentNode != null;
+  if (!hasEnvironment) return vec4(single, 0);
+  // PhysicalLightingModel.ambientOcclusion: Lagarde's specular occlusion at three's roughness
+  const ao: N = ambientOcclusion;
+  const aoExp: N = (roughness as N).mul(-16).oneMinus().negate().exp2();
+  const occlusion: N = ao.sub(dotNV.add(ao).pow(aoExp).oneMinus()).clamp();
+  return vec4(single, occlusion.mul(materialEnvIntensity));
 }) as N)();
+
+/** three's shading roughness (`roughness`: the material's, raised by geometry roughness, >= 0.045), D403. */
+export const gbufferShadingRoughness = /*@__PURE__*/ (Fn((builder: Builder) => (physicalLit(builder) ? float(roughness) : gbufferRoughness)) as N)();

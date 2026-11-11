@@ -7,6 +7,8 @@
 // (local probes + the sky in the environment slot) or, without probes, the constant
 // `settings.fallbackColor`. `radiance` therefore holds FFX SSSR's lerp(fallback, hit, confidence) for
 // every reflective pixel, rough ones included, and the composite only applies the split-sum weight.
+// Glossy misses take the fallback at the pixel's roughness (core's `fallbackRoughness`, default
+// 'surface', D3100; 'mirror' is FFX's roughness-0 lookup).
 //
 // Why a repack (D2002): core allocates its outputs itself and pixi can't wrap a foreign GPUTexture in
 // a TextureSource with public API, and r32float (confidence, hit distance) can't be bound to the

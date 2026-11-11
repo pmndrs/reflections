@@ -60,11 +60,13 @@ export interface ScreenSpaceTraceOptions {
   /** Default: the scene's `environmentIntensity` at `render()` (1 if `trace()` is called directly). */
   environmentIntensity?: number;
   /**
-   * Light traced hits with the scene's visible directional and hemisphere lights too (Lambert, no
-   * shadows; up to 4 + 2), gathered at `render()`. Default true.
+   * Light traced hits with the scene's visible directional and hemisphere lights too (Lambert; up
+   * to 4 + 2), gathered at `render()`. Directional lights are shadowed by one ray each through the
+   * provider (`settings.hitShadows`, default on; every traced mesh casts, `castShadow` is not read);
+   * hemisphere lights and the environment are not. Default true.
    */
   lights?: boolean;
-  /** Ray budget, length cap, origin offset, on-screen reuse. */
+  /** Ray budget, length cap, origin offset, on-screen reuse, hit shadows. */
   settings?: TracedReflectionsSettings;
 }
 

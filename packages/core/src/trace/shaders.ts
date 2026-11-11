@@ -57,7 +57,7 @@ struct RtParams {
   onScreenDepthTolerance: f32,
   tilesX: u32,
   iblFactor: f32,
-  _pad0: u32,
+  hitShadows: u32,
   fallbackColor: vec4f,
   motionVectorScale: vec2f,
   useHistory: u32,
@@ -105,7 +105,7 @@ fn main() {
  * `traceFirstHit` (group 2), `hitShadingWgsl` `shadeTracedHit` (group 3 if it binds anything),
  * `materialWgsl` `traceHitMaterial`.
  */
-export function rtTraceWgsl(parts: { fallbackWgsl: string; providerWgsl: string; materialWgsl: string; hitShadingWgsl: string }): string {
+export function rtTraceWgsl(parts: { fallbackWgsl: string; providerWgsl: string; materialWgsl: string; anyHitWgsl: string; hitShadingWgsl: string }): string {
   return /* wgsl */ `
 ${RT_PARAMS_WGSL}
 @group(0) @binding(1) var t_depth: texture_2d<f32>;
@@ -126,6 +126,17 @@ ${HIT_WGSL}
 ${parts.fallbackWgsl}
 ${parts.providerWgsl}
 ${parts.materialWgsl}
+${parts.anyHitWgsl}
+
+// The shadow query hit shading calls (D903): false if geometry lies between the hit point and
+// P + L x tMax. The origin is offset along the normal by normalOffset x the view distance, as the
+// reflection ray's own origin (D8). With hitShadows off, every light is visible.
+fn traceLightVisible(hitP: vec3f, N: vec3f, L: vec3f, tMax: f32) -> bool {
+  if (P.hitShadows == 0u) { return true; }
+  let origin = hitP + N * (P.normalOffset * length(hitP - P.cameraPosition));
+  return !traceAny(origin, L, tMax);
+}
+
 ${parts.hitShadingWgsl}
 
 // A fixed position in [0, 1) per tile (PCG hash), the order the rotating remainder walks.

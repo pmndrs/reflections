@@ -19,6 +19,7 @@ import bc6hSrc from '../../../packages/core/src/encode/bc6h.ts?raw';
 import { gbufferFirstFrameChecks, rtHistoryChecks, rtStatsChecks, rtTileChecks, ssrHistoryChecks } from './ssr';
 import { hiZLimitChecks, probeEnvDominantChecks, probeIrradianceChecks, probeSourceSizeChecks, rtLimitChecks } from './core';
 import { probeRebakeChecks, probeScaleChecks } from './probes';
+import { specularSwapAssetChecks, specularSwapChecks } from './swap';
 
 /** Stream F2's sections (SSR / RT and probe-core review), by name. */
 const F2: Record<string, () => Promise<unknown>> = {
@@ -34,6 +35,8 @@ const F2: Record<string, () => Promise<unknown>> = {
   probeScale: probeScaleChecks,
   probeSourceSize: probeSourceSizeChecks,
   probeRebake: probeRebakeChecks,
+  specularSwap: specularSwapChecks,
+  specularSwapAssets: specularSwapAssetChecks,
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
