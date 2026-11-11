@@ -25,7 +25,9 @@
           reflectivity and linear velocity; <code>FrameGraphReflectionsTask</code> runs the core screen-space tracer on Babylon's
           device with a core <code>ProbeSet</code> (one probe + the environment slot, captured by Babylon cube renders) as the
           radiance fallback; <code>FrameGraphReflectionsCompositeTask</code> adds <code>radiance &times; Babylon's split-sum weight</code>.
-          URL: <code>?view=</code>, <code>?ssr=0</code>, <code>?probes=0</code>, <code>?variant=workgroup</code>, <code>?manual</code>.
+          URL: <code>?view=</code>, <code>?ssr=0</code>, <code>?probes=0</code>, <code>?variant=workgroup</code>, <code>?manual</code>,
+          <code>?scene=ibl</code> (AO / normal-mapped metal, rough, clear-coat, sheen and bent-normal materials under a flat sky, to
+          compare the composite with Babylon's own specular IBL; <code>?sky=gradient</code>).
         </p>
       </header>
       <canvas id="view" width="960" height="540"></canvas>
