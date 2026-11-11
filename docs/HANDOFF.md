@@ -79,6 +79,7 @@ For the fine-tune pass once the phases are built and running. Nothing here block
 - Probe captures after a layout and environment change: fixed by a second capture pass; revisit the cost.
 
 **Quality experiments**
+- RT hit shading vs probe size: with 256 px probes (the default since W31) contact's traced hits read 1.10x the on-screen brightness with @pmndrs/bvh (1.084 at 128 px; mirrorWall / moving unchanged within 0.01). Both sides brighten; the hits' roughness-1 lookup moves more. The ssr-rt checks pin `probeRes=128` (run-headless `url`) until this is understood.
 - The SSR-to-probe step on glossy floors is mostly radiance, not blur: hit vs probe luma bias -10 to -14/255 on mirrorWall, +6 to +23 on contact / the strips (`pnpm check --only seam`, W26). Lagarde's options close 4-24 % of it. Look at hit shading vs the probe capture's lighting (D903's dark bias may be the same thing).
 - Probe count vs resolution (D23, decided 2026-11-11): many small probes (Ben's demos) against a few large ones at equal memory, on the rooms and Sponza; output is the sizing guidance that goes with the 256 px default.
 - Probe captures lit by our environment slot vs three's PMREM (W31, D3201): on mirrorWall a re-bake with the probe node installed gives probes ~8 / 255 luma darker than the first bake, whose captures used three's PMREM of the sky as IBL; compare the two roughness-1 irradiances of the same sky.

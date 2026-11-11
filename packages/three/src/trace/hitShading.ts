@@ -2,7 +2,8 @@
 // from what: the scene's reflection probes when the scene is lit by them, its environment otherwise.
 //
 // - Probes (D901, W28): core `probeHitShading` over the ReflectionProbes' own atlas (the bake's
-//   texture) and a volume table this file packs with core's `packProbeTable`, so a hit's diffuse
+//   texture) and a volume table packed by the probe module's `packReflectionProbesTable` (the node's
+//   own packing, D2900), so a hit's diffuse
 //   term is the probe lookup at the hit along N at roughness 1, what three's EnvironmentNode gives
 //   the same surface on screen when `scene.environmentNode = reflectionProbes(probes)`.
 // - Environment: core `environmentHitShading` (cosine-weighted mean of `scene.environment`).
@@ -12,13 +13,11 @@
 // traced pass must be rebuilt.
 import * as THREE from 'three/webgpu';
 import {
-  environmentHitShading, packProbeTable, probeHitShading, probeIrradianceRow, probeTableRows,
-  type EnvironmentHitShading, type EnvironmentMapping, type HitLights, type HitShading, type ProbeHitShading, type ProbeVolume,
+  environmentHitShading, probeHitShading, probeTableRows,
+  type EnvironmentHitShading, type EnvironmentMapping, type HitLights, type HitShading, type ProbeHitShading,
 } from '@pmndrs/reflections-core';
-import { probeOrigin, probeWorldScale, type ReflectionProbes } from '../probes/ReflectionProbes';
-import { ReflectionProbesNode, probeLayoutFor } from '../probes/ReflectionProbesNode';
-
-const _p = new THREE.Vector3(), _o = new THREE.Vector3(), _s = new THREE.Vector3();
+import { type ReflectionProbes } from '../probes/ReflectionProbes';
+import { ReflectionProbesNode, packReflectionProbesTable, probeLayoutFor } from '../probes/ReflectionProbesNode';
 
 /**
  * The probes three lights `scene` with: those of a plain `reflectionProbes(probes)` environment
@@ -28,26 +27,6 @@ export function sceneLightingProbes(scene: THREE.Scene): ReflectionProbes | null
   const node = (scene as unknown as { environmentNode?: unknown }).environmentNode;
   if (!(node instanceof ReflectionProbesNode) || node.coverage || node.positionNode !== null || node.directionNode !== null) return null;
   return node.probes.texture && node.probes.bakedProbes ? node.probes : null;
-}
-
-/**
- * The volumes of the last bake in core's table form. The same mapping as the probe node's own table
- * (packages/three/src/probes/ReflectionProbesNode.ts `volumeList`), which is private to it.
- */
-function volumeList(probes: ReflectionProbes): ProbeVolume[] {
-  return probes.bakedProbes.map((probe, slot) => {
-    probe.getWorldPosition(_p);
-    probeOrigin(probe, _o);
-    probeWorldScale(probe, _s);
-    const half = probe.influenceSize.clone().multiply(_s).multiplyScalar(0.5);
-    const projection = (probe.projectionSize ?? probe.influenceSize).clone().multiply(_s);
-    const offset = probe.projectionOffset.clone().multiply(_s);
-    return {
-      slot, center: [_p.x, _p.y, _p.z], halfSize: [half.x, half.y, half.z], fade: probe.blendDistance,
-      projectionSize: [projection.x, projection.y, projection.z], projectionOffset: [offset.x, offset.y, offset.z],
-      origin: [_o.x, _o.y, _o.z], boxProjection: probes.boxProjection,
-    };
-  });
 }
 
 type Source = { kind: 'environment'; texture: THREE.Texture } | { kind: 'probes'; probes: ReflectionProbes };
@@ -110,10 +89,7 @@ export class ThreeHitShading {
         this.group = null;
       }
       // every frame, as the probe node's own table (moved probes, `boxProjection`, a bake in progress)
-      this.packed = packProbeTable({
-        maxLod: probes.texture!.mipmaps.length - 1, enabled: !probes.capturing, environmentSlot: count,
-        irradianceRow: probeIrradianceRow(count), refitClamp: probes.refitClamp,
-      }, volumeList(probes), this.packed);
+      this.packed = packReflectionProbesTable(probes, this.packed);
       this.device.queue.writeBuffer(this.table, 0, this.packed);
       if (!this.group || this.groupFor !== gpu) {
         this.sampler ??= this.device.createSampler({ label: 'rt hit probes', magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear' });
