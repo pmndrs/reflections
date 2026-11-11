@@ -154,8 +154,13 @@ export class FrameGBuffer {
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     const w = options.width ?? size.x, h = options.height ?? size.y;
 
-    const names: FrameTargetName[] = ['output', 'normalRoughness', 'albedoMetalness', 'motion'];
-    if (this.lit) names.push('lit');
+    // `lit` goes first when written: three's transmission (KHR_materials_transmission, r187
+    // `viewportOpaqueMipTexture`) copies the render target's attachment 0 as the refracted backdrop
+    // (WebGPUBackend.copyFramebufferToTexture: `renderContext.textures[0]`). With `output` (scene
+    // colour without specular) there, glass refracted every metal (gold trim, a mirror floor) as
+    // black (W42, D3520). Without `lit` the backdrop stays specular-free.
+    const names: FrameTargetName[] = this.lit ? ['lit', 'output'] : ['output'];
+    names.push('normalRoughness', 'albedoMetalness', 'motion');
     if (this.specular) names.push('specular', 'shadingRoughness');
     const depth = new THREE.DepthTexture(w, h, THREE.FloatType);
     depth.name = 'depth';
@@ -165,9 +170,9 @@ export class FrameGBuffer {
       t.minFilter = t.magFilter = THREE.NearestFilter;
       t.generateMipmaps = false;
     });
-    const albedo = rt.textures[2];
+    const albedo = rt.textures[names.indexOf('albedoMetalness')];
     albedo.type = THREE.UnsignedByteType; // rgba8unorm
-    const motion = rt.textures[3];
+    const motion = rt.textures[names.indexOf('motion')];
     motion.format = THREE.RGFormat; // rg16float
     if (this.specular) rt.textures[names.indexOf('shadingRoughness')].format = THREE.RedFormat; // r16float
     this.renderTarget = rt;
