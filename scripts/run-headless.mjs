@@ -547,7 +547,7 @@ async function mirrorBiasChecks(pages) {
     all.push({ ...c, ...r });
     console.log(`  mirrorBias ${c.scene}${c.floor !== undefined ? ` floor r ${c.floor}` : ''} (${r.seconds.toFixed(0)} s, ${r.frames} frames vs a ${r.refFrames}-frame bias-0 raw reference; 8-bit luma):`);
     for (const row of r.results) {
-      console.log(`    denoise ${row.denoise ? 'on ' : 'off'} bias ${row.mirrorBias.toFixed(2)}: ${row.bins.map((b) => `r ${b.roughness} std ${b.std.toFixed(2)} flicker ${b.flicker.toFixed(2)} bias ${b.bias.toFixed(2)} (signed ${b.signed.toFixed(2)}) rmse ${b.rmse.toFixed(2)}`).join(' | ')}`);
+      console.log(`    denoise ${row.denoise ? 'on ' : 'off'} bias ${row.mirrorBias.toFixed(2)}: ${row.bins.map((b) => `r ${b.roughness} std ${b.std.toFixed(2)} flicker ${b.flicker.toFixed(2)} bias ${b.bias.toFixed(2)} (signed ${b.signed.toFixed(2)}, added ${b.added?.toFixed(2) ?? '-'}) rmse ${b.rmse.toFixed(2)}`).join(' | ')}`);
     }
   }
   fs.mkdirSync(OUT, { recursive: true });

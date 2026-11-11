@@ -567,7 +567,8 @@ async function main() {
    * bias): `warm` frames after a history reset, then `frames` frames, per px mean m and variance v:
    * `std` = mean temporal std, `flicker` = mean |x_t - x_t-1| (the denoiser scorecard's), `bias` =
    * RMS of (m - R) with the finite-sample noise taken out (sqrt(max(0, <(m-R)^2> - <v>/frames -
-   * <vR>/refFrames))), `signed` = <m - R>, `rmse` = RMS of a single frame against R (what one frame shows).
+   * <vR>/refFrames))), `signed` = <m - R>, `rmse` = RMS of a single frame against R (what one frame shows),
+   * `added` = the same bias estimate against this denoise mode's own bias-0 mean (the knob's share).
    */
   type BiasOptions = { biases?: number[]; bins?: number[]; frames?: number; refFrames?: number; warm?: number; denoise?: boolean[] };
   async function mirrorBiasStats(o: BiasOptions = {}) {
@@ -635,8 +636,20 @@ async function main() {
     const t0 = performance.now();
     const ref = await run(0, false, refFrames, null);
     const results: N[] = [];
-    for (const dn of denoiseModes) for (const b of biases) {
-      results.push({ denoise: dn, mirrorBias: b, bins: (await run(b, dn, frames, ref)).per });
+    // `added`: the same noise-corrected RMS of (m_b - m_0) against this denoise mode's own bias-0 mean,
+    // i.e. what the knob adds on top of the denoiser's own (spatial) bias
+    const added = (a: { mean: Float64Array; varr: Float64Array }, z: { mean: Float64Array; varr: Float64Array }, k: number) => {
+      let px = 0, d2 = 0, v = 0;
+      for (let i = 0; i < W * H; i++) if (bin[i] === k) { px++; d2 += (a.mean[i] - z.mean[i]) ** 2; v += a.varr[i] + z.varr[i]; }
+      return px ? Math.sqrt(Math.max(0, d2 / px - v / px / frames)) : 0;
+    };
+    for (const dn of denoiseModes) {
+      let zero: Awaited<ReturnType<typeof run>> | null = null;
+      for (const b of biases) {
+        const r = await run(b, dn, frames, ref);
+        if (b === 0) zero = r;
+        results.push({ denoise: dn, mirrorBias: b, bins: r.per.map((x: N, k) => (zero ? { ...x, added: added(r, zero, k) } : x)) });
+      }
     }
     ssr.settings.mirrorBias = keepBias; if (keepBias === undefined) delete ssr.settings.mirrorBias;
     hybrid.denoise = keepDenoise; hybrid.resetHistory(); setView(keepView);
