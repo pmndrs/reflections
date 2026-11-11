@@ -25,8 +25,9 @@
 // (`ssrRadiance` is already confidence x hit, see ScreenSpaceReflectionsPass.radiance). This only
 // needs `lit` and an estimate of what three added, not a specular-free re-render; with confidence
 // 0 the result is `lit` exactly. What it gets wrong is in docs/DIVERGES.md D603-D606: the
-// subtraction is only as good as our estimate of three's term (geometry roughness, AO maps,
-// clearcoat / sheen / iridescence / specular colour are not modelled), hit radiance has no
+// subtraction is only as good as our copy of three's term (with the G-buffer's `specular` target
+// it is three's own weights, D603; clearcoat / sheen / iridescence / anisotropy and per-material
+// envMap radiance are still not modelled, nor anything in the estimate path), hit radiance has no
 // specular (scene colour without it, D400), and there is no denoiser here (rule 7), so glossy SSR
 // is one noisy sample per quad.
 //
