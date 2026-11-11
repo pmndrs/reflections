@@ -21,6 +21,8 @@ import {
 } from './shaders';
 import { PassTimer } from './timer';
 import type { FrameInputs } from '../frame/contract';
+import { DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, HIT_WGSL, type HitShading } from '../trace/provider';
+import { shadeLobeWgslFor } from '../trace/hitShading';
 
 export type ScreenSpaceVariant = Variant;
 
@@ -95,6 +97,38 @@ export interface ScreenSpaceReflectionsOptions {
   missList?: boolean;
   /** Per-pass GPU timestamps (needs 'timestamp-query'). Default false. */
   timestamps?: boolean;
+  /**
+   * Where `hitShading: 'reshade'` looks up the radiance along a hit's reflected ray (W44, D3540): a
+   * hit shading module (core `probeHitShading` / `environmentHitShading`, the one a traced pass
+   * shades its hits with; its bindings in `@group(3)`, bound per frame by
+   * `inputs.hitShadingBindGroup`). Default: the radiance fallback (`sampleRadianceFallback`).
+   */
+  hitSpecularShading?: HitShading;
+}
+
+/**
+ * What a screen-space hit returns (W44, D3540; `ScreenSpaceReflectionsSettings.hitShading`):
+ * - 'reshade' (default): the hit's view-independent part (scene colour without specular) plus its
+ *   specular lobe evaluated along the reflected ray, from the G-buffer's F0 / roughness and the
+ *   radiance along R (`hitSpecularShading`). Needs `inputs.albedo` (else F0 0.04).
+ * - 'trace': hits whose surface is glossy or metal also go to the miss list, so a traced pass
+ *   shades them; the rest (and every hit without a traced pass) keep the screen colour.
+ * - 'off': the screen colour as is (FFX SSSR), `hitColor` picks which.
+ */
+export type ScreenSpaceHitShading = 'reshade' | 'trace' | 'off';
+
+/** The intersect pass's view of a hit shading: the module (or the fallback lobe) plus stubs for what only a traced pass has. */
+export function screenSpaceHitShadingWgsl(shading?: HitShading): string {
+  const own = shading?.wgsl ?? '';
+  return /* wgsl */ `
+${HIT_WGSL}
+${DEFAULT_HIT_MATERIAL_WGSL}
+${DEFAULT_HIT_SPECULAR_WGSL}
+// No BVH in a screen-space pass: every light and every lobe is visible.
+fn traceLightVisible(P_world: vec3f, N: vec3f, L: vec3f, tMax: f32) -> bool { return true; }
+fn rtHitSpecularOn() -> bool { return true; }
+${own}
+${shadeLobeWgslFor(own)}`;
 }
 
 export interface ScreenSpaceReflectionsSettings {
@@ -159,6 +193,12 @@ export interface ScreenSpaceReflectionsSettings {
   mirrorBias?: number;
   /** Override the frame index (blue-noise rotation). Default: increments per dispatch. */
   frameIndex?: number;
+  /**
+   * How a hit's colour accounts for the view direction (W44, D3540): 'reshade' (default) keeps the
+   * hit's diffuse from the screen and evaluates its specular along the reflected ray; 'trace' sends
+   * glossy hits to the ray-traced pass; 'off' reuses the screen colour (FFX). See {@link ScreenSpaceHitShading}.
+   */
+  hitShading?: ScreenSpaceHitShading;
 }
 
 export interface ScreenSpaceCamera {
@@ -199,6 +239,14 @@ export interface ScreenSpaceReflectionsInputs {
   history?: GPUTexture;
   /** Last frame's reflection variance (denoiser output), for variance-guided tracing. */
   variance?: GPUTexture;
+  /** Base colour (linear rgb) for the re-shade's F0 = mix(0.04, albedo, metalness) (W44). Without it F0 is 0.04. */
+  albedo?: GPUTexture;
+  /** Metalness channel for the re-shade (W44). Without it 0. */
+  metalness?: { texture: GPUTexture; channel: number };
+  /** Clear coat for the re-shade (W44, D3541): r = factor, g = perceptual roughness. Without it no coat. */
+  clearcoat?: GPUTexture;
+  /** Bind group for `hitSpecularShading`'s `@group(3)`, if it has one. */
+  hitShadingBindGroup?: GPUBindGroup;
   camera: ScreenSpaceCamera;
   /** Bind group for the radiance fallback's `@group(1)`, if it has one. */
   fallbackBindGroup?: GPUBindGroup;
@@ -266,7 +314,7 @@ export interface ScreenSpaceReflections {
  */
 export function screenSpaceInputsFromFrame(
   frame: FrameInputs, tracer: Pick<ScreenSpaceReflections, 'depthInverted'>,
-  extra: Pick<ScreenSpaceReflectionsInputs, 'variance' | 'fallbackBindGroup' | 'history'> = {},
+  extra: Pick<ScreenSpaceReflectionsInputs, 'variance' | 'fallbackBindGroup' | 'history' | 'hitShadingBindGroup'> = {},
 ): ScreenSpaceReflectionsInputs {
   const { textures: t, conventions: c } = frame;
   if (c.depthLinear) throw new Error('ssr: linear depth is not supported; pass hardware (device) depth');
@@ -280,6 +328,9 @@ export function screenSpaceInputsFromFrame(
     roughnessUnpack: c.roughnessUnpack,
     roughnessIsPerceptual: c.roughnessIsPerceptual,
     color: t.sceneColor,
+    albedo: t.albedo,
+    metalness: t.metalness,
+    clearcoat: t.clearcoat,
     motion: t.motion,
     motionVectorScale: c.motionVectorScale,
     camera: frame.camera,
@@ -341,6 +392,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   device.queue.writeBuffer(noiseTable, 0, blueNoiseBytes());
   const dummyVariance = device.createTexture({ label: 'ssr no variance', size: [1, 1], format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING });
   const dummyHistory = device.createTexture({ label: 'ssr no history', size: [1, 1], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING });
+  const dummyMaterial = device.createTexture({ label: 'ssr no hit material', size: [1, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING });
   const hierarchyView = depthHierarchy.createView();
 
   // ---- pipelines
@@ -380,9 +432,14 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     entries: [uniformEntry(0), texEntry(1), texEntry(2), texEntry(3), texEntry(4), texEntry(5),
       bufEntry(6, 'read-only-storage'), bufEntry(7, 'read-only-storage'),
       storageTexEntry(8, 'rgba16float'), storageTexEntry(9, 'r32float'), storageTexEntry(10, 'r32float'),
-      ...(useMissList ? [bufEntry(11), bufEntry(12)] : []), texEntry(13), texEntry(14)],
+      ...(useMissList ? [bufEntry(11), bufEntry(12)] : []), texEntry(13), texEntry(14), texEntry(15), texEntry(16), texEntry(17)],
   });
-  const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList), withFallback(intersectBgl));
+  // the re-shade's radiance (W44): the hit shading's @group(3), groups 1-2 empty where unused
+  const hitShading = options.hitSpecularShading;
+  const emptyBgl = device.createBindGroupLayout({ label: 'ssr empty', entries: [] });
+  const emptyGroup = device.createBindGroup({ label: 'ssr empty', layout: emptyBgl, entries: [] });
+  const intersectLayouts = hitShading?.layout ? [intersectBgl, fallback.layout ?? emptyBgl, emptyBgl, hitShading.layout] : withFallback(intersectBgl);
+  const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading)), intersectLayouts);
 
   let missArgsPipe: GPUComputePipeline | undefined, missArgsGroup: GPUBindGroup | undefined;
   if (useMissList) {
@@ -445,6 +502,11 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     const mvs = inputs.motionVectorScale ?? [1, 1];
     f[128] = mvs[0]; f[129] = mvs[1];
     f[130] = inputs.roughnessUnpack?.mul ?? 1; f[131] = inputs.roughnessUnpack?.add ?? 0;
+    const mode = s.hitShading ?? 'reshade';
+    u[132] = mode === 'reshade' ? 1 : mode === 'trace' ? 2 : 0;
+    u[133] = inputs.metalness?.channel ?? 0;
+    u[134] = inputs.albedo ? 1 : 0;
+    u[135] = inputs.clearcoat ? 1 : 0;
     device.queue.writeBuffer(params, 0, data);
   }
 
@@ -453,6 +515,10 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
       if (t.width !== W || t.height !== H) throw new Error(`ssr: ${k} is ${t.width}x${t.height}, expected ${W}x${H}`);
     }
     if (fallback.layout && !inputs.fallbackBindGroup) throw new Error('ssr: the radiance fallback needs inputs.fallbackBindGroup');
+    if (hitShading?.layout && !inputs.hitShadingBindGroup) throw new Error('ssr: hitSpecularShading needs inputs.hitShadingBindGroup');
+    for (const [k, t] of [['albedo', inputs.albedo], ['metalness', inputs.metalness?.texture], ['clearcoat', inputs.clearcoat]] as const) {
+      if (t && (t.width !== W || t.height !== H)) throw new Error(`ssr: ${k} is ${t.width}x${t.height}, expected ${W}x${H}`);
+    }
     const useHistory = (settings.hitColor ?? 'current') === 'history';
     if (useHistory && (!inputs.history || !inputs.motion)) throw new Error("ssr: hitColor 'history' needs inputs.history and inputs.motion");
     if (inputs.history && (inputs.history.width !== W || inputs.history.height !== H)) throw new Error(`ssr: history is ${inputs.history.width}x${inputs.history.height}, expected ${W}x${H}`);
@@ -488,7 +554,10 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
         { binding: 10, resource: confidence.createView() },
         ...(useMissList ? [{ binding: 11, resource: { buffer: missList! } }, { binding: 12, resource: { buffer: missCounter! } }] : []),
         { binding: 13, resource: (useHistory ? inputs.history! : dummyHistory).createView() },
-        { binding: 14, resource: (useHistory ? inputs.motion! : dummyHistory).createView() }],
+        { binding: 14, resource: (useHistory ? inputs.motion! : dummyHistory).createView() },
+        { binding: 15, resource: (inputs.albedo ?? dummyMaterial).createView() },
+        { binding: 16, resource: (inputs.metalness?.texture ?? dummyMaterial).createView() },
+        { binding: 17, resource: (inputs.clearcoat ?? dummyMaterial).createView() }],
     });
 
     timer?.begin();
@@ -508,6 +577,11 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     pass('intersect', (p) => {
       p.setPipeline(intersectPipe); p.setBindGroup(0, intersectGroup);
       if (fallback.layout) p.setBindGroup(1, inputs.fallbackBindGroup!);
+      if (hitShading?.layout) {
+        if (!fallback.layout) p.setBindGroup(1, emptyGroup);
+        p.setBindGroup(2, emptyGroup);
+        p.setBindGroup(3, inputs.hitShadingBindGroup!);
+      }
       p.dispatchWorkgroupsIndirect(indirectArgs, 0);
     });
     if (missArgsPipe) pass('miss args', (p) => { p.setPipeline(missArgsPipe!); p.setBindGroup(0, missArgsGroup!); p.dispatchWorkgroups(1); });
@@ -526,7 +600,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
       return timer.timings;
     },
     destroy() {
-      for (const t of [depthHierarchy, radiance, hitDistance, confidence, extractedRoughness, blueNoise, dummyVariance, dummyHistory]) t.destroy();
+      for (const t of [depthHierarchy, radiance, hitDistance, confidence, extractedRoughness, blueNoise, dummyVariance, dummyHistory, dummyMaterial]) t.destroy();
       for (const b of [rayList, denoiserTileList, tileFlags, rayCounter, indirectArgs, missList, missCounter, missArgs, params, noiseTable]) b?.destroy();
       timer?.destroy();
     },

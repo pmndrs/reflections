@@ -81,7 +81,11 @@ const SPECULAR = /* wgsl */ `
 // The specular lobe and clear coat on top of the diffuse part (W41, D3510); needs
 // hitSpecularRadiance(P, R, roughness), the radiance along R at a perceptual roughness.
 fn hitShadeSurface(hit: Hit, P: vec3f, N: vec3f, dir: vec3f, emissive: vec3f, diffuse: vec3f) -> vec3f {
-  let s = traceHitSpecular(hit);
+  return hitShadeLobe(traceHitSpecular(hit), P, N, dir, emissive, diffuse);
+}
+// The same for a lobe that does not come from the provider (W44, D3540: a screen-space hit's
+// material read from the G-buffer).
+fn hitShadeLobe(s: HitSpecular, P: vec3f, N: vec3f, dir: vec3f, emissive: vec3f, diffuse: vec3f) -> vec3f {
   if (!rtHitSpecularOn() || (max(s.color.x, max(s.color.y, s.color.z)) <= 0.0 && s.clearcoat <= 0.0)) { return emissive + diffuse; }
   let R = reflect(dir, N);
   let NdotV = clamp(dot(N, -dir), 1e-4, 1.0);
@@ -96,6 +100,21 @@ fn hitShadeSurface(hit: Hit, P: vec3f, N: vec3f, dir: vec3f, emissive: vec3f, di
   return emissive + hitLayered(s, diffuse, envBase, envCoat, NdotV);
 }
 `;
+
+/**
+ * `hitShadeLobe` / `hitShadeSurface` on the pass's radiance fallback (`sampleRadianceFallback` along
+ * R at the lobe's roughness), for a hit shading that does not define them (core's
+ * `fallbackHitShading`, or a screen-space pass without one; W44, D3540).
+ */
+export const FALLBACK_SHADE_LOBE_WGSL = /* wgsl */ `
+const HIT_SHADOW_RAY_LENGTH: f32 = 1e30;
+fn hitSpecularRadiance(P: vec3f, R: vec3f, roughness: f32) -> vec3f { return sampleRadianceFallback(P, R, roughness); }
+${SPECULAR}`;
+
+/** The WGSL to add after a hit shading's own so that `hitShadeLobe` / `hitShadeSurface` exist. */
+export function shadeLobeWgslFor(shadingWgsl: string): string {
+  return /fn\s+hitShadeLobe\s*\(/.test(shadingWgsl) ? '' : FALLBACK_SHADE_LOBE_WGSL;
+}
 
 // The environment's cosine-weighted hemisphere mean (needs `hitEnvSample`).
 const SHADE = /* wgsl */ `
