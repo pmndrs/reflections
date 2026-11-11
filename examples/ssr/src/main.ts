@@ -165,8 +165,20 @@ async function main() {
   });
   const device = ssr.device;
   // hybrid resolve + denoise seam (phase 5)
-  const denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, q.has('timing')) : null;
+  let denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, q.has('timing')) : null;
   const hybrid = new HybridReflections(ssr, { denoiser });
+  // FFX's options are constructor-only, so the denoiser follows the tracer's roughness threshold by
+  // being rebuilt when it changes (D1402); checked once per frame, so a slider drag rebuilds at most per frame.
+  let denoiserGate = 0.447;
+  const syncDenoiserGate = () => {
+    const t = ssr.settings.roughnessThreshold ?? 0.447;
+    if (!denoiser || t === denoiserGate) return;
+    const old = denoiser;
+    denoiser = createReflectionDenoiser(device, t, q.has('timing'))!;
+    hybrid.setDenoiser(denoiser); // new seam: history starts over
+    old.dispose();
+    denoiserGate = t;
+  };
   hybrid.denoise = wantDenoise && !!denoiser;
   if (q.has('mirrorBias')) ssr.settings.mirrorBias = Number(q.get('mirrorBias'));
   const gpuErrors: string[] = [];
@@ -395,6 +407,7 @@ async function main() {
     if (provider && kit.update) { kit.scene.updateMatrixWorld(); refitProvider(); }
     ssr.render(kit.scene, kit.camera, taa.jitter(kit.camera, W, H));
     taa.restore(kit.camera);
+    syncDenoiserGate();
     hybrid.update();
     updateMask();
     if (taa.enabled) {
@@ -506,6 +519,9 @@ async function main() {
       setHitColor: (m: HitColorMode) => setHitColor(m),
       setRT(on: boolean) { ssr.rayTracing = on; },
       hybrid, get denoiserName() { return denoiser?.name ?? null; },
+      /** D1402: the perceptual threshold the current denoiser was built with (its alpha gate is this squared). */
+      get denoiserGate() { return denoiser ? denoiserGate : null; },
+      denoiserGateCheck: (threshold?: number) => denoiserGateCheck(threshold),
       get taa() { return taa; },
       setTAA(on: boolean) { taa.enabled = on; taa.reset(); taaBox.checked = on; },
       setDenoise(on: boolean) { hybrid.denoise = on && !!denoiser; denoiseBox.checked = hybrid.denoise; },
@@ -586,6 +602,47 @@ async function main() {
     for (let y = 0; y < tex.height; y++) for (let x = y * bpr, e = x + tex.width * 8; x < e; x++) { h ^= b[x]; h = Math.imul(h, 0x01000193) >>> 0; }
     buf.unmap(); buf.destroy();
     return h.toString(16).padStart(8, '0');
+  }
+
+  /**
+   * D1402: does the denoiser's roughness gate follow the tracer's threshold? Sets the threshold,
+   * renders `frames` denoised frames, then compares the denoiser's output with its input (the hybrid
+   * signal) per roughness band on geometry: FFX passes pixels above its gate through unchanged, so
+   * pixels between the default threshold (0.447) and the new one change only if the gate moved.
+   */
+  async function denoiserGateCheck(threshold = 0.8, frames = 8) {
+    if (!denoiser) return null;
+    const keep = ssr.settings.roughnessThreshold, keepDenoise = hybrid.denoise;
+    ssr.settings.roughnessThreshold = threshold;
+    hybrid.denoise = true;
+    for (let i = 0; i < frames; i++) frame();
+    await idle();
+    const t = ssr.gbuffer.gpuTextures();
+    const [depth, nr, sig, den] = await Promise.all([
+      readTexture(device, t.depth), readTexture(device, t.normal),
+      readTexture(device, getGPUTexture(renderer, hybrid.signalTarget.texture)), readTexture(device, getGPUTexture(renderer, hybrid.denoised)),
+    ]);
+    const gate = denoiserGate;
+    const inverted = ssr.gbuffer.conventions.depthInverted;
+    const bands = { glossy: [0.05, 0.42], between: [0.47, threshold - 0.03], above: [threshold + 0.03, 1] };
+    const out: Record<string, { px: number; changed: number }> = {};
+    for (const [k, [lo, hi]] of Object.entries(bands)) {
+      let px = 0, changed = 0;
+      for (let i = 0; i < W * H; i++) {
+        if (inverted ? depth[i] <= 0 : depth[i] >= 1) continue;
+        const r = nr[i * 4 + 3];
+        if (r < lo || r > hi) continue;
+        px++;
+        let d = 0;
+        for (let c = 0; c < 3; c++) d = Math.max(d, Math.abs(den[i * 4 + c] - sig[i * 4 + c]));
+        if (d > 1e-3) changed++;
+      }
+      out[k] = { px, changed: px ? changed / px : 0 };
+    }
+    if (keep === undefined) delete ssr.settings.roughnessThreshold; else ssr.settings.roughnessThreshold = keep;
+    hybrid.denoise = keepDenoise;
+    frame(); await idle();
+    return { threshold, gate, bands: out };
   }
 
   /**

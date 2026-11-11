@@ -502,6 +502,27 @@ async function ssrChecks(pages) {
   const t = await big.T('window.__p.time(30)');
   console.log(`  GPU ms ${t.size.join('x')} through the three adapter (${t.variant}, mirrorWall, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
   await mirrorBiasChecks(pages);
+  await denoiserGateChecks(pages);
+}
+
+/**
+ * D1402 (W34): examples/ssr rebuilds the FFX denoiser when the tracer's roughness threshold changes,
+ * so its gate follows. At threshold 0.8 on the roughnessRamp strips, the denoiser must change pixels
+ * between 0.447 and 0.8 (it passes pixels above its gate through unchanged) and leave those above 0.8.
+ */
+async function denoiserGateChecks(pages) {
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1`);
+  pages.push(p);
+  if (!(await p.T('window.__p.denoiserName'))) { console.log('  ssr denoiser gate: no denoiser (no sibling Denoiser repo), skipped'); return; }
+  await p.T("window.__p.load('roughnessRamp')");
+  await p.T("window.__p.setPose('strips')");
+  const r = await p.T('window.__p.denoiserGateCheck(0.8)');
+  const after = await p.T('window.__p.denoiserGate');
+  const b = r.bands;
+  const fmt = (k) => `${k} ${(b[k].changed * 100).toFixed(1)}% of ${b[k].px} px`;
+  check('ssr denoiser gate follows the roughness threshold (D1402)',
+    r.gate === 0.8 && after === 0.447 && b.between.px > 1000 && b.between.changed > 0.5 && b.above.changed < 0.01 && b.glossy.changed > 0.5,
+    `threshold 0.8: gate ${r.gate}, denoised (output != input): ${['glossy', 'between', 'above'].map(fmt).join(', ')}; gate back to ${after}`);
 }
 
 /**
@@ -1588,6 +1609,7 @@ async function main() {
     if (runs('ssr')) await ssrChecks(pages);
     if (runs('hybrid')) await hybridChecks(pages);
     if (only === 'mirror-bias') await mirrorBiasChecks(pages); // W32: the mirrorBias check alone (also part of ssr)
+    if (only === 'denoiser-gate') await denoiserGateChecks(pages); // W34: the D1402 check alone (also part of ssr)
     if (only === 'seam') {
       // W26: the D53 seam sweep alone (examples/ssr, denoised)
       const sp = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1`);
