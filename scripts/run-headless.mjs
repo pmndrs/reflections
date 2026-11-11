@@ -923,6 +923,7 @@ async function ssrRtChecks(pages) {
   }
   if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '');
   await missFillChecks(pages);
+  await offscreenFillChecks(pages);
 
   // GPU ms vs miss count at 1080p: the same frame, misses varied with the miss-list threshold
   const big = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1&scene=offscreen&pose=mirror`);
@@ -986,6 +987,74 @@ async function missFillChecks(pages) {
 }
 /** D4301: limits for {@link missFillChecks}, from W37's measurement (see DIVERGES D4301). */
 const MISS_FILL_MAX = { default: 22.5, left: 27 };
+
+/**
+ * W38 (D4400): offscreen keeps its emissives in the probe captures and places them with probes (a
+ * floor probe lidded at the ring's height, a wall-mirror probe). Per pose, over the SSR miss px
+ * (RT off), the RT-off `final` against the same frame with `?rt=1`: mean abs diff / 255, and the
+ * ring's px (warm: r > 200, r - b > 60) in the RT frame, the RT-off frame and both. `single` bakes
+ * the room's probe alone (the kit before W38, emissives in) for the comparison.
+ */
+const OFFSCREEN_FILL = `async (poses, rects) => {
+  const p = window.__p;
+  const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+  const warm = (d, k) => d[k] > 200 && d[k] - d[k + 2] > 60;
+  p.setHitColor('current'); p.setDenoise(false);
+  const out = {};
+  for (const pose of poses) {
+    p.setPose(pose);
+    p.setRT(false); p.setView('misses'); await p.step(3);
+    const M = await px(await p.shot());
+    p.setView('final');
+    out[pose] = {};
+    for (const [name, volumes] of [['single', [p.kit.probes[0]]], ['kit', null]]) {
+      await p.setProbeVolumes(volumes);
+      p.setRT(true); await p.step(3);
+      const R = await px(await p.shot());
+      p.setRT(false); await p.step(3);
+      const F = await px(await p.shot());
+      const rc = rects[pose], W = 960;
+      let n = 0, d = 0, ringRT = 0, ringOff = 0, both = 0;
+      for (let k = 0; k < M.length; k += 4) {
+        if (!(M[k] > 200 && M[k + 1] < 80 && M[k + 2] < 80)) continue;
+        const x = (k >> 2) % W, y = ((k >> 2) / W) | 0;
+        if (rc && !(x >= rc[0] && y >= rc[1] && x < rc[2] && y < rc[3])) continue;
+        n++; d += (Math.abs(F[k] - R[k]) + Math.abs(F[k + 1] - R[k + 1]) + Math.abs(F[k + 2] - R[k + 2])) / 3;
+        const a = warm(R, k), b = warm(F, k);
+        ringRT += a; ringOff += b; both += a && b;
+      }
+      out[pose][name] = { px: n, mad: n ? d / n : 0, ringRT, ringOff, both, probes: p.probes.bakedProbes.length };
+    }
+  }
+  p.setView('grid');
+  return out;
+}`;
+
+/**
+ * D4400: limits for {@link offscreenFillChecks}: W38's measurement plus ~1 / 255 (default 17.8, the
+ * wall mirror's upper part 13.4), and below the room probe alone by a margin (26.7 / 17.5). The
+ * 'mirror' pose counts only the wall mirror's upper part (the bars and the glow sphere, 960x540 px
+ * [335, 185, 630, 300]): below it the mirror shows the floor, where the RT reference is black (a
+ * metal hit seen in a mirror, D3513).
+ */
+const OFFSCREEN_FILL_MAX = { default: 19, mirror: 14.5 };
+const OFFSCREEN_FILL_MARGIN = { default: 5, mirror: 2 };
+const OFFSCREEN_FILL_RECT = { mirror: [335, 185, 630, 300] };
+
+async function offscreenFillChecks(pages) {
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=offscreen`);
+  pages.push(p);
+  const r = await p.T(`(${OFFSCREEN_FILL})(['default', 'mirror'], ${JSON.stringify(OFFSCREEN_FILL_RECT)})`);
+  const d = r.default;
+  const ring = (v) => `ring px rt ${v.ringRT}, rt-off ${v.ringOff}, both ${v.both}`;
+  check('offscreen: the ring shows in the RT-off fallback where ?rt=1 has it (emissives captured, floor probe lidded at the ring, D4400)',
+    d.kit.probes === 3 && d.kit.ringRT > 500 && d.kit.both >= 0.9 * d.kit.ringRT && d.kit.ringOff <= 2.5 * d.kit.ringRT && d.single.both < 0.6 * d.single.ringRT,
+    `kit (${d.kit.probes} probes): ${ring(d.kit)}; one room probe: ${ring(d.single)}`);
+  check('offscreen: the probe fallback in the SSR misses stays near the ray-traced fill (D4400)',
+    ['default', 'mirror'].every((k) => r[k].kit.px > 10000 && r[k].kit.mad < OFFSCREEN_FILL_MAX[k] && r[k].kit.mad < r[k].single.mad - OFFSCREEN_FILL_MARGIN[k]),
+    `mean abs diff / 255 vs rt=1 over the misses (mirror: the wall mirror's upper part); ${['default', 'mirror'].map((k) => `${k}: ${r[k].kit.px} miss px, one room probe ${r[k].single.mad.toFixed(2)} -> kit ${r[k].kit.mad.toFixed(2)}`).join('; ')} (limits ${JSON.stringify(OFFSCREEN_FILL_MAX)}, margins ${JSON.stringify(OFFSCREEN_FILL_MARGIN)})`);
+}
 
 /**
  * examples/ssr?rt=1&bvh=pmndrs (W14): core's @pmndrs/bvh provider.

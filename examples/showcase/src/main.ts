@@ -169,7 +169,7 @@ async function main() {
       specular: c.geometry.select(tone(c.specular), vec3(0)),
       probeSpecular: c.geometry.select(tone(c.probeSpecular), vec3(0)),
       // W38: the pixels the ray-traced pass traced (SSR's miss list, after the tile cap), red; RT on only
-      traced: c.source.greaterThan(0.5).select(vec3(1, 0, 0), vec3(0)),
+      traced: c.geometry.and(c.source.greaterThan(0.5)).select(vec3(1, 0, 0), vec3(0)),
       hitDistance: (() => { const d: N = c.hitDistance; return d.greaterThan(0).select((vec3(1, 0.8, 0.5) as N).mul(d.div(d.add(2))), vec3(0)); })(),
     };
     let out: N = vec3(0);
@@ -583,6 +583,8 @@ async function main() {
         if (helper) { kit.scene.remove(helper); helper = null; }
         const next = probes = makeProbes(volumes ?? kit.probes);
         kit.scene.add(next);
+        // bake as on a fresh load: the previous set left on the scene would light the first pass's captures
+        kit.scene.environmentNode = null;
         await idle();
         bake();
         await idle();

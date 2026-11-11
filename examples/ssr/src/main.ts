@@ -394,6 +394,8 @@ async function main() {
       probes.add(p);
     }
     kit!.scene.add(probes);
+    // bake as on a fresh load: a previous set left on the scene would light the first pass's captures
+    kit!.scene.environmentNode = null;
     probes.bake(renderer, kit!.scene, bakeOptions(extra));
     nextNodeFrame();
     kit!.scene.environmentNode = reflectionProbes(probes) as N;

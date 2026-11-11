@@ -11,6 +11,9 @@
 // Probe captures (D4301): each kit captures only what lies on its probe's projection box (walls,
 // floor, face-mounted mirrors); the objects standing inside the box are `noProbe()`, so where SSR
 // misses, the box-projected fallback shows the room behind them instead of their smeared capture.
+// offscreen is the exception (W38, D4400): its off-screen emissives are what the scene is about, so
+// they stay in the captures and extra probes (a floor probe lidded at their height, a wall-mirror
+// probe) put them where the floor's and the mirror's rays meet them.
 import * as THREE from 'three/webgpu';
 import {
   type KitScene, type SceneOptions, type Vec3, add, floor, floorProbe, glow, gradientEnvironment, makeCamera, mirror, newScene, noProbe, skyEnvironment, useSky,
@@ -60,6 +63,9 @@ export function mirrorWall(opts: SceneOptions = {}): KitScene {
  * reflected ray keeps the view ray's horizontal direction), so "off screen" for the floor is above
  * the frame, as in the explainer's scenario; behind-the-camera is the wall mirror's case.
  */
+/** offscreen's ring height: the floor probe's projection box ends there (W38). */
+const RING_Y = 3.4;
+
 export function offscreen(opts: SceneOptions = {}): KitScene {
   const scene = newScene();
   useSky(scene, new THREE.Vector3(-3, 7, 3));
@@ -71,17 +77,19 @@ export function offscreen(opts: SceneOptions = {}): KitScene {
   // on screen: a few matte objects
   add(scene, noProbe(new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.7, 40), std(0x8899aa, 0.6))), [-1.8, 0.35, -1.2]);
   add(scene, noProbe(new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.7), std(0xb5562f, 0.7))), [1.8, 0.25, -0.6], 0.4);
-  // above the frame: a glowing ring and a lamp bar (the floor shows them, the screen doesn't)
-  // (in mid-air, 1.6-1.9 m below the projection box's top: out of the probe, D4301; the floor's
-  // misses vs ?rt=1 25.6 -> 14.5 / 255 with them out, the probe painted them onto the box's top)
-  const ring = add(scene, noProbe(new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.07, 16, 80), glow(0xff8a2a, 5))), [0, 3.4, -2.5]);
+  // above the frame: a glowing ring and a lamp bar (the floor shows them, the screen doesn't). They
+  // stay in the probes (W38, D4400): the floor's own probe has its projection box's lid at the
+  // ring's height (y = RING_Y), so box projection puts the ring where the floor's rays meet it
+  const ring = add(scene, new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.07, 16, 80), glow(0xff8a2a, 5)), [0, RING_Y, -2.5]);
   ring.rotation.x = Math.PI / 2;
-  add(scene, noProbe(new THREE.Mesh(new THREE.BoxGeometry(3, 0.1, 0.1), glow(0x7fe7ff, 5))), [-2.2, 3.1, 0.2]);
+  add(scene, new THREE.Mesh(new THREE.BoxGeometry(3, 0.1, 0.1), glow(0x7fe7ff, 5)), [-2.2, 3.1, 0.2]);
   // behind the camera: three bright bars on a blue wall (only the wall mirror shows them)
   add(scene, new THREE.Mesh(new THREE.PlaneGeometry(14, 5), std(0x5a7690, 0.85)), [0, 2.5, 8], Math.PI);
   [[0xff3b5c, -1.2], [0x2ee6d6, 0], [0xffc93c, 1.2]].forEach(([c, x]) =>
     add(scene, new THREE.Mesh(new THREE.BoxGeometry(0.25, 1.4, 0.05), glow(c, 4)), [x, 1.3, 7.9]));
-  add(scene, noProbe(new THREE.Mesh(new THREE.SphereGeometry(0.35, 32, 16), glow(0xfff0d0, 3))), [1.8, 1.4, 6.5]);
+  // a glow sphere 1.5 m in front of that wall: in the probes too; the wall mirror's own probe
+  // captures from just in front of the mirror, so the sphere keeps its place in it (W38, D4400)
+  add(scene, new THREE.Mesh(new THREE.SphereGeometry(0.35, 32, 16), glow(0xfff0d0, 3)), [1.8, 1.4, 6.5]);
   studioLights(scene, [-3, 7, 3], 1.6);
   const views = {
     default: { pos: [0, 1.6, 4] as Vec3, target: [0, 0.25, -0.5] as Vec3 },
@@ -90,8 +98,19 @@ export function offscreen(opts: SceneOptions = {}): KitScene {
   return {
     id: 'offscreen', title: 'Off screen: above the frame and behind the camera', scene, camera: makeCamera(views.default, opts.aspect),
     target: new THREE.Vector3(...views.default.target), views,
-    // influence 0.6 m past the walls too: the wall mirror (z = -3.95) sat on the back face (D1500)
-    probes: [floorProbe({ position: [0, 2.5, 2], influenceSize: [15.2, 5, 13.2], projectionSize: [14, 5, 12] })],
+    // Three probes over one room box (x -7..7, y 0..5, z -4..8; W38, D4400). Smaller volumes take
+    // priority, so the floor and the wall mirror use their own and the rest the room's:
+    //  - the room: influence 0.6 m past the walls too (the wall mirror at z = -3.95 sat on the back face, D1500);
+    //  - the floor: a slab around y = 0 whose projection box is the room cut off at the ring's height,
+    //    captured 0.2 m above the floor (lower captures keep the sky over the back wall where it is);
+    //  - the wall mirror: a thin box around it, projected onto the room, captured 0.25 m in front of it.
+    // Floor + wall mirror vs ?rt=1 over the SSR misses: 13.4 / 18.9 (default / mirror view) against
+    // 13.7 / 22.6 with the emissives out of a single probe and 24.9 / 26.5 with them in it.
+    probes: [
+      floorProbe({ position: [0, 2.5, 2], influenceSize: [15.2, 5, 13.2], projectionSize: [14, 5, 12] }),
+      { position: [0, -0.05, 2], influenceSize: [14.6, 0.9, 12.6], blendDistance: 0.3, projectionSize: [14, RING_Y, 12], projectionOffset: [0, RING_Y / 2 + 0.05, 0], originOffset: [0, 0.25, 0] },
+      { position: [0, 1.2, -3.95], influenceSize: [3.6, 2.2, 0.8], blendDistance: 0.2, projectionSize: [14, 5, 12], projectionOffset: [0, 1.3, 5.95], originOffset: [0, 0, 0.25] },
+    ],
   };
 }
 
