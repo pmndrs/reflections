@@ -9,6 +9,10 @@
 //
 // Babylon's world is left-handed. The scene uses three's coordinates with x negated, so the image
 // matches the three page (examples/ssr/?scene=mirrorWall) instead of its mirror image.
+//
+// ?scene=ibl: metal / rough / dielectric spheres and a ground with ambient-occlusion and normal maps
+// (plus clear coat, sheen and bent-normal spheres) under a flat sky (?sky=gradient for the gradient),
+// to compare the composite against Babylon's own specular IBL (`__p.iblCompare()`, D1804).
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera.js';
 import { Constants } from '@babylonjs/core/Engines/constants.js';
 import { WebGPUEngine } from '@babylonjs/core/Engines/webgpuEngine.js';
@@ -28,7 +32,10 @@ import { PBRMaterial } from '@babylonjs/core/Materials/PBR/pbrMaterial.js';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture.js';
 import { RawCubeTexture } from '@babylonjs/core/Materials/Textures/rawCubeTexture.js';
+import { HDRFiltering } from '@babylonjs/core/Materials/Textures/Filtering/hdrFiltering.js';
 import { Texture } from '@babylonjs/core/Materials/Textures/texture.js';
+import { ToHalfFloat } from '@babylonjs/core/Misc/textureTools.js';
+import { CubeMapToSphericalPolynomialTools } from '@babylonjs/core/Misc/HighDynamicRange/cubemapToSphericalPolynomial.js';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.js';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector.js';
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh.js';
@@ -48,6 +55,8 @@ import {
 
 const q = new URLSearchParams(location.search);
 const manual = q.has('manual');
+const sceneName = q.get('scene') === 'ibl' ? 'ibl' : 'mirrorWall';
+const flatSky = (q.get('sky') ?? (sceneName === 'ibl' ? 'flat' : 'gradient')) === 'flat';
 const status = document.getElementById('status')!;
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const controls = document.getElementById('controls')!;
@@ -68,8 +77,8 @@ scene.clearColor = new Color4(0.004, 0.005, 0.006, 1); // three's 0x0d0f12, line
 const L = (x: number, y: number, z: number) => new Vector3(-x, y, z);
 const lin = (hex: number) => Color3.FromHexString(`#${hex.toString(16).padStart(6, '0')}`).toLinearSpace();
 
-const camera = new FreeCamera('camera', L(0, 1.5, 5.5), scene);
-camera.setTarget(L(0, 1.0, -3));
+const camera = new FreeCamera('camera', sceneName === 'ibl' ? L(0, 2.2, 5.2) : L(0, 1.5, 5.5), scene);
+camera.setTarget(sceneName === 'ibl' ? L(0, 0.4, -0.6) : L(0, 1.0, -3));
 camera.fov = (50 * Math.PI) / 180;
 camera.minZ = 0.05;
 camera.maxZ = 100;
@@ -78,6 +87,7 @@ if (!manual) camera.attachControl(canvas, true);
 
 /** examples/shared/kit.ts gradientEnvironment, as a float cube in WebGPU's face convention. */
 function gradientSky(dir: Vector3): [number, number, number] {
+  if (flatSky) return [0.62, 0.6, 0.56]; // constant: any prefilter of it is itself, so the radiance matches Babylon's exactly
   const up = dir.y;
   if (up > 0) { const k = Math.min(1, up * 1.6); return [0.46 + 0.22 * k, 0.44 + 0.21 * k, 0.41 + 0.19 * k]; }
   const k = Math.min(1, -up * 2.5);
@@ -94,20 +104,35 @@ function cubeFaceDir(face: number, u: number, v: number): Vector3 {
     default: return new Vector3(-u, -v, -1);
   }
 }
-function skyCube(size = 64): RawCubeTexture {
-  const faces: Float32Array[] = [];
+function skyCube(mipmaps = false, size = 64): RawCubeTexture {
+  const faces: Uint16Array[] = [];
   for (let f = 0; f < 6; f++) {
-    const data = new Float32Array(size * size * 4);
+    const data = new Uint16Array(size * size * 4);
     for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
       const d = cubeFaceDir(f, ((x + 0.5) / size) * 2 - 1, ((y + 0.5) / size) * 2 - 1).normalize();
       const c = gradientSky(d);
-      data.set([c[0], c[1], c[2], 1], (y * size + x) * 4);
+      data.set([ToHalfFloat(c[0]), ToHalfFloat(c[1]), ToHalfFloat(c[2]), ToHalfFloat(1)], (y * size + x) * 4);
     }
     faces.push(data);
   }
-  return new RawCubeTexture(scene, faces, size, Constants.TEXTUREFORMAT_RGBA, Constants.TEXTURETYPE_FLOAT, false, false, Texture.BILINEAR_SAMPLINGMODE);
+  const cube = new RawCubeTexture(scene, faces, size, Constants.TEXTUREFORMAT_RGBA, Constants.TEXTURETYPE_HALF_FLOAT, mipmaps, false, mipmaps ? Texture.TRILINEAR_SAMPLINGMODE : Texture.BILINEAR_SAMPLINGMODE);
+  // Linear radiance. Babylon's default (gammaSpace true) decodes it with pow 2.2 in PBR's IBL and the
+  // skybox material alike, but the skybox applies its level before the decode ((0.3 c)^2.2 vs
+  // 0.3 c^2.2), so the sky (and the environment slot captured from it) was ~4x darker than the
+  // environment PBR lit with.
+  cube.gammaSpace = false;
+  return cube;
 }
-const environment = skyCube();
+const environment = skyCube(true);
+// GGX-prefiltered into its mips, as Babylon's PBR expects of an environment (it samples the radiance
+// at a roughness LOD). Babylon's own specular IBL reads it only with the strip plugin off
+// (`iblCompare`); the reflections take the environment slot captured from the sky instead.
+await new HDRFiltering(engine, { quality: Constants.TEXTURE_FILTERING_QUALITY_OFFLINE }).prefilter(environment);
+// Its spherical harmonics (PBR's environment irradiance). Deep imports skip the side effect that
+// computes them on demand, so without this the irradiance was 0: no IBL diffuse, and Babylon's own
+// specular IBL, which mixes the radiance toward the irradiance by alphaG (MIX_IBL_RADIANCE_WITH_IRRADIANCE),
+// went dark on rough materials.
+environment.sphericalPolynomial = await CubeMapToSphericalPolynomialTools.ConvertCubeMapTextureToSphericalPolynomial(environment);
 scene.environmentTexture = environment;
 scene.environmentIntensity = 0.3;
 
@@ -118,8 +143,10 @@ const skyTex = skyCube();
 skyTex.coordinatesMode = Texture.SKYBOX_MODE;
 // The sky is drawn at the environment's intensity, so the visible sky, the environment slot the
 // probes capture from it, and the PBR irradiance all agree; the tracer's iblFactor stays 1 (local
-// probe captures are real radiance and are not scaled).
-skyTex.level = scene.environmentIntensity;
+// probe captures are real radiance and are not scaled). StandardMaterial works in gamma space: it
+// encodes a linear texture with pow 1 / 2.2, applies the level, and decodes its output with pow 2.2,
+// so the level that draws the sky at `intensity x radiance` is intensity^(1 / 2.2).
+skyTex.level = Math.pow(scene.environmentIntensity, 1 / 2.2);
 skyMat.reflectionTexture = skyTex;
 skyMat.backFaceCulling = false;
 skyMat.disableLighting = true;
@@ -137,53 +164,143 @@ const pbr = (name: string, hex: number, roughness: number, metallic = 0) => {
   return m;
 };
 
-const floor = CreateGround('floor', { width: 16, height: 16 }, scene);
-floor.material = pbr('mirror', 0xeeeeee, 0, 1);
+function buildMirrorWall() {
+  const floor = CreateGround('floor', { width: 16, height: 16 }, scene);
+  floor.material = pbr('mirror', 0xeeeeee, 0, 1);
 
-function patternTexture(): DynamicTexture {
-  const [cx, cy] = [10, 4], [w, h] = [1024, 410];
-  const tex = new DynamicTexture('pattern', { width: w, height: h }, scene, true);
+  function patternTexture(): DynamicTexture {
+    const [cx, cy] = [10, 4], [w, h] = [1024, 410];
+    const tex = new DynamicTexture('pattern', { width: w, height: h }, scene, true);
+    const g = tex.getContext() as CanvasRenderingContext2D;
+    const bands = ['#e63946', '#f4a261', '#2a9d8f', '#457b9d', '#8d5fd3'];
+    const cw = w / cx, ch = h / cy;
+    for (let y = 0; y < cy; y++) for (let x = 0; x < cx; x++) { g.fillStyle = (x + y) % 2 ? '#d8d8d8' : '#9a9a9a'; g.fillRect(x * cw, y * ch, cw, ch); }
+    for (let y = 0; y < cy; y += 2) { g.fillStyle = bands[(y / 2) % bands.length]; g.fillRect(0, y * ch + ch * 0.4, w, ch * 0.2); }
+    g.fillStyle = '#202020';
+    g.font = `bold ${Math.floor(ch * 0.32)}px sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    for (let y = 0; y < cy; y++) for (let x = 0; x < cx; x++) g.fillText(String.fromCharCode(65 + y) + (x + 1), (x + 0.5) * cw, (y + 0.22) * ch);
+    tex.update(true);
+    tex.anisotropicFilteringLevel = 8;
+    return tex;
+  }
+  const wall = CreatePlane('wall', { width: 10, height: 4 }, scene);
+  wall.position = L(0, 2, -3);
+  wall.rotation.y = Math.PI; // Babylon's plane faces -Z; the camera is at +Z
+  const wallMat = pbr('wall', 0xffffff, 0.75);
+  wallMat.albedoTexture = patternTexture();
+  wall.material = wallMat;
+
+  const post = (name: string, hex: number, x: number) => {
+    const m = CreateBox(name, { width: 0.4, height: 3, depth: 0.4 }, scene);
+    m.position = L(x, 1.5, -2.4);
+    m.material = pbr(name, hex, 0.5);
+  };
+  post('postRed', 0xd1495b, -4.2);
+  post('postTeal', 0x00798c, 4.2);
+  const sphere = CreateSphere('sphere', { diameter: 0.9, segments: 48 }, scene);
+  sphere.position = L(-1.6, 0.45, -1.2);
+  sphere.material = pbr('sphere', 0xedae49, 0.35);
+  const box = CreateBox('box', { size: 0.8 }, scene);
+  box.position = L(1.5, 0.4, -1.5);
+  box.rotation.y = -0.5;
+  box.material = pbr('box', 0x66a182, 0.6);
+  const strip = CreateBox('strip', { width: 9, height: 0.08, depth: 0.05 }, scene);
+  strip.position = L(0, 3.85, -2.95);
+  const stripMat = pbr('strip', 0x000000, 1);
+  stripMat.emissiveColor = lin(0xfff0d8);
+  stripMat.emissiveIntensity = 4;
+  strip.material = stripMat;
+}
+
+/** Grey-scale ambient-occlusion map: dark grooves on a tile grid, softer towards the tile centres. */
+function aoTexture(): DynamicTexture {
+  const n = 256, tiles = 4;
+  const tex = new DynamicTexture('ao', { width: n, height: n }, scene, true);
   const g = tex.getContext() as CanvasRenderingContext2D;
-  const bands = ['#e63946', '#f4a261', '#2a9d8f', '#457b9d', '#8d5fd3'];
-  const cw = w / cx, ch = h / cy;
-  for (let y = 0; y < cy; y++) for (let x = 0; x < cx; x++) { g.fillStyle = (x + y) % 2 ? '#d8d8d8' : '#9a9a9a'; g.fillRect(x * cw, y * ch, cw, ch); }
-  for (let y = 0; y < cy; y += 2) { g.fillStyle = bands[(y / 2) % bands.length]; g.fillRect(0, y * ch + ch * 0.4, w, ch * 0.2); }
-  g.fillStyle = '#202020';
-  g.font = `bold ${Math.floor(ch * 0.32)}px sans-serif`;
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  for (let y = 0; y < cy; y++) for (let x = 0; x < cx; x++) g.fillText(String.fromCharCode(65 + y) + (x + 1), (x + 0.5) * cw, (y + 0.22) * ch);
-  tex.update(true);
-  tex.anisotropicFilteringLevel = 8;
+  const img = g.createImageData(n, n);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const u = ((x + 0.5) / n) * tiles, v = ((y + 0.5) / n) * tiles;
+    const du = Math.min(u - Math.floor(u), Math.ceil(u) - u), dv = Math.min(v - Math.floor(v), Math.ceil(v) - v);
+    const edge = Math.min(du, dv); // 0 at the grooves, 0.5 at the tile centre
+    const ao = 0.12 + 0.88 * Math.min(1, Math.pow(edge / 0.22, 0.8));
+    const b = Math.round(ao * 255), k = (y * n + x) * 4;
+    img.data[k] = img.data[k + 1] = img.data[k + 2] = b; img.data[k + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  tex.update(false);
   return tex;
 }
-const wall = CreatePlane('wall', { width: 10, height: 4 }, scene);
-wall.position = L(0, 2, -3);
-wall.rotation.y = Math.PI; // Babylon's plane faces -Z; the camera is at +Z
-const wallMat = pbr('wall', 0xffffff, 0.75);
-wallMat.albedoTexture = patternTexture();
-wall.material = wallMat;
+/** Tangent-space normal map of rounded tiles (the AO map's grid), for horizon occlusion (needs BUMP). */
+function normalTexture(): DynamicTexture {
+  const n = 256, tiles = 4;
+  const tex = new DynamicTexture('normals', { width: n, height: n }, scene, true);
+  const g = tex.getContext() as CanvasRenderingContext2D;
+  const img = g.createImageData(n, n);
+  const h = (u: number, v: number) => { const fu = u - Math.floor(u), fv = v - Math.floor(v); return Math.sin(Math.PI * fu) * Math.sin(Math.PI * fv); };
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const u = ((x + 0.5) / n) * tiles, v = ((y + 0.5) / n) * tiles, e = 1 / n;
+    const dx = (h(u + e * tiles, v) - h(u - e * tiles, v)) / (2 * e), dy = (h(u, v + e * tiles) - h(u, v - e * tiles)) / (2 * e);
+    const s = 0.08; // slope scale
+    let nx = -dx * s, ny = -dy * s, nz = 1;
+    const l = Math.hypot(nx, ny, nz); nx /= l; ny /= l; nz /= l;
+    const k = (y * n + x) * 4;
+    img.data[k] = Math.round((nx * 0.5 + 0.5) * 255); img.data[k + 1] = Math.round((ny * 0.5 + 0.5) * 255); img.data[k + 2] = Math.round((nz * 0.5 + 0.5) * 255); img.data[k + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  tex.update(false);
+  return tex;
+}
+/** A flat bent-normal map (the bent normal is the surface normal): bent-normal occlusion from the AO alone. */
+function flatNormalTexture(): DynamicTexture {
+  const tex = new DynamicTexture('bentNormals', { width: 4, height: 4 }, scene, false);
+  const g = tex.getContext() as CanvasRenderingContext2D;
+  g.fillStyle = 'rgb(128,128,255)';
+  g.fillRect(0, 0, 4, 4);
+  tex.update(false);
+  return tex;
+}
 
-const post = (name: string, hex: number, x: number) => {
-  const m = CreateBox(name, { width: 0.4, height: 3, depth: 0.4 }, scene);
-  m.position = L(x, 1.5, -2.4);
-  m.material = pbr(name, hex, 0.5);
-};
-post('postRed', 0xd1495b, -4.2);
-post('postTeal', 0x00798c, 4.2);
-const sphere = CreateSphere('sphere', { diameter: 0.9, segments: 48 }, scene);
-sphere.position = L(-1.6, 0.45, -1.2);
-sphere.material = pbr('sphere', 0xedae49, 0.35);
-const box = CreateBox('box', { size: 0.8 }, scene);
-box.position = L(1.5, 0.4, -1.5);
-box.rotation.y = -0.5;
-box.material = pbr('box', 0x66a182, 0.6);
-const strip = CreateBox('strip', { width: 9, height: 0.08, depth: 0.05 }, scene);
-strip.position = L(0, 3.85, -2.95);
-const stripMat = pbr('strip', 0x000000, 1);
-stripMat.emissiveColor = lin(0xfff0d8);
-stripMat.emissiveIntensity = 4;
-strip.material = stripMat;
+/** Metal / rough / dielectric materials with AO and normal maps, clear coat, sheen, bent normals. */
+function buildIBL() {
+  const ao = aoTexture(), normals = normalTexture();
+  const ground = CreateGround('ground', { width: 10, height: 10 }, scene);
+  const groundMat = pbr('ground', 0x9a9a9a, 0.55, 0);
+  groundMat.ambientTexture = ao;
+  groundMat.bumpTexture = normals;
+  ground.material = groundMat;
+  // [name, colour, roughness, metallic, AO, bump, extra]
+  const spheres: [string, number, number, number, boolean, boolean, string?][] = [
+    ['gold', 0xffc356, 0.25, 1, true, false],
+    ['silver', 0xe8e8e8, 0.6, 1, true, true],
+    ['copper', 0xf0a070, 0.9, 1, false, false],
+    ['red', 0xc0303a, 0.4, 0, true, true],
+    ['coat', 0x3050c0, 0.5, 0, true, false, 'clearcoat'],
+    ['sheen', 0x606060, 0.7, 0, true, false, 'sheen'],
+    ['bent', 0xd0d0d0, 0.35, 1, true, false, 'bent'],
+  ];
+  spheres.forEach(([name, hex, roughness, metallic, useAO, bump, extra], i) => {
+    const m = CreateSphere(name, { diameter: 0.85, segments: 48 }, scene);
+    m.position = L(-3 + i, 0.425, i % 2 ? -1.6 : -0.6);
+    const mat = pbr(name, hex, roughness, metallic);
+    if (useAO) mat.ambientTexture = ao;
+    if (bump) mat.bumpTexture = normals;
+    if (extra === 'clearcoat') { mat.clearCoat.isEnabled = true; mat.clearCoat.roughness = 0.1; }
+    if (extra === 'sheen') { mat.sheen.isEnabled = true; mat.sheen.color = new Color3(1, 1, 1); mat.sheen.intensity = 0.8; mat.sheen.albedoScaling = true; }
+    if (extra === 'bent') mat.bentNormalTexture = flatNormalTexture();
+    m.material = mat;
+  });
+  const box = CreateBox('metalBox', { size: 0.8 }, scene);
+  box.position = L(2.4, 0.4, 0.6);
+  box.rotation.y = 0.6;
+  const boxMat = pbr('metalBox', 0xc8c8d0, 0.3, 1);
+  boxMat.ambientTexture = ao;
+  boxMat.bumpTexture = normals;
+  box.material = boxMat;
+}
+
+if (sceneName === 'ibl') buildIBL(); else buildMirrorWall();
 
 const hemi = new HemisphericLight('hemi', new Vector3(0, 1, 0), scene);
 hemi.diffuse = lin(0xdde6ff);
@@ -536,6 +653,90 @@ async function motionCheck() {
   return { pixels: n, best: best.scale, rows };
 }
 
+/** The canvas as RGBA8 (what the page shows: ACES, sRGB), row 0 at the top. */
+async function canvasPixels(): Promise<Uint8ClampedArray> {
+  frame();
+  const url = canvas.toDataURL('image/png');
+  await idle();
+  const img = new Image();
+  img.src = url;
+  await img.decode();
+  const c = new OffscreenCanvas(img.width, img.height);
+  const g = c.getContext('2d')!;
+  g.drawImage(img, 0, 0);
+  return g.getImageData(0, 0, img.width, img.height).data;
+}
+
+/** Renders until two frames in a row are identical (materials recompiled after a plugin toggle). */
+async function settled(): Promise<Uint8ClampedArray> {
+  await scene.whenReadyAsync();
+  let last = await canvasPixels();
+  for (let i = 0; i < 40; i++) {
+    const next = await canvasPixels();
+    let same = true;
+    for (let k = 0; k < next.length; k += 4) if (next[k] !== last[k] || next[k + 1] !== last[k + 1] || next[k + 2] !== last[k + 2]) { same = false; break; }
+    if (same) return next;
+    last = next;
+  }
+  return last;
+}
+
+/**
+ * The composite against Babylon's own specular IBL (D1804). SSR off and probes off, so core's
+ * radiance is the environment slot (captured from the sky) and ours should equal Babylon's IBL:
+ *   ours   = lit (strip plugin on) + weight x radiance (view 'final'), with and without the plugin's
+ *            per-pixel factors (`composite.specularFactors`): after / before;
+ *   theirs = Babylon's own render (plugin off on every PBR material, view 'lit').
+ * Mean and p99 of the per-pixel max-channel abs difference of the shown image (8-bit), over the
+ * geometry, over the pixels with a specular factor < 1 (AO, horizon / bent-normal occlusion, coat,
+ * sheen) and over the energy-compensated pixels with factor 1.
+ */
+async function iblCompare() {
+  stopLoop();
+  const pbrs = scene.materials.filter((m): m is PBRMaterial => m instanceof PBRMaterial);
+  const plugins = pbrs.map((m) => stripSpecularIBL(m));
+  const saved = { ssr: ssr.enabled, probes: probes.enabled, view: composite!.debugView, factors: composite!.specularFactors };
+  ssr.enabled = false; probes.enabled = false;
+  composite!.setView('final');
+  composite!.specularFactors = true;
+  const after = await settled();
+  // the masks, from the G-buffer of this frame (Babylon's targets are Y-flipped: row 0 = bottom)
+  const t = ssr.lastFrame!.textures;
+  const vel = await readTexture(t.motion);
+  const mat = await readTexture(ssr.frame.material!);
+  composite!.specularFactors = false;
+  const before = await settled();
+  for (const pl of plugins) pl.active = false;
+  composite!.setView('lit');
+  const babylon = await settled();
+  for (const pl of plugins) pl.active = true;
+  composite!.debugView = saved.view; composite!.specularFactors = saved.factors;
+  ssr.enabled = saved.ssr; probes.enabled = saved.probes;
+  await settled();
+  const W = t.motion.width, H = t.motion.height;
+  const sets = { geometry: [] as number[], occluded: [] as number[], energyOnly: [] as number[] };
+  const diffs = { before: { geometry: [] as number[], occluded: [] as number[], energyOnly: [] as number[] }, after: { geometry: [] as number[], occluded: [] as number[], energyOnly: [] as number[] } };
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    if (mat.data[i * 4] > 0.999) continue; // background
+    const packed = vel.data[i * 4 + 2];
+    const ms = packed > 1.5, factor = 1 - (packed - (ms ? 2 : 0));
+    const k = ((H - 1 - y) * W + x) * 4; // canvas row
+    const d = (img: Uint8ClampedArray) => Math.max(Math.abs(img[k] - babylon[k]), Math.abs(img[k + 1] - babylon[k + 1]), Math.abs(img[k + 2] - babylon[k + 2]));
+    const groups: (keyof typeof sets)[] = ['geometry'];
+    if (factor < 0.999) groups.push('occluded'); else if (ms) groups.push('energyOnly');
+    for (const g of groups) { sets[g].push(i); diffs.before[g].push(d(before)); diffs.after[g].push(d(after)); }
+  }
+  const summary = (a: number[]) => {
+    if (!a.length) return { mean: NaN, p99: NaN, max: NaN };
+    const s = [...a].sort((p, r) => p - r);
+    return { mean: Number((a.reduce((p, r) => p + r, 0) / a.length).toFixed(3)), p99: s[Math.min(s.length - 1, Math.floor(s.length * 0.99))], max: s[s.length - 1] };
+  };
+  const out: Record<string, unknown> = {};
+  for (const g of Object.keys(sets) as (keyof typeof sets)[]) out[g] = { pixels: sets[g].length, before: summary(diffs.before[g]), after: summary(diffs.after[g]) };
+  return out;
+}
+
 Object.assign(window, {
   __p: {
     engine, scene, ssr, probes, get composite() { return composite; }, gpuErrors, views: COMPOSITE_VIEWS,
@@ -558,6 +759,6 @@ Object.assign(window, {
       const med = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
       return Object.fromEntries(Object.entries(per).map(([k, v]) => [k, Number(med(v).toFixed(4))]));
     },
-    stats, orientation, motionCheck,
+    stats, orientation, motionCheck, iblCompare,
   },
 });

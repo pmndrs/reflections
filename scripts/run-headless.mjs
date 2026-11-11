@@ -1114,6 +1114,30 @@ async function babylonChecks(pages) {
       if (t) console.log(`  babylon tracer GPU ms (960x540, loop stopped): ${Object.entries(t).map(([k, v]) => `${k} ${v}`).join(', ')}`);
     }
   }
+  // D1804 (W29): the composite with SSR and probes off (environment slot only) against Babylon's own
+  // specular IBL, on AO / normal-mapped metal, rough, clear-coat, sheen and bent-normal materials.
+  for (const sky of ['flat', 'gradient']) {
+    const before = results.logs.length;
+    const p = await openPage(`http://127.0.0.1:${PORT}/babylon/?manual&scene=ibl&sky=${sky}`);
+    pages.push(p);
+    await p.T('window.__p.step(2)');
+    const c = await p.T('window.__p.iblCompare()');
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    const fmt = (g) => `${g.pixels} px: before mean ${g.before.mean} p99 ${g.before.p99} -> after mean ${g.after.mean} p99 ${g.after.p99} (/255)`;
+    console.log(`  babylon ibl (${sky} sky) vs Babylon's own specular IBL: geometry ${fmt(c.geometry)}; specular factor < 1 ${fmt(c.occluded)}; energy compensation only ${fmt(c.energyOnly)}`);
+    if (sky === 'flat') {
+      // flat sky: any prefilter of a constant is itself, so only the weight can differ
+      check('babylon: composite matches Babylon\'s own specular IBL (AO, horizon occlusion, multi-scatter applied)',
+        errs.length === 0 && c.occluded.pixels > 1000 && c.geometry.after.mean < 0.5 && c.geometry.after.mean < c.geometry.before.mean && c.occluded.after.mean < c.occluded.before.mean,
+        errs.length ? errs.slice(0, 2).join(' | ') : `geometry mean ${c.geometry.before.mean} -> ${c.geometry.after.mean}, p99 ${c.geometry.before.p99} -> ${c.geometry.after.p99} (/255)`);
+      const shot = async (name) => savePng(`babylon-ibl-${name}.png`, await p.T('window.__p.shot()'));
+      await p.T('window.__p.setSSR(false)');
+      await p.T('window.__p.setProbes(false)');
+      await shot('final');
+      await p.T("window.__p.setView('specularFactor')");
+      await shot('view-specularFactor');
+    }
+  }
 }
 
 /**
