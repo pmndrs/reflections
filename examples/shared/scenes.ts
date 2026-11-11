@@ -104,8 +104,8 @@ export function offscreen(opts: SceneOptions = {}): KitScene {
     //  - the floor: a slab around y = 0 whose projection box is the room cut off at the ring's height,
     //    captured 0.2 m above the floor (lower captures keep the sky over the back wall where it is);
     //  - the wall mirror: a thin box around it, projected onto the room, captured 0.25 m in front of it.
-    // Floor + wall mirror vs ?rt=1 over the SSR misses: 13.4 / 18.9 (default / mirror view) against
-    // 13.7 / 22.6 with the emissives out of a single probe and 24.9 / 26.5 with them in it.
+    // vs ?rt=1 over the SSR misses (default view; mirror view, the wall mirror's bars and sphere): 17.8 /
+    // 13.4, against 15.6 / 11.4 with the emissives out of one probe (not shown) and 26.7 / 17.6 with them in it.
     probes: [
       floorProbe({ position: [0, 2.5, 2], influenceSize: [15.2, 5, 13.2], projectionSize: [14, 5, 12] }),
       { position: [0, -0.05, 2], influenceSize: [14.6, 0.9, 12.6], blendDistance: 0.3, projectionSize: [14, RING_Y, 12], projectionOffset: [0, RING_Y / 2 + 0.05, 0], originOffset: [0, 0.25, 0] },
