@@ -7,7 +7,7 @@
 //   L = emissive + albedo x (envMean(N) x intensity + sum_hemi mix(ground, sky, 0.5 N.up + 0.5) / pi
 //                            + sum_dir colour x max(N.l, 0) / pi)
 //
-// plus, for providers with `traceHitSpecular` (W27, D2700), the specular lobe and clear coat by
+// plus, for providers with `traceHitSpecular` (W27b, D2750), the specular lobe and clear coat by
 // `hitLayered`: the environment along the mirror direction R, as the mean over a cone around R
 // whose width follows the roughness (one sample below ~0.1). Without it a metal hit (albedo
 // x (1 - metalness) = 0) was black: a mirror floor or metal car paint seen by a ray.

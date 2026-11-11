@@ -11,7 +11,7 @@
 //               triangle offset, split axis or (leaf flag << 16 | triangle count), 2 pad.
 //               A TLAS leaf holds the transform slot in the low 24 bits and the BLAS root node.
 //   transforms  36 words per slot: matrixWorld, inverseMatrixWorld, visible, 3 pad words. We pack
-//               the slot's material into the pad words (W27): albedo rgb8 + roughness 8, emissive
+//               the slot's material into the pad words (W27b): albedo rgb8 + roughness 8, emissive
 //               rgb9e5, specular F0 as sqrt-encoded rgb565 + clear coat 8 + clear coat roughness 8;
 //               the hook three-mesh-bvh's writeTransformData comment names for this.
 //   index       u32 triangle corners (rebased into the packed attributes)
@@ -26,8 +26,8 @@ import type { BindingSlot, ModuleBindingEntry, TraceProvider } from '@pmndrs/ref
 
 /**
  * Linear diffuse albedo and emitted radiance of a traced hit (WGSL `HitMaterial`), and its specular
- * lobe (WGSL `HitSpecular`, W27, D2700): F0 (linear), perceptual roughness, clear coat factor and
- * roughness. Without `specular` the hit is diffuse only (as before W27).
+ * lobe (WGSL `HitSpecular`, W27b, D2750): F0 (linear), perceptual roughness, clear coat factor and
+ * roughness. Without `specular` the hit is diffuse only (as before W27b).
  */
 export interface HitMaterial {
   albedo: readonly [number, number, number];
@@ -58,7 +58,7 @@ export interface MeshBVHTraceProviderOptions {
    * The material a mesh contributes to traced-hit shading. Default {@link defaultHitMaterial}:
    * diffuse albedo `color x mean(map) x (1 - metalness) x (1 - transmission)`, `emissive x
    * mean(emissiveMap) x emissiveIntensity`, specular F0 `mix(0.04, base, metalness)`, roughness and
-   * clear coat (one set per mesh: D902, D2700).
+   * clear coat (one set per mesh: D902, D2750).
    */
   material?: (mesh: THREE.Mesh) => HitMaterial;
 }
@@ -104,7 +104,7 @@ export function textureMeanColor(t: THREE.Texture): [number, number, number] | n
  * from the material's scalars x the mean of its maps (D902):
  * - diffuse albedo `color x mean(map) x (1 - metalness) x (1 - transmission)`;
  * - `emissive x mean(emissiveMap) x emissiveIntensity`;
- * - specular F0 `mix(0.04, color x mean(map), metalness)` (W27, D2700; standard and physical
+ * - specular F0 `mix(0.04, color x mean(map), metalness)` (W27b, D2750; standard and physical
  *   materials only), roughness `roughness x mean(roughnessMap).g`, metalness `x mean(metalnessMap).b`,
  *   clear coat `clearcoat x mean(clearcoatMap).r` and `clearcoatRoughness` (physical materials).
  */

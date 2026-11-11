@@ -53,7 +53,7 @@ export const gbufferMetalness = /*@__PURE__*/ (Fn((builder: Builder) => {
 
 /**
  * How much of the base layer's specular survives the clear coat, three's `PhysicalLightingModel.finish`:
- * `1 - clearcoat x F_Schlick(0.04, 1, dot(clearcoatNormal, V))` (W27, D2702). The composite scales its
+ * `1 - clearcoat x F_Schlick(0.04, 1, dot(clearcoatNormal, V))` (W27b, D2752). The composite scales its
  * estimate of three's specular IBL term by it, so it swaps the base layer's term at the weight three
  * gave it, not more (which over-subtracted red car paint to black / cyan at grazing angles).
  * 1 for materials without a clear coat. Transparent (blended) materials keep their alpha, which the

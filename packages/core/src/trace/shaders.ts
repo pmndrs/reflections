@@ -262,7 +262,7 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
   hitN = select(hitN, -hitN, dot(hitN, dir) > 0.0);
   var L = vec3f(0.0);
   var source = ${RT_SOURCE.tracedHit}u;
-  // On-screen reuse only for hits whose diffuse outweighs their specular lobe (W27, D2701): the
+  // On-screen reuse only for hits whose diffuse outweighs their specular lobe (W27b, D2751): the
   // reused colour is the camera's view of the surface (with hitColor 'history', its reflections
   // too), which for a metal (no diffuse: a mirror floor, metal paint) is a view-dependent term
   // the ray doesn't see. Those are shaded (environment along the mirror direction) instead.

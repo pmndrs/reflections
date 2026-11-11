@@ -40,8 +40,8 @@ export interface BvhTraceInstance {
 
 /**
  * Linear diffuse albedo and emitted radiance of a traced hit (WGSL `HitMaterial`), and its specular
- * lobe (WGSL `HitSpecular`, W27): F0 (linear), perceptual roughness, clear coat factor and roughness.
- * Without `specular` the hit has no specular lobe (diffuse only, as before W27).
+ * lobe (WGSL `HitSpecular`, W27b): F0 (linear), perceptual roughness, clear coat factor and roughness.
+ * Without `specular` the hit has no specular lobe (diffuse only, as before W27b).
  */
 export interface BvhTraceMaterial {
   readonly albedo: readonly [number, number, number];

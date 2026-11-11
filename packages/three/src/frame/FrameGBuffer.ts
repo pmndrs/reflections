@@ -159,7 +159,7 @@ export class FrameGBuffer {
       albedoMetalness: vec4((diffuseColor as N).rgb, gbufferMetalness),
       velocity: motionNode, // must be 'velocity', see the header
     };
-    // alpha: the base layer's specular scale under a clear coat (W27, D2702), not the opacity
+    // alpha: the base layer's specular scale under a clear coat (W27b, D2752), not the opacity
     if (this.lit) outputs.lit = vec4((output as N).rgb, gbufferBaseSpecularScale);
     this.mrt = mrt(outputs);
     // guides clear to zero (no surface); scene colour keeps the renderer's clear / background
