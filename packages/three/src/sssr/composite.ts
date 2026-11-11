@@ -46,6 +46,7 @@ import {
 } from 'three/tsl';
 import { sampleReflectionProbes, sampleReflectionProbesLocal, sampleReflectionProbesProxyShare } from '../probes/ReflectionProbesNode';
 import type { ReflectionProbes } from '../probes/ReflectionProbes';
+import { RT_SOURCE } from '@pmndrs/reflections-core';
 import type { ScreenSpaceReflectionsPass } from './ScreenSpaceReflectionsPass';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -211,7 +212,13 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
   if (options.ao) {
     const ao: N = typeof options.ao === 'function' ? float(options.ao(at)) : texture(options.ao, at).x;
     const a: N = roughness.mul(roughness);
-    specularOcclusion = dotNV.add(ao).max(0).pow(a.mul(-16).sub(1).exp2()).sub(1).add(ao).clamp(0, 1).toVar();
+    const lagarde: N = dotNV.add(ao).max(0).pow(a.mul(-16).sub(1).exp2()).sub(1).add(ao).clamp(0, 1);
+    // W45 (D3551, D4513): a traced miss is a ray that left the scene unblocked: its own visibility
+    // (D66: rays carry their occlusion; over the denoiser's samples the lobe's), so Lagarde's guess
+    // from the AO would occlude it twice. Untraced pixels (no RT, capped, rougher than the tracer)
+    // keep it.
+    const tracedMiss: N = texture(ssr.source, at).x.add(0.5).floor().equal(RT_SOURCE.tracedMiss);
+    specularOcclusion = tracedMiss.select(float(1), lagarde).toVar();
   }
 
   // final = lit + amount x weight x (specular - probeSpecular): three's own IBL term swapped for ours
