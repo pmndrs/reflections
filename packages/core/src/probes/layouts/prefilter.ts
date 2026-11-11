@@ -232,10 +232,15 @@ export class LayoutPrefilter {
     }
   }
 
-  /** Records the prefilter of `source` (a cube texture of sourceSize px faces) into `scratch`. */
-  encodeScratch(encoder: GPUCommandEncoder, source: GPUTexture, timestampWrites?: GPUComputePassTimestampWrites) {
+  /**
+   * Records the prefilter of `source` (a cube texture of sourceSize px faces) into `scratch`. With
+   * `remap` (a capture transform's face remap, ../capture.ts), the source is read in through it
+   * instead of copied.
+   */
+  encodeScratch(encoder: GPUCommandEncoder, source: GPUTexture, timestampWrites?: GPUComputePassTimestampWrites, remap?: { encode(encoder: GPUCommandEncoder, source: GPUTexture, dst: GPUTexture): void }) {
     const n = this.sourceSize;
-    encoder.copyTextureToTexture({ texture: source, mipLevel: 0 }, { texture: this.src, mipLevel: 0 }, [n, n, 6]);
+    if (remap) remap.encode(encoder, source, this.src);
+    else encoder.copyTextureToTexture({ texture: source, mipLevel: 0 }, { texture: this.src, mipLevel: 0 }, [n, n, 6]);
     const pass = encoder.beginComputePass({ label: `LayoutPrefilter.${this.layout.id}`, timestampWrites });
     // Box-filtered source chain (2x2 average per level, the 6 faces as array layers) by downsampler,
     // up to six levels per dispatch, in this pass ahead of the GGX dispatches that sample it.

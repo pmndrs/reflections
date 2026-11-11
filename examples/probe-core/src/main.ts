@@ -6,11 +6,15 @@
 //             so the re-fit doubles every lookup; plus Lagarde's specular occlusion at fixed inputs
 //   mixed     D805: sets of three layouts (cube2d-warp, cube-hw, octa) in one shader module
 //             (probeLookupWgsl([...]) with suffixes), each against its own single-set module, bit for bit
+//   transform D1805 / D2104 (W35): the capture transform. Captures in three's (x-mirrored),
+//             Babylon's (y-mirrored) and pixi-3d's (camera images) conventions, made from the test
+//             captures by a face remap, each looked up through its transform against the plain set
 //   sssr      the core tracer on its analytic scene (examples/sssr-core) with probeRadianceFallback: a
 //             probe set holding the constant c must give the image of the constant fallback c, bit for
 //             bit; a structured capture must change the fallback pixels
 import {
-  ProbeSet, probeLookupWgsl, createScreenSpaceReflections, createTracedReflections, constantRadianceFallback, type TraceProvider, type TracedReflectionsStats, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
+  ProbeSet, probeLookupWgsl, ProbeCaptureRemap, CAPTURE_MIRROR_X, CAPTURE_MIRROR_Y, CAPTURE_BABYLON_FACES, CAPTURE_CAMERA_FACES, type ProbeCaptureTransform,
+  createScreenSpaceReflections, createTracedReflections, constantRadianceFallback, type TraceProvider, type TracedReflectionsStats, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
   type FrameInputs, type ProbeLayoutId, type ProbeSetFormat, type ProbeVolume, type ScreenSpaceReflectionsInputs, reflectionsRequiredLimits,
 } from '@pmndrs/reflections/core';
 import { lookAt, perspective, SCENE_WGSL } from '../../sssr-core/src/scene';
@@ -217,8 +221,75 @@ async function main() {
     say(`constant capture: max rel err ${constErr.toExponential(2)}; re-fit x2: ${refitErr.toExponential(2)}; specular occlusion: ${soErr.toExponential(2)}`);
 
     result.mixed = await mixed();
+    result.transform = await transform();
     result.sssr = await sssr();
     return result;
+  }
+
+  // ---- D1805 / D2104: the capture transform
+  async function transform() {
+    const kinds = [0, 1, 3, 0];
+    // a capture in another engine's convention, made from a WebGPU-convention cube by a face remap
+    const derive = (faces: ProbeCaptureTransform) => {
+      const remap = new ProbeCaptureRemap(device, faces);
+      const enc = device.createCommandEncoder();
+      const out = kinds.map((k) => {
+        const t = device.createTexture({ size: [SOURCE, SOURCE, 6], format: 'rgba16float', usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC });
+        remap.encode(enc, cubes[k], t);
+        return t;
+      });
+      device.queue.submit([enc.finish()]);
+      remap.dispose();
+      return out;
+    };
+    // the world mirrored in x (three's CubeCamera): ±X swapped, every face flipped in x; the world
+    // mirrored in y (a Babylon ReflectionProbe on WebGPU): ±Y swapped, rows flipped (both are their
+    // own inverse); camera images (pixi-3d): every face flipped in x
+    const three = derive({ faces: [1, 0, 2, 3, 4, 5].map((layer) => ({ layer, flipX: true })) });
+    const babylon = derive(CAPTURE_BABYLON_FACES);
+    const camera = derive(CAPTURE_CAMERA_FACES);
+    const run = async (sources: GPUTexture[], o: { mirrorX?: boolean; captureTransform?: ProbeCaptureTransform }) => {
+      const set = new ProbeSet(device, { capacity: 3, sourceSize: SOURCE, ...o });
+      const enc = device.createCommandEncoder();
+      for (let s = 0; s < 3; s++) set.capture(enc, s, sources[s]);
+      set.captureEnvironment(enc, sources[3]);
+      set.setVolumes(volumes);
+      set.update();
+      set.computeIrradiance(enc);
+      const pipe = device.createComputePipeline({
+        layout: device.createPipelineLayout({ bindGroupLayouts: [evalBgl, set.bindGroupLayout] }),
+        compute: { module: device.createShaderModule({ code: set.wgsl({ group: 1 }) + EVAL_WGSL }), entryPoint: 'main' },
+      });
+      const p = enc.beginComputePass(); p.setPipeline(pipe); p.setBindGroup(0, evalGroup); p.setBindGroup(1, set.bindGroup); p.dispatchWorkgroups(COUNT / 64); p.end();
+      device.queue.submit([enc.finish()]);
+      const out = await readBuffer(outBuf);
+      const table = await readBuffer(set.table);
+      const irr = table.slice(set.irradianceRow * 4);
+      set.dispose();
+      return { out, irr };
+    };
+    const ref = await run(kinds.map((k) => cubes[k]), {});
+    const exact = (a: Float32Array, b: Float32Array) => { let m = 0; for (let i = 0; i < a.length; i++) m = Math.max(m, Number.isFinite(a[i]) && Number.isFinite(b[i]) ? Math.abs(a[i] - b[i]) : Infinity); return m; };
+    // L1 SH rows (radiance coefficients) against the plain set's, relative to its largest
+    const irrErr = (a: Float32Array) => { let m = 0, s = 0; for (let i = 0; i < ref.irr.length; i++) { m = Math.max(m, Math.abs(a[i] - ref.irr[i])); s = Math.max(s, Math.abs(ref.irr[i])); } return m / s; };
+    const rows: Record<string, unknown>[] = [];
+    const add = async (name: string, sources: GPUTexture[], o: { mirrorX?: boolean; captureTransform?: ProbeCaptureTransform }) => {
+      const r = await run(sources, o);
+      const row = { name, exact: exact(r.out, ref.out), full: compare(r.out, ref.out, 1), local: compare(r.out, ref.out, 0), irr: irrErr(r.irr), out: r.out };
+      rows.push(row);
+      say(`capture transform ${name} vs plain: max ${row.exact.toExponential(1)}; full mean ${row.full.mean.toFixed(3)} p99 ${row.full.p99.toFixed(2)} max ${row.full.max.toFixed(1)} /255; SH rel err ${row.irr.toExponential(1)}`);
+      return row;
+    };
+    const alias = await add('three mirrorX', three, { mirrorX: true });
+    const axesX = await add('three axes [-x, y, z]', three, { captureTransform: CAPTURE_MIRROR_X });
+    await add('babylon faces (D1805 pass)', babylon, { captureTransform: CAPTURE_BABYLON_FACES });
+    await add('babylon axes [x, -y, z]', babylon, { captureTransform: CAPTURE_MIRROR_Y });
+    await add('pixi-3d camera faces', camera, { captureTransform: CAPTURE_CAMERA_FACES });
+    const aliasErr = exact(alias.out as Float32Array, axesX.out as Float32Array);
+    let both = '';
+    try { new ProbeSet(device, { capacity: 1, sourceSize: SOURCE, mirrorX: true, captureTransform: CAPTURE_MIRROR_Y }).dispose(); } catch (e) { both = String((e as Error).message); }
+    for (const t of [...three, ...babylon, ...camera]) t.destroy();
+    return { aliasErr, both, rows: rows.map(({ out: _out, ...r }) => r) };
   }
 
   // ---- D805: three layouts in one module, against each layout's own module (evaluate())

@@ -1651,6 +1651,16 @@ async function main() {
         `auto x2 max rel err ${r.refit.autoErr.toExponential(2)}, off x1 ${r.refit.offErr.toExponential(2)}`);
       check('probe core: sets of three layouts in one module match their own modules (D805)', r.mixed.length === 3 && r.mixed.every((m) => m.maxAbs === 0),
         r.mixed.map((m) => `${m.layout} max ${m.maxAbs}`).join(', '));
+      {
+        // W35 (D1805 / D2104): captures in three's, Babylon's and pixi-3d's conventions through the capture transform
+        const T = r.transform, row = (n) => T.rows.find((x) => x.name.startsWith(n));
+        const fmt = (x) => `float max ${x.exact.toExponential(1)}; full mean ${x.full.mean.toFixed(3)}, p99 ${x.full.p99.toFixed(2)}, max ${x.full.max.toFixed(1)} / 255, SH ${x.irr.toExponential(1)}`;
+        check('capture transform: mirrorX is an alias of captureTransform CAPTURE_MIRROR_X; both at once throws', T.aliasErr === 0 && T.both.includes('not both'), `max ${T.aliasErr}; ${T.both.slice(0, 60)}`);
+        // a face remap reproduces the WebGPU cube exactly, so the set is the plain one
+        for (const n of ['babylon faces', 'pixi-3d camera faces']) check(`capture transform: ${n} = the plain set`, row(n).exact === 0, `max ${row(n).exact}`);
+        // a mirror at lookup: the same world, prefiltered mirrored (up to the GGX sample pattern, D1805)
+        for (const n of ['three axes', 'babylon axes']) check(`capture transform: ${n} looks up the plain set's world`, row(n).full.mean < 0.05 && row(n).full.max <= 1 && row(n).irr < 1e-3, fmt(row(n)));
+      }
       check('sssr probe fallback: constant probes = constant fallback (to one f16 step)', r.sssr.constantVsProbes === 0, `${r.sssr.constantVsProbes} px differ`);
       check('sssr probe fallback: structured probes reach the fallback pixels', r.sssr.structuredVsConstant > r.sssr.pixels * 0.05, `${r.sssr.structuredVsConstant} of ${r.sssr.pixels} px`);
       const rt = r.sssr.rt;

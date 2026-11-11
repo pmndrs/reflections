@@ -18,6 +18,10 @@ export {
   type ProbeVolume, type ProbeTableHeader,
 } from './probes/table';
 export { ProbeIrradiance, type ProbeIrradianceOptions } from './probes/irradiance';
+export {
+  CAPTURE_MIRROR_X, CAPTURE_MIRROR_Y, CAPTURE_BABYLON_FACES, CAPTURE_CAMERA_FACES, ProbeCaptureRemap, resolveCaptureTransform, captureAxesWgsl,
+  type ProbeCaptureTransform, type ProbeCaptureFace, type ProbeAxis, type ProbeCaptureTransformOptions,
+} from './probes/capture';
 export { probeRadianceFallback, PROBE_FALLBACK_WGSL, type ProbeRadianceFallback } from './probes/fallback';
 export * from './sssr';
 // Mip chains and Hi-Z via `downsampler`: the device limits that let it run six levels per dispatch.

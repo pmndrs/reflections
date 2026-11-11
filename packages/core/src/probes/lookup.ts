@@ -40,11 +40,13 @@
 //   probeSpecularOcclusion(NdotV, ao, roughness) is always defined: Lagarde 2014's
 //                      saturate(pow(NdotV + ao, exp2(-16 a - 1)) - 1 + ao), a = perceptual^2, D66.
 //
-// Direction convention: R and N are world directions. `mirrorX` mirrors x before the layout lookup,
-// for engines whose cube captures are x-mirrored (three's CubeCamera).
+// Direction convention: R and N are world directions. `captureTransform.axes` (./capture.ts) maps them
+// into the captures' texture space before the layout lookup: `mirrorX` (three's x-mirrored
+// CubeCamera) is its alias for ['-x', 'y', 'z'].
 
 import { PROBE_HEADER_ROWS, PROBE_IRRADIANCE_ROWS, PROBE_ROWS_PER_VOLUME } from './table';
 import { dedupeChunks } from './layouts';
+import { captureAxesWgsl, resolveCaptureTransform, type ProbeCaptureTransform } from './capture';
 import type { ProbeLayout, ProbeWgslChunk } from './layouts/types';
 
 /**
@@ -58,8 +60,14 @@ export type ProbeLodMapping = 'r187' | 'alpha';
 
 export interface ProbeLookupOptions {
   layout: ProbeLayout;
-  /** The atlas holds x-mirrored captures (three's CubeCamera). Default false. */
+  /** The atlas holds x-mirrored captures (three's CubeCamera): an alias of `captureTransform: CAPTURE_MIRROR_X`. Default false. */
   mirrorX?: boolean;
+  /**
+   * How the atlas's captures relate to WebGPU's cube convention (./capture.ts, D1805). The lookup
+   * applies its `axes` to every world direction (its `faces` act at capture time only). Default:
+   * none. Not together with `mirrorX`.
+   */
+  captureTransform?: ProbeCaptureTransform;
   /** Lagarde's dominant direction (D57). Default false. */
   dominantDirection?: boolean;
   /**
@@ -186,8 +194,9 @@ fn pr_shIrradiance(a: vec4f, b: vec4f, c: vec4f, N: vec3f) -> vec3f {
 const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: string, samp: string) => {
   const unroll = o.count;
   const sample = o.layout.sampleFunction;
-  // world direction to the layout's texture space
-  const texDir = (d: string) => (o.mirrorX === true ? `vec3f(-(${d}).x, (${d}).y, (${d}).z)` : d);
+  // world direction to the layout's texture space (the capture transform's axes)
+  const transform = resolveCaptureTransform(o);
+  const texDir = (d: string) => captureAxesWgsl(transform, d);
   const lodFn = `pr_lod_${o.lodMapping ?? DEFAULT_PROBE_LOD_MAPPING}`;
   // box projection; with Lagarde's seam options (D53) pr_parallax with its distance t kept (App. F)
   const seam = o.distanceRoughness === true || o.roughnessLerp === true;

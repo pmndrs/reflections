@@ -10,11 +10,12 @@
 // cosine lobe, so the bias is small while 16384 samples stay well above the mip's texel count.
 
 import type { ProbeLayout } from './layouts/types';
+import { captureAxesWgsl, resolveCaptureTransform, type ProbeCaptureTransform } from './capture';
 import { PROBE_IRRADIANCE_ROWS } from './table';
 
 const WG = 256;
 
-const shaderWgsl = (layout: ProbeLayout, mirrorX: boolean) => /* wgsl */ `${layout.wgsl}
+const shaderWgsl = (layout: ProbeLayout, transform: ProbeCaptureTransform) => /* wgsl */ `${layout.wgsl}
 struct U { slot: u32, row: u32, samples: u32, pad: u32, lod: f32, pad1: f32, pad2: f32, pad3: f32 }
 @group(0) @binding(0) var atlas: ${layout.textureType};
 @group(0) @binding(1) var samp: sampler;
@@ -33,7 +34,7 @@ fn main(@builtin(local_invocation_index) li: u32) {
     let rxy = sqrt(max(1.0 - z * z, 0.0));
     let phi = f32(i) * 2.399963229728653;
     let d = vec3f(rxy * cos(phi), rxy * sin(phi), z);
-    let t = select(d, vec3f(-d.x, d.y, d.z), ${mirrorX});
+    let t = ${captureAxesWgsl(transform, 'd')};
     let c = sampleLayout(atlas, samp, u.slot, t, u.lod).rgb;
     L00 += c; Ly += c * d.y; Lz += c * d.z; Lx += c * d.x;
   }
@@ -53,8 +54,10 @@ fn main(@builtin(local_invocation_index) li: u32) {
 }`;
 
 export interface ProbeIrradianceOptions {
-  /** The atlas holds x-mirrored captures (three's CubeCamera). Default false. */
+  /** The atlas holds x-mirrored captures (three's CubeCamera): an alias of `captureTransform: CAPTURE_MIRROR_X`. Default false. */
   mirrorX?: boolean;
+  /** The captures' transform (./capture.ts); its `axes` apply to the integrated directions. Not together with `mirrorX`. */
+  captureTransform?: ProbeCaptureTransform;
   /** Directions integrated per probe. Default 16384. */
   samples?: number;
 }
@@ -77,7 +80,7 @@ export class ProbeIrradiance {
     this.sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear' });
     this.pipe = device.createComputePipeline({
       label: `ProbeIrradiance.${layout.id}`, layout: 'auto',
-      compute: { module: device.createShaderModule({ code: shaderWgsl(layout, options.mirrorX === true), label: `probe-irradiance.${layout.id}` }), entryPoint: 'main' },
+      compute: { module: device.createShaderModule({ code: shaderWgsl(layout, resolveCaptureTransform(options)), label: `probe-irradiance.${layout.id}` }), entryPoint: 'main' },
     });
   }
 
