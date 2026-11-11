@@ -508,8 +508,86 @@ async function main() {
       },
       stats: () => stats(),
       blendStats: () => blendStats(),
+      /** W26 (D53): the probe set's seam options, [distanceRoughness, roughnessLerp] (null without probes). */
+      getSeamOptions() { return probes ? [probes.distanceRoughness, probes.roughnessLerp] : null; },
+      /** W26 (D53): Lagarde's seam options on the probe set (lit and composite rebuilt together). */
+      setSeamOptions(distanceRoughness: boolean, roughnessLerp = distanceRoughness) {
+        if (!probes) return false;
+        probes.distanceRoughness = distanceRoughness; probes.roughnessLerp = roughnessLerp;
+        buildDisplay(); hybrid.resetHistory();
+        return true;
+      },
+      /** W26: the roughness of the scene's floor (its largest upward plane), e.g. a glossy mirrorWall. */
+      setFloorRoughness(r: number) {
+        let best: THREE.Mesh | null = null, area = 0;
+        kit!.scene.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (!m.isMesh || m.geometry.type !== 'PlaneGeometry' || m.getWorldDirection(new THREE.Vector3()).y < 0.99) return;
+          const g = (m.geometry as THREE.PlaneGeometry).parameters, s = m.getWorldScale(new THREE.Vector3());
+          const a = g.width * g.height * s.x * s.y;
+          if (a > area) { area = a; best = m; }
+        });
+        if (best) ((best as THREE.Mesh).material as THREE.MeshStandardMaterial).roughness = r;
+        hybrid.resetHistory();
+        return !!best;
+      },
+      seamStats: (o?: SeamOptions) => seamStats(o),
     },
   });
+
+  /**
+   * W26 (D53): the SSR-to-probe seam, measured as the step a viewer sees where the hybrid's weight
+   * falls from the hit to the probe. At a confident hit (confidence >= cmin) the final image is
+   * ~ lit + w (hit - probe); with SSR off it is lit (three's own probe term), so `final - lit` there
+   * is exactly the jump the image makes where the confidence fades (D41) or a ray misses. Measured
+   * in display units (8-bit luma, Rec. 709, after tone mapping), on 8x8 blocks of px that are each a
+   * confident hit in the roughness band [rmin, rmax) (perceptual, G-buffer), at least half of them:
+   * block means first, so the SSR's noise doesn't count as seam. Returns the mean |step| and the signed mean (probe - hit).
+   */
+  type SeamOptions = { rmin?: number; rmax?: number; cmin?: number; frames?: number; block?: number; shots?: boolean };
+  async function seamStats(o: SeamOptions = {}) {
+    const { rmin = 0.1, rmax = 0.45, cmin = 0.9, frames = 16, block = 8 } = o;
+    const keepView = viewSel.value as View, keepAmount = composite!.amount.value;
+    setView('final');
+    composite!.amount.value = 1;
+    const grab = async () => {
+      const u = canvas.toDataURL('image/png'); await idle();
+      const img = new Image(); img.src = u; await img.decode();
+      const c2 = new OffscreenCanvas(W, H); const g2 = c2.getContext('2d')!; g2.drawImage(img, 0, 0);
+      return g2.getImageData(0, 0, W, H).data;
+    };
+    for (let i = 0; i < frames; i++) { frame(); await idle(); }
+    const A = await grab();
+    const core = ssr.tracer!;
+    const t = ssr.gbuffer.gpuTextures();
+    const [depth, nr, conf] = await Promise.all([readTexture(device, t.depth), readTexture(device, t.normal), readTexture(device, core.outputs.confidence)]);
+    composite!.amount.value = 0;
+    frame(); await idle();
+    const B = await grab();
+    composite!.amount.value = keepAmount;
+    setView(keepView);
+    const inverted = ssr.gbuffer.conventions.depthInverted;
+    const luma = (d: Uint8ClampedArray, i: number) => 0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2];
+    // per px the signed step lit - final over confident glossy hits; per 8x8 block (at least half its
+    // px qualify) the mean of those, so the SSR's noise averages out before the absolute value
+    let px = 0, pxAbs = 0, blocks = 0, abs = 0, signed = 0, hitL = 0;
+    for (let by = 0; by + block <= H; by += block) for (let bx = 0; bx + block <= W; bx += block) {
+      let n = 0, a = 0, b = 0;
+      for (let y = by; y < by + block; y++) for (let x = bx; x < bx + block; x++) {
+        const i = y * W + x;
+        const geo = inverted ? depth[i] > 0 : depth[i] < 1;
+        const r = nr[i * 4 + 3];
+        if (!geo || r < rmin || r >= rmax || conf[i] < cmin) continue;
+        const la = luma(A, i), lb = luma(B, i);
+        n++; a += la; b += lb; px++; pxAbs += Math.abs(la - lb);
+      }
+      if (n * 2 < block * block) continue;
+      blocks++; abs += Math.abs(b - a) / n; signed += (b - a) / n; hitL += a / n;
+    }
+    const toUrl = async (d: Uint8ClampedArray) => { const c3 = new OffscreenCanvas(W, H); c3.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(d), W, H), 0, 0); const bl = await c3.convertToBlob(); return await new Promise<string>((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result as string); fr.readAsDataURL(bl); }); };
+    const shots = o.shots ? { final: await toUrl(A), lit: await toUrl(B) } : undefined;
+    return { blocks, px, step: blocks ? abs / blocks : 0, bias: blocks ? signed / blocks : 0, pxStep: px ? pxAbs / px : 0, hitLuma: blocks ? hitL / blocks : 0, shots };
+  }
 
   /**
    * Readback stats for the check: confidence / ray / miss counts, and two scene checks.

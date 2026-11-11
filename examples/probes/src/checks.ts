@@ -249,6 +249,83 @@ export function makeChecks(p: Page) {
     },
 
     /**
+     * W26 (D53): Lagarde's distance-based roughness and roughness lerp, against the plain lookup fed
+     * the CPU's version of each. Points well inside one volume (weight 1) and its projection box; per
+     * point the CPU intersects the ray with the projection box (hit, t), takes h = normalize(hit -
+     * capture point), r' = mix(clamp(t / |hit - capture| r, 0, r), r, r) and l = normalize(mix(h, R, r)).
+     * The option lookups run with box projection on; the references with it off (direction sampled as
+     * given), in a second dispatch: dist ~ look(h, r'), lerp ~ look(l, r), both ~ look(l, r'), off ~ look(h, r).
+     */
+    async seamOptions() {
+      const points = [[-5, 2, 1], [-3, 1.5, -1], [4, 2, 1], [5, 3, -1], [-2.5, 0.6, 2.5], [3, 4, -2], [0.2, 1.2, 0.4], [-0.3, 2.5, -0.5]];
+      const dirs = [[0.3, -0.2, -1], [-1, 0.4, 0.2], [0.2, 0.9, 0.3], [0.7, -0.6, 0.4], [0.5, -0.8, -0.3], [-0.2, 0.3, 1], [1, 0.1, 0.2], [-0.4, -0.5, -0.8]]
+        .map((d) => new THREE.Vector3(...d).normalize());
+      const rough = [0.25, 0.5, 0.7, 0.15, 0.4, 0.85, 0.3, 0.6];
+      const probes = p.probes.bakedProbes;
+      const rows: number[] = [];
+      const info: { slot: number; t: number; dc: number; r2: number }[] = [];
+      for (let i = 0; i < points.length; i++) {
+        const P = new THREE.Vector3(...points[i]), R = dirs[i], r = rough[i];
+        const slot = probes.findIndex((probe) => [0, 1, 2].every((k) => Math.abs(P.getComponent(k) - probe.position.getComponent(k)) < probe.influenceSize.getComponent(k) / 2 - probe.blendDistance));
+        const probe = probes[slot];
+        const size = probe.projectionSize ?? probe.influenceSize, box = probe.position.clone().add(probe.projectionOffset);
+        let t = Infinity;
+        for (let k = 0; k < 3; k++) {
+          const d = R.getComponent(k), side = d >= 0 ? 1 : -1;
+          t = Math.min(t, (side * size.getComponent(k) / 2 + box.getComponent(k) - P.getComponent(k)) / (side * Math.max(Math.abs(d), 1e-6)));
+        }
+        const origin = probe.position.clone().add(probe.originOffset);
+        const hit = P.clone().addScaledVector(R, t).sub(origin);
+        const dc = hit.length();
+        const h = hit.clone().normalize();
+        const r2 = THREE.MathUtils.lerp(Math.min(r, Math.max(0, (t / dc) * r)), r, r);
+        const l = h.clone().lerp(R, r).normalize();
+        rows.push(...P.toArray(), r, ...R.toArray(), r2, ...h.toArray(), 0, ...l.toArray(), 0);
+        info.push({ slot, t, dc, r2 });
+      }
+      const n = points.length, K = 8;
+      const input = instancedArray(new Float32Array(rows) as never, 'vec4') as N;
+      const output = instancedArray(n * K, 'vec4') as N;
+      const kernel = Fn(() => {
+        const at = (k: number) => input.element(instanceIndex.mul(4).add(k));
+        const P = at(0).xyz.toVar(), r = at(0).w.toVar(), R = at(1).xyz.toVar(), r2 = at(1).w.toVar(), h = at(2).xyz.toVar(), l = at(3).xyz.toVar();
+        const look = (dir: N, rr: N, o: object) => sampleReflectionProbesLocal(p.probes, P, dir, rr, o);
+        const put = (k: number, v: N) => output.element(instanceIndex.mul(K).add(k)).assign(v);
+        const off = { distanceRoughness: false, roughnessLerp: false };
+        put(0, look(R, r, { distanceRoughness: true, roughnessLerp: false }));
+        put(1, look(R, r, { distanceRoughness: false, roughnessLerp: true }));
+        put(2, look(R, r, { distanceRoughness: true, roughnessLerp: true }));
+        put(3, look(R, r, off));
+        put(4, look(h, r2, off));
+        put(5, look(l, r, off));
+        put(6, look(l, r2, off));
+        put(7, look(h, r, off));
+      })().compute(n) as N;
+      const run = async () => {
+        await p.shot();
+        await renderer.computeAsync(kernel);
+        return new Float32Array(await renderer.getArrayBufferAsync(output.value));
+      };
+      const boxOn = await run();
+      p.probes.boxProjection = false;
+      let boxOff: Float32Array;
+      try { boxOff = await run(); } finally { p.probes.boxProjection = true; }
+      await p.shot();
+      const rel = (a: number, b: number) => Math.abs(a - b) / Math.max(1e-3, Math.abs(b));
+      const err = { dist: 0, lerp: 0, both: 0, off: 0 };
+      const names = ['dist', 'lerp', 'both', 'off'] as const;
+      let changedDist = 0, changedLerp = 0, lum = 0;
+      for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) {
+        const A = (k: number) => boxOn[(i * K + k) * 4 + c], B = (k: number) => boxOff[(i * K + k) * 4 + c];
+        names.forEach((name, k) => { err[name] = Math.max(err[name], rel(A(k), B(k + 4))); });
+        changedDist = Math.max(changedDist, rel(A(0), A(3)));
+        changedLerp = Math.max(changedLerp, rel(A(1), A(3)));
+        lum += A(3);
+      }
+      return { err, changedDist, changedLerp, lum, info };
+    },
+
+    /**
      * Cache key: two probe sets of equal size (one red capture, one blue), each sampled by its own
      * material. If they shared a compiled program, both quads would show the first set.
      */
