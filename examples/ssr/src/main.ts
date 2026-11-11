@@ -33,7 +33,7 @@ import {
   createPmndrsBvhTraceProviderFromObjects, type ThreePmndrsBvhTraceProvider,
 } from '@pmndrs/reflections/three';
 import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
-import { ASSET_SCENES, SCENES, type KitScene } from '../../shared';
+import { ASSET_SCENES, SCENES, type KitScene, type ProbeVolume } from '../../shared';
 import { createReflectionDenoiser, denoiserAvailable, denoiserSource } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
@@ -164,7 +164,7 @@ async function main() {
   const adapter = await navigator.gpu.requestAdapter();
   // the composite needs the G-buffer's `lit` target: 36 bytes/sample
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { ...(adapter ? reflectionsRequiredLimits(adapter) : {}), maxColorAttachmentBytesPerSample: maxBytes } } as N);
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, trackTimestamp: q.has('gpuTime'), requiredLimits: { ...(adapter ? reflectionsRequiredLimits(adapter) : {}), maxColorAttachmentBytesPerSample: maxBytes } } as N);
   renderer.setPixelRatio(1);
   renderer.setSize(DW, DH, false);
   renderer.shadowMap.enabled = true;
@@ -283,7 +283,7 @@ async function main() {
     ssao?.dispose();
     const ao = ssao = new ScreenSpaceAO(ssr.gbuffer, kit!.camera);
     Object.assign(hybrid.options, {
-      probes: useProbes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity,
+      probes: useProbes && probesEnabled ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity,
       ao: specOcc ? (u: N) => ao.sample(u) : null,
     });
     hybrid.rebuild();
@@ -353,6 +353,8 @@ async function main() {
   const controls = new OrbitControls(new THREE.PerspectiveCamera(), canvas);
   let kit: KitScene | null = null;
   let probes: ReflectionProbes | null = null;
+  /** W38: `__p.setProbesEnabled(false)` lights with `scene.environment` only (the probe-free reference). */
+  let probesEnabled = true;
   type ExampleProvider = TraceProvider & { destroy(): void };
   let provider: ExampleProvider | null = null;
   let refitProvider: () => void = () => {};
@@ -386,6 +388,36 @@ async function main() {
     near: 0.05, far: 60, ...extra,
   });
 
+  /** W38: bytes of the probe atlas (rgba16float, 6 faces per slot incl. the environment slot, every mip). */
+  function probeBytes() {
+    const t = probes?.texture as N;
+    if (!t) return 0;
+    const res = t.image?.width ?? 0, slots = (probes!.bakedProbes.length + 1) * 6;
+    const mips = Math.max(1, t.mipmaps?.length ?? 1);
+    let b = 0;
+    for (let l = 0; l < mips; l++) b += (res >> l) ** 2 * slots * 8;
+    return b;
+  }
+  /** A probe set from volumes (the kit's suggestion, or W38's variants via `__p.setProbeVolumes`), baked and lit with. */
+  function buildProbes(volumes: ProbeVolume[], extra: Partial<BakeOptions> = {}) {
+    probes = new ReflectionProbes();
+    for (const v of volumes) {
+      const p = new ReflectionProbe(...v.influenceSize);
+      p.position.set(...v.position);
+      if (v.projectionSize) p.projectionSize = new THREE.Vector3(...v.projectionSize);
+      if (v.originOffset) p.originOffset.set(...v.originOffset);
+      if (v.projectionOffset) p.projectionOffset.set(...v.projectionOffset);
+      if (v.blendDistance !== undefined) p.blendDistance = v.blendDistance;
+      probes.add(p);
+    }
+    kit!.scene.add(probes);
+    // bake as on a fresh load: a previous set left on the scene would light the first pass's captures
+    kit!.scene.environmentNode = null;
+    probes.bake(renderer, kit!.scene, bakeOptions(extra));
+    nextNodeFrame();
+    kit!.scene.environmentNode = reflectionProbes(probes) as N;
+  }
+
   async function load(id: string) {
     const factory = SCENES[id] ?? Object.values(ASSET_SCENES).find((a) => a.id === id)?.factory;
     if (!factory) throw new Error(`unknown scene ${id}`);
@@ -398,22 +430,7 @@ async function main() {
     controls.target.copy(kit.target);
     controls.update();
     time = 0; kit.update?.(0);
-    if (useProbes && kit.probes.length) {
-      probes = new ReflectionProbes();
-      for (const v of kit.probes) {
-        const p = new ReflectionProbe(...v.influenceSize);
-        p.position.set(...v.position);
-        if (v.projectionSize) p.projectionSize = new THREE.Vector3(...v.projectionSize);
-        if (v.originOffset) p.originOffset.set(...v.originOffset);
-        if (v.projectionOffset) p.projectionOffset.set(...v.projectionOffset);
-        if (v.blendDistance !== undefined) p.blendDistance = v.blendDistance;
-        probes.add(p);
-      }
-      kit.scene.add(probes);
-      probes.bake(renderer, kit.scene, bakeOptions());
-      nextNodeFrame();
-      kit.scene.environmentNode = reflectionProbes(probes) as N;
-    }
+    if (useProbes && kit.probes.length) buildProbes(kit.probes);
     if (useRT) {
       // every visible mesh except helpers; one BVH per scene (two-level: instances over mesh trees)
       kit.scene.updateMatrixWorld(true);
@@ -429,7 +446,7 @@ async function main() {
     hybrid.resetHistory();
     aa.reset();
     refreshUI();
-    return { id: kit.id, views: Object.keys(kit.views), probes: probes?.bakedProbes.length ?? 0, animated: !!kit.update };
+    return { id: kit.id, views: Object.keys(kit.views), probes: (probes as ReflectionProbes | null)?.bakedProbes.length ?? 0, animated: !!kit.update };
   }
 
   function setPose(name: string) {
@@ -633,6 +650,61 @@ async function main() {
         ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
         ms.sort((a, b) => a - b);
         return { ms: ms[ms.length >> 1], all: ms, excluded: list?.length ?? 0 };
+      },
+      /**
+       * W38: replace the scene's probe set with `volumes` (null: the kit's own), baked with the page's
+       * options plus `extra`. Returns the probe count, the bake's wall-clock ms (idle to idle, loop
+       * stopped) and the atlas's bytes (every slot incl. the environment, all mips).
+       */
+      async setProbeVolumes(volumes: ProbeVolume[] | null, extra: N = {}) {
+        if (!kit) return null;
+        stopLoop();
+        const old = probes;
+        if (old) kit.scene.remove(old);
+        await idle();
+        const t0 = performance.now();
+        buildProbes(volumes ?? kit.probes, extra);
+        await idle();
+        const ms = performance.now() - t0;
+        // every material's environment node changed: rebuild them before the old atlas goes
+        kit.scene.traverse((o) => { const m = (o as THREE.Mesh).material; if (m) for (const x of ([] as THREE.Material[]).concat(m)) x.needsUpdate = true; });
+        buildDisplay();
+        frame(); await idle();
+        old?.dispose?.();
+        ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
+        return { probes: probes!.bakedProbes.length, ms, bytes: probeBytes() };
+      },
+      probeBytes: () => probeBytes(),
+      /**
+       * W38: the probe-free reference for the miss-fill metric: with `false` the lit image and the
+       * composite use `scene.environment` only, and traced hits are lit by the environment, so a
+       * `?rt=1` frame no longer depends on what the probes captured (D901). `true` restores the probes.
+       */
+      setProbesEnabled(on: boolean) {
+        if (!kit) return;
+        kit.scene.environmentNode = on && probes ? (reflectionProbes(probes) as N) : null;
+        kit.scene.traverse((o) => { const m = (o as THREE.Mesh).material; if (m) for (const x of ([] as THREE.Material[]).concat(m)) x.needsUpdate = true; });
+        probesEnabled = on;
+        buildDisplay();
+        ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
+      },
+      /**
+       * W38: GPU ms of three's render passes per frame (`?gpuTime`: the renderer tracks timestamps),
+       * median of `n` frames, loop stopped: the G-buffer (whose lit image runs every material's probe
+       * lookup), the composite (its probe lookup per pixel) and the display; the core passes are
+       * `time()`. The probe lookup's cost is the difference between two probe sets on the same frame.
+       */
+      async renderTime(n = 30) {
+        stopLoop();
+        if (!(renderer as N).backend.trackTimestamp) return null;
+        const v: number[] = [];
+        for (let i = 0; i < n + 3; i++) {
+          frame(); await idle();
+          const ms = await renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+          if (i >= 3 && typeof ms === 'number') v.push(ms);
+        }
+        v.sort((a, b) => a - b);
+        return { frames: v.length, ms: v[v.length >> 1], p10: v[Math.floor(v.length * 0.1)], p90: v[Math.floor(v.length * 0.9)] };
       },
       async step(n = 1) { for (let i = 0; i < n; i++) frame(); await idle(); },
       async shot() { frame(); const url = canvas.toDataURL('image/png'); await idle(); return url; },

@@ -58,6 +58,7 @@ const VIEWS = {
   probeSpecular: 'Probe / environment radiance (subtracted)',
   ao: 'AO input (GTAO, for specular occlusion)',
   specularOcclusion: 'Specular occlusion factor (1 = none)',
+  traced: 'Traced pixels (the miss list, RT on)',
 } as const;
 type View = keyof typeof VIEWS;
 const VIEW_IDS = Object.keys(VIEWS) as View[];
@@ -76,7 +77,7 @@ async function main() {
   const adapter = await navigator.gpu.requestAdapter();
   // the composite reads the G-buffer's lit target: 36 bytes per sample
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { maxColorAttachmentBytesPerSample: maxBytes } } as N);
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, trackTimestamp: q.has('gpuTime'), requiredLimits: { maxColorAttachmentBytesPerSample: maxBytes } } as N);
   renderer.setPixelRatio(1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -184,6 +185,12 @@ async function main() {
       probeSpecular: c.geometry.select(tone(c.probeSpecular), vec3(0)),
       ao: c.geometry.select(vec3(ao.sample(at)), vec3(0)),
       specularOcclusion: c.geometry.select(vec3(c.specularOcclusion), vec3(0)),
+      // W38: the pixels the ray-traced pass traced (SSR's miss list, after the tile cap): red where the
+      // ray hit the scene, magenta where it missed (or was capped); RT on only
+      traced: (() => {
+        const src: N = c.source.add(0.5).floor();
+        return c.geometry.not().or(src.lessThan(1)).select(vec3(0), src.equal(1).or(src.equal(4)).select(vec3(1, 0, 0), vec3(1, 0, 1)));
+      })(),
       hitDistance: (() => { const d: N = c.hitDistance; return d.greaterThan(0).select((vec3(1, 0.8, 0.5) as N).mul(d.div(d.add(2))), vec3(0)); })(),
     };
     let out: N = vec3(0);
@@ -283,6 +290,29 @@ async function main() {
     if (helper) helper.visible = on;
   }
 
+  function makeProbes(volumes: ShowcaseScene['probes']) {
+    const set = new ReflectionProbes();
+    for (const v of volumes) {
+      const p = new ReflectionProbe(...v.influenceSize);
+      p.position.set(...v.position);
+      if (v.projectionSize) p.projectionSize = new THREE.Vector3(...v.projectionSize);
+      if (v.originOffset) p.originOffset.set(...v.originOffset);
+      if (v.projectionOffset) p.projectionOffset.set(...v.projectionOffset);
+      if (v.blendDistance !== undefined) p.blendDistance = v.blendDistance;
+      set.add(p);
+    }
+    return set;
+  }
+  /** W38: bytes of the probe atlas (rgba16float, 6 faces per slot incl. the environment slot, every mip). */
+  function probeBytes() {
+    const t = probes?.texture as N;
+    if (!t) return 0;
+    const res = t.image?.width ?? 0, slots = (probes!.bakedProbes.length + 1) * 6;
+    let b = 0;
+    for (let l = 0; l < Math.max(1, t.mipmaps?.length ?? 1); l++) b += (res >> l) ** 2 * slots * 8;
+    return b;
+  }
+
   // ---- scene loading ---------------------------------------------------------------------------------
   const controls = new OrbitControls(new THREE.PerspectiveCamera(), canvas);
   controls.enableDamping = true;
@@ -303,16 +333,7 @@ async function main() {
     if (kit.thickness) Object.assign(ssr.settings, kit.thickness);
     renderer.toneMappingExposure = state.exposure;
     // probes: one box per region, as the scene suggests
-    probes = new ReflectionProbes();
-    for (const v of kit.probes) {
-      const p = new ReflectionProbe(...v.influenceSize);
-      p.position.set(...v.position);
-      if (v.projectionSize) p.projectionSize = new THREE.Vector3(...v.projectionSize);
-      if (v.originOffset) p.originOffset.set(...v.originOffset);
-      if (v.projectionOffset) p.projectionOffset.set(...v.projectionOffset);
-      if (v.blendDistance !== undefined) p.blendDistance = v.blendDistance;
-      probes.add(p);
-    }
+    probes = makeProbes(kit.probes);
     kit.scene.add(probes);
     bake();
     if (state.helpers) setHelpers(true);
@@ -575,6 +596,50 @@ async function main() {
         return { bounces: n ?? 'default', probes: probes?.bakedProbes.length ?? 0, ms: ms[ms.length >> 1], all: ms };
       },
       async shot() { frame(); const url = canvas.toDataURL('image/png'); await idle(); return url; },
+      /**
+       * W38: replace the probe set with `volumes` (null: the scene's own) and bake it; returns the
+       * probe count, the bake's wall-clock ms (idle to idle, loop stopped) and the atlas's bytes.
+       */
+      async setProbeVolumes(volumes: ShowcaseScene['probes'] | null) {
+        if (!kit) return null;
+        stopLoop();
+        const old = probes;
+        if (old) kit.scene.remove(old);
+        if (helper) { kit.scene.remove(helper); helper = null; }
+        const next = probes = makeProbes(volumes ?? kit.probes);
+        kit.scene.add(next);
+        // bake as on a fresh load: the previous set left on the scene would light the first pass's captures
+        kit.scene.environmentNode = null;
+        await idle();
+        bake();
+        await idle();
+        setProbes(state.probes);
+        frame(); await idle();
+        old?.dispose();
+        return { probes: next.bakedProbes.length, ms: bakeMs, bytes: probeBytes() };
+      },
+      /** W38: the stage's model in (true, the default) or out of the probe captures; re-bakes. */
+      async setHeroCapture(on: boolean) {
+        if (!kit?.hero) return false;
+        kit.hero.traverse((o) => { o.userData.reflectionProbeExclude = !on; });
+        stopLoop(); bake(); await idle();
+        ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
+        return true;
+      },
+      probeBytes: () => probeBytes(),
+      /** W38: GPU ms of three's render passes per frame (`?gpuTime`), median of `n` frames, loop stopped. */
+      async renderTime(n = 30) {
+        stopLoop();
+        if (!(renderer as N).backend.trackTimestamp) return null;
+        const v: number[] = [];
+        for (let i = 0; i < n + 3; i++) {
+          frame(); await idle();
+          const ms = await renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+          if (i >= 3 && typeof ms === 'number') v.push(ms);
+        }
+        v.sort((a, b) => a - b);
+        return { frames: v.length, ms: v[v.length >> 1], p10: v[Math.floor(v.length * 0.1)], p90: v[Math.floor(v.length * 0.9)] };
+      },
       async info() {
         await idle();
         return { scene: kit!.id, denoiser: hybrid.denoise ? denoiser?.name ?? null : null, aa: aa.mode, size: [W, H], renderSize: [RW, RH], probes: probes?.bakedProbes.length ?? 0, bakeMs, bvh: bvhInfo, rt: ssr.rayTracing, gpuErrors: gpuErrors.length, timings: Object.fromEntries(timings), trace: await ssr.readTraceStats() };
