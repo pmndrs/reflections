@@ -747,6 +747,11 @@ async function regressionChecks(pages) {
     `roughness ${m.roughnessNode.toFixed(3)}, metalness ${m.metalnessNode.toFixed(3)}`);
   check('gbuffer: MeshBasic env reflection stays out of scene colour', m.basicEnvSceneColor.every((v) => Math.abs(v - m.basicExpected) < 0.01),
     `${m.basicEnvSceneColor.map((v) => v.toFixed(4)).join(' ')} (diffuse ${m.basicExpected.toFixed(4)})`);
+  const tr = g.transmission;
+  if (tr.skipped) console.log(`  gbuffer transmission: skipped (${tr.skipped})`);
+  else check('gbuffer: glass refracts the metal behind it into lit as a plain render does (W42, D3520)',
+    tr.plain[0] > 0.1 && tr.lit.every((v, c) => Math.abs(v - tr.plain[c]) <= 0.02 * tr.plain[c] + 1e-3),
+    `centre rgb lit ${tr.lit.map((v) => v.toFixed(4)).join(' ')}, plain ${tr.plain.map((v) => v.toFixed(4)).join(' ')}`);
   check('gbuffer: logarithmicDepthBuffer rejected', g.logDepth.threw && /logarithmic/i.test(g.logDepth.message), g.logDepth.message ?? 'no error');
   check('gbuffer: no WebGPU errors', g.gpuErrors.length === 0, g.gpuErrors.slice(0, 2).join(' | '));
   const b = r.bc6h;

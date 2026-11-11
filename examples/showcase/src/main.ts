@@ -487,6 +487,12 @@ async function main() {
       poses: () => Object.keys(kit!.views),
       setPose,
       setView: (v: View) => setView(v),
+      /** The orbit camera as [pos, target] (scene units), and setting it (same convention as compare.html's `view()` / `setView()`). */
+      camera: () => [kit!.camera.position.toArray(), controls.target.toArray()],
+      setCamera(pos: [number, number, number], target: [number, number, number]) {
+        kit!.camera.position.set(...pos); controls.target.set(...target); controls.update();
+        ssr.resetHistory(); hybrid.resetHistory(); taa.reset();
+      },
       async setSources(s: { probes?: boolean; ssr?: boolean; rt?: boolean; denoise?: boolean }) {
         if (s.probes !== undefined && s.probes !== state.probes) setProbes(s.probes);
         if (s.ssr !== undefined) state.ssr = s.ssr;
