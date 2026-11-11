@@ -1,6 +1,6 @@
 # @pmndrs/reflections — spec
 
-Status: draft 4, 2026-11-10 (source claims corrected against `docs/research/sources.md`). Phase 0 (this repo's first commit) is done. Everything after it is a plan.
+Status: draft 4, 2026-11-10 (source claims corrected against `docs/research/sources.md`). Phases 0–3 are done, 4–6 are built with items left; see "Where we are" under Roadmap.
 
 ## What this is
 
@@ -346,6 +346,20 @@ Debug views:
   - Never trust "it builds".
 
 ## Roadmap
+
+### Where we are (2026-11-11)
+
+| Phase | State | Left |
+|---|---|---|
+| 0 Repo + probes moved | ✅ done | — |
+| 1 Layout bench | ✅ decided | — (r < 0.2 lookups, BC6H split: fine-tune backlog) |
+| 2 Probe core | ✅ done | — (three cube arrays now real via the W20 shim) |
+| 3 SSSR port | ✅ gate passes with the denoiser (W10) | Variance-guided extra rays (needs variance from the denoiser, PRs #24–26) |
+| 4 RT fallback | 🟡 built, gate checks pass (miss-list rays, per-tile cap, @pmndrs/bvh = three-mesh-bvh; RT matches the path tracer better than SSR, W21) | Make @pmndrs/bvh the default (its `reflections-integration` branch is unmerged); RT hit shading has no shadows (~15% bright) |
+| 5 Hybrid + denoise seam | 🟡 built (`HybridReflections`, depth-aware blend W22) | Switch the denoiser repo's reflection pages to the package; feed the denoiser tile list / motion scale / variance once PRs #24–26 land; sharp environment for near-mirror misses (W21) |
+| 6 babylon / pixi, publish 0.1 | 🟡 babylon and pixi-3d adapters built | Packed-subpath check; publish 0.1 (needs: repo public + npm name, open question 2; bvh and downsampler published instead of `link:`) |
+
+Details per phase in the table below; per-workstream state in `docs/HANDOFF.md`.
 
 | Phase | What | Gate |
 |---|---|---|
