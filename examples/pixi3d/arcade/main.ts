@@ -204,7 +204,8 @@ async function main() {
   const skyLinear = { sky: new Float32Array(3), ground: new Float32Array(3), up: new Float32Array(3) };
   writeHemisphere(sky, skyLinear.sky, skyLinear.ground, skyLinear.up);
   probes.captureHemisphere(skyLinear);
-  const capture = new ProbeCapture(view3d, probes.faceSize);
+  // the probe sees the sky behind the geometry (W33, D2104); ?probeSky=0 keeps the black-sky capture
+  const capture = new ProbeCapture(view3d, probes.faceSize, { background: q.get('probeSky') !== '0' });
   for (const t of [0]) { drawSign(t); drawEq(t); drawSun(t); }
   const t0 = performance.now();
   capture.capture(renderer, probes, 0, probePosition);
@@ -312,20 +313,21 @@ async function main() {
     if (e === 31) return m ? NaN : s * Infinity;
     return s * (1 + m / 1024) * 2 ** (e - 15);
   }
-  /** Reads a 2-D r32float / rgba16float / rgba32float / rgba8unorm texture as floats. */
+  /** Reads a 2-D (or 2-D array: every layer, in order) r32float / rgba16float / rgba32float / rgba8unorm texture as floats. */
   async function readTexture(tex: GPUTexture): Promise<{ data: Float32Array; channels: number }> {
     const fmt = tex.format;
     const channels = fmt === 'r32float' ? 1 : 4;
     const bpp = fmt === 'r32float' ? 4 : fmt === 'rgba32float' ? 16 : fmt === 'rgba8unorm' ? 4 : 8;
     const bytesPerRow = Math.ceil((tex.width * bpp) / 256) * 256;
-    const buf = device.createBuffer({ size: bytesPerRow * tex.height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const rows = tex.height * tex.depthOrArrayLayers;
+    const buf = device.createBuffer({ size: bytesPerRow * rows, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     const enc = device.createCommandEncoder();
-    enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow }, [tex.width, tex.height]);
+    enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow, rowsPerImage: tex.height }, [tex.width, tex.height, tex.depthOrArrayLayers]);
     device.queue.submit([enc.finish()]);
     await buf.mapAsync(GPUMapMode.READ);
     const raw = buf.getMappedRange();
-    const out = new Float32Array(tex.width * tex.height * channels);
-    for (let y = 0; y < tex.height; y++) for (let x = 0; x < tex.width; x++) {
+    const out = new Float32Array(tex.width * rows * channels);
+    for (let y = 0; y < rows; y++) for (let x = 0; x < tex.width; x++) {
       const i = (y * tex.width + x) * channels, o = y * bytesPerRow + x * bpp;
       if (fmt === 'r32float') out[i] = new Float32Array(raw, o, 1)[0];
       else if (fmt === 'rgba32float') out.set(new Float32Array(raw, o, 4), i);
@@ -491,6 +493,117 @@ async function main() {
   }
 
   /**
+   * Do local probes see the sky (D2104, W33)? (1) A view with the arcade's Hemisphere as its
+   * background and nothing visible in it, captured by ProbeCapture, must equal the environment slot's
+   * sky (captureHemisphere) texel for texel: same colours, same up. (The view holds one sub-texel
+   * speck: a pixi-3d view with no mesh at all draws nothing into its pass cameras, sky included.) (2) The arcade's probe captured without the sky (faces
+   * cleared to black) and with it: the sky texels are the ones that differ; how many are black in
+   * each. (3) The composite (the canvas, 0-255) with the black-sky probe vs the sky probe, after
+   * `frames` frames from a reset history each, with and without SSR; an A / A pair (sky twice) gives
+   * the floor. Restores the page's own setting at the end.
+   */
+  async function probeSkyCheck(frames = 12) {
+    stopLoop();
+    // (1)
+    const test = new View3D({ environment: sky, background: sky, toneMapping: 'custom' });
+    const speck = new Mesh3D({ geometry: new CubeGeometry({ width: 0.001, height: 0.001, depth: 0.001 }), material: reflectiveMaterial({ baseColor: 0x000000 }) });
+    speck.position.set(0, -50, 0);
+    test.root.addChild(speck);
+    const testProbes = new PixiProbeSet(renderer, { capacity: 1, sourceSize: 64 });
+    testProbes.captureHemisphere(skyLinear);
+    const hemi = await readTexture(testProbes.captureTexture);
+    const cap = new ProbeCapture(test, 64);
+    cap.capture(renderer, testProbes, 0, [0, 0, 0]);
+    const drawn = await readTexture(testProbes.captureTexture);
+    let skyMax = 0, skySum = 0, skyRef = 0;
+    for (let i = 0; i < hemi.data.length; i += 4) for (let c = 0; c < 3; c++) {
+      const e = Math.abs(drawn.data[i + c] - hemi.data[i + c]);
+      skyMax = Math.max(skyMax, e); skySum += e; skyRef = Math.max(skyRef, hemi.data[i + c]);
+    }
+    cap.destroy();
+    testProbes.dispose();
+    test.destroy({ children: true });
+
+    // (2)
+    const initial = capture.background;
+    const recapture = async (bg: boolean) => {
+      capture.background = bg;
+      capture.capture(renderer, probes, 0, probePosition);
+      await idle();
+      return (await readTexture(probes.captureTexture)).data;
+    };
+    const black = await recapture(false), lit = await recapture(true);
+    const texels = black.length / 4;
+    const isBlack = (d: Float32Array, i: number) => Math.max(d[i], d[i + 1], d[i + 2]) <= 1e-6;
+    let skyTexels = 0, blackBefore = 0, blackAfter = 0, skyBlackBefore = 0, skyBlackAfter = 0;
+    for (let i = 0; i < black.length; i += 4) {
+      const isSky = Math.abs(lit[i] - black[i]) + Math.abs(lit[i + 1] - black[i + 1]) + Math.abs(lit[i + 2] - black[i + 2]) > 0;
+      if (isSky) skyTexels++;
+      if (isBlack(black, i)) { blackBefore++; if (isSky) skyBlackBefore++; }
+      if (isBlack(lit, i)) { blackAfter++; if (isSky) skyBlackAfter++; }
+    }
+
+    // (3)
+    const pixels = async () => {
+      const url = (app.canvas as HTMLCanvasElement).toDataURL('image/png');
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      const c2 = document.createElement('canvas');
+      c2.width = img.width; c2.height = img.height;
+      const g = c2.getContext('2d')!;
+      g.drawImage(img, 0, 0);
+      return g.getImageData(0, 0, img.width, img.height).data;
+    };
+    const render = async (bg: boolean | null) => {
+      if (bg !== null) await recapture(bg);
+      view.resetHistory();
+      for (let i = 0; i < frames - 1; i++) frame();
+      await idle();
+      frame();
+      const px = await pixels();
+      await idle();
+      return px;
+    };
+    // glossy geometry (roughness < 0.25) of the 3-D view, outside the inset
+    const nr = await readTexture(view.targets.normal.gpu);
+    const mo = await readTexture(view.targets.motion.gpu);
+    const w = view.pixelWidth, h = view.pixelHeight;
+    const inInset = (x: number, y: number) => x >= inset.x - 4 && y >= inset.y - 22 && x < inset.x + W * insetScale + 4 && y < inset.y + H * insetScale + 4;
+    const glossy: number[] = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (mo.data[i * 4 + 3] >= 0.5 && nr.data[i * 4 + 3] < 0.25 && !inInset(x, y) && y > 40) glossy.push(i);
+    }
+    const diff = (a: Uint8ClampedArray, b: Uint8ClampedArray) => {
+      const d = glossy.map((i) => Math.max(Math.abs(a[i * 4] - b[i * 4]), Math.abs(a[i * 4 + 1] - b[i * 4 + 1]), Math.abs(a[i * 4 + 2] - b[i * 4 + 2])));
+      const changed = d.filter((x) => x >= 2);
+      const sorted = [...d].sort((x, y) => x - y), cs = [...changed].sort((x, y) => x - y);
+      const mean = (v: number[]) => (v.length ? v.reduce((s, x) => s + x, 0) / v.length : 0);
+      const p99 = (v: number[]) => (v.length ? v[Math.min(v.length - 1, Math.floor(v.length * 0.99))] : 0);
+      return { glossyPx: d.length, mean: mean(d), p99: p99(sorted), max: sorted[sorted.length - 1] ?? 0, changedPx: changed.length, changedMean: mean(changed), changedP99: p99(cs) };
+    };
+    const ssrWas = view.ssrEnabled;
+    const composite: Record<string, ReturnType<typeof diff>> = {};
+    for (const ssr of [true, false]) {
+      view.ssrEnabled = ssr;
+      const a = await render(false), b = await render(true), c = await render(null);
+      composite[ssr ? 'ssr' : 'ssrOff'] = diff(a, b);
+      composite[ssr ? 'ssrAA' : 'ssrOffAA'] = diff(b, c);
+    }
+    view.ssrEnabled = ssrWas;
+    await recapture(initial);
+    view.resetHistory();
+    frame();
+    await idle();
+    return {
+      sky: { texels: hemi.data.length / 4, maxError: skyMax, meanError: skySum / (hemi.data.length * 0.75), maxValue: skyRef },
+      probe: { texels, skyTexels, blackBefore, blackAfter, skyBlackBefore, skyBlackAfter },
+      composite, frames,
+    };
+  }
+
+  /**
    * Does REFLECTIONS_SCENE_COLOR_BIT take the environment's specular out (D2102)? Two white metal
    * planes (roughness 0.1, no lights, a white hemisphere: all they show is the environment's
    * specular) face the camera, the left with the bit, the right without. The left must
@@ -594,7 +707,7 @@ async function main() {
         const med = (arr: number[]) => { const s = [...arr].sort((x, y) => x - y); return s[s.length >> 1]; };
         return Object.fromEntries(Object.entries(per).map(([key, v]) => [key, Number(med(v).toFixed(4))]));
       },
-      stats, orientation, motionCheck, cameraCheck, sceneColorCheck,
+      stats, orientation, motionCheck, cameraCheck, sceneColorCheck, probeSkyCheck,
     },
   });
 }

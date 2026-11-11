@@ -9,10 +9,11 @@
 //                            rgba32float texture like DepthOutputPass / MotionVectorPass do.
 //   reflectiveMaterial()     a Material3D with REFLECTIONS_SCENE_COLOR_BIT (the colour without the
 //                            environment's specular) that opts into the G-buffer pass.
-//   ProbeCapture             six 90-degree cameras with render textures, drawing the opaque scene
+//   ProbeCapture             six 90-degree cameras with render textures, each drawing the view's
+//                            background (BackgroundPass on that camera) and then the opaque scene
 //                            (MeshPass 'opaque' per camera, pixi-3d's security-camera pattern).
 import {
-  Camera3D, ForwardRenderPass, Material3D, MeshPass, Pass3D, View3D,
+  BackgroundPass, Camera3D, ForwardRenderPass, Material3D, MeshPass, Pass3D, View3D,
   type Material3DOptions, type PassBuilder, type PassContext, type RenderGraph, type RenderSession, type ShaderBit, type ShaderDescriptorOptions,
 } from '@pixi/3d';
 import { RenderTexture, Texture, TextureSource, type WebGPURenderer } from 'pixi.js';
@@ -144,22 +145,49 @@ const FACES: readonly { forward: [number, number, number]; up: [number, number, 
   { forward: [0, 0, -1], up: [0, 1, 0] },
 ];
 
+// The sky behind one capture camera: pixi-3d's own BackgroundPass on that camera (the view's
+// background, cubemap or Hemisphere, through the view's exposure and tone mapping; skipped when the
+// view has none). Listed before the camera's MeshPass so the geometry draws over it: the pattern
+// pixi-3d documents for PortalPass feeds (public API, no beta internals).
+class FaceBackgroundPass extends Pass3D {
+  readonly stage = 'beforeOpaque' as const;
+  constructor(private readonly camera: Camera3D) { super(); }
+  build(graph: RenderGraph, ctx: PassContext): void {
+    graph.addPass(new BackgroundPass({ renderer: ctx.renderer, camera: this.camera }));
+  }
+}
+
+export interface ProbeCaptureOptions {
+  near?: number;
+  far?: number;
+  /**
+   * Draw the view's background into each face behind the geometry (default true), so a local probe
+   * sees the sky where no geometry is. Off: those texels stay black (the capture before W33, D2104).
+   */
+  background?: boolean;
+}
+
 /**
  * Captures probes with pixi-3d: six 90-degree Camera3Ds with rgba16float render textures, each drawn
- * by a MeshPass on the 'opaque' membership (pixi-3d's own render-to-texture path), then handed to
- * the PixiProbeSet. The sky behind is not drawn by a MeshPass, so a face's clear colour stands in for
- * it (`background`, linear rgb).
+ * by a BackgroundPass on that camera (the view's sky) and then a MeshPass on the 'opaque' membership
+ * (pixi-3d's own render-to-texture path), then handed to the PixiProbeSet.
  */
 export class ProbeCapture {
   readonly cameras: Camera3D[];
   readonly faces: RenderTexture[];
-  private readonly passes: MeshPass[];
+  /** Draw the view's background behind the geometry (see ProbeCaptureOptions). */
+  background: boolean;
+  private readonly meshPasses: MeshPass[];
+  private readonly skyPasses: FaceBackgroundPass[];
 
-  constructor(private readonly view: View3D, size: number, near = 0.05, far = 100) {
+  constructor(private readonly view: View3D, size: number, options: ProbeCaptureOptions = {}) {
+    const { near = 0.05, far = 100, background = true } = options;
+    this.background = background;
     this.faces = FACES.map(() => RenderTexture.create({ width: size, height: size, resolution: 1, format: 'rgba16float', antialias: false, autoGenerateMipmaps: false }));
     this.cameras = FACES.map((_, i) => new Camera3D({ fov: 90, near, far, renderTexture: this.faces[i] }));
     for (const c of this.cameras) view.root.addChild(c);
-    this.passes = this.cameras.map((camera) => new MeshPass({ name: 'opaque', camera, stage: 'beforeOpaque' }));
+    this.meshPasses = this.cameras.map((camera) => new MeshPass({ name: 'opaque', camera, stage: 'beforeOpaque' }));
+    this.skyPasses = this.cameras.map((camera) => new FaceBackgroundPass(camera));
   }
 
   /** Renders the six faces from `position` with `renderer` and captures them into `slot`. */
@@ -169,9 +197,10 @@ export class ProbeCapture {
       c.position.set(position[0], position[1], position[2]);
       c.lookAt({ x: position[0] + f.forward[0], y: position[1] + f.forward[1], z: position[2] + f.forward[2] }, { x: f.up[0], y: f.up[1], z: f.up[2] });
     });
-    // only the capture draws (the view's own passes would resize their outputs to the scratch)
+    // only the capture draws (the view's own passes would resize their outputs to the scratch); per
+    // face the sky first, then the geometry over it (beforeOpaque passes build in list order)
     const passes = this.view.passes;
-    this.view.passes = this.passes;
+    this.view.passes = this.meshPasses.flatMap((mesh, i) => (this.background ? [this.skyPasses[i], mesh] : [mesh]));
     const scratch = RenderTexture.create({ width: 16, height: 16, resolution: 1, format: 'rgba16float', antialias: false });
     renderer.render({ container: this.view, target: scratch });
     this.view.passes = passes;
