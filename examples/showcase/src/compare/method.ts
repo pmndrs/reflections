@@ -17,11 +17,11 @@ export const METHOD_LABELS: Record<MethodId, string> = {
   'three-raw': 'three SSRNode, raw (stochastic)',
   'three-denoise': 'three SSRNode + its denoiser',
   'three-ffx': 'three SSRNode + FFX (denoiser repo wiring)',
-  pathtraced: 'path traced (three-gpu-pathtracer)',
+  pathtraced: 'path traced + OIDN (three-gpu-pathtracer WebGPU)',
 };
 export const METHOD_SHORT: Record<MethodId, string> = {
   'ours-raw': 'ours raw', 'ours-denoised': 'ours denoised', 'ours-rt': 'ours + RT', probes: 'probes only',
-  'three-raw': 'three SSR raw', 'three-denoise': 'three SSR + denoise', 'three-ffx': 'three SSR + FFX', pathtraced: 'path traced',
+  'three-raw': 'three SSR raw', 'three-denoise': 'three SSR + denoise', 'three-ffx': 'three SSR + FFX', pathtraced: 'path traced + OIDN',
 };
 export const METHOD_IDS = Object.keys(METHOD_LABELS) as MethodId[];
 
@@ -57,8 +57,15 @@ export interface CompareMethod {
   status(): string;
   /** Path tracer only: accumulated samples. */
   samples?(): number;
-  /** Path tracer only: raise the sample cap (the reference stops tracing at it). */
+  /** Path tracer only: the sample cap (it stops tracing there and denoises once). */
   setMaxSamples?(n: number): void;
+  maxSamples?(): number;
+  /** Path tracer only: at the cap and the denoise (if any) finished; the GPU is idle until something changes. */
+  done?(): boolean;
+  /** Path tracer only: show the denoised frame (true) or the raw accumulation. */
+  setShowDenoised?(v: boolean): void;
+  /** Redraw the frame on show into the canvas without new work (for a readback of an idle method). */
+  present?(): void;
   /** Ours only: render the glossy-pixel mask (geometry with perceptual roughness < 0.447) into the canvas. */
   renderMask?(camera: THREE.PerspectiveCamera): void;
   /** Settings actually used (for the readout and the write-up). */

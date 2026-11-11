@@ -7,7 +7,7 @@
 //
 // Methods: ours raw / denoised / with the RT fallback, probes only, three r187's SSRNode raw / with
 // its own denoiser / with the FFX reflection denoiser (the denoiser repo's wiring), and the path
-// tracer (three-gpu-pathtracer, WebGL) as the reference. Every method displays AgX + sRGB at the
+// tracer (three-gpu-pathtracer WebGPU, stopped at a sample cap and OIDN-denoised) as the reference. Every method displays AgX + sRGB at the
 // scene's exposure.
 //
 // "Measure" (a tool readout, not a check): with the camera frozen, path-trace the reference to N
@@ -22,7 +22,7 @@
 // URL: ?scene=<id> ?pose=<name> ?left=<method> ?right=<method> ?split=0.5 ?w=960&h=540 ?freeze ?manual
 // Experiment overrides (not product defaults): ?spq=1|2|4 ?tsf=<FFX temporalStabilityFactor>
 // ?hit=final|lit|current (ours), ?mirrorBias= ?ssrMaxDistance= ?ssrThickness= (three's SSR), ?ptBounces=
-// ?ptTiles= ?ptClearcoat=1 (path tracer), ?floorRoughness= (every method's floor, before the bake)
+// ?ptMax= ?ptRaw=1 ?ptDenoise=0 ?ptClearcoat=0 (path tracer), ?floorRoughness= (every method's floor, before the bake)
 import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { availableAssets } from '../../shared';
@@ -30,7 +30,7 @@ import { SHOWCASE, type ShowcaseEntry } from './scenes';
 import { METHOD_IDS, METHOD_LABELS, METHOD_SHORT, type CompareMethod, type MethodContext, type MethodId } from './compare/method';
 import { createOurs } from './compare/ours';
 import { createThreeSSR, ffxAvailable } from './compare/three-ssr';
-import { createPathTracer, pathTracerAvailable } from './compare/pathtracer';
+import { DEFAULT_MAX_SAMPLES, createPathTracer, oidnAvailable, pathTracerAvailable } from './compare/pathtracer';
 import { denoiserAvailable } from '../../shared/denoiser';
 
 const q = new URLSearchParams(location.search);
@@ -249,6 +249,20 @@ async function main() {
     return count ? sum / count : 0;
   }
 
+  /** Path tracer: set its cap to `samples`, then render until it has traced there and denoised (idle). */
+  async function accumulate(pt: CompareMethod, samples: number, onStep?: () => void) {
+    pt.setMaxSamples?.(samples);
+    if (pt.id === 'pathtraced' && sides.includes('pathtraced')) ptMaxIn.value = String(samples);
+    const t0 = performance.now();
+    while (!(pt.done?.() ?? true) && performance.now() - t0 < 600_000) {
+      pt.frame(camera);
+      onStep?.();
+      labels();
+      await pt.idle();
+      await nextFrame();
+    }
+  }
+
   async function measure(opts: { samples?: number; warmup?: number; frames?: number; methods?: MethodId[]; orbitDeg?: number; orbitFrames?: number } = {}): Promise<Measure> {
     const samples = opts.samples ?? Number(sampIn.value), warmup = opts.warmup ?? Number(warmIn.value), K = opts.frames ?? Number(framesIn.value);
     const orbitDeg = opts.orbitDeg ?? 0.05, orbitFrames = opts.orbitFrames ?? 32;
@@ -261,13 +275,8 @@ async function main() {
     try {
       // reference
       const pt = await get('pathtraced');
-      pt.setMaxSamples?.(samples);
-      while ((pt.samples?.() ?? 0) < samples) {
-        pt.frame(camera);
-        say(`path tracing the reference: ${pt.samples?.()} / ${samples} samples`);
-        labels();
-        await nextFrame();
-      }
+      await accumulate(pt, samples, () => say(`path tracing the reference: ${pt.status()}`));
+      pt.present?.();
       const ref = new Uint8ClampedArray(read(pt.canvas));
       const refSamples = pt.samples?.() ?? 0;
       if (!sides.includes('pathtraced')) drop('pathtraced'); // GPU memory for the methods (Sponza)
@@ -327,7 +336,7 @@ async function main() {
     }
   }
   function table(rows: Row[], refSamples: number, n: number) {
-    const head = `vs path traced (${refSamples} spp), ${n.toLocaleString()} glossy px\n8-bit display units (0-255), still camera\n\n${'method'.padEnd(20)}${'MAD'.padStart(6)}${'bias'.padStart(6)}${'std'.padStart(6)}${'p99'.padStart(6)}${'orbit'.padStart(6)}\n`;
+    const head = `vs path traced (${refSamples} spp${oidnAvailable ? ', OIDN-denoised' : ''}), ${n.toLocaleString()} glossy px\n8-bit display units (0-255), still camera\n\n${'method'.padEnd(20)}${'MAD'.padStart(6)}${'bias'.padStart(6)}${'std'.padStart(6)}${'p99'.padStart(6)}${'orbit'.padStart(6)}\n`;
     return head + rows.map((r) => `${METHOD_SHORT[r.method].padEnd(20)}${r.mad.toFixed(2).padStart(6)}${r.bias.toFixed(2).padStart(6)}${r.stdMean.toFixed(2).padStart(6)}${r.stdP99.toFixed(1).padStart(6)}${(r.orbit ?? NaN).toFixed(2).padStart(6)}`).join('\n') +
       '\n\nMAD: mean |frame - ref| (noise incl.)\nbias: |temporal mean - ref|\nstd: per-pixel temporal std of luma\norbit: |2nd temporal difference| of luma\n  in a 0.05 deg/frame orbit (no reference)';
   }
@@ -358,6 +367,25 @@ async function main() {
   const expoVal = document.createElement('span'); expoVal.className = 'val';
   expo.oninput = () => { exposure = Number(expo.value); expoVal.textContent = exposure.toFixed(2); for (const m of live.values()) m.setExposure(exposure); };
   row('Exposure (AgX)', expo, expoVal);
+
+  h2('Path tracer (reference)');
+  // the cap and the raw/denoised toggle go into `q` too, so a re-created tracer (scene change) keeps them
+  const ptMaxIn = num(Number(q.get('ptMax') ?? DEFAULT_MAX_SAMPLES));
+  ptMaxIn.max = '512';
+  ptMaxIn.disabled = !pathTracerAvailable;
+  ptMaxIn.onchange = () => {
+    const n = Math.min(512, Math.max(1, Math.round(Number(ptMaxIn.value) || DEFAULT_MAX_SAMPLES)));
+    ptMaxIn.value = String(n); q.set('ptMax', String(n));
+    live.get('pathtraced')?.setMaxSamples?.(n);
+    const u = new URL(location.href); u.searchParams.set('ptMax', String(n)); history.replaceState(null, '', u);
+  };
+  row('Max samples (then denoise)', ptMaxIn);
+  const ptDenoisedBox = check(oidnAvailable ? 'Show denoised (OIDN, albedo + normal)' : 'Show denoised (OIDN not found)', q.get('ptRaw') !== '1', (v) => {
+    q.set('ptRaw', v ? '0' : '1');
+    live.get('pathtraced')?.setShowDenoised?.(v);
+  });
+  ptDenoisedBox.disabled = !oidnAvailable || !pathTracerAvailable;
+  note('Traces while the camera moves (restarts on every move), stops at max samples, denoises once and then sits idle.');
 
   h2('Split');
   const methodOpts = METHOD_IDS.map((id) => [id, METHOD_LABELS[id] + (available(id) ? '' : ' (unavailable)'), !available(id)] as [string, string, boolean]);
@@ -393,7 +421,7 @@ async function main() {
     const errs = errors.length + [...live.values()].reduce((a, m) => a + m.gpuErrors().length, 0);
     statusEl.textContent = [
       `${entry.title} | ${W}x${H} | three r${THREE.REVISION}`,
-      `path tracer: ${pathTracerAvailable ? __PATHTRACER_SOURCE__ : 'not found'}`,
+      `path tracer: ${pathTracerAvailable ? __PATHTRACER_SOURCE__ + ' (WebGPU)' : 'not found'}; OIDN: ${oidnAvailable ? 'denoiser package' : 'not found'}`,
       `FFX: ${ffxAvailable ? 'denoiser/three ffxReflections + denoiser/ffx' : denoiserAvailable ? 'denoiser/ffx only' : 'not found'}`,
       errs ? `GPU errors: ${errs}` : '',
     ].filter(Boolean).join('\n');
@@ -417,6 +445,7 @@ async function main() {
       async shot() {
         renderVisible();
         const [a, b] = sides.map((s) => live.get(s)!);
+        a.present?.(); b.present?.(); // an idle path tracer draws nothing new per frame
         const c = document.createElement('canvas'); c.width = W; c.height = H;
         const g = c.getContext('2d')!;
         g.drawImage(a.canvas, 0, 0);
@@ -429,6 +458,7 @@ async function main() {
         const m = await get(id);
         for (let i = 1; i < frames; i++) { m.frame(camera); await m.idle(); }
         m.frame(camera);
+        m.present?.();
         const url = m.canvas.toDataURL('image/png');
         await m.idle();
         return url;
@@ -450,7 +480,15 @@ async function main() {
         g.putImageData(img, 0, 0);
         return { mean, url: c.toDataURL('image/png') };
       },
-      async converge(samples: number) { const pt = await get('pathtraced'); pt.setMaxSamples?.(samples); while ((pt.samples?.() ?? 0) < samples) { pt.frame(camera); await nextFrame(); } return pt.samples?.(); },
+      /** Trace the reference to `samples` (its cap), denoise, and return its info (samples, denoised, ms). */
+      async converge(samples?: number) {
+        const pt = await get('pathtraced');
+        const t = performance.now();
+        await accumulate(pt, samples ?? pt.maxSamples?.() ?? 8);
+        return { ...pt.info(), status: pt.status(), done: pt.done?.() ?? true, seconds: (performance.now() - t) / 1000 };
+      },
+      showDenoised: (v = true) => { ptDenoisedBox.checked = v; q.set('ptRaw', v ? '0' : '1'); live.get('pathtraced')?.setShowDenoised?.(v); },
+      ptInfo: () => { const m = live.get('pathtraced'); return m ? { ...m.info(), status: m.status(), done: m.done?.() ?? true } : null; },
       measure, get lastMeasure() { return lastMeasure; },
       drop, prune,
       info: () => ({ scene: entry.id, pose, sides: [...sides], split, frozen, live: [...live.keys()], status: Object.fromEntries([...live].map(([k, m]) => [k, m.status()])) }),
