@@ -141,8 +141,13 @@ function tableFor(probes: ReflectionProbes): SetTable {
   return t;
 }
 
-/** The volumes of the last bake, in lookup order (smallest first), as core's table wants them. */
-function volumeList(probes: ReflectionProbes): ProbeVolume[] {
+/**
+ * The volumes of the last bake, in lookup order (smallest first, slot = index), as core's table
+ * wants them: world centre, half size, projection box and offset, capture origin, the set's
+ * `boxProjection`. For engines or passes that bind the probe atlas themselves (the trace hit
+ * shading, D2900); see {@link packReflectionProbesTable} for the whole table.
+ */
+export function reflectionProbeVolumes(probes: ReflectionProbes): ProbeVolume[] {
   return probes.bakedProbes.map((probe, slot) => {
     probe.getWorldPosition(_p);
     probeOrigin(probe, _o);
@@ -159,6 +164,21 @@ function volumeList(probes: ReflectionProbes): ProbeVolume[] {
 }
 
 /**
+ * The set's volume table as the probe node packs it (core `packProbeTable`: header, then
+ * {@link reflectionProbeVolumes}), for a pass that owns its own table buffer. `enabled` is off while
+ * the set is capturing, so captures see only the environment, as the node's lookups do. The
+ * irradiance rows (the re-fit's L1 SH, `probes.irradiance`) are not included: copy them to
+ * `probeIrradianceRow(count) * 16` bytes if the lookup re-fits. Reuses `target` when it is large enough.
+ */
+export function packReflectionProbesTable(probes: ReflectionProbes, target?: Float32Array<ArrayBuffer>): Float32Array<ArrayBuffer> {
+  const count = probes.bakedProbes.length;
+  return packProbeTable({
+    maxLod: probes.texture!.mipmaps.length - 1, enabled: !probes.capturing, environmentSlot: count,
+    irradianceRow: probeIrradianceRow(count), refitClamp: probes.refitClamp,
+  }, reflectionProbeVolumes(probes), target);
+}
+
+/**
  * Packs the set's table (core packProbeTable) and uploads it with queue.writeBuffer, once per render
  * (`renderId`, -1: always); copies the bake's L1 SH into the irradiance rows when it changed.
  */
@@ -167,10 +187,7 @@ function writeTable(probes: ReflectionProbes, t: SetTable, renderer: THREE.WebGP
   t.renderId = renderId;
   const count = probes.bakedProbes.length;
   // captures see only the environment, so baking doesn't feed back into itself
-  t.packed = packProbeTable({
-    maxLod: probes.texture!.mipmaps.length - 1, enabled: !probes.capturing, environmentSlot: count,
-    irradianceRow: probeIrradianceRow(count), refitClamp: probes.refitClamp,
-  }, volumeList(probes), t.packed);
+  t.packed = packReflectionProbesTable(probes, t.packed);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const backend = renderer.backend as any;
   const buffer: GPUBuffer | undefined = backend.get(t.attribute).buffer;
