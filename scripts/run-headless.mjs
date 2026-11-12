@@ -5,6 +5,7 @@
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | probe-layouts)
+//   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
 //   pnpm check -- --only probe-bindings          # W62: Sponza's three-size probe set at the default 16 sampled textures
 //   pnpm check -- --only probe-bindings-measure  # W62: Sponza with fewer probe sizes vs the path tracer (MAD, PSNR), lookup ms; out/w62-probe-bindings.json
 //   pnpm check -- --only probe-layouts-measure   # W61: probe layouts at equal memory, error vs RT / path tracer, seams, timing (minutes); out/w61-probe-layouts.json
@@ -1126,6 +1127,54 @@ async function missFillChecks(pages) {
     ['default', 'left'].every((k) => r[k].kit.px > 10000 && r[k].kit.mad < MISS_FILL_MAX[k] && r[k].kit.mad < r[k].all.mad - 1),
     `mean abs diff / 255 vs rt=1 over the misses; ${line('default')}; ${line('left')} (limits ${JSON.stringify(MISS_FILL_MAX)})`);
 }
+/**
+ * `--only halo-options` (W52, D3640-D3642): the halo options run and do what they say, RT on,
+ * denoiser and AA off, a fixed frame index so two runs trace the same rays.
+ * - hitShadeVisibility 'all': facingMirrors' mirror seen in a mirror takes the visibility ray (the
+ *   facing mirror blocks R: black stripes) where 'offscreen' (default) leaves it lit.
+ * - hitShadeOcclusion 'screen': an occlusion test only darkens (contact scene, final view).
+ * - hitLobeFilterMixed 0: rebuilds the tracer with last frame's hit source and changes the glossy px
+ *   next to traced hits, without validation errors.
+ */
+// One frame with these settings; with `keep` the pixels stay on the page as the reference, else the
+// page returns the share of px > 2/255 darker / brighter in luma than that reference (no pixel arrays
+// over CDP: a 1100x900 frame by value took minutes).
+const HALO_FRAME = `async (settings, trace, keep) => {
+  const p = window.__p;
+  const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+  p.setSettings({ frameIndex: 7, hitShadeOcclusion: 'off', hitLobeFilterMixed: 1, ...settings });
+  p.setTraceSettings(trace);
+  p.setView('final');
+  await p.step(4);
+  const B = await px(await p.shot());
+  const facing = (await p.stats()).facing;
+  if (keep) { window.__haloRef = B; return { facing }; }
+  const A = window.__haloRef, lum = (a, k) => 0.2126 * a[k] + 0.7152 * a[k + 1] + 0.0722 * a[k + 2];
+  let darker = 0, brighter = 0, n = 0;
+  for (let k = 0; k < A.length; k += 4) { n++; const d = lum(B, k) - lum(A, k); if (d < -2) darker++; else if (d > 2) brighter++; }
+  return { facing, darker: darker / n, brighter: brighter / n };
+}`;
+async function haloOptionChecks(pages) {
+  const fm = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&aa=off&scene=facingMirrors`);
+  pages.push(fm);
+  const off = await fm.T(`(${HALO_FRAME})({}, {}, true)`);
+  const all = await fm.T(`(${HALO_FRAME})({}, { hitShadeVisibility: 'all' }, true)`);
+  check('halo options: hitShadeVisibility all gives on-screen re-shaded hits the visibility ray (facingMirrors mirror in mirror, D3640)',
+    off.facing.pixels > 1000 && off.facing.black < 0.05 && all.facing.black > 0.2,
+    `${off.facing.pixels} px of the left mirror reflecting the right one: black ${(off.facing.black * 100).toFixed(1)}% (lum ${off.facing.meanLum.toFixed(3)}) with 'offscreen' -> ${(all.facing.black * 100).toFixed(1)}% (lum ${all.facing.meanLum.toFixed(3)}) with 'all'`);
+  const ct = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&aa=off&scene=contact`);
+  pages.push(ct);
+  await ct.T(`(${HALO_FRAME})({}, {}, true)`);
+  const dOcc = await ct.T(`(${HALO_FRAME})({ hitShadeOcclusion: 'screen' }, {}, false)`);
+  check('halo options: hitShadeOcclusion screen only darkens re-shaded hits (contact, D3642)', dOcc.darker > 0.001 && dOcc.brighter < 0.0005,
+    `px > 2/255 darker ${(dOcc.darker * 100).toFixed(2)}%, brighter ${(dOcc.brighter * 100).toFixed(3)}%`);
+  await ct.T(`(${HALO_FRAME})({ hitLobeFilterMixed: 0 }, {}, false)`); // the tracer rebuilds with the hit source; next frames read it
+  const dMix = await ct.T(`(${HALO_FRAME})({ hitLobeFilterMixed: 0 }, {}, false)`);
+  check('halo options: hitLobeFilterMixed 0 changes the glossy px next to traced hits (contact, D3641)', dMix.darker + dMix.brighter > 0.0005,
+    `px > 2/255 darker ${(dMix.darker * 100).toFixed(2)}%, brighter ${(dMix.brighter * 100).toFixed(2)}%`);
+}
+
 /** D4301: limits for {@link missFillChecks}, from W37's measurement (see DIVERGES D4301). */
 const MISS_FILL_MAX = { default: 22.5, left: 27 };
 
@@ -2523,6 +2572,7 @@ async function main() {
       }
     }
     if (runs('ssr-rt')) await ssrRtChecks(pages);
+    if (only === 'halo-options') await haloOptionChecks(pages); // W52 (D3640-D3642)
     if (runs('probe-layouts')) await probeLayoutChecks(pages); // W61
     if (runs('probe-bindings')) await probeBindingChecks(pages); // W62
     if (only === 'probe-bindings-measure') await probeBindingMeasure(pages); // W62: the measurement (minutes), JSON to out/w62-probe-bindings.json
