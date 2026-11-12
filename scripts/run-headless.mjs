@@ -17,7 +17,7 @@
 //   pnpm check -- --only ssr-rt --rt-shadow-timing   # D903: GPU ms of hit shadow rays, kit scenes, 960x540 + 1080p (also ssr-rt-bvh)
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -83,8 +83,26 @@ const savePng = (name, dataUrl) => {
   console.log('  saved', path.relative(process.cwd(), file));
 };
 
-/** Every Chrome this run started, so the global timeout can kill them (W61: a timed-out run left its Chrome rendering Sponza). */
-const liveChromes = new Set();
+/**
+ * Every Chrome this run started (process -> its temp profile). Every exit path (a page's close(), the
+ * normal end, a failure, the global timeout, SIGINT / SIGTERM / SIGHUP) kills each one's process group
+ * (its GPU / renderer helpers too: SIGKILL of the browser alone left them running under PID 1) plus any
+ * process still naming its profile, then removes the profile (W61).
+ */
+const liveChromes = new Map();
+function killChrome(chrome) {
+  const dir = liveChromes.get(chrome);
+  liveChromes.delete(chrome);
+  try { process.kill(-chrome.pid, 'SIGKILL'); } catch { /* group gone */ }
+  try { chrome.kill('SIGKILL'); } catch { /* gone */ }
+  if (dir) {
+    try { spawnSync('pkill', ['-9', '-f', dir]); } catch { /* none left */ }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+const killAllChromes = () => { for (const c of [...liveChromes.keys()]) killChrome(c); };
+process.on('exit', killAllChromes);
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { killAllChromes(); process.exit(130); });
 /** Open `url` in a fresh headless Chrome; resolves once `window.__p` exists. */
 async function openPage(url, extraArgs = []) {
   // Port 0: Chrome picks a free port and writes it to DevToolsActivePort. A random fixed port could
@@ -94,8 +112,8 @@ async function openPage(url, extraArgs = []) {
     '--headless=new', '--no-sandbox', '--use-angle=metal', '--enable-unsafe-webgpu',
     '--enable-features=Vulkan', '--window-size=1100,900', '--remote-debugging-port=0', ...extraArgs,
     `--user-data-dir=${userDataDir}`, url,
-  ], { stdio: 'ignore' });
-  liveChromes.add(chrome); chrome.on('exit', () => liveChromes.delete(chrome));
+  ], { stdio: 'ignore', detached: true });
+  liveChromes.set(chrome, userDataDir);
   let port = null;
   for (const deadline = Date.now() + 30_000; port === null && Date.now() < deadline; await sleep(100)) {
     try { port = Number(fs.readFileSync(path.join(userDataDir, 'DevToolsActivePort'), 'utf8').split('\n')[0]) || null; } catch { /* not written yet */ }
@@ -126,7 +144,7 @@ async function openPage(url, extraArgs = []) {
     throw new Error(`page not ready: ${url}\n${status}\n${results.logs.join('\n')}`);
   }
   const T = (expr) => cdp.evalJs(`(async () => JSON.stringify(await (${expr})))()`).then((s) => (s === undefined ? undefined : JSON.parse(s)));
-  const close = () => { try { ws.close(); } catch { /* noop */ } chrome.kill('SIGKILL'); };
+  const close = () => { try { ws.close(); } catch { /* noop */ } killChrome(chrome); };
   /** Load another URL in the same browser (same profile, so IndexedDB carries over); resolves once its `__p` exists. */
   const navigate = async (next) => {
     await cdp.send('Page.navigate', { url: next });
@@ -1170,11 +1188,13 @@ const LAYOUT_VIEW_STATS = `async () => {
     if (D[k] === 0) continue; // background
     geo++; const n = D[k + 1]; sum += n; max = Math.max(max, n); if (n === 0) env++; seen.add(D[k] - 1);
   }
-  const shots = {};
-  for (const v of ['final', 'probeIndex', 'probeCount', 'probeSpecular']) { mark('shot ' + v); p.setView(v); await p.step(2); shots[v] = await p.shot(); }
+  // the shots stay in the page (window.__w61shots) and come back one per call: several Sponza PNGs in one
+  // CDP reply (~5 MB) never arrived (W61: the page reached the end, the evaluation never returned)
+  window.__w61shots = {};
+  for (const v of ['final', 'probeIndex', 'probeCount']) { mark('shot ' + v); p.setView(v); await p.step(2); window.__w61shots[v] = await p.shot(); }
   mark('done');
   p.setView('final');
-  return { checkMax, geo, countMean: geo ? sum / geo : 0, countMax: max, envOnly: env, dominantSeen: seen.size, shots };
+  return { checkMax, geo, countMean: geo ? sum / geo : 0, countMax: max, envOnly: env, dominantSeen: seen.size };
 }`;
 async function probeLayoutChecks(pages) {
   console.log('examples/ssr ?probeLayout (W61):');
@@ -1194,7 +1214,7 @@ async function probeLayoutChecks(pages) {
       const t1 = Date.now();
       const v = await p.T(`(${LAYOUT_VIEW_STATS})()`);
       if (process.env.W61_VERBOSE) console.log(`  ${scene} ${name}: bake + first frame ${((t1 - t0) / 1000).toFixed(1)} s, views ${((Date.now() - t1) / 1000).toFixed(1)} s`);
-      for (const [k, u] of Object.entries(v.shots)) if (k !== 'probeSpecular') savePng(`w61-${scene}-${name}-${k}.png`, u);
+      for (const k of ['final', 'probeIndex', 'probeCount']) savePng(`w61-${scene}-${name}-${k}.png`, await p.T(`window.__w61shots.${k}`));
       const errs = (await p.T('window.__p.gpuErrors')).length;
       const share = r.bytes / budget - 1;
       const memOk = name === 'shipped' || Math.abs(share) <= 0.1;
@@ -1336,7 +1356,8 @@ const LAYOUT_MEASURE = `async (poses, variants) => {
       for (let k = 0; k < cols; k++) await draw(sh.rows[r].urls[k], k * cw, y + lh);
     }
     const blob = await c.convertToBlob({ type: 'image/jpeg', quality: 0.82 });
-    out.sheets[pose] = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+    (window.__w61sheets ??= {})[pose] = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+    out.sheets[pose] = true;
   }
   await p.setTraceProbes(null);
   return out;
@@ -1371,7 +1392,8 @@ async function probeLayoutMeasure(pages) {
       pages.push(p);
       const t0 = Date.now();
       const r = await p.T(`(${LAYOUT_MEASURE})(${JSON.stringify(poses)}, ${JSON.stringify(PROBE_LAYOUT_VARIANTS)})`);
-      for (const [pose, u] of Object.entries(r.sheets)) { fs.writeFileSync(path.join(OUT, `w61-${scene}-${pose}-layouts.jpg`), Buffer.from(u.split(',')[1], 'base64')); }
+      // one CDP reply per sheet (several MB in one reply never arrived, see probeLayoutChecks)
+      for (const pose of Object.keys(r.sheets)) { const u = await p.T(`window.__w61sheets[${JSON.stringify(pose)}]`); fs.writeFileSync(path.join(OUT, `w61-${scene}-${pose}-layouts.jpg`), Buffer.from(u.split(',')[1], 'base64')); }
       delete r.sheets;
       all[scene].error = r; save();
       for (const row of r.rows) {
@@ -1901,7 +1923,7 @@ async function pixi3dChecks(pages) {
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); for (const c of liveChromes) c.kill('SIGKILL'); process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull ? 3_600_000 : 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });

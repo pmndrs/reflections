@@ -24,7 +24,11 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   const canvas = newCanvas(W, H);
   const adapter = await navigator.gpu.requestAdapter();
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { maxColorAttachmentBytesPerSample: maxBytes } } as N);
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: {
+    maxColorAttachmentBytesPerSample: maxBytes,
+    // W61 (D4804): a probe layout of three sizes is three atlas bindings in every Sponza material (18 > the default 16)
+    ...(params.has('probeLayout') && adapter ? { maxSampledTexturesPerShaderStage: Math.min(adapter.limits.maxSampledTexturesPerShaderStage, 48) } : {}),
+  } } as N);
   renderer.setPixelRatio(1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;

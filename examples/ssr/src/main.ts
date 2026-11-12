@@ -83,6 +83,13 @@ const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
  * layout the page tracks GPU timestamps (three's passes and the core passes) for the HUD's "Time" button.
  */
 const layoutMode = q.has('probeLayout');
+/**
+ * W61 (D4804): every probe size is one more atlas binding in every lit material's fragment stage. Sponza's
+ * materials with a three-size set (mixed: 512 + 256 + 128) need 18 sampled textures, past WebGPU's default 16,
+ * so with a layout (or `?texLimit=adapter`) the page asks for the adapter's limit (up to 48); `?texLimit=default` keeps 16.
+ */
+const texLimit = (adapter: GPUAdapter | null): Record<string, number> =>
+  adapter && (q.get('texLimit') ?? (layoutMode ? 'adapter' : 'default')) === 'adapter' ? { maxSampledTexturesPerShaderStage: Math.min(adapter.limits.maxSampledTexturesPerShaderStage, 48) } : {};
 const timingOn = q.has('gpuTime') || layoutMode;
 
 const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'ssrWeight', 'hitFade', 'probeConsistency', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'coverage', 'source', 'rtSource', 'grid', 'ao', 'specularOcclusion',
@@ -179,7 +186,7 @@ async function main() {
   const adapter = await navigator.gpu.requestAdapter();
   // the composite needs the G-buffer's `lit` target: 36 bytes/sample
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, trackTimestamp: timingOn, requiredLimits: { ...(adapter ? reflectionsRequiredLimits(adapter) : {}), maxColorAttachmentBytesPerSample: maxBytes } } as N);
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, trackTimestamp: timingOn, requiredLimits: { ...(adapter ? reflectionsRequiredLimits(adapter) : {}), maxColorAttachmentBytesPerSample: maxBytes, ...texLimit(adapter) } } as N);
   renderer.setPixelRatio(1);
   renderer.setSize(DW, DH, false);
   renderer.shadowMap.enabled = true;
