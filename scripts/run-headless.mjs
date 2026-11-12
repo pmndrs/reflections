@@ -1172,6 +1172,7 @@ async function offscreenFillChecks(pages) {
  */
 async function ssrRtBvhChecks(pages) {
   console.log('examples/ssr (?rt=1&bvh=pmndrs):');
+  if (args.includes('--rt-bvh-timing-only')) return rtBvhTiming(pages);
   const nCompare = args.includes('--rt-compare-rays') ? Number(args[args.indexOf('--rt-compare-rays') + 1]) : 16384;
   const fmtOracle = (o) => `${o.agree}/${o.rays} agree (${o.bothMiss} both miss), gpu-only ${o.gpuOnly}, cpu-only ${o.cpuOnly}, p99 rel ${o.p99Rel.toExponential(1)}; of ${o.compared} hits: triangle ${o.triangle}, normal ${o.normalSigned} (same line ${o.normalAbs}), frontFace ${o.frontFace}, instance ${o.instance}, material ${o.material}`;
   // Where both hit within 1e-3 the attributes must agree, but for ties: rays spread through a scene
