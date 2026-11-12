@@ -15,6 +15,6 @@ export const SCENES: Record<string, SceneFactory> = { mirrorWall, offscreen, con
 /** Regression scenes: loadable by id on the pages that ask for them, but not in {@link SCENES} (W49: `multiMaterial`). */
 export const TEST_SCENES: Record<string, SceneFactory> = { multiMaterial };
 export {
-  PROBE_LAYOUT_BUDGET, PROBE_LAYOUT_NAMES, PROBE_LAYOUT_SCENES, PROBE_LAYOUT_TOLERANCE, LAYOUT_SET_RESOLUTION, cubeBytes, floorSlab, gridProbes, hasProbeLayouts, layoutBytes, probeLayout,
+  PROBE_LAYOUT_BUDGET, PROBE_LAYOUT_NAMES, PROBE_LAYOUT_SCENES, PROBE_LAYOUT_TOLERANCE, LAYOUT_SET_RESOLUTION, cubeBytes, floorSlab, gridProbes, hasProbeLayouts, layoutBytes, probeGrid, probeLayout,
   type LayoutRegion, type ProbeLayout, type ProbeLayoutName,
 } from './probeLayouts';

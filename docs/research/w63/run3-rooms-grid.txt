@@ -1,0 +1,18 @@
+# W63 run 3 (rooms, one page per variant, --only probe-lookup-cost, shared GPU mildly loaded: free 5.3-5.8 ms vs 5.0 in run 1)
+# ('base' here is the walk before W63, unrolled: today's 'legacy')
+  rooms [grid] n 4 (4): all 6.19 ms, composite-only 5.79, free 5.57 | lookup 0.62 = material 0.40 + composite 0.22 | core 1.11
+  rooms [grid] n 8 (8): all 6.19 ms, composite-only 5.90, free 5.47 | lookup 0.72 = material 0.29 + composite 0.43 | core 1.25
+  rooms [grid] n 16 (16): all 6.20 ms, composite-only 5.88, free 5.43 | lookup 0.77 = material 0.32 + composite 0.45 | core 1.11
+  rooms [grid] n 32 (32): all 6.41 ms, composite-only 6.03, free 5.60 | lookup 0.82 = material 0.39 + composite 0.43 | core 1.05
+  rooms [grid,skip] n 4 (4): all 6.02 ms, composite-only 5.77, free 5.48 | lookup 0.54 = material 0.25 + composite 0.29 | core 1.13
+  rooms [grid,skip] n 8 (8): all 6.01 ms, composite-only 5.70, free 5.30 | lookup 0.70 = material 0.30 + composite 0.40 | core 1.09
+  rooms [grid,skip] n 16 (16): all 6.03 ms, composite-only 5.74, free 5.29 | lookup 0.74 = material 0.29 + composite 0.45 | core 0.99
+  rooms [grid,skip] n 32 (32): all 6.32 ms, composite-only 5.94, free 5.42 | lookup 0.90 = material 0.38 + composite 0.52 | core 1.10
+  rooms [loop,skip] n 4 (4): all 6.05 ms, composite-only 5.86, free 5.69 | lookup 0.36 = material 0.19 + composite 0.17 | core 1.06
+  rooms [loop,skip] n 8 (8): all 6.43 ms, composite-only 6.18, free 5.65 | lookup 0.78 = material 0.26 + composite 0.52 | core 1.18
+  rooms [loop,skip] n 16 (16): all 6.95 ms, composite-only 6.31, free 5.71 | lookup 1.24 = material 0.64 + composite 0.60 | core 1.23
+  rooms [loop,skip] n 32 (32): all 7.96 ms, composite-only 7.04, free 5.81 | lookup 2.15 = material 0.92 + composite 1.23 | core 1.41
+  rooms [base] n 4 (4): all 6.05 ms, composite-only 6.03, free 5.76 | lookup 0.29 = material 0.02 + composite 0.27 | core 1.08
+  rooms [base] n 8 (8): all 6.80 ms, composite-only 6.12, free 5.75 | lookup 1.05 = material 0.68 + composite 0.37 | core 1.30
+  rooms [base] n 16 (16): all 8.72 ms, composite-only 6.41, free 5.81 | lookup 2.92 = material 2.32 + composite 0.60 | core 1.46
+  rooms [base] n 32 (32): all 17.90 ms, composite-only 7.23, free 5.83 | lookup 12.07 = material 10.67 + composite 1.40 | core 1.77
