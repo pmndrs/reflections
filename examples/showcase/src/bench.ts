@@ -94,6 +94,10 @@ async function main() {
   let busy = false;
   let regions: Region[] = decodeRegions(q.get('regions'));
   let showRegions = true, drawing = false;
+  /** Regions left out of the overlay and of Measure (?hideRegions=a,b): named ones can't be deleted, only hidden. */
+  const hiddenRegions = new Set((q.get('hideRegions') ?? '').split(',').filter(Boolean));
+  /** The region being edited (selected on the overlay or in the list). */
+  let selected: string | null = null;
   /** A still copy of A shown as B (see takeSnapshot). */
   let snapshot: { canvas: HTMLCanvasElement; label: string } | null = null;
   const instances = new Map<MethodId, Promise<CompareMethod>>();
@@ -149,7 +153,14 @@ async function main() {
 
   // ---- regions overlay (drag a rectangle with "Add region") -------------------------------------------
   const sceneRegions = () => (NAMED_REGIONS[entry.id] ?? []).filter((r) => !r.aspect || Math.abs(r.aspect - W / H) < 0.01); // W54: 1:1 regions at 1:1 only
-  const allRegions = () => [...sceneRegions(), ...regions];
+  /** A user region named like a scene region overrides its rect (an edited named region keeps its mask and pose). */
+  const effective = (): (Region & { user: boolean })[] => {
+    const named = sceneRegions().map((r) => { const u = regions.find((x) => x.name === r.name); return { ...r, ...(u ? { rect: u.rect } : {}), user: false }; });
+    const own = regions.filter((u) => !named.some((n) => n.name === u.name)).map((u) => ({ ...u, user: true }));
+    return [...named, ...own];
+  };
+  const allRegions = (): Region[] => effective().filter((r) => !hiddenRegions.has(r.name));
+  const onPose = (r: Region) => !r.pose || r.pose === pose;
   /** Image-space (0..1) point of a pointer event, in the image half it falls on (side by side: either half). */
   function imagePoint(ev: PointerEvent): [number, number] {
     const r = stage.getBoundingClientRect();
@@ -162,33 +173,97 @@ async function main() {
     overlay.setAttribute('viewBox', `0 0 ${r.width} ${r.height}`);
     const halves = mode === 'side' ? [[0, (r.width - 6) / 2], [(r.width + 6) / 2, (r.width - 6) / 2]] : [[0, r.width]];
     const parts: string[] = [];
-    const show = (rc: [number, number, number, number], color: string, name: string, dashed: boolean) => {
+    const show = (rc: [number, number, number, number], color: string, name: string, dashed: boolean, sel = false) => {
       for (const [x0, w] of halves) {
-        parts.push(`<rect x="${x0 + rc[0] * w}" y="${rc[1] * r.height}" width="${rc[2] * w}" height="${rc[3] * r.height}" fill="none" stroke="${color}" stroke-width="1.5" ${dashed ? 'stroke-dasharray="4 3"' : ''}/>`);
-        parts.push(`<text x="${x0 + rc[0] * w + 3}" y="${rc[1] * r.height + 11}" fill="${color}" font-size="11" style="paint-order:stroke;stroke:#000;stroke-width:3px">${name}</text>`);
+        const x = x0 + rc[0] * w, y = rc[1] * r.height, rw = rc[2] * w, rh = rc[3] * r.height;
+        parts.push(`<rect x="${x}" y="${y}" width="${rw}" height="${rh}" fill="${sel ? 'rgba(255,255,255,0.06)' : 'none'}" stroke="${color}" stroke-width="${sel ? 2.5 : 1.5}" ${dashed && !sel ? 'stroke-dasharray="4 3"' : ''}/>`);
+        parts.push(`<text x="${x + 3}" y="${y + 11}" fill="${color}" font-size="11" style="paint-order:stroke;stroke:#000;stroke-width:3px">${name}</text>`);
+        if (sel) for (const [hx, hy] of [[x, y], [x + rw, y], [x, y + rh], [x + rw, y + rh]]) parts.push(`<rect x="${hx - 4}" y="${hy - 4}" width="8" height="8" fill="${color}" stroke="#000"/>`);
       }
     };
-    if (showRegions) {
-      for (const g of sceneRegions()) if (!g.pose || g.pose === pose) show(g.rect, '#7fe3ff', g.name, true);
-      for (const g of regions) show(g.rect, '#ffd166', g.name, false);
+    if (showRegions || drawing) {
+      for (const g of effective()) {
+        if (!onPose(g) || hiddenRegions.has(g.name)) continue;
+        const own = g.user || regions.some((u) => u.name === g.name);
+        show(g.rect, own ? '#ffd166' : '#7fe3ff', g.name, !g.user, drawing && g.name === selected);
+      }
     }
     if (live) show(live, '#fff', 'new', false);
     overlay.innerHTML = parts.join('');
     overlay.classList.toggle('drawing', drawing);
   }
+  /** Write a region's rect: a user region in place, a named one as a user override of the same name. */
+  function setRect(name: string, rect: [number, number, number, number]) {
+    const u = regions.find((x) => x.name === name);
+    if (u) u.rect = rect; else regions.push({ name, rect });
+    q.set('regions', encodeRegions(regions)); urlSync();
+  }
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+  // Edit mode (the "regions: edit" button): drag on empty image = new region; drag inside one = move it;
+  // drag a corner = resize; click = select; Delete / Backspace = delete (yours) or hide (named); Esc = done.
   overlay.addEventListener('pointerdown', (e) => {
     if (!drawing) return;
-    overlay.setPointerCapture(e.pointerId);
+    try { overlay.setPointerCapture(e.pointerId); } catch { /* synthetic events */ }
     const a = imagePoint(e);
-    let rect: [number, number, number, number] = [a[0], a[1], 0, 0];
-    const move = (ev: PointerEvent) => { const b = imagePoint(ev); rect = [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])]; drawOverlay(rect); };
-    const up = () => {
-      overlay.removeEventListener('pointermove', move); overlay.removeEventListener('pointerup', up);
-      if (rect[2] * W >= 2 && rect[3] * H >= 2) addRegion(`r${regions.length + 1}`, rect);
-      setDrawing(false);
-    };
+    const sr = stage.getBoundingClientRect();
+    const tolX = 8 / (mode === 'side' ? (sr.width - 6) / 2 : sr.width), tolY = 8 / sr.height;
+    const visible = effective().filter((g) => onPose(g) && !hiddenRegions.has(g.name));
+    // corner hit first (the selected region wins), then inside (smallest first)
+    const order = [...visible].sort((x, y) => (x.name === selected ? -1 : y.name === selected ? 1 : x.rect[2] * x.rect[3] - y.rect[2] * y.rect[3]));
+    let target: (Region & { user: boolean }) | undefined, corner: [number, number] | null = null;
+    for (const g of order) {
+      const [x, y, w, h] = g.rect;
+      for (const [cx, cy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as [number, number][]) {
+        if (Math.abs(a[0] - (x + cx * w)) <= tolX && Math.abs(a[1] - (y + cy * h)) <= tolY) { target = g; corner = [cx, cy]; break; }
+      }
+      if (target) break;
+    }
+    if (!target) target = order.find((g) => a[0] >= g.rect[0] && a[0] <= g.rect[0] + g.rect[2] && a[1] >= g.rect[1] && a[1] <= g.rect[1] + g.rect[3]);
+    let up: () => void;
+    let move: (ev: PointerEvent) => void;
+    if (target) {
+      selected = target.name;
+      const r0 = [...target.rect] as [number, number, number, number];
+      const name = target.name;
+      let moved = false;
+      move = (ev) => {
+        const b = imagePoint(ev); const dx = b[0] - a[0], dy = b[1] - a[1];
+        if (!moved && Math.abs(dx) < tolX / 4 && Math.abs(dy) < tolY / 4) return;
+        moved = true;
+        let rect: [number, number, number, number];
+        if (corner) {
+          const fx = corner[0] ? r0[0] : r0[0] + r0[2], fy = corner[1] ? r0[1] : r0[1] + r0[3]; // the fixed corner
+          const px = clamp01((corner[0] ? r0[0] + r0[2] : r0[0]) + dx), py = clamp01((corner[1] ? r0[1] + r0[3] : r0[1]) + dy);
+          rect = [Math.min(fx, px), Math.min(fy, py), Math.abs(px - fx), Math.abs(py - fy)];
+        } else {
+          rect = [clamp01(Math.min(r0[0] + dx, 1 - r0[2])), clamp01(Math.min(r0[1] + dy, 1 - r0[3])), r0[2], r0[3]];
+        }
+        if (rect[2] * W >= 2 && rect[3] * H >= 2) { setRect(name, rect); drawOverlay(); }
+      };
+      up = () => { refreshRegionList(); drawOverlay(); };
+    } else {
+      let rect: [number, number, number, number] = [a[0], a[1], 0, 0];
+      move = (ev) => { const b = imagePoint(ev); rect = [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])]; drawOverlay(rect); };
+      up = () => {
+        if (rect[2] * W >= 2 && rect[3] * H >= 2) { let n = regions.length + 1; while (effective().some((g) => g.name === `r${n}`)) n++; addRegion(`r${n}`, rect); selected = `r${n}`; }
+        else selected = null;
+        refreshRegionList(); drawOverlay();
+      };
+    }
+    const done = () => { overlay.removeEventListener('pointermove', move); overlay.removeEventListener('pointerup', done); up(); };
     overlay.addEventListener('pointermove', move);
-    overlay.addEventListener('pointerup', up);
+    overlay.addEventListener('pointerup', done);
+    refreshRegionList(); drawOverlay();
+  });
+  window.addEventListener('keydown', (e) => {
+    if (!drawing || (e.target as HTMLElement)?.tagName === 'INPUT') return;
+    if (e.key === 'Escape') { setDrawing(false); return; }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
+      e.preventDefault();
+      const g = effective().find((x) => x.name === selected);
+      if (g?.user) removeRegion(regions.findIndex((x) => x.name === selected)); else if (g) hideRegion(g.name, true);
+      selected = null; refreshRegionList(); drawOverlay();
+    }
   });
   function addRegion(name: string, rect: [number, number, number, number]) {
     regions.push({ name, rect });
@@ -196,9 +271,25 @@ async function main() {
     refreshRegionList(); drawOverlay();
   }
   function removeRegion(i: number) {
+    if (i < 0) return;
     regions.splice(i, 1);
     if (regions.length) q.set('regions', encodeRegions(regions)); else q.delete('regions');
     urlSync(); refreshRegionList(); drawOverlay();
+  }
+  function hideRegion(name: string, hide: boolean) {
+    if (hide) hiddenRegions.add(name); else hiddenRegions.delete(name);
+    if (hiddenRegions.size) q.set('hideRegions', [...hiddenRegions].join(',')); else q.delete('hideRegions');
+    urlSync(); refreshRegionList(); drawOverlay();
+  }
+  function renameRegion(from: string, to: string) {
+    to = to.trim().replace(/[;:,]/g, '');
+    if (!to || to === from || effective().some((g) => g.name === to)) return false;
+    const u = regions.find((x) => x.name === from);
+    if (!u) return false;
+    u.name = to;
+    if (selected === from) selected = to;
+    q.set('regions', encodeRegions(regions)); urlSync();
+    return true;
   }
 
   // ---- methods -----------------------------------------------------------------------------------------
@@ -633,7 +724,7 @@ async function main() {
   const snapBtn = btn('Snapshot A as B', () => { takeSnapshot(); }, toolbar, 'B shows a still copy of A as it is now: change a setting and compare live A with it (split or heat map). Freeze the camera first.');
   const liveBBtn = btn('B live', () => clearSnapshot(), toolbar, 'Back to the B method');
   liveBBtn.disabled = true;
-  const regionBtn = btn('+ region', () => setDrawing(!drawing), toolbar, 'Drag a rectangle on the image to add a Measure region');
+  const regionBtn = btn('edit regions', () => setDrawing(!drawing), toolbar, 'Edit Measure regions on the image: drag on empty image to add one, drag inside one to move it, drag a corner to resize, click to select; Delete removes yours or hides a named one; Esc when done. The list under Measure renames, hides, deletes and resets.');
   const regionsBox = el('input', { type: 'checkbox', checked: true });
   regionsBox.onchange = () => { showRegions = regionsBox.checked; drawOverlay(); };
   toolbar.append(el('label', {}, regionsBox, ' regions'));
@@ -649,7 +740,7 @@ async function main() {
     diffTools.style.display = m === 'diff' ? '' : 'none';
     refreshLegend(); layout();
   }
-  function setDrawing(v: boolean) { drawing = v; regionBtn.classList.toggle('on', v); drawOverlay(); }
+  function setDrawing(v: boolean) { drawing = v; if (!v) selected = null; regionBtn.classList.toggle('on', v); regionBtn.textContent = v ? 'done editing' : 'edit regions'; refreshRegionList(); drawOverlay(); }
 
   // panel: view + actions
   h2('View');
@@ -701,15 +792,27 @@ async function main() {
   }
   const measureBtn = btn('Measure', () => { measureBtn.disabled = true; measure().catch(fail).finally(() => { measureBtn.disabled = false; }); }, panel);
   measureBtn.disabled = !pathTracerAvailable;
-  note('Freezes the camera, path-traces the reference, then runs each ticked method from reset (the shown sides by default) and reads the mean of the measured frames. Regions: whole frame, glossy px, the scene\'s named ones at this pose (carConcept: W50\'s lip / band / wheel / door / car at pose w50), and yours (+ region on the toolbar).');
+  note('Freezes the camera, path-traces the reference, then runs each ticked method from reset (the shown sides by default) and reads the mean of the measured frames. Regions: whole frame, glossy px, the scene\'s named ones at this pose (carConcept: W50\'s lip / band / wheel / door / car at pose w50; W54\'s hub / wheelFace / cabin / floorWheel at 1:1), and yours. \"edit regions\" on the toolbar adds, moves, resizes and deletes them; the list below hides, renames, deletes and resets.');
   const regionListEl = el('div', { id: 'regionList' }); panel.append(regionListEl);
   const readoutEl = el('pre', { id: 'readout' }); panel.append(readoutEl);
   function refreshRegionList() {
-    regionListEl.replaceChildren(
-      ...sceneRegions().map((r) => el('div', { title: r.note ?? '' }, el('span', { textContent: `${r.name} (named, pose ${r.pose})` }))),
-      ...regions.map((r, i) => { const d = el('div', {}, el('span', { textContent: `${r.name}: ${r.rect.map((v) => v.toFixed(3)).join(', ')}` })); btn('x', () => removeRegion(i), d); return d; }),
-    );
+    regionListEl.replaceChildren(...effective().map((g) => {
+      const named = !g.user, edited = named && regions.some((u) => u.name === g.name);
+      const shown = el('input', { type: 'checkbox', checked: !hiddenRegions.has(g.name), title: 'Shown and measured' });
+      shown.onchange = () => hideRegion(g.name, !shown.checked);
+      const name = el('input', { value: g.name, size: 10, title: named ? 'A named region (W50 / W54): its name is fixed' : 'Rename' });
+      name.disabled = named;
+      name.onchange = () => { if (!renameRegion(g.name, name.value)) name.value = g.name; refreshRegionList(); drawOverlay(); };
+      const info = el('span', { textContent: `${named ? `named${edited ? ', edited' : ''}${g.pose ? ` @${g.pose}` : ''}` : g.rect.map((v) => v.toFixed(2)).join(' ')}`, title: g.note ?? '' });
+      const row = el('div', {}, el('span', {}, shown, ' ', name), info);
+      row.style.outline = g.name === selected ? '1px solid #ffd166' : '';
+      row.onclick = (e) => { if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'BUTTON') return; selected = g.name; if (!drawing) setDrawing(true); else { refreshRegionList(); drawOverlay(); } };
+      if (g.user) btn('delete', () => removeRegion(regions.indexOf(regions.find((u) => u.name === g.name)!)), row, 'Delete this region');
+      if (edited) btn('reset', () => removeRegion(regions.findIndex((u) => u.name === g.name)), row, 'Back to the named rect');
+      return row;
+    }));
   }
+
 
   h2('GPU time (visible methods)');
   const timingsEl = el('pre', { id: 'timings' }); panel.append(timingsEl);

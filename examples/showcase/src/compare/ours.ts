@@ -20,6 +20,7 @@ import {
 } from '@pmndrs/reflections/three';
 import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
 import { ScreenSpaceAO } from '../../../shared/ao';
+import { LINEAR_VIEWS, VIEW_IDS, buildDebugViews, type View } from '../debugViews';
 import { DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../../shared/antialias';
 import { hitSourceDenoiserOptions, hitSourceFromQuery } from '../../../shared/denoiser';
 import { probeLayout, type ProbeLayoutName } from '../../../shared/probeLayouts';
@@ -248,7 +249,16 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   const linear = uniform(0);
   const pipeline = new THREE.RenderPipeline(renderer);
   pipeline.outputColorTransform = false;
-  pipeline.outputNode = vec4((linear as N).equal(1).select(c.final.rgb, toned(c.final)), 1);
+  // W57: the showcase's debug views (?view=), one graph picked by a uniform
+  const uView = uniform(Math.max(0, VIEW_IDS.indexOf((params.get('view') ?? 'final') as View)));
+  const currentView = (): View => VIEW_IDS[uView.value] ?? 'final';
+  const views = buildDebugViews({
+    c, ssr, tone: (x: N) => toned(x), T: (x: N) => (linear as N).equal(1).select(x, toned(x)),
+    roughnessThreshold: hybrid.roughnessThreshold, probesOn: uniform(probesOn ? 1 : 0), ao: ao ? (u: N) => ao.sample(u) : null,
+  });
+  let viewOut: N = vec3(0);
+  VIEW_IDS.forEach((v, i) => { viewOut = uView.equal(i).select(views[v], viewOut); });
+  pipeline.outputNode = vec4(viewOut, 1);
   const maskPipeline = new THREE.RenderPipeline(renderer);
   maskPipeline.outputColorTransform = false;
   maskPipeline.outputNode = vec4(c.geometry.and(c.roughness.lessThan(GLOSSY)).select(vec3(1), vec3(0)), 1);
@@ -283,6 +293,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     const a = new DisplayAA(renderer, ssr.gbuffer as N, { mode: aaMode, ratio: aaQ.ratio, settings: upscalerSettings() as N, displayWidth: W, displayHeight: H, tone: toned, gpuTiming: false });
     await a.init();
     aa = a;
+    a.toneView = LINEAR_VIEWS.includes(currentView());
     applyReactive();
     return a;
   };
@@ -333,6 +344,11 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   const live: Record<string, (v: string | null) => void> = {
     spq: (v) => { if (v === null) delete ssr.settings.samplesPerQuad; else ssr.settings.samplesPerQuad = Number(v) as 1 | 2 | 4; },
     hit: (v) => setHit((v ?? 'final') as 'final' | 'lit' | 'current'),
+    view: (v) => {
+      const view = (v ?? 'final') as View;
+      uView.value = Math.max(0, VIEW_IDS.indexOf(view));
+      if (aa) { aa.toneView = LINEAR_VIEWS.includes(view); aa.reset(); }
+    },
     reshade: (v) => { ssr.settings.hitShading = (v ?? 'reshade') as 'reshade' | 'off'; },
     lobeFilter: (v) => { if (v === null) delete ssr.settings.hitLobeFilter; else ssr.settings.hitLobeFilter = Number(v); },
     // W52: the traced pass's own lobe filter (the compare page's ?rtLobeFilter=); unset = the tracer's

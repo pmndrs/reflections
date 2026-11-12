@@ -41,6 +41,7 @@ import { availableAssets, probeAtlasBytes } from '../../shared';
 import { createReflectionDenoiser, denoiserAvailable, hitSourceDenoiserOptions, hitSourceFromQuery, setDenoiserHitSource, type DenoiserHitSourceSettings } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
+import { LINEAR_VIEWS, VIEWS, VIEW_IDS, VIEW_LEGENDS, buildDebugViews, type View } from './debugViews';
 import { SHOWCASE, type FloorKind, type ShowcaseEntry, type ShowcaseScene } from './scenes';
 import { SPEC_AA_DEFAULT, setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } from './specAA';
 
@@ -52,25 +53,6 @@ const manual = q.has('manual');
 const aaQuery = aaFromQuery(q);
 const reactiveScale = Number(q.get('reactive') ?? 0);
 
-const VIEWS = {
-  final: 'Final (hybrid)',
-  split: 'Raw | denoised',
-  off: 'Reflections off',
-  ibl: 'Probes / environment only',
-  reflections: 'Reflection term only',
-  source: 'Source per pixel',
-  rtSource: 'Ray-traced pass per pixel',
-  confidence: 'Screen-space confidence',
-  hitDistance: 'Hit distance',
-  hitRadiance: 'Hit radiance (tracer, x confidence)',
-  specular: 'Specular radiance (composited, unweighted)',
-  probeSpecular: 'Probe / environment radiance (subtracted)',
-  ao: 'AO input (GTAO, for specular occlusion)',
-  specularOcclusion: 'Specular occlusion factor (1 = none)',
-  traced: 'Traced pixels (the miss list, RT on)',
-} as const;
-type View = keyof typeof VIEWS;
-const VIEW_IDS = Object.keys(VIEWS) as View[];
 type HitMode = 'current' | 'lit' | 'final';
 const HIT_MODES: Record<HitMode, string> = { final: "last frame's image", lit: "last frame's lit (no SSR)", current: 'this frame, no specular' };
 /** W44 (D3540): how a screen-space hit accounts for the view direction (`ssr.settings.hitShading`). `?reshade=` */
@@ -156,8 +138,6 @@ async function main() {
   const toneOf = (t: Tone) => (c: N) => (renderOutput(c, TONE[t], THREE.SRGBColorSpace) as N).rgb;
   const aa = new DisplayAA(renderer, ssr.gbuffer, { ...aaQuery, displayWidth: W, displayHeight: H, tone: toneOf(state.tone) });
   await aa.init();
-  /** Views that are a tone-mapped image: fed to the upscaler linear, tone-mapped after it. */
-  const LINEAR_VIEWS: View[] = ['final', 'split', 'off', 'ibl', 'reflections'];
 
   function buildDisplay() {
     const tone = toneOf(state.tone);
@@ -173,42 +153,7 @@ async function main() {
     hybrid.rebuild();
     const c = composite = hybrid.composite();
     c.amount.value = state.ssr || state.rt ? 1 : 0;
-    const off: N = c.geometry.select(c.lit.sub(c.weight.mul(c.probeSpecular)).max(0), c.lit);
-    const raw: N = c.geometry.select(c.lit.add(c.weight.mul(c.signal.sub(c.probeSpecular)).mul(c.amount)).max(0), c.lit);
-    const dim: N = tone(off).mul(0.25);
-    const at: N = uv();
-    const views: Record<View, N> = {
-      final: T(c.final.rgb),
-      split: at.x.sub(0.5).abs().lessThan(0.0008).select(vec3(1), at.x.lessThan(0.5).select(T(raw), T(c.final.rgb))),
-      off: T(off),
-      ibl: T(c.lit),
-      reflections: T(c.specular.mul(c.weight).mul(c.amount)),
-      // SSR green, traced blue, probe orange, environment magenta, rough (probe/env, untraced) grey
-      source: c.geometry.select(dim.add(HybridReflections.sourceColor(c, hybrid.roughnessThreshold).mul(0.75)), vec3(0)),
-      rtSource: (() => {
-        // traced hit blue, traced hit coloured from the screen cyan, traced miss magenta, capped
-        // orange; untouched: SSR hit green (by confidence), else probe amber / environment grey
-        const src: N = c.source.add(0.5).floor();
-        const fallback: N = uProbes.equal(1).select(vec3(0.85, 0.6, 0.15), vec3(0.4));
-        const ssrHit: N = mix(fallback, vec3(0.15, 0.85, 0.25), c.confidence.clamp(0, 1));
-        const col: N = src.equal(1).select(vec3(0.2, 0.4, 1), src.equal(4).select(vec3(0.2, 0.9, 0.95),
-          src.equal(2).select(vec3(0.95, 0.2, 0.85), src.equal(3).select(vec3(1, 0.55, 0.1), ssrHit))));
-        return c.geometry.select(dim.add(col.mul(0.75)), vec3(0));
-      })(),
-      confidence: c.geometry.select(vec3(c.confidence), vec3(0.02, 0.03, 0.08)),
-      hitRadiance: c.geometry.select(tone(c.ssr), vec3(0)),
-      specular: c.geometry.select(tone(c.specular), vec3(0)),
-      probeSpecular: c.geometry.select(tone(c.probeSpecular), vec3(0)),
-      ao: c.geometry.select(vec3(ao.sample(at)), vec3(0)),
-      specularOcclusion: c.geometry.select(vec3(c.specularOcclusion), vec3(0)),
-      // W38: the pixels the ray-traced pass traced (SSR's miss list, after the tile cap): red where the
-      // ray hit the scene, magenta where it missed (or was capped); RT on only
-      traced: (() => {
-        const src: N = c.source.add(0.5).floor();
-        return c.geometry.not().or(src.lessThan(1)).select(vec3(0), src.equal(1).or(src.equal(4)).select(vec3(1, 0, 0), vec3(1, 0, 1)));
-      })(),
-      hitDistance: (() => { const d: N = c.hitDistance; return d.greaterThan(0).select((vec3(1, 0.8, 0.5) as N).mul(d.div(d.add(2))), vec3(0)); })(),
-    };
+    const views = buildDebugViews({ c, ssr, tone, T, roughnessThreshold: hybrid.roughnessThreshold, probesOn: uProbes, ao: (u: N) => ao.sample(u) });
     let out: N = vec3(0);
     VIEW_IDS.forEach((v, i) => { out = uView.equal(i).select(views[v], out); });
     pipeline.outputNode = vec4(out, 1);
@@ -528,10 +473,7 @@ async function main() {
     for (const [c, t] of items) { const i = document.createElement('i'); i.style.background = c; const sp = document.createElement('span'); sp.textContent = t; l.append(i, sp); }
     panel.append(l); return l;
   };
-  const legends: Partial<Record<View, HTMLElement>> = {
-    source: legendOf([['#26d940', 'screen-space hit'], ['#3373ff', 'ray-traced hit'], ['#ff8c1a', 'probe'], ['#d933d9', 'environment'], ['#595959', 'rough: probe / environment only']]),
-    rtSource: legendOf([['#3366ff', 'ray-traced hit'], ['#33e6f2', 'ray-traced, colour from screen'], ['#f233d9', 'ray-traced miss'], ['#ff8c1a', 'over the ray budget'], ['#26d940', 'screen-space hit'], ['#d99926', 'probe (grey: environment)']]),
-  };
+  const legends: Partial<Record<View, HTMLElement>> = Object.fromEntries(Object.entries(VIEW_LEGENDS).map(([k, items]) => [k, legendOf(items!)]));
 
   h2('Image');
   row('Tone mapping', select({ agx: 'AgX', neutral: 'Neutral (Khronos PBR)', aces: 'ACES filmic' }, state.tone, (v) => { state.tone = v as Tone; buildDisplay(); applySources(); }));
