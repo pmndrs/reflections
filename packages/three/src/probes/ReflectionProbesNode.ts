@@ -131,7 +131,8 @@ function lookupFor(options: CoreLookupOptions): { fn: N; includes: N[] } {
   const includes = includesFor(options.layout);
   const layoutKey = `${options.layout.id}:${options.layout.mipLevelCount}`;
   const atlasKey = (options.atlases ?? 1) > 1 ? `:${options.atlases}:${options.volumeAtlases?.join(',') ?? '-'}` : '';
-  const key = `${layoutKey}:${options.lodMapping}:${options.dominantDirection === true}:${options.refit === true}:${options.distanceRoughness === true}:${options.roughnessLerp === true}:${options.count ?? -1}${atlasKey}`;
+  // keyed by the generated code too (W63): what the options compile to is what the variant is
+  const key = `${layoutKey}:${options.lodMapping}:${options.dominantDirection === true}:${options.refit === true}:${options.distanceRoughness === true}:${options.roughnessLerp === true}:${options.count ?? -1}${atlasKey}:${probeLookupFunctionWgsl({ ...options, mirrorX: true }, 'k')}`;
   let entry = _lookups.get(key);
   if (!entry) {
     // a name per variant: a shader holding two variants (two sets, or two lookups of one) would
@@ -212,7 +213,7 @@ export function packReflectionProbesTable(probes: ReflectionProbes, target?: Flo
   if (!all && probes.textures.length > 1) volumes = volumes.map((v) => ((v.atlas ?? 0) === 0 ? v : { ...v, atlas: 0, slot: 0, halfSize: [-1, -1, -1] as const }));
   return packProbeTable({
     maxLod: probes.texture!.mipmaps.length - 1, enabled: !probes.capturing, environmentSlot: probes.bakedEnvironmentSlot,
-    irradianceRow: probeIrradianceRow(count), refitClamp: probes.refitClamp,
+    irradianceRow: probeIrradianceRow(count), refitClamp: probes.refitClamp, capacity: count,
     ...(all ? { atlases: probeAtlasTable(probes) } : {}),
   }, volumes, target);
 }
@@ -525,9 +526,10 @@ export class ReflectionProbesProxyNode extends THREE.Node {
     this.table = tableFor(probes);
     this.updateBefore();
     const { includes } = lookupFor({ layout: probeLayoutFor(probes) });
-    const key = `${this.volumes}`;
+    // keyed by the generated code (W63), one name per variant
+    const key = probeProxyShareFunctionWgsl({ count: this.volumes }, 'k');
     let fn = _proxyFns.get(key);
-    if (!fn) _proxyFns.set(key, (fn = wgslFn(probeProxyShareFunctionWgsl({ count: this.volumes }, 'probesProxyShare'), includes) as N));
+    if (!fn) _proxyFns.set(key, (fn = wgslFn(probeProxyShareFunctionWgsl({ count: this.volumes }, `probesProxyShare${_proxyFns.size || ''}`), includes) as N));
     return fn({ table: this.table.node, P: vec3(this.positionNode), dir: vec3(this.directionNode), near: float(this.nearNode), far: float(this.farNode) });
   }
 }

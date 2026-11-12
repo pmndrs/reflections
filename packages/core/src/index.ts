@@ -10,11 +10,12 @@ export { GGXReference, lobeTexels, referenceModeFor, type ReferenceMode } from '
 // Probe core (phase 2): the atlas + volume table + WGSL lookup, the radiance-fallback seam, re-fit irradiance.
 export { ProbeSet, type ProbeSetOptions, type ProbeSetFormat } from './probes/set';
 export {
-  probeLookupWgsl, probeLookupIncludesWgsl, probeLookupIncludeChunks, probeLookupFunctionWgsl, probeProxyShareFunctionWgsl, lodWgsl, DEFAULT_PROBE_LOD_MAPPING,
+  probeLookupWgsl, probeLookupIncludesWgsl, probeLookupIncludeChunks, probeLookupFunctionWgsl, probeProxyShareFunctionWgsl, lodWgsl, DEFAULT_PROBE_LOD_MAPPING, PROBE_UNROLL_MAX_VOLUMES,
   type ProbeLookupOptions, type ProbeLookupModuleOptions, type ProbeLodMapping,
 } from './probes/lookup';
 export {
   packProbeTable, sortProbeVolumes, probeTableRows, probeIrradianceRow, planProbeAtlases, PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, PROBE_IRRADIANCE_ROWS, PROBE_MAX_ATLASES,
+  probeGridRow, probeGridRows, PROBE_GRID_MAX_CELLS, PROBE_GRID_MIN_VOLUMES, PROBE_GRID_LANE_BITS,
   type ProbeVolume, type ProbeTableHeader, type ProbeTableAtlas, type ProbeAtlasPlan,
 } from './probes/table';
 export { ProbeIrradiance, type ProbeIrradianceOptions } from './probes/irradiance';

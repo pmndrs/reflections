@@ -14,6 +14,8 @@
 // Both are the same body (`lookupBody` below); only how a table row is read differs.
 //
 // Method (#35046, as ported in packages/three before phase 2; D58): volumes are walked in table order.
+// Only those the table's volume grid lists in P's cell are visited (W63, D4950; ./table.ts): a volume
+// outside the cell has no weight at P, so the result is the full walk's.
 // Each takes `clamp(distance inside its influence box / fade) * remaining` of the weight and leaves
 // the rest to the next; inside its projection box the direction is box-projected (Lagarde's BPCEM,
 // the guarded form of #35046) and sampled from the capture point. What is left over goes to the
@@ -44,7 +46,7 @@
 // into the captures' texture space before the layout lookup: `mirrorX` (three's x-mirrored
 // CubeCamera) is its alias for ['-x', 'y', 'z'].
 
-import { PROBE_HEADER_ROWS, PROBE_IRRADIANCE_ROWS, PROBE_MAX_ATLASES, PROBE_ROWS_PER_VOLUME } from './table';
+import { PROBE_GRID_LANE_BITS, PROBE_HEADER_ROWS, PROBE_IRRADIANCE_ROWS, PROBE_MAX_ATLASES, PROBE_ROWS_PER_VOLUME } from './table';
 import { dedupeChunks } from './layouts';
 import { captureAxesWgsl, resolveCaptureTransform, type ProbeCaptureTransform } from './capture';
 import type { ProbeLayout, ProbeWgslChunk } from './layouts/types';
@@ -92,9 +94,11 @@ export interface ProbeLookupOptions {
   /** Roughness to mip. Default 'alpha' (D101); 'r187' is three r187's PMREM mapping everywhere. */
   lodMapping?: ProbeLodMapping;
   /**
-   * Unroll the volume loop for exactly this many volumes (the table's count is then ignored). An
-   * engine that recompiles when the probe count changes (three) gets constant table indices; the
-   * runtime loop measured ~1.5x the lookup cost on Apple M-series (W7). Default: a runtime loop.
+   * The table's volume count, known at compile time (an engine that recompiles when the probe count
+   * changes: three). Up to PROBE_UNROLL_MAX_VOLUMES the walk is unrolled for exactly this many
+   * volumes (the table's count is then ignored; the runtime loop measured ~1.5x the lookup cost at
+   * a few volumes, W7 / W63); above, the lookup walks the table's volume grid as without it (W63,
+   * D4950: unrolled, the cost grows faster than the count). Default: the grid walk.
    */
   count?: number;
   /**
@@ -107,7 +111,8 @@ export interface ProbeLookupOptions {
   /**
    * With `count` and several `atlases`: the atlas of each unrolled volume, fixed at compile time
    * (an engine that recompiles per bake, three), so each volume samples its own texture with no
-   * branch. Absent, each volume's atlas is read from the table and picked by a branch.
+   * branch. Absent, or past PROBE_UNROLL_MAX_VOLUMES (the grid walk), each volume's atlas is read
+   * from the table and picked by a branch.
    */
   volumeAtlases?: readonly number[];
 }
@@ -218,12 +223,69 @@ function atlasCount(o: Pick<ProbeLookupOptions, 'atlases' | 'volumeAtlases' | 'c
   return n;
 }
 
-/** W63 bench only (not exported from the package): lookup variants for the cost profile. */
+/**
+ * Volume counts the lookup unrolls when it knows the count at compile time (`count`, an engine that
+ * recompiles per bake: three); above, and without `count`, it walks the volume grid (W63, D4950).
+ * Unrolled, every volume costs a box test per px; three's materials hold several lookups each, and
+ * past ~8 unrolled volumes the shader's cost grows faster than the count (W63: 32 volumes 9.6 ms at
+ * 1080p unrolled, 0.8 on the grid; 4 volumes 0.36 unrolled, ~0.5 on the grid).
+ */
+export const PROBE_UNROLL_MAX_VOLUMES = 4;
+
+/**
+ * Bench only (W63; not exported from the package index): compile-time variants of the volume walk
+ * for `--only probe-lookup-cost` / `probe-lookup-ab`, comma-separated: 'legacy' (unroll whenever
+ * `count` is given, the walk before W63), 'loop' (a runtime loop over every volume), 'skip' (with
+ * those two: stop once the weight is spent), 'grid' (the grid walk at any count), 'noskip' (the grid
+ * walk without the early-out), 'nosample' / 'boxonly' (profiling: no atlas sample / box test only).
+ * '' is the shipped walk.
+ */
 export const PROBE_LOOKUP_EXPERIMENT: { mode: string } = { mode: '' };
+
+/**
+ * The walk over the volume grid (./table.ts, W63): the lanes of P's cell, each set bit a volume in
+ * table order, `body` once per listed volume (`i` its index). Without a grid (row 1.z = 0) every
+ * volume is listed; P outside the grid lists none. `earlyOut` stops once the weight is spent.
+ */
+const gridWalk = (body: string, row: (i: string) => string, earlyOut: boolean) => /* wgsl */ `  let pr_g = u32(${row('1u')}.z);
+  var pr_lanes = (count + ${PROBE_GRID_LANE_BITS - 1}u) / ${PROBE_GRID_LANE_BITS}u;
+  var pr_cell = 0u;
+  if (pr_g != 0u) {
+    let g0 = ${row('pr_g')};
+    let g1 = ${row('pr_g + 1u')};
+    let pr_c = floor((P - g0.xyz) * g0.w);
+    if (any(pr_c < vec3f(0.0)) || any(pr_c >= g1.xyz)) { pr_lanes = 0u; }
+    else { pr_cell = pr_g + 2u + (u32(pr_c.x) + u32(g1.x) * (u32(pr_c.y) + u32(g1.y) * u32(pr_c.z))) * u32(g1.w); }
+  }
+  for (var pr_l = 0u; pr_l < pr_lanes; pr_l++) {
+    let pr_left = count - pr_l * ${PROBE_GRID_LANE_BITS}u;
+    var pr_m = select(${(1 << PROBE_GRID_LANE_BITS) - 1}u, (1u << min(pr_left, 31u)) - 1u, pr_left < ${PROBE_GRID_LANE_BITS}u);
+    if (pr_g != 0u) { pr_m = u32(${row('pr_cell + pr_l / 4u')}[pr_l % 4u]); }
+    loop {
+      if (pr_m == 0u${earlyOut ? ' || remaining <= 0.0' : ''}) { break; }
+      let i = pr_l * ${PROBE_GRID_LANE_BITS}u + countTrailingZeros(pr_m);
+      pr_m &= pr_m - 1u;
+${body}    }
+  }
+`;
+
+/**
+ * The volume walk around `volume(k)` (the body for volume `i`; `k` its index when unrolled): unrolled
+ * up to PROBE_UNROLL_MAX_VOLUMES known volumes, else the grid walk with the early-out (exact: once
+ * `remaining` is 0 every later weight is 0). In scope: count, remaining.
+ */
+function walkWgsl(count: number | undefined, volume: (k: number | undefined) => string, row: (i: string) => string): string {
+  const X = PROBE_LOOKUP_EXPERIMENT.mode.split(',');
+  const skip = X.includes('skip') ? '    if (remaining <= 0.0) { break; }\n' : '';
+  const unrolled = (n: number) => Array.from({ length: n }, (_, k) => `  ${skip ? 'if (remaining > 0.0) ' : ''}{\n    let i = ${k}u;\n${volume(k)}  }\n`).join('');
+  if (X.includes('loop') || (X.includes('legacy') && count === undefined)) return `  for (var i = 0u; i < count; i++) {\n${skip}${volume(undefined)}  }\n`;
+  if (X.includes('legacy')) return unrolled(count!);
+  if (count !== undefined && count <= PROBE_UNROLL_MAX_VOLUMES && !X.includes('grid')) return unrolled(count);
+  return gridWalk(volume(undefined), row, !X.includes('noskip'));
+}
 
 const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: string, samp: string) => {
   const X = PROBE_LOOKUP_EXPERIMENT.mode.split(',');
-  const unroll = X.includes('loop') ? undefined : o.count;
   const atlases = atlasCount(o);
   const multi = atlases > 1;
   const sample = o.layout.sampleFunction;
@@ -261,7 +323,7 @@ const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: stri
     let weight = clamp(inside / max(r0.w, 1e-6), 0.0, 1.0) * remaining;
     radiance += vec3f(weight);
     remaining -= weight;
-` : /* wgsl */ `${X.includes('skip') ? (unroll === undefined ? '    if (remaining <= 0.0) { break; }\n' : '') : ''}    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
+` : /* wgsl */ `    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
     let r0 = ${row('b')};
     let r1 = ${row('b + 1u')};
     let lp = P - r0.xyz;
@@ -313,7 +375,7 @@ ${pick(k, `slot, ${texDir('corrected')}, vlod`)}      if (refitOn) {
   if (${o.dominantDirection === true}) { dir = pr_dominantDirection(N, R, roughness); }
   var radiance = vec3f(0.0);
   var remaining = enabled;
-${unroll === undefined ? `  for (var i = 0u; i < count; i++) {\n${volume(undefined)}  }\n` : Array.from({ length: unroll }, (_, k) => `  ${X.includes('skip') ? 'if (remaining > 0.0) ' : ''}{\n    let i = ${k}u;\n${volume(o.volumeAtlases?.[k])}  }\n`).join('')}  let coverage = enabled - remaining;
+${walkWgsl(o.count, (k) => volume(k === undefined ? undefined : o.volumeAtlases?.[k]), row)}  let coverage = enabled - remaining;
   if (!withEnv) { return vec4f(radiance / max(coverage, 1e-6), coverage); }
   if (envSlot >= 0.0) {
     let slot = u32(envSlot);
@@ -363,7 +425,7 @@ const proxyBody = (o: Pick<ProbeLookupOptions, 'count'>, row: (i: string) => str
   let count = u32(hdr.x);
   var share = 0.0;
   var remaining = hdr.z;
-${o.count === undefined ? `  for (var i = 0u; i < count; i++) {\n${volume}  }\n` : Array.from({ length: o.count }, (_, k) => `  {\n    let i = ${k}u;\n${volume}  }\n`).join('')}  return share;
+${walkWgsl(o.count, () => volume, row)}  return share;
 `;
 };
 

@@ -6,7 +6,7 @@
 // Layout (rows of vec4<f32>; integers are stored as floats, exact below 2^24):
 //   row 0           count, maxLod, enabled (0 during a capture: probes then contribute nothing),
 //                   environment slot (-1: none)
-//   row 1           irradiance base row (see below), re-fit clamp, 0, 0
+//   row 1           irradiance base row (see below), re-fit clamp, grid row (0: no grid; W63), 0
 //   row 2           maxLod of atlases 0..3 (several atlases only, D4700; zeros for one atlas, whose
 //                   maxLod is row 0's)
 //   row 3           first irradiance slot of atlases 0..3 (several atlases only; zeros otherwise)
@@ -16,6 +16,13 @@
 //     +2  projection-box offset.xyz from the centre, atlas slot
 //     +3  projection-box size.xyz (full size), priority (informational: the order is what counts)
 //     +4  capture point.xyz (world: centre + originOffset), atlas index (0 with one atlas)
+//   then, for a capacity of at least PROBE_GRID_MIN_VOLUMES, the volume grid (W63, D4950) from the grid
+//   row (probeGridRow): a world-space grid over the volumes' influence boxes, each cell listing the
+//   volumes whose box touches it, so the lookup walks only those (in table order: exact):
+//     +0  grid min.xyz (world), 1 / cell size
+//     +1  cells per axis.xyz, rows per cell
+//     +2  cells, x fastest, then y, then z; each cell `rows per cell` rows of 4 lanes, lane l bit b
+//         (a float holding an integer below 2^24) set when volume 24 * l + b touches the cell
 //   then from the irradiance base row, per atlas slot (environment included), PROBE_IRRADIANCE_ROWS
 //   rows of L1 SH irradiance (see ./irradiance.ts): (L00.rgb, L1-1.r), (L1-1.gb, L10.rg), (L10.b, L11.rgb).
 //   With several atlases (one per resolution class, D4700) the slots are numbered across them:
@@ -83,6 +90,12 @@ export interface ProbeTableHeader {
   /** Upper bound of the re-fit ratio frameIrradiance / probeIrradiance. Default 4. */
   refitClamp?: number;
   /**
+   * The table's volume capacity, for the volume grid (W63): with a capacity of at least
+   * PROBE_GRID_MIN_VOLUMES the grid is packed at `probeGridRow(capacity)` and the packed rows run to
+   * its end. Default: no grid (the lookup then walks every volume).
+   */
+  capacity?: number;
+  /**
    * The atlases of a set whose probes live in several (one per resolution class, D4700), at most
    * {@link PROBE_MAX_ATLASES}: each one's last mip and first irradiance slot. Atlas 0 holds the
    * environment slot and its `maxLod` should be the header's. Absent (one atlas): header rows 2 and
@@ -100,9 +113,22 @@ export interface ProbeTableAtlas {
 }
 
 /** Rows the table needs for `capacity` volumes and `slots` atlas slots (irradiance included). */
-export const probeTableRows = (capacity: number, slots: number) => PROBE_HEADER_ROWS + capacity * PROBE_ROWS_PER_VOLUME + slots * PROBE_IRRADIANCE_ROWS;
-/** Row where the irradiance block starts for `capacity` volumes. */
-export const probeIrradianceRow = (capacity: number) => PROBE_HEADER_ROWS + capacity * PROBE_ROWS_PER_VOLUME;
+export const probeTableRows = (capacity: number, slots: number) => probeIrradianceRow(capacity) + slots * PROBE_IRRADIANCE_ROWS;
+/** Row where the irradiance block starts for `capacity` volumes (after the volumes and the volume grid). */
+export function probeIrradianceRow(capacity: number) { return PROBE_HEADER_ROWS + capacity * PROBE_ROWS_PER_VOLUME + probeGridRows(capacity); }
+
+/** Volumes one grid lane holds (an integer stored as f32 is exact below 2^24). */
+export const PROBE_GRID_LANE_BITS = 24;
+/** Cells a volume grid holds at most (its rows: cells x rows per cell, 64 KB per row of cells). */
+export const PROBE_GRID_MAX_CELLS = 4096;
+/** Capacity from which a table carries the volume grid; smaller sets walk every volume (W63). */
+export const PROBE_GRID_MIN_VOLUMES = 2;
+/** Rows of one grid cell for `capacity` volumes. */
+export const probeGridRowsPerCell = (capacity: number) => Math.ceil(capacity / (4 * PROBE_GRID_LANE_BITS));
+/** Rows the volume grid takes for `capacity` volumes (0 below PROBE_GRID_MIN_VOLUMES). */
+export const probeGridRows = (capacity: number) => (capacity >= PROBE_GRID_MIN_VOLUMES ? 2 + PROBE_GRID_MAX_CELLS * probeGridRowsPerCell(capacity) : 0);
+/** Row where the volume grid starts for `capacity` volumes (right after them; meaningless without a grid). */
+export const probeGridRow = (capacity: number) => PROBE_HEADER_ROWS + capacity * PROBE_ROWS_PER_VOLUME;
 
 const boxVolume = (v: ProbeVolume) => v.halfSize[0] * v.halfSize[1] * v.halfSize[2];
 
@@ -120,11 +146,15 @@ export function sortProbeVolumes(volumes: readonly ProbeVolume[]): ProbeVolume[]
  * irradiance block.
  */
 export function packProbeTable(header: ProbeTableHeader, volumes: readonly ProbeVolume[], out?: Float32Array<ArrayBuffer>): Float32Array<ArrayBuffer> {
-  const rows = PROBE_HEADER_ROWS + volumes.length * PROBE_ROWS_PER_VOLUME;
+  const capacity = header.capacity ?? 0;
+  if (header.capacity !== undefined && volumes.length > capacity) throw new Error(`packProbeTable: ${volumes.length} volumes, capacity ${capacity}`);
+  const grid = probeGridRows(capacity) > 0 ? probeGridRow(capacity) : 0;
+  const rows = grid > 0 ? grid + probeGridRows(capacity) : PROBE_HEADER_ROWS + volumes.length * PROBE_ROWS_PER_VOLUME;
   const f = out && out.length >= rows * 4 ? out : new Float32Array(rows * 4);
   f.fill(0, 0, rows * 4);
   f.set([volumes.length, header.maxLod, header.enabled === false ? 0 : 1, header.environmentSlot], 0);
-  f.set([header.irradianceRow ?? 0, header.refitClamp ?? 4, 0, 0], 4);
+  f.set([header.irradianceRow ?? 0, header.refitClamp ?? 4, grid, 0], 4);
+  if (grid > 0) packProbeGrid(f, grid, probeGridRowsPerCell(capacity), volumes);
   if (header.atlases !== undefined && header.atlases.length > 0) {
     if (header.atlases.length > PROBE_MAX_ATLASES) throw new Error(`packProbeTable: ${header.atlases.length} atlases, at most ${PROBE_MAX_ATLASES}`);
     header.atlases.forEach((a, k) => { f[8 + k] = a.maxLod; f[12 + k] = a.irradianceBase; });
@@ -143,6 +173,36 @@ export function packProbeTable(header: ProbeTableHeader, volumes: readonly Probe
     f.set([...origin, atlas], o + 16);
   });
   return f.subarray(0, rows * 4);
+}
+
+/**
+ * Writes the volume grid (see the layout above) at row `row` of `f`: cubic cells over the union of
+ * the influence boxes, at most PROBE_GRID_MAX_CELLS, each listing every volume whose box (grown by
+ * a hundredth of a cell, so float rounding on the GPU can't drop one) touches it. Volumes with an
+ * empty box (a negative half-size: masked out) are in no cell. The rows must be zero.
+ */
+function packProbeGrid(f: Float32Array, row: number, rowsPerCell: number, volumes: readonly ProbeVolume[]) {
+  const live = volumes.map((v, i) => ({ v, i })).filter(({ v }) => v.halfSize[0] > 0 && v.halfSize[1] > 0 && v.halfSize[2] > 0);
+  if (live.length === 0) { f.set([0, 0, 0, 1, 0, 0, 0, rowsPerCell], row * 4); return; } // no cell: every lookup misses
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const { v } of live) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], v.center[a] - v.halfSize[a]); hi[a] = Math.max(hi[a], v.center[a] + v.halfSize[a]); }
+  const ext = lo.map((l, a) => Math.max(hi[a] - l, 1e-3));
+  let cell = Math.cbrt((ext[0] * ext[1] * ext[2]) / PROBE_GRID_MAX_CELLS);
+  let dims = ext.map((e) => Math.max(1, Math.ceil(e / cell)));
+  while (dims[0] * dims[1] * dims[2] > PROBE_GRID_MAX_CELLS) { cell *= 1.02; dims = ext.map((e) => Math.max(1, Math.ceil(e / cell))); }
+  // half a cell of margin on the low side keeps P on a box face inside the grid
+  const origin = lo.map((l, a) => l - 0.5 * (dims[a] * cell - ext[a]));
+  f.set([origin[0], origin[1], origin[2], 1 / cell, dims[0], dims[1], dims[2], rowsPerCell], row * 4);
+  const base = (row + 2) * 4, eps = 0.01;
+  for (const { v, i } of live) {
+    const r0 = [0, 1, 2].map((a) => Math.max(0, Math.floor((v.center[a] - v.halfSize[a] - origin[a]) / cell - eps)));
+    const r1 = [0, 1, 2].map((a) => Math.min(dims[a] - 1, Math.floor((v.center[a] + v.halfSize[a] - origin[a]) / cell + eps)));
+    const lane = Math.floor(i / PROBE_GRID_LANE_BITS), bit = 2 ** (i % PROBE_GRID_LANE_BITS);
+    for (let z = r0[2]; z <= r1[2]; z++) for (let y = r0[1]; y <= r1[1]; y++) for (let x = r0[0]; x <= r1[0]; x++) {
+      const k = base + (x + dims[0] * (y + dims[1] * z)) * rowsPerCell * 4 + lane;
+      f[k] += bit;
+    }
+  }
 }
 
 /** Where a probe set of mixed resolutions keeps each capture: see {@link planProbeAtlases}. */

@@ -892,6 +892,8 @@ async function main() {
         buildDisplay();
         ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
       },
+      /** W63 bench only: compile lookup variant `mode` (core's PROBE_LOOKUP_EXPERIMENT; '' the shipped lookup) into every lookup. */
+      setLookupExp(mode: string) { PROBE_LOOKUP_EXPERIMENT.mode = mode; (this as N).setProbeParts(true, true); },
       /** W63: the probe lookups of the lit materials and of the composite on / off separately (cost split). */
       setProbeParts(material: boolean, composite: boolean) {
         if (!kit) return;
