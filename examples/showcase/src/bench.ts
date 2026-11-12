@@ -148,7 +148,7 @@ async function main() {
   });
 
   // ---- regions overlay (drag a rectangle with "Add region") -------------------------------------------
-  const sceneRegions = () => (NAMED_REGIONS[entry.id] ?? []);
+  const sceneRegions = () => (NAMED_REGIONS[entry.id] ?? []).filter((r) => !r.aspect || Math.abs(r.aspect - W / H) < 0.01); // W54: 1:1 regions at 1:1 only
   const allRegions = () => [...sceneRegions(), ...regions];
   /** Image-space (0..1) point of a pointer event, in the image half it falls on (side by side: either half). */
   function imagePoint(ev: PointerEvent): [number, number] {

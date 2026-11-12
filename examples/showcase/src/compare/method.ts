@@ -160,6 +160,21 @@ export function applySceneParams(kit: ShowcaseScene, params: URLSearchParams) {
     const s = Number(params.get('keyLight'));
     kit.scene.traverse((o) => { if ((o as THREE.Light).isLight && !(o as THREE.Light & { isAmbientLight?: boolean }).isAmbientLight) (o as THREE.Light).intensity *= s; });
   }
+  // W54: ?glass=noShadow|black|hidden isolates the transmissive glass (carConcept's cabin): noShadow lets the key
+  // light through (three's shadow map blocks it, the path tracer doesn't); black = opaque black, its own
+  // reflection only; hidden = no glass (the cabin as lit without it)
+  const glass = params.get('glass');
+  if (glass && glass !== 'authored') {
+    kit.scene.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const ms = ([] as THREE.Material[]).concat(mesh.material ?? []) as THREE.MeshPhysicalMaterial[];
+      if (!ms.some((m) => m.transmission > 0)) return;
+      if (glass === 'hidden') { mesh.visible = false; mesh.userData.noTrace = true; mesh.userData.reflectionProbeExclude = true; }
+      else if (glass === 'noShadow') mesh.castShadow = false;
+      else if (glass === 'black') for (const m of ms) if (m.transmission > 0) { m.transmission = 0; m.color.set(0); m.needsUpdate = true; }
+    });
+  }
   // ?paintRoughness=<r> sets every clear-coated material's roughness and drops its normal map (W45: what a paint lobe sees)
   if (params.has('paintRoughness')) {
     const r = Number(params.get('paintRoughness'));
