@@ -2,6 +2,7 @@ import sys, json
 import numpy as np
 from PIL import Image
 # metrics.py ref.png name=file ... ; regions in 960x540 coords of view V1 (scaled if the image is bigger)
+# (W53 copy of W50's: the lip / band search scales too)
 ref_f = sys.argv[1]
 L = lambda a: 0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]
 def load(f): return np.asarray(Image.open(f).convert('RGB'), dtype=np.float64)
@@ -10,10 +11,12 @@ def rect(x0, y0, x1, y1):
     m = np.zeros((H, W), bool); m[int(y0 * s):int(y1 * s), int(x0 * s):int(x1 * s)] = True; return m
 lr = L(R)
 def lip():
-    # the skirt's lower lip on the car: the 10 px above the top of the PT's dark band, per column x 460-640
+    # the skirt's lower lip on the car: the 8 px (at 960 wide; scaled) above the top of the PT's dark band, per column x 460-640
+    # (W53: scaled to the image's size, so 1920x1080 uses the same region)
     m = np.zeros((H, W), bool)
-    for x in range(460, 640):
-        col = lr[280:400, x] < 15
+    y0, y1 = int(280 * s), int(400 * s)
+    for x in range(int(460 * s), int(640 * s)):
+        col = lr[y0:y1, x] < 15
         best, start, run0 = 0, None, None
         for y in range(len(col) + 1):
             if y < len(col) and col[y]:
@@ -21,9 +24,9 @@ def lip():
             else:
                 if run0 is not None and y - run0 > best: best, start = y - run0, run0
                 run0 = None
-        if start is not None and best >= 6:
-            m[280 + start - 8:280 + start, x] = True
-            BAND[280 + start:280 + start + best, x] = True
+        if start is not None and best >= 6 * s:
+            m[y0 + start - int(8 * s):y0 + start, x] = True
+            BAND[y0 + start:y0 + start + best, x] = True
     return m
 BAND = np.zeros((H, W), bool)
 def band(): return BAND
