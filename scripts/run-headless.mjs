@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | probe-layouts)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | bench | probe-layouts)
 //   pnpm check -- --only probe-bindings          # W62: Sponza's three-size probe set at the default 16 sampled textures
 //   pnpm check -- --only probe-bindings-measure  # W62: Sponza with fewer probe sizes vs the path tracer (MAD, PSNR), lookup ms; out/w62-probe-bindings.json
 //   pnpm check -- --only probe-layouts-measure   # W61: probe layouts at equal memory, error vs RT / path tracer, seams, timing (minutes); out/w61-probe-layouts.json
@@ -2229,6 +2229,121 @@ async function showcaseChecks(pages) {
 }
 
 /**
+ * examples/showcase/bench.html (W51, the tuning bench): loads carConcept with ours + RT | three SSR +
+ * denoise, moves every schema control once through the page's own DOM controls (live ones reset after
+ * each move; creation-time ones left set, then one Rebuild with all of them, then three SSR + FFX, the
+ * path tracer, probes only and ours denoised created with them), switches the scene and back, renders
+ * each view mode (split, side by side, |A - B| heat map), and runs Measure once on carConcept at W50's
+ * pose (path-traced reference, W50's named regions plus a dragged-in one). Passes with no GPU validation
+ * errors or exceptions, images that aren't black and finite region numbers. Skipped without assets.
+ * Screenshots: out/bench-{split,side,diff,rebuilt}.png.
+ */
+async function benchChecks(pages) {
+  console.log('examples/showcase/bench.html:');
+  const p = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual&scene=carConcept&pose=w50&left=ours-rt&right=three-denoise`);
+  pages.push(p);
+  if (!(await p.T('window.__p.entries()')).length) { console.log('  (no assets downloaded: bench skipped)'); return; }
+  const errsSince = (n) => results.logs.slice(n).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+  const lum = (url) => p.T(`(async (u) => { const i = new Image(); i.src = u; await i.decode(); const c = document.createElement('canvas'); c.width = 160; c.height = 90;
+    const g = c.getContext('2d'); g.drawImage(i, 0, 0, 160, 90); const d = g.getImageData(0, 0, 160, 90).data; let s = 0; for (let k = 0; k < d.length; k += 4) s += d[k] + d[k + 1] + d[k + 2]; return s / (d.length / 4) / 3; })(${JSON.stringify(url)})`);
+  let before = results.logs.length;
+  await p.T('window.__p.step(4)');
+  // 1. every control once, through the DOM
+  const sweep = await p.T(`(async () => {
+    const P = window.__p, out = { live: 0, rebuild: [], planned: [], failed: [] };
+    for (const s of P.settings()) {
+      if (s.planned) { out.planned.push(s.id); continue; }
+      if (s.id === 'scene' || s.id === 'pose') continue; // below / the camera
+      try {
+        P.moveControl(s.id); await P.step(2);
+        if (s.apply === 'live' || s.page) { P.resetControl(s.id); await P.step(1); out.live++; } else out.rebuild.push(s.id);
+      } catch (e) { out.failed.push(s.id + ': ' + (e.message ?? e)); }
+    }
+    return out;
+  })()`);
+  let errs = errsSince(before).concat(await p.T('window.__p.gpuErrors()'));
+  check('bench: every live control moved and reset through the DOM, no GPU errors or exceptions', errs.length === 0 && sweep.failed.length === 0,
+    `${sweep.live} live, ${sweep.rebuild.length} creation-time left set, planned: ${sweep.planned.join(', ') || 'none'}${sweep.failed.length ? '; ' + sweep.failed[0] : ''}${errs.length ? '; ' + errs[0] : ''}`);
+  // 2. one Rebuild with every creation-time setting moved, then the other methods built with them
+  before = results.logs.length;
+  const rb = await p.T(`(async () => {
+    const P = window.__p; const pend = P.pending();
+    await P.rebuild(); await P.step(8);
+    const a = await P.shot();
+    await P.setSides('three-ffx', 'pathtraced'); await P.step(4);
+    const b = await P.shot();
+    await P.setSides('probes', 'ours-denoised'); await P.step(4);
+    const c = await P.shot();
+    const info = P.info();
+    P.resetAll(false); await P.setSides('ours-rt', 'three-denoise'); await P.rebuild(); await P.step(4);
+    return { pend, a, b, c, info, after: P.pending() };
+  })()`);
+  savePng('bench-rebuilt.png', rb.a);
+  errs = errsSince(before).concat(await p.T('window.__p.gpuErrors()'));
+  const lums = [await lum(rb.a), await lum(rb.b), await lum(rb.c)];
+  check('bench: one Rebuild with every creation-time setting moved, then three SSR + FFX, PT, probes, ours denoised built with them', errs.length === 0 && lums.every((l) => l > 8) && rb.pend.methods.length > 0,
+    `pending ${rb.pend.methods.join(', ')}${rb.pend.page ? ' + page (size)' : ''}; means ${lums.map((l) => l.toFixed(0)).join(' / ')}/255${errs.length ? '; ' + errs[0] : ''}`);
+  // 3. the scene control: away and back
+  before = results.logs.length;
+  const sc = await p.T(`(async () => {
+    const P = window.__p, wait = async (id) => { const t0 = Date.now(); while ((P.info().scene !== id || P.info().live.length < 2) && Date.now() - t0 < 120000) await new Promise((r) => setTimeout(r, 200)); };
+    P.moveControl('scene', 'toyCar'); await wait('toyCar'); await P.step(3); const t = P.info().scene;
+    P.moveControl('scene', 'carConcept'); await wait('carConcept'); P.setPose('w50'); await P.step(3);
+    return { t, back: P.info().scene };
+  })()`);
+  errs = errsSince(before).concat(await p.T('window.__p.gpuErrors()'));
+  check('bench: the scene control switches and comes back', errs.length === 0 && sc.t === 'toyCar' && sc.back === 'carConcept', `${sc.t} -> ${sc.back}${errs.length ? '; ' + errs[0] : ''}`);
+  // 4. view modes
+  before = results.logs.length;
+  const shots = {};
+  for (const m of ['split', 'side', 'diff']) {
+    shots[m] = await p.T(`(async () => { const P = window.__p; P.setMode('${m}'); await P.step(6); return P.shot(); })()`);
+    savePng(`bench-${m}.png`, shots[m]);
+  }
+  const diff = await p.T('window.__p.lastDiff');
+  errs = errsSince(before).concat(await p.T('window.__p.gpuErrors()'));
+  const ml = { split: await lum(shots.split), side: await lum(shots.side), diff: await lum(shots.diff) };
+  check('bench: view modes render (split, side by side, |A - B| heat map with its stats)', errs.length === 0 && ml.split > 8 && ml.side > 8 && !!diff && Number.isFinite(diff.mean) && diff.mean > 0,
+    `means split ${ml.split.toFixed(0)}, side ${ml.side.toFixed(0)}, heat ${ml.diff.toFixed(0)}/255; |A - B| mean ${diff?.mean.toFixed(2)}, p99 ${diff?.p99}${errs.length ? '; ' + errs[0] : ''}`);
+  // 4b. both sides follow the camera (W51 found the upscaler presenting a stale first frame once several
+  // renderers' GPU timers exhausted Metal's query sample buffers): A alone and B alone at two poses must differ
+  const follow = await p.T(`(async () => { const P = window.__p; P.setMode('split'); const out = {};
+    for (const [side, x] of [['A', 1], ['B', 0]]) { P.setSplit(x); P.setPose('hero'); await P.step(6); const a = await P.shot(); P.setPose('w50'); await P.step(6); const b = await P.shot(); out[side] = [a, b]; }
+    P.setSplit(0.5); return out; })()`);
+  const fa = await p.T(`(${IMAGE_STATS})(${JSON.stringify(follow.A[0])}, ${JSON.stringify(follow.A[1])})`);
+  const fb = await p.T(`(${IMAGE_STATS})(${JSON.stringify(follow.B[0])}, ${JSON.stringify(follow.B[1])})`);
+  check('bench: both sides follow the shared camera (pose hero -> w50 changes A and B, AA on)', fa.mean > 3 && fb.mean > 3, `mean |hero - w50| A ${fa.mean.toFixed(1)}, B ${fb.mean.toFixed(1)}/255`);
+  // 4c. setting A/B on one method: snapshot A as B, flip a candidate (hitLobeFilter 1 -> 0, W50's halo), heat map of live A vs the snapshot
+  before = results.logs.length;
+  const ab = await p.T(`(async () => { const P = window.__p; await P.setSides('ours-rt', 'three-denoise'); P.setPose('w50'); P.freeze(true); P.setMode('diff');
+    await P.step(24); P.snapshot(); await P.step(2); const same = P.lastDiff.mean;
+    P.setSetting('lobeFilter', 0); await P.step(24); const flipped = P.lastDiff.mean; const shot = await P.shot();
+    P.setSetting('lobeFilter', null); P.clearSnapshot(); P.freeze(false); P.setMode('split'); await P.step(2);
+    return { same, flipped, shot }; })()`);
+  savePng('bench-snapshot-lobefilter.png', ab.shot);
+  errs = errsSince(before).concat(await p.T('window.__p.gpuErrors()'));
+  check('bench: snapshot A as B, flip hitLobeFilter 1 -> 0, heat map shows the change', errs.length === 0 && ab.flipped > ab.same,
+    `|live A - snapshot| mean ${ab.same.toFixed(3)} right after the snapshot, ${ab.flipped.toFixed(3)} with lobeFilter 0${errs.length ? '; ' + errs[0] : ''}`);
+  // 5. Measure once on carConcept at W50's pose: W50's regions plus a dragged-in one
+  before = results.logs.length;
+  const m = await p.T(`(async () => { const P = window.__p; P.setMode('split'); await P.setSides('ours-rt', 'pathtraced'); P.setPose('w50');
+    P.addRegion('underside', [0.47, 0.6, 0.2, 0.12]);
+    return P.measure({ samples: 16, warmup: 16, frames: 4 }); })()`);
+  errs = errsSince(before).concat(await p.T('window.__p.gpuErrors()'));
+  const need = ['frame', 'glossy', 'lip', 'band', 'wheel', 'door', 'car', 'underside'];
+  const byName = Object.fromEntries(m.rows.map((r) => [r.region, r]));
+  const missing = need.filter((n) => !byName[n] || !(byName[n].px > 0) || !Number.isFinite(byName[n].methods['ours-rt']?.mad));
+  check('bench: Measure on carConcept (pose w50) vs the path tracer over frame, glossy, W50\'s regions and a dragged one', errs.length === 0 && missing.length === 0,
+    `${m.referenceSamples} spp; ${m.rows.map((r) => `${r.region} ${r.px} px MAD ${r.methods['ours-rt']?.mad.toFixed(1)} (luma ${r.methods['ours-rt']?.luma.toFixed(1)}, PT ${r.refLuma.toFixed(1)})`).join('; ')}${missing.length ? '; missing ' + missing.join(', ') : ''}${errs.length ? '; ' + errs[0] : ''}`);
+  // 6. state: copy as code, URL, presets
+  const st = await p.T(`(() => { const P = window.__p; P.setSetting('lobeFilter', 0); const code = P.copyAsCode(); const q = P.settingsQuery();
+    const pre = P.presets.read(); pre['check'] = q; const ok = P.presets.write(pre); const back = P.presets.read()['check']; P.setSetting('lobeFilter', null);
+    return { code, q, ok, back }; })()`);
+  check('bench: copy as code, URL state and presets', st.code.includes('ScreenSpaceReflectionsPass') && st.code.includes('hitLobeFilter: 0') && st.q.includes('lobeFilter=0') && (!st.ok || st.back === st.q),
+    `query '${st.q}', preset round trip ${st.ok ? 'ok' : 'storage unavailable'}, code ${st.code.split('\n').length} lines`);
+}
+
+/**
  * examples/showcase/compare.html (smoke, W21/W23): the split renders with our denoised pipeline on the
  * left and three's SSRNode + FFX on the right, with no GPU errors and a non-black image; the WebGPU
  * path tracer stops at the page's max samples (no more samples or dispatches at rest) and its OIDN
@@ -2765,6 +2880,7 @@ async function main() {
     else if (runs('ssr-bench')) await ssrBenchSmoke(pages);
     if (runs('showcase')) await showcaseChecks(pages);
     if (runs('showcase-compare')) await showcaseCompareChecks(pages);
+    if (runs('bench')) await benchChecks(pages); // W51: the tuning bench
 
     if (runs('probe-core')) {
       // examples/probe-core: the phase 2 probe core on a bare device (layouts x formats, CPU weights,

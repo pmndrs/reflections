@@ -162,6 +162,11 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     probes.distanceRoughness = v === '1' || v === 'dist';
     probes.roughnessLerp = v === '1' || v === 'lerp';
   }
+  // W51: the set-wide lookup options (ReflectionProbes properties; every lookup of the set reads them)
+  if (params.has('pr.distanceRoughness')) probes.distanceRoughness = params.get('pr.distanceRoughness') === '1';
+  if (params.has('pr.roughnessLerp')) probes.roughnessLerp = params.get('pr.roughnessLerp') === '1';
+  if (params.has('pr.lodMapping')) probes.lodMapping = params.get('pr.lodMapping') as N;
+  if (params.has('pr.boxProjection')) probes.boxProjection = params.get('pr.boxProjection') === '1';
   // W51: ?probes=0 lights with the plain environment (no probes in the lit image or the composite)
   const probesOn = params.get('probes') !== '0';
   const envNode: N = probesOn ? reflectionProbes(probes) : null;
@@ -246,7 +251,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   const applyReactive = () => aa?.setReactive(reactiveScale > 0 ? reflectionReactive(h, ssr.gbuffer.textures.motion!, reactiveScale) : null);
   const makeAA = async () => {
     if (aa) return aa;
-    const a = new DisplayAA(renderer, ssr.gbuffer as N, { mode: aaMode, ratio: aaQ.ratio, settings: upscalerSettings() as N, displayWidth: W, displayHeight: H, tone: toned });
+    const a = new DisplayAA(renderer, ssr.gbuffer as N, { mode: aaMode, ratio: aaQ.ratio, settings: upscalerSettings() as N, displayWidth: W, displayHeight: H, tone: toned, gpuTiming: false });
     await a.init();
     aa = a;
     applyReactive();
@@ -320,6 +325,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     floorRoughness: (v) => { kit.floor.setRoughness(v === null ? floorRoughness0 : Number(v)); rebake(); },
     floor: (v) => { kit.floor.setKind?.((v ?? 'mirror') as FloorKind); rebake(); },
     floorPolish: (v) => { kit.floor.setPolished?.(v !== '0'); rebake(); },
+    maskSpecAA: () => {},
   };
   for (const f of Object.keys(SSSR_FIELDS)) {
     live[`s.${f}`] = (v) => {
@@ -341,7 +347,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   }
   /** Keys read only at creation (a Rebuild applies them). */
   const REBUILD = new Set(['bvh', 'bvhBuilder', 'rtShadingNormals', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
-    'probeLayout', 'probeBlend', 'specOcc', 'seam', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'bgBlur', 'bgIntensity', 'timestamps', 'shim']);
+    'probeLayout', 'probeBlend', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'bgBlur', 'bgIntensity', 'timestamps', 'shim']);
 
   return {
     id, canvas, scene: sceneInfo(kit),
@@ -381,8 +387,9 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     }),
     set(key, value) {
       const f = live[key];
-      if (f) { setParam(key, value); f(value); if (!/^(aa|reactive|sharpness|accum|aa\..*)$/.test(key)) ssr.resetHistory(); return 'live'; }
-      return REBUILD.has(key) ? 'rebuild' : 'ignored';
+      if (f) { setParam(key, value); f(value); if (!/^(aa|reactive|sharpness|accum|aa\..*|maskSpecAA)$/.test(key)) ssr.resetHistory(); return 'live'; }
+      if (REBUILD.has(key)) { setParam(key, value); return 'rebuild'; }
+      return 'ignored';
     },
     get(key) {
       if (key.startsWith('s.')) { const v = (ssr.settings as N)[key.slice(2)]; return v === undefined ? undefined : String(typeof v === 'boolean' ? +v : v); }

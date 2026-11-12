@@ -167,10 +167,10 @@ export async function createThreeSSR(id: Extract<MethodId, 'three-raw' | 'three-
   pipeline.outputNode = vec4((linear as N).equal(1).select(lit, toned(lit)), 1);
   const nextNodeFrame = () => (renderer as N)._nodes.nodeFrame.update();
 
-  // W51: display AA (off unless asked); at ratio > 1 the scene pass renders at the render size
-  const aaQ = aaFromQuery(params, 'off');
+  // W51: AA at ratio 1 only on this side: `?upscale=` (a render size below the display) is ours' (three's SSR + FFX at a
+  // scaled pass size disagreed with its own radiance size; the AA choice itself is the same on both sides)
+  const aaQ = { ...aaFromQuery(params, 'off'), ratio: 1 };
   const { width: RW, height: RH } = renderSize(W, H, aaQ.ratio);
-  if (aaQ.ratio > 1) scenePass.setResolutionScale(RW / W);
   // the AA wants uv-space motion (current - previous, y down); three's velocity is the NDC delta (y up)
   const motionRT = new THREE.RenderTarget(RW, RH, { type: THREE.HalfFloatType, format: THREE.RGFormat, depthBuffer: false });
   motionRT.texture.minFilter = motionRT.texture.magFilter = THREE.NearestFilter;
@@ -187,7 +187,7 @@ export async function createThreeSSR(id: Extract<MethodId, 'three-raw' | 'three-
   const makeAA = async () => {
     if (aa) return aa;
     const a = new DisplayAA(renderer, { textures: { motion: motionRT.texture, depth: scenePass.getTexture('depth') } }, {
-      mode: aaMode, ratio: aaQ.ratio, settings: upscalerSettings() as N, displayWidth: W, displayHeight: H, tone: toned,
+      mode: aaMode, ratio: aaQ.ratio, settings: upscalerSettings() as N, displayWidth: W, displayHeight: H, tone: toned, gpuTiming: false,
     });
     await a.init();
     aa = a;
@@ -220,7 +220,7 @@ export async function createThreeSSR(id: Extract<MethodId, 'three-raw' | 'three-
   for (const f of Object.keys(UPS)) live[`aa.${f}`] = () => { if (aa) Object.assign(aa.upscaler.settings, upscalerSettings()); };
   if (tr) for (const [k, d] of Object.entries(REPROJECT)) live[`th.rp.${k}`] = (v) => { tr[k].value = v === null ? d : parseTh(d, v); };
   if (dn) for (const [k, d] of Object.entries(DENOISE)) live[`th.dn.${k}`] = (v) => { dn[k].value = v === null ? d : parseTh(d, v); };
-  const REBUILD = new Set(['th.stepExponent', 'th.resolutionScale', 'th.binaryRefine', 'th.screenEdgeFadeBlack', 'th.ffx.tsf', 'th.ffx.roughnessThreshold', 'upscale', 'tone',
+  const REBUILD = new Set(['th.stepExponent', 'th.resolutionScale', 'th.binaryRefine', 'th.screenEdgeFadeBlack', 'th.ffx.tsf', 'th.ffx.roughnessThreshold', 'tone',
     'keyLight', 'paintRoughness', 'bgBlur', 'bgIntensity']);
 
   return {
