@@ -965,7 +965,9 @@ async function rtMaterialChecks(p, label, oracle) {
  * Opt-in (`--rt-material-assets`): loads every downloaded asset scene on the page's provider.
  */
 async function rtMaterialAssetSurvey(p, label) {
-  const ids = (await p.T('window.__p.assets ? window.__p.assets() : []')) ?? [];
+  // `--rt-material-ids chess,helmet` narrows it (each asset loads and bakes: ~1-3 minutes)
+  const want = args.includes('--rt-material-ids') ? args[args.indexOf('--rt-material-ids') + 1].split(',') : null;
+  const ids = ((await p.T('window.__p.assets ? window.__p.assets() : []')) ?? []).filter((id) => !want || want.includes(id));
   for (const id of ids) {
     await p.T(`window.__p.load(${JSON.stringify(id)})`);
     await p.T('window.__p.step(1)');
@@ -984,8 +986,9 @@ async function rtMaterialsAlone(pages) {
     pages.push(p);
     const bvh = await p.T('window.__p.bvh');
     const label = builder ? `@pmndrs/bvh (${bvh.builder})` : 'three-mesh-bvh port';
+    // the survey (materials arrays are the scene's, not the walk's) on the first provider only
+    if (args.includes('--rt-material-assets')) { await rtMaterialAssetSurvey(p, label); return; }
     await rtMaterialChecks(p, label, builder ? oracleOk : null);
-    if (args.includes('--rt-material-assets')) await rtMaterialAssetSurvey(p, label);
   }
 }
 
