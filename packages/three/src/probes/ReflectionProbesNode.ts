@@ -28,6 +28,10 @@
 // (on by default) and `roughnessLerp` (off) (Lagarde's SSR-to-probe seam techniques, D53). With
 // distance roughness on, the lookup is no longer #35046's (D2700).
 //
+// Probes of several resolutions (D4700) live in one atlas each (`probes.textures`); the node binds
+// them all and compiles each volume's sample against its own atlas (its atlas is fixed per bake, so
+// the unrolled lookup names it: no branch). A set at one resolution compiles the lookup it always did.
+//
 // The volume table is a storage buffer (one per probe set, shared by its nodes) written with
 // queue.writeBuffer before every render (updateBefore), not a uniform in a per-object group: r186/r187 re-upload per-object uniforms
 // only for render objects they see change, so probe moves and `boxProjection` would never reach
@@ -126,7 +130,8 @@ function includesFor(layout: ProbeLayout): N[] {
 function lookupFor(options: CoreLookupOptions): { fn: N; includes: N[] } {
   const includes = includesFor(options.layout);
   const layoutKey = `${options.layout.id}:${options.layout.mipLevelCount}`;
-  const key = `${layoutKey}:${options.lodMapping}:${options.dominantDirection === true}:${options.refit === true}:${options.distanceRoughness === true}:${options.roughnessLerp === true}:${options.count ?? -1}`;
+  const atlasKey = (options.atlases ?? 1) > 1 ? `:${options.atlases}:${options.volumeAtlases?.join(',') ?? '-'}` : '';
+  const key = `${layoutKey}:${options.lodMapping}:${options.dominantDirection === true}:${options.refit === true}:${options.distanceRoughness === true}:${options.roughnessLerp === true}:${options.count ?? -1}${atlasKey}`;
   let entry = _lookups.get(key);
   if (!entry) {
     // a name per variant: a shader holding two variants (two sets, or two lookups of one) would
@@ -162,19 +167,33 @@ function tableFor(probes: ReflectionProbes): SetTable {
  * shading, D2900); see {@link packReflectionProbesTable} for the whole table.
  */
 export function reflectionProbeVolumes(probes: ReflectionProbes): ProbeVolume[] {
-  return probes.bakedProbes.map((probe, slot) => {
+  return probes.bakedProbes.map((probe, i) => {
     probe.getWorldPosition(_p);
     probeOrigin(probe, _o);
     probeWorldScale(probe, _s);
     const half = probe.influenceSize.clone().multiply(_s).multiplyScalar(0.5);
     const projection = (probe.projectionSize ?? probe.influenceSize).clone().multiply(_s);
     const offset = probe.projectionOffset.clone().multiply(_s);
+    // its atlas and the slot within it (D4700; one atlas: slot = index)
     return {
-      slot, center: [_p.x, _p.y, _p.z], halfSize: [half.x, half.y, half.z], fade: probe.blendDistance,
+      slot: probes.bakedSlots[i] ?? i, atlas: probes.bakedAtlases[i] ?? 0,
+      center: [_p.x, _p.y, _p.z], halfSize: [half.x, half.y, half.z], fade: probe.blendDistance,
       projectionSize: [projection.x, projection.y, projection.z], projectionOffset: [offset.x, offset.y, offset.z],
       origin: [_o.x, _o.y, _o.z], boxProjection: probes.boxProjection,
     };
   });
+}
+
+/** Options of {@link packReflectionProbesTable}. */
+export interface PackReflectionProbesTableOptions {
+  /**
+   * Which atlases the pass binds (D4700). 'primary' (default): only `probes.texture`, for a lookup
+   * compiled for one atlas: volumes that live in another atlas (probes of another resolution) are
+   * packed with zero weight, so they fall through to the next volume or the environment. 'all': every
+   * one of `probes.textures`, for a lookup compiled with `atlases: probes.textures.length` (header
+   * rows 2 / 3 and each volume's atlas filled). Both are the same table for a one-atlas set.
+   */
+  atlases?: 'primary' | 'all';
 }
 
 /**
@@ -183,13 +202,30 @@ export function reflectionProbeVolumes(probes: ReflectionProbes): ProbeVolume[] 
  * the set is capturing, so captures see only the environment, as the node's lookups do. The
  * irradiance rows (the re-fit's L1 SH, `probes.irradiance`) are not included: copy them to
  * `probeIrradianceRow(count) * 16` bytes if the lookup re-fits. Reuses `target` when it is large enough.
+ * A set with probes of several resolutions has several atlases: see {@link PackReflectionProbesTableOptions.atlases}.
  */
-export function packReflectionProbesTable(probes: ReflectionProbes, target?: Float32Array<ArrayBuffer>): Float32Array<ArrayBuffer> {
+export function packReflectionProbesTable(probes: ReflectionProbes, target?: Float32Array<ArrayBuffer>, options: PackReflectionProbesTableOptions = {}): Float32Array<ArrayBuffer> {
   const count = probes.bakedProbes.length;
+  const all = options.atlases === 'all' && probes.textures.length > 1;
+  let volumes = reflectionProbeVolumes(probes);
+  // a one-atlas lookup can't reach the other atlases: those volumes take no weight there
+  if (!all && probes.textures.length > 1) volumes = volumes.map((v) => ((v.atlas ?? 0) === 0 ? v : { ...v, atlas: 0, slot: 0, halfSize: [-1, -1, -1] as const }));
   return packProbeTable({
-    maxLod: probes.texture!.mipmaps.length - 1, enabled: !probes.capturing, environmentSlot: count,
+    maxLod: probes.texture!.mipmaps.length - 1, enabled: !probes.capturing, environmentSlot: probes.bakedEnvironmentSlot,
     irradianceRow: probeIrradianceRow(count), refitClamp: probes.refitClamp,
-  }, reflectionProbeVolumes(probes), target);
+    ...(all ? { atlases: probeAtlasTable(probes) } : {}),
+  }, volumes, target);
+}
+
+/** Header rows 2 / 3 of a multi-atlas set: each atlas's last mip and first irradiance slot (D4700). */
+function probeAtlasTable(probes: ReflectionProbes) {
+  let base = 0;
+  return probes.textures.map((t, a) => {
+    const n = a === 0 ? probes.bakedEnvironmentSlot + 1 : probes.bakedAtlases.filter((x) => x === a).length;
+    const row = { maxLod: t.mipmaps.length - 1, irradianceBase: base };
+    base += n;
+    return row;
+  });
 }
 
 /**
@@ -201,7 +237,7 @@ function writeTable(probes: ReflectionProbes, t: SetTable, renderer: THREE.WebGP
   t.renderId = renderId;
   const count = probes.bakedProbes.length;
   // captures see only the environment, so baking doesn't feed back into itself
-  t.packed = packReflectionProbesTable(probes, t.packed);
+  t.packed = packReflectionProbesTable(probes, t.packed, { atlases: 'all' });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const backend = renderer.backend as any;
   const buffer: GPUBuffer | undefined = backend.get(t.attribute).buffer;
@@ -229,12 +265,24 @@ export function probeLayoutFor(probes: ReflectionProbes): ProbeLayout {
   return createProbeLayout(id, { maxLod: tex.mipmaps.length - 1 });
 }
 
-/** The texture node a lookup binds the atlas with: `cubeTexture()` for a cube array (cube-array view), else `texture()`. */
-function atlasNode(probes: ReflectionProbes): N {
+/** The texture node a lookup binds atlas `k` with: `cubeTexture()` for a cube array (cube-array view), else `texture()`. */
+function atlasNode(probes: ReflectionProbes, k = 0): N {
+  const tex = probes.textures[k] ?? probes.texture!;
   // an explicit (unused) uv: the default, reflectVector, needs a camera, which compute shaders lack
-  const node: N = probes.bakedLayout === 'cube-array' ? cubeTexture(probes.texture as N, vec3(0, 0, 1)) : texture(probes.texture!);
+  const node: N = probes.bakedLayout === 'cube-array' ? cubeTexture(tex as N, vec3(0, 0, 1)) : texture(tex);
   node.mergeable = false;
   return node;
+}
+
+/** The atlas count and, with several, each baked volume's atlas: what a lookup compiles in (D4700). */
+function atlasSignature(probes: ReflectionProbes): string {
+  return probes.textures.length > 1 ? `${probes.textures.length}:${probes.bakedAtlases.join(',')}` : '1';
+}
+
+/** The lookup's atlas options (D4700): none for one atlas, else the count and each volume's atlas. */
+function atlasOptions(probes: ReflectionProbes) {
+  const n = probes.textures.length;
+  return n > 1 ? { atlases: n, volumeAtlases: probes.bakedAtlases } : {};
 }
 
 /** Box-projected direction (Lagarde's BPCEM, the guarded form from #35046), core's `pr_parallax`. */
@@ -263,6 +311,10 @@ export class ReflectionProbesNode extends THREE.Node {
   static get type() { return 'ReflectionProbesNode'; }
   readonly probes: ReflectionProbes;
   protected array: N;
+  /** Atlases 1.. of a set with probes of several resolutions (D4700); `array` is atlas 0. */
+  protected arrays: N[] = [];
+  /** {@link atlasSignature} of the compiled lookup. */
+  private atlases = '1';
   /** Explicit lookup inputs; null ones come from the material (environment node). */
   readonly positionNode: N = null;
   readonly directionNode: N = null;
@@ -310,14 +362,24 @@ export class ReflectionProbesNode extends THREE.Node {
     probes.track(this);
   }
 
+  /** Atlas nodes for atlases 1.. (D4700), rebuilt when the storage or count changed. */
+  private syncAtlases() {
+    const n = this.probes.textures.length;
+    while (this.arrays.length > Math.max(0, n - 1)) this.arrays.pop();
+    while (this.arrays.length < n - 1) this.arrays.push(atlasNode(this.probes, this.arrays.length + 1));
+  }
+
   customCacheKey() {
     // the probe count and the seam handling are compiled into the shader; the node's own id keeps
     // separate probe sets from sharing a program (#35046 6837c32abc); the texture id makes render
     // objects rebind after a bake that replaced the texture
     const probes = this.probes;
     const { distanceRoughness, roughnessLerp, lodMapping } = this.seamOptions();
+    // several atlases (D4700): their count, each volume's atlas and their textures too
+    const multi = probes.textures.length > 1;
     return THREE.NodeUtils.hash(super.customCacheKey(), probes.bakedProbes.length, probes.bakedSeamFix === 'warp' ? 1 : 0, probes.bakedLayout === 'cube-array' ? 1 : 0, probes.texture?.id ?? 0,
-      distanceRoughness ? 1 : 0, roughnessLerp ? 1 : 0, lodMapping === 'r187' ? 1 : 0);
+      distanceRoughness ? 1 : 0, roughnessLerp ? 1 : 0, lodMapping === 'r187' ? 1 : 0,
+      ...(multi ? [THREE.NodeUtils.hashString(atlasSignature(probes)), ...probes.textures.map((t) => t.id)] : []));
   }
 
   /** The set-wide lookup options this lookup uses: its own, else the set's (seam options D53, lod mapping D101). */
@@ -334,8 +396,9 @@ export class ReflectionProbesNode extends THREE.Node {
     if (probes.bakedLayout !== this.storage) { this.needsUpdate = true; return; }
     // a bake that changes the layout disposes the previous texture, so switch even before a recompile
     this.array.value = probes.texture!;
+    for (let k = 0; k < this.arrays.length; k++) if (probes.textures[k + 1]) this.arrays[k].value = probes.textures[k + 1];
     // (a change of the set's seam options bumps its nodes itself: ReflectionProbes.touchUsers)
-    if (probes.bakedProbes.length !== this.volumes || probes.bakedSeamFix !== this.seamFix) {
+    if (probes.bakedProbes.length !== this.volumes || probes.bakedSeamFix !== this.seamFix || atlasSignature(probes) !== this.atlases) {
       this.needsUpdate = true;
       return;
     }
@@ -345,9 +408,11 @@ export class ReflectionProbesNode extends THREE.Node {
   setup(builder: N) {
     const probes = this.probes;
     this.renderer = builder.renderer;
-    if (probes.bakedLayout !== this.storage) { this.array = atlasNode(probes); this.storage = probes.bakedLayout; }
+    if (probes.bakedLayout !== this.storage) { this.array = atlasNode(probes); this.arrays = []; this.storage = probes.bakedLayout; }
+    this.syncAtlases();
     this.seamFix = probes.bakedSeamFix;
     this.volumes = probes.bakedProbes.length;
+    this.atlases = atlasSignature(probes);
     const seam = this.seamOptions();
     this.table = tableFor(probes);
     this.updateBefore();
@@ -365,9 +430,11 @@ export class ReflectionProbesNode extends THREE.Node {
     // an explicit direction is looked up as given; core bends the direction first (dominant
     // direction) and rotates the bent one, so volumes and environment agree
     const envRotation: N = this.directionNode === null ? materialEnvRotation : mat4(new THREE.Matrix4());
-    const { fn } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit, ...seam, count: this.volumes });
+    const { fn } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit, ...seam, count: this.volumes, ...atlasOptions(probes) });
+    const extraAtlases: Record<string, N> = {};
+    this.arrays.forEach((a, k) => { extraAtlases[`atlas_${k + 1}`] = a; });
     const result: N = fn({
-      atlas: this.array, samp: sampler(this.array), table: this.table.node,
+      atlas: this.array, ...extraAtlases, samp: sampler(this.array), table: this.table.node,
       P: vec3(position), N: vec3(normal), R: vec3(direction), roughness, envRotation,
       frameIrr: refit ? vec3(this.frameIrradianceNode) : vec3(-1), withEnv: bool(!this.coverage),
     }).toVar();

@@ -14,8 +14,8 @@ export {
   type ProbeLookupOptions, type ProbeLookupModuleOptions, type ProbeLodMapping,
 } from './probes/lookup';
 export {
-  packProbeTable, sortProbeVolumes, probeTableRows, probeIrradianceRow, PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, PROBE_IRRADIANCE_ROWS,
-  type ProbeVolume, type ProbeTableHeader,
+  packProbeTable, sortProbeVolumes, probeTableRows, probeIrradianceRow, planProbeAtlases, PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, PROBE_IRRADIANCE_ROWS, PROBE_MAX_ATLASES,
+  type ProbeVolume, type ProbeTableHeader, type ProbeTableAtlas, type ProbeAtlasPlan,
 } from './probes/table';
 export { ProbeIrradiance, type ProbeIrradianceOptions } from './probes/irradiance';
 export {

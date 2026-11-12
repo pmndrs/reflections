@@ -1694,6 +1694,19 @@ async function main() {
       // (to float rounding: the shader compiler may fold a function differently next to another one)
       check(`probe sets of ${ml.sets.length} layouts in one shader match their own lookups (D805)`, ml.sets.length >= 2 && ml.sets.every((s) => s.q255 === 0 && s.maxAbs < 1e-6 && s.lum > 0),
         ml.sets.map((s) => `${s.layout} max ${s.q255} / 255 (float ${s.maxAbs.toExponential(1)}, tone-mapped ${s.max255.toExponential(1)} / 255, lum ${s.lum.toFixed(2)})`).join(', '));
+      // W60 (D4700): per-probe resolution, one atlas per size; each probe's lookups (plain and re-fit)
+      // equal a one-size set's at its size, bit for bit, on the cube array and both 2D-array fallbacks
+      for (const [storage, bounces] of [['cube-array', 1], ['warp', 1], ['none', 1], ['cube-array', 2]]) {
+        const mr = await p.T(`window.__p.checks.mixedResolution('${storage}', ${bounces})`);
+        const okInfo = mr.info.textures === 3 && mr.info.resolutions.join(',') === '128,64,256' && mr.info.atlases.join(',') === '0,2,1,2' && mr.info.slots.join(',') === '0,0,0,1' && mr.info.environmentSlot === 1
+          && mr.info.layout === (storage === 'cube-array' ? 'cube-array' : 'cube2d');
+        check(`mixed probe resolutions (${storage}${bounces > 1 ? `, ${bounces} bounces` : ''}): each probe samples its own atlas at its own size (D4700)`,
+          okInfo && mr.probes.every((q) => q.own === 0 && q.ownRefit === 0 && q.other > 1e-3 && q.lum > 0.1),
+          `${JSON.stringify(mr.info)}; ${mr.probes.map((q) => `${q.res} px (atlas ${q.atlas} slot ${q.slot}): vs own size ${q.own}, re-fit ${q.ownRefit}, vs other sizes >= ${q.other.toExponential(1)}, lum ${q.lum.toFixed(2)}`).join('; ')}`);
+        if (bounces === 1 && storage === 'cube-array') {
+          check('mixed probe resolutions: a time-sliced re-bake of one probe moves only its lookups (D4700)', mr.slice[3] > 0.05 && mr.slice.slice(0, 3).every((d) => d === 0), `max change per probe ${mr.slice.map((d) => d.toExponential(1)).join(', ')}`);
+        }
+      }
       // W35 (D2204): the cube-array atlas is only ever bound as 'cube-array' (bake, irradiance, materials)
       const ab = await C('atlasBindings');
       check("probe atlas bound only as its layout's view dimension (D2204)", ab.dims.every((d) => d.length > 0 && d.every((x) => x === (ab.layout === 'cube-array' ? 'cube-array' : '2d-array'))),

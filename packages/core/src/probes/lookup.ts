@@ -44,7 +44,7 @@
 // into the captures' texture space before the layout lookup: `mirrorX` (three's x-mirrored
 // CubeCamera) is its alias for ['-x', 'y', 'z'].
 
-import { PROBE_HEADER_ROWS, PROBE_IRRADIANCE_ROWS, PROBE_ROWS_PER_VOLUME } from './table';
+import { PROBE_HEADER_ROWS, PROBE_IRRADIANCE_ROWS, PROBE_MAX_ATLASES, PROBE_ROWS_PER_VOLUME } from './table';
 import { dedupeChunks } from './layouts';
 import { captureAxesWgsl, resolveCaptureTransform, type ProbeCaptureTransform } from './capture';
 import type { ProbeLayout, ProbeWgslChunk } from './layouts/types';
@@ -97,6 +97,19 @@ export interface ProbeLookupOptions {
    * runtime loop measured ~1.5x the lookup cost on Apple M-series (W7). Default: a runtime loop.
    */
   count?: number;
+  /**
+   * Atlases the set's captures live in, one per resolution class (D4700), all of `layout`'s kind
+   * (each its own size and mip count: the table's row 2 holds each one's maxLod, a volume's row +4.w
+   * its atlas). Atlas 0 holds the environment slot. Default 1: the one-atlas lookup, unchanged.
+   * At most 4 (PROBE_MAX_ATLASES).
+   */
+  atlases?: number;
+  /**
+   * With `count` and several `atlases`: the atlas of each unrolled volume, fixed at compile time
+   * (an engine that recompiles per bake, three), so each volume samples its own texture with no
+   * branch. Absent, each volume's atlas is read from the table and picked by a branch.
+   */
+  volumeAtlases?: readonly number[];
 }
 
 /** The default {@link ProbeLodMapping} (D101, decided 2026-11-11). */
@@ -191,8 +204,24 @@ fn pr_shIrradiance(a: vec4f, b: vec4f, c: vec4f, N: vec3f) -> vec3f {
  * frameIrr (vec3f; negative: no re-fit), withEnv (bool). Returns vec4f: with `withEnv`, (radiance with the environment
  * fallback, 1); without, (probe radiance normalized by its coverage, coverage).
  */
+/** WGSL name of atlas `k` given atlas 0's name (`atlas`, `atlas_1`, ...). */
+const atlasName = (tex: string, k: number) => (k === 0 ? tex : `${tex}_${k}`);
+
+/** The number of atlases a lookup binds (1 unless `atlases` asks for more), checked. */
+function atlasCount(o: Pick<ProbeLookupOptions, 'atlases' | 'volumeAtlases' | 'count'>): number {
+  const n = Math.floor(o.atlases ?? 1);
+  if (n < 1 || n > PROBE_MAX_ATLASES) throw new Error(`probe lookup: atlases ${o.atlases}, 1 to ${PROBE_MAX_ATLASES}`);
+  if (o.volumeAtlases !== undefined) {
+    if (o.count === undefined || o.volumeAtlases.length !== o.count) throw new Error('probe lookup: volumeAtlases needs `count` and one atlas per volume');
+    if (o.volumeAtlases.some((a) => !(a >= 0 && a < n))) throw new Error(`probe lookup: volumeAtlases ${o.volumeAtlases.join(',')} outside 0..${n - 1}`);
+  }
+  return n;
+}
+
 const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: string, samp: string) => {
   const unroll = o.count;
+  const atlases = atlasCount(o);
+  const multi = atlases > 1;
   const sample = o.layout.sampleFunction;
   // world direction to the layout's texture space (the capture transform's axes)
   const transform = resolveCaptureTransform(o);
@@ -205,10 +234,20 @@ const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: stri
     : [
       '        let t = pr_parallaxDistance(P, dir, r3.xyz, r0.xyz + r2.xyz);',
       '        corrected = P + normalize(dir) * t - r4.xyz;',
-      ...(o.distanceRoughness === true ? [`        vlod = ${lodFn}(pr_distanceRoughness(t, length(corrected), rough), hdr.y);`] : []),
+      ...(o.distanceRoughness === true ? [`        vlod = ${lodFn}(pr_distanceRoughness(t, length(corrected), rough), ${multi ? 'vmax' : 'hdr.y'});`] : []),
       ...(o.roughnessLerp === true ? ['        corrected = mix(normalize(corrected), normalize(dir), rough);'] : []),
     ].join('\n') + '\n';
-  const volume = /* wgsl */ `    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
+  // Several atlases (D4700): each volume's maxLod and irradiance base come from header rows 2 / 3 by
+  // its atlas, and its sample reads that atlas: named at compile time when `volumeAtlases` fixes
+  // it, else picked by a branch on the table's atlas index. One atlas: the code as it always was.
+  const comp = ['x', 'y', 'z', 'w'];
+  const pick = (k: number | undefined, sampleArgs: string) => {
+    if (!multi) return `      var c = ${sample}(${tex}, ${samp}, ${sampleArgs}).rgb;\n`;
+    if (k !== undefined) return `      var c = ${sample}(${atlasName(tex, k)}, ${samp}, ${sampleArgs}).rgb;\n`;
+    const branches = Array.from({ length: atlases }, (_, a) => `${a === 0 ? '      ' : ' else '}${a < atlases - 1 ? `if (va == ${a}u) ` : ''}{ c = ${sample}(${atlasName(tex, a)}, ${samp}, ${sampleArgs}).rgb; }`);
+    return `      var c = vec3f(0.0);\n${branches.join('')}\n`;
+  };
+  const volume = (k: number | undefined) => /* wgsl */ `    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
     let r0 = ${row('b')};
     let r1 = ${row('b + 1u')};
     let lp = P - r0.xyz;
@@ -220,16 +259,22 @@ const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: stri
       let r2 = ${row('b + 2u')};
       let r3 = ${row('b + 3u')};
       let r4 = ${row('b + 4u')};
-      // the projection box is centred at centre + offset; the capture point is r4
+${!multi ? '' : k !== undefined
+    ? `      let vmax = atl.${comp[k]};
+      let vbase = u32(atlBase.${comp[k]});
+`
+    : `      let va = u32(r4.w);
+      let vmax = atl[va];
+      let vbase = u32(atlBase[va]);
+`}      // the projection box is centred at centre + offset; the capture point is r4
       let insideProjection = all(abs(lp - r2.xyz) <= r3.xyz * 0.5);
       var corrected = dir;
-      var vlod = lod;
+      var vlod = ${multi ? `${lodFn}(rough, vmax)` : 'lod'};
       if ((u32(r1.w) & 1u) != 0u && insideProjection) {
 ${projection}      }
       let slot = u32(r2.w);
-      var c = ${sample}(${tex}, ${samp}, slot, ${texDir('corrected')}, vlod).rgb;
-      if (refitOn) {
-        let s = irrRow + slot * PR_IRRADIANCE_ROWS;
+${pick(k, `slot, ${texDir('corrected')}, vlod`)}      if (refitOn) {
+        let s = irrRow + ${multi ? '(vbase + slot)' : 'slot'} * PR_IRRADIANCE_ROWS;
         let probeIrr = pr_shIrradiance(${row('s')}, ${row('s + 1u')}, ${row('s + 2u')}, N);
         c *= clamp(frameIrr / max(probeIrr, vec3f(1e-4)), vec3f(0.0), vec3f(irr.y));
       }
@@ -245,14 +290,16 @@ ${projection}      }
   let enabled = hdr.z;
   let envSlot = hdr.w;
   let irr = ${row('1u')};
-  let irrRow = u32(irr.x);
+  let irrRow = u32(irr.x);${multi ? `
+  var atl = ${row('2u')};
+  var atlBase = ${row('3u')};` : ''}
   // a negative frameIrr switches the re-fit off (no provider)
   let refitOn = ${o.refit === true} && all(frameIrr >= vec3f(0.0));
   var dir = R;
   if (${o.dominantDirection === true}) { dir = pr_dominantDirection(N, R, roughness); }
   var radiance = vec3f(0.0);
   var remaining = enabled;
-${unroll === undefined ? `  for (var i = 0u; i < count; i++) {\n${volume}  }\n` : Array.from({ length: unroll }, (_, k) => `  {\n    let i = ${k}u;\n${volume}  }\n`).join('')}  let coverage = enabled - remaining;
+${unroll === undefined ? `  for (var i = 0u; i < count; i++) {\n${volume(undefined)}  }\n` : Array.from({ length: unroll }, (_, k) => `  {\n    let i = ${k}u;\n${volume(o.volumeAtlases?.[k])}  }\n`).join('')}  let coverage = enabled - remaining;
   if (!withEnv) { return vec4f(radiance / max(coverage, 1e-6), coverage); }
   if (envSlot >= 0.0) {
     let slot = u32(envSlot);
@@ -350,10 +397,13 @@ export function probeLookupIncludesWgsl(options: Pick<ProbeLookupOptions, 'layou
  * (`envRotation`: world to environment-slot directions, e.g. an environment rotation; identity if none)
  * Needs {@link probeLookupIncludesWgsl} in the same module (and WGSL's unrestricted pointer
  * parameters, which Chrome has shipped since 123). Returns what {@link probeLookupWgsl}'s
- * `probeLookup` returns.
+ * `probeLookup` returns. With `atlases: n > 1` (D4700) the function takes `atlas_1` ... `atlas_<n-1>`
+ * (same type) right after `atlas`.
  */
 export function probeLookupFunctionWgsl(options: ProbeLookupOptions, name = 'probeLookup'): string {
-  return `fn ${name}(atlas: ${options.layout.textureType}, samp: sampler, table: ptr<storage, array<vec4f>, read>, ${SIGNATURE}) -> vec4f {${lookupBody(options, (i) => `(*table)[${i}]`, 'atlas', 'samp')}}\n`;
+  // several atlases (D4700): atlas_1, atlas_2, ... after atlas, same type
+  const extra = Array.from({ length: atlasCount(options) - 1 }, (_, k) => `${atlasName('atlas', k + 1)}: ${options.layout.textureType}, `).join('');
+  return `fn ${name}(atlas: ${options.layout.textureType}, ${extra}samp: sampler, table: ptr<storage, array<vec4f>, read>, ${SIGNATURE}) -> vec4f {${lookupBody(options, (i) => `(*table)[${i}]`, 'atlas', 'samp')}}\n`;
 }
 
 export interface ProbeLookupModuleOptions extends ProbeLookupOptions {
@@ -361,6 +411,11 @@ export interface ProbeLookupModuleOptions extends ProbeLookupOptions {
   group?: number;
   /** First binding index (atlas; sampler +1, table +2). Default 0. */
   binding?: number;
+  /**
+   * With several `atlases` (D4700): the binding of atlas 1 (atlas k at `atlasBinding + k - 1`, same
+   * group). Default `binding + 3`, right after the table.
+   */
+  atlasBinding?: number;
   /**
    * WGSL defining `fn frameIrradiance(P: vec3f, N: vec3f) -> vec3f`, the frame's irradiance from
    * the app's GI, for `refit`; given, the re-fit is on unless `refit: false` (D803). Default: none.
@@ -385,13 +440,15 @@ function moduleWgsl(moduleOptions: ProbeLookupModuleOptions): { frame: string; b
   // without a provider, a negative frame irradiance switches the re-fit off
   const frameCall = options.refit && options.frameIrradianceWgsl ? 'frameIrradiance(P, N)' : 'vec3f(-1.0)';
   const atlas = `pr_atlas${x}`, samp = `pr_sampler${x}`, table = `pr_table${x}`;
+  const ab = options.atlasBinding ?? b + 3;
+  const extra = Array.from({ length: atlasCount(options) - 1 }, (_, k) => `@group(${g}) @binding(${ab + k}) var ${atlasName(atlas, k + 1)}: ${options.layout.textureType};\n`).join('');
   return {
     frame,
     body: `
 @group(${g}) @binding(${b}) var ${atlas}: ${options.layout.textureType};
 @group(${g}) @binding(${b + 1}) var ${samp}: sampler;
 @group(${g}) @binding(${b + 2}) var<storage, read> ${table}: array<vec4f>;
-fn probeLookup${x}(${SIGNATURE}) -> vec4f {${lookupBody(options, (i) => `${table}[${i}]`, atlas, samp)}}
+${extra}fn probeLookup${x}(${SIGNATURE}) -> vec4f {${lookupBody(options, (i) => `${table}[${i}]`, atlas, samp)}}
 fn probeFrameIrradiance${x}(P: vec3f, N: vec3f) -> vec3f { return ${frameCall}; }
 fn probeRadianceN${x}(P: vec3f, N: vec3f, R: vec3f, roughness: f32) -> vec4f {
   return probeLookup${x}(P, N, R, roughness, PR_IDENTITY, probeFrameIrradiance${x}(P, N), false);
@@ -434,7 +491,10 @@ export function probeLookupWgsl(moduleOptions: ProbeLookupModuleOptions | readon
   const list: readonly ProbeLookupModuleOptions[] = Array.isArray(moduleOptions) ? moduleOptions : [moduleOptions as ProbeLookupModuleOptions];
   const suffixes = list.map((o) => o.suffix ?? '');
   if (new Set(suffixes).size !== list.length) throw new Error(`probeLookupWgsl: each set in one module needs its own suffix, got [${suffixes.map((x) => `'${x}'`).join(', ')}]`);
-  const slots = list.flatMap((o) => [0, 1, 2].map((k) => `${o.group ?? 0}:${(o.binding ?? 0) + k}`));
+  const slots = list.flatMap((o) => [
+    ...[0, 1, 2].map((k) => `${o.group ?? 0}:${(o.binding ?? 0) + k}`),
+    ...Array.from({ length: atlasCount(o) - 1 }, (_, k) => `${o.group ?? 0}:${(o.atlasBinding ?? (o.binding ?? 0) + 3) + k}`),
+  ]);
   if (new Set(slots).size !== slots.length) throw new Error('probeLookupWgsl: two sets in one module share a binding (give each its own group or binding)');
   const parts = list.map(moduleWgsl);
   const frames = [...new Set(parts.map((p) => p.frame).filter((f) => f !== ''))];

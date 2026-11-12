@@ -3,7 +3,7 @@
 // state (probes, node, visibility) before it returns.
 
 import * as THREE from 'three/webgpu';
-import { Fn, instanceIndex, instancedArray, positionWorld, vec3, vec4 } from 'three/tsl';
+import { Fn, instanceIndex, instancedArray, positionWorld, uniform, vec3, vec4 } from 'three/tsl';
 import {
   ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, reflectionProbes, sampleReflectionProbes, sampleReflectionProbesLocal,
   installCubeArraySupport, cubeArraySupported,
@@ -436,6 +436,114 @@ export function makeChecks(p: Page) {
     },
 
     /**
+     * D4700 (W60): per-probe resolution. Four probes far apart, each inside its own closed box with a
+     * high-frequency procedural pattern tinted per box (unlit, so captures don't depend on order or
+     * lights), resolutions [default 128, 256, 64, 256]: three atlases (128 with the environment, 64,
+     * 256). Explicit lookups deep inside each probe (weight 1 from it alone) at random directions and
+     * roughness 0..1, plain and re-fit (`frameIrradiance`, so the irradiance slots are checked too),
+     * must equal those of a one-resolution set baked at that probe's size, bit for bit; against the
+     * other sizes they must differ (the size is what was looked up). Per storage: the cube array
+     * (with the shim) and the 2D-array fallbacks 'warp' and 'none'. Then a 2-bounce bake (the scratch
+     * atlases) and a time-sliced re-bake of one 256 px probe after its tint changed: only its lookups move.
+     */
+    async mixedResolution(storage: 'cube-array' | 'warp' | 'none', bounces = 1) {
+      const test = new THREE.Scene();
+      test.background = new THREE.Color(0x000000);
+      const xs = [-60, -20, 20, 60];
+      const tints = [[1, 0.25, 0.25], [0.25, 1, 0.25], [0.25, 0.25, 1], [1, 1, 0.25]];
+      const sizes: (number | null)[] = [null, 256, 64, 256];
+      const boxes = xs.map((x, k) => {
+        const material = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide });
+        const tint = new THREE.Vector3(...tints[k]);
+        const pattern = positionWorld.mul(vec3(3.1, 2.3, 4.7)).sin().mul(positionWorld.zxy.mul(vec3(1.7, 5.3, 2.9)).cos()).mul(0.5).add(0.5);
+        const tintNode = uniform(tint);
+        material.colorNode = pattern.mul(tintNode).mul(4);
+        const box = new THREE.Mesh(new THREE.BoxGeometry(8, 8, 8), material);
+        box.position.set(x, 0, 0);
+        test.add(box);
+        return { box, tint: tintNode };
+      });
+      const makeSet = (resolution: number, perProbe: boolean) => {
+        const set = new ReflectionProbes();
+        if (storage === 'cube-array') set.layout = 'cube-array';
+        else { set.layout = 'cube2d'; set.seamFix = storage; }
+        xs.forEach((x, k) => {
+          const probe = new ReflectionProbe(6, 6, 6);
+          probe.position.set(x, 0, 0);
+          probe.blendDistance = 0.1;
+          probe.projectionSize = new THREE.Vector3(8, 8, 8);
+          if (perProbe) probe.resolution = sizes[k];
+          set.add(probe);
+        });
+        test.add(set);
+        return set;
+      };
+      const bakeSet = (set: ReflectionProbes, resolution: number, extra: object = {}) => {
+        nextFrame();
+        set.bake(renderer, test, { resolution, near: 0.05, far: 30, bounces, environment: false, ...extra });
+      };
+      const mixed = makeSet(128, true);
+      bakeSet(mixed, 128);
+      const uniformSets = new Map<number, ReflectionProbes>();
+      for (const r of [64, 128, 256]) { const s = makeSet(r, false); bakeSet(s, r); uniformSets.set(r, s); }
+      let seed = 11;
+      const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 4294967296);
+      const per = 64, n = per * xs.length;
+      const rows: number[] = [];
+      for (let i = 0; i < n; i++) {
+        const k = Math.floor(i / per);
+        const d = new THREE.Vector3(rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1).normalize();
+        rows.push(xs[k] + rnd() * 4 - 2, rnd() * 4 - 2, rnd() * 4 - 2, i % 8 === 0 ? 0 : i % 8 === 1 ? 1 : rnd(), d.x, d.y, d.z, 0);
+      }
+      const input = instancedArray(new Float32Array(rows) as never, 'vec4') as N;
+      const read = async (set: ReflectionProbes) => {
+        const output = instancedArray(n * 2, 'vec4') as N;
+        const kernel = Fn(() => {
+          const P = input.element(instanceIndex.mul(2)).xyz.toVar(), r = input.element(instanceIndex.mul(2)).w.toVar();
+          const dir = input.element(instanceIndex.mul(2).add(1)).xyz.toVar();
+          output.element(instanceIndex.mul(2)).assign(vec4(sampleReflectionProbes(set, P, dir, r), 1));
+          output.element(instanceIndex.mul(2).add(1)).assign(vec4(sampleReflectionProbes(set, P, dir, r, { normal: dir, frameIrradiance: vec3(0.5) }), 1));
+        })().compute(n) as N;
+        // twice: the first dispatch uploads the table, the irradiance rows land with the next
+        await renderer.computeAsync(kernel);
+        await renderer.computeAsync(kernel);
+        return new Float32Array(await renderer.getArrayBufferAsync(output.value));
+      };
+      const compare = (a: Float32Array, b: Float32Array, k: number, which: 0 | 1) => {
+        let max = 0;
+        for (let i = k * per; i < (k + 1) * per; i++) for (let c = 0; c < 3; c++) {
+          const x = a[(i * 2 + which) * 4 + c], y = b[(i * 2 + which) * 4 + c];
+          max = Math.max(max, Number.isFinite(x) && Number.isFinite(y) ? Math.abs(x - y) : Infinity);
+        }
+        return max;
+      };
+      const M = await read(mixed);
+      const U = new Map<number, Float32Array>();
+      for (const [r, s] of uniformSets) U.set(r, await read(s));
+      const probes = xs.map((_, k) => {
+        const res = sizes[k] ?? 128;
+        const others = [64, 128, 256].filter((r) => r !== res);
+        let lum = 0;
+        for (let i = k * per; i < (k + 1) * per; i++) for (let c = 0; c < 3; c++) lum += M[i * 2 * 4 + c] / (3 * per);
+        return {
+          res, atlas: mixed.bakedAtlases[k], slot: mixed.bakedSlots[k], lum,
+          own: compare(M, U.get(res)!, k, 0), ownRefit: compare(M, U.get(res)!, k, 1),
+          other: Math.min(...others.map((r) => compare(M, U.get(r)!, k, 0))),
+        };
+      });
+      // time slice: re-tint probe 3's box (256 px, atlas 2, slot 1), re-bake only it
+      boxes[3].tint.value.set(0.25, 1, 1);
+      bakeSet(mixed, 128, { probes: [mixed.bakedProbes[3]] });
+      const S = await read(mixed);
+      const slice = xs.map((_, k) => compare(S, M, k, 0));
+      const info = { resolutions: mixed.bakedResolutions, atlases: mixed.bakedAtlases, slots: mixed.bakedSlots, environmentSlot: mixed.bakedEnvironmentSlot, layout: mixed.bakedLayout, seamFix: mixed.bakedSeamFix, textures: mixed.textures.length };
+      mixed.dispose();
+      for (const s of uniformSets.values()) s.dispose();
+      test.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.geometry.dispose(); (m.material as THREE.Material).dispose(); } });
+      return { info, probes, slice };
+    },
+
+    /**
      * D2204 (W35): the view dimensions the atlas is bound with, over two bakes that each make a new
      * atlas (so the materials bind it afresh) and a render after each, recorded by wrapping
      * GPUTexture.createView and GPUDevice.createBindGroup. A cube-array atlas must only ever be
@@ -581,11 +689,15 @@ export function makeChecks(p: Page) {
      * every bake; removing the environment clears it. Counts CubeCamera.update calls per bake.
      */
     async environment() {
+      // the set's capture camera (one per probe resolution since W60, D4700; the page's probes use one);
+      // not the prototype: three's equirect-to-cube conversion of the environment runs a CubeCamera too
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const cube = (p.probes as any).cubeCamera as THREE.CubeCamera;
+      const captures = [...((p.probes as any).captures as Map<number, { cubeCamera: THREE.CubeCamera }>).values()];
+      if (captures.length !== 1) throw new Error(`environment check: expected one capture size, got ${captures.length}`);
+      const cube = captures[0].cubeCamera;
       let calls = 0;
       const update = cube.update;
-      cube.update = function (...args: Parameters<THREE.CubeCamera['update']>) { calls++; return update.apply(this, args); };
+      cube.update = function (this: THREE.CubeCamera, ...args: Parameters<THREE.CubeCamera['update']>) { calls++; return update.apply(this, args); };
       const count = (extra: object = {}) => { calls = 0; bake(extra); return calls; };
       const env = new THREE.DataTexture(new Float32Array([4, 3, 2, 1, 1, 2, 4, 1, 3, 3, 3, 1, 0.5, 0.5, 0.5, 1]), 2, 2, THREE.RGBAFormat, THREE.FloatType);
       env.mapping = THREE.EquirectangularReflectionMapping;
