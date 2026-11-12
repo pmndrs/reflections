@@ -3,7 +3,9 @@
 // with the FFX reflection denoiser behind the denoise seam, and the BVH ray-traced fallback for
 // 'ours-rt'. Same settings as the showcase defaults; `ctx.params` only carries explicit experiment
 // overrides (?spq= samples per quad, ?tsf= the denoiser's temporal stability, ?hit=current|lit|final,
-// ?specOcc=1 Lagarde's specular occlusion from GTAO on the probe part, W39 / D4510).
+// ?specOcc=1 Lagarde's specular occlusion from GTAO on the probe part, W39 / D4510; ?hitSource=hits|all
+// keeps screen-space hits and traced hits (|all: and misses) apart in the denoiser, ?hitDistW=<k> weights
+// its neighbours by relative hit distance, W53 / D3660-D3662).
 //
 // W51 (bench.html): every setting the tuning bench exposes is read here by its URL key (the schema in
 // ../bench/schema.ts names the keys), and `set(key, value)` applies the live ones without a rebuild.
@@ -19,6 +21,7 @@ import {
 import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
 import { ScreenSpaceAO } from '../../../shared/ao';
 import { DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../../shared/antialias';
+import { hitSourceDenoiserOptions, hitSourceFromQuery } from '../../../shared/denoiser';
 import { probeLayout, type ProbeLayoutName } from '../../../shared/probeLayouts';
 import { setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } from '../specAA';
 import type { FloorKind } from '../scenes';
@@ -89,12 +92,13 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     if (params.has('dn.roughnessThreshold')) o.roughnessThreshold = Number(params.get('dn.roughnessThreshold'));
     if (params.has('dn.currentFrameStatistics')) o.currentFrameStatistics = params.get('dn.currentFrameStatistics') === '1';
     if (params.has('dn.missDistance')) o.missDistance = Number(params.get('dn.missDistance'));
+    Object.assign(o, hitSourceDenoiserOptions(hitSourceFromQuery(params))); // W53
     return o;
   };
   if (params.has('s.roughnessThreshold')) ssr.settings.roughnessThreshold = Number(params.get('s.roughnessThreshold'));
   let denoiserOpts = denoiserOptions();
   let denoiser: N = wantDenoise && FfxReflectionDenoiser ? new FfxReflectionDenoiser(device, denoiserOpts) : null;
-  const hybridOptions: Record<string, unknown> = { denoiser };
+  const hybridOptions: Record<string, unknown> = { denoiser, denoiserHitSource: hitSourceFromQuery(params).hitSource };
   if (params.has('h.denoiserMotion')) hybridOptions.denoiserMotion = params.get('h.denoiserMotion');
   if (params.has('h.denoiserRoughness')) hybridOptions.denoiserRoughness = params.get('h.denoiserRoughness');
   const hybrid = new HybridReflections(ssr, hybridOptions as N);
@@ -302,6 +306,13 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     resetAll();
   };
   const setParam = (k: string, v: string | null) => { if (v === null) params.delete(k); else params.set(k, v); };
+  const setW53 = () => {
+    const hs = hitSourceFromQuery(params);
+    hybrid.denoiserHitSource = hs.hitSource;
+    denoiser?.setOptions?.(hitSourceDenoiserOptions(hs));
+    denoiserOpts = denoiserOptions();
+    resetAll();
+  };
 
   /** W51: live settings by URL key (the bench); anything else this method reads at creation only. */
   const live: Record<string, (v: string | null) => void> = {
@@ -318,6 +329,10 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     'dn.roughnessThreshold': () => renewDenoiser(),
     'dn.currentFrameStatistics': () => renewDenoiser(),
     'dn.missDistance': () => renewDenoiser(),
+    // W53 (D3660-D3662): the hit source / hit-distance weight, changed on the live denoiser (setOptions)
+    hitSource: () => setW53(),
+    hitMissAny: () => setW53(),
+    hitDistW: () => setW53(),
     'h.depthAware': (v) => { hybrid.depthAware.value = v === null ? 1 : Number(v); },
     'h.amount': (v) => { if (id === 'probes') return; amount = v === null ? 1 : Number(v); c.amount.value = h.amount.value = amount; },
     aa: (v) => {

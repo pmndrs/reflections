@@ -246,6 +246,17 @@ export const SETTINGS: Setting[] = [
   }),
   bool('dn.currentFrameStatistics', 'denoiser', 'Current-frame statistics', true, { appliesTo: OURS_DN, api: 'FfxReflectionDenoiser({ currentFrameStatistics })', tradeoff: 'false reproduces FFX v1.1.4 exactly (its one-frame-off statistics: dark speckles on disocclusion, a black first frame).' }),
   num('dn.missDistance', 'denoiser', 'Miss ray length', 0, 200, 1, null, { defaultNote: 'camera far', appliesTo: OURS_DN, api: 'FfxReflectionDenoiser({ missDistance })', tradeoff: 'Ray length the reprojection assumes for misses (hit distance 0).' }),
+  // W53 (D3660-D3662): live (the denoiser's setOptions + HybridReflections.denoiserHitSource), no rebuild
+  sel('hitSource', 'denoiser', 'Keep hit sources apart', [['0', 'off'], ['hits', 'screen vs traced hits'], ['all', 'hits and misses']], '0', {
+    appliesTo: OURS_DN, api: 'hybrid.denoiserHitSource = true; FfxReflectionDenoiser({ separateHitSources, missesMatchAnySource })',
+    tradeoff: 'The denoiser stops blending bright screen-space hits into dark traced ones (the W50 halo: carConcept lip 80 -> 59 with hits, 52 with all, PT 48, at 960x540; at 1080p the halo is mostly gone anyway). hits: no regression on chess / toyCar / Sponza. all: boils where rays flip between hit and miss (std p99 x4-10). Both show a 2x2 stair step at source edges (D3663).',
+    cost: '+0.35 ms (hits) / +0.51 ms (all) at 1080p, ~0 at 960x540 (W53)',
+  }),
+  num('hitDistW', 'denoiser', 'Hit-distance weight', 0, 16, 1, 0, {
+    appliesTo: OURS_DN, api: 'FfxReflectionDenoiser({ hitDistanceWeight })',
+    tradeoff: 'Neighbours weighted by relative hit distance, exp(-k |t_p - t_q| / (t_p + t_q)); no extra input. 8 separates the lip as well as the source (50.6) but boils everywhere the hit distance varies (std p99 x5-10). 0 = off.',
+    cost: '+1.3 ms at 1080p for k 8 (W53)',
+  }),
 
   // ---- probes ----------------------------------------------------------------------------------------------
   bool('probes', 'probes', 'Reflection probes', null, { pageDefault: true, apply: 'rebuild', appliesTo: OURS, api: 'scene.environmentNode = reflectionProbes(probes); HybridReflections({ probes })', tradeoff: 'Off lights with the plain environment (three\'s PMREM): misses read the HDRI instead of the local capture.' }),

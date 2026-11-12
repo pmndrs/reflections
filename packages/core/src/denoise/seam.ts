@@ -20,12 +20,34 @@
 //  - tile lists / indirect args: the denoisers in the denoiser repo dispatch full screen and take no
 //    lists, so the seam passes textures only (our 2-D tile args, D601, stay for a later consumer).
 //  - camera: our `FrameCamera` is a superset of denoiser-core's and is passed unchanged.
+//  - hit source (W53, optional, D3660): denoiser-core's `SpecularInputs.hitSource` (HIT_SOURCE codes
+//    in an r32float) is built here from the tracer's confidence and the ray-traced pass's RT_SOURCE
+//    codes, when `dispatch` is given them. Denoisers that know it keep screen-space hits, traced hits
+//    and misses apart (FFX: `separateHitSources`).
 import type { FrameInputs } from '../frame/contract';
+import { RT_SOURCE } from '../trace/shaders';
 
-/** denoiser-core `SpecularInputs`: noisy reflected radiance (rgba16float) and hit distance (0 = miss). */
+/**
+ * denoiser-core `SpecularInputs`: noisy reflected radiance (rgba16float), hit distance (0 = miss)
+ * and, optionally, which pass produced each sample (`HIT_SOURCE` codes in .r).
+ */
 export interface SpecularInputs {
   radiance: GPUTexture;
   hitDistance: GPUTexture;
+  hitSource?: GPUTexture;
+}
+
+/** denoiser-core `HIT_SOURCE`: the codes of `SpecularInputs.hitSource`. */
+export const HIT_SOURCE = { miss: 0, screen: 1, traced: 2 } as const;
+
+/**
+ * What the seam builds `SpecularInputs.hitSource` from (W53). `confidence`: the tracer's (r32float,
+ * after the ray-traced pass). `traceSource`: the ray-traced pass's RT_SOURCE codes (r32float), or
+ * null without it.
+ */
+export interface DenoiseHitSources {
+  confidence: GPUTexture;
+  traceSource?: GPUTexture | null;
 }
 
 /** denoiser-core `FrameGuides`. */
@@ -86,8 +108,16 @@ export interface ReflectionDenoiseSeam {
   readonly denoiser: TemporalDenoiser<SpecularInputs>;
   /** The guides of the last dispatch (for debug views). */
   readonly guides: DenoiseGuides | null;
-  /** Denoise. Returns the denoiser's output texture (owned by it, valid until its next dispatch). */
-  dispatch(frame: FrameInputs, signal: SpecularInputs): GPUTexture;
+  /** The hit source of the last dispatch that was given `sources` (r32float, HIT_SOURCE codes), else null. */
+  readonly hitSource: GPUTexture | null;
+  /**
+   * Denoise. Returns the denoiser's output texture (owned by it, valid until its next dispatch).
+   * With `sources` (W53), the seam also hands the denoiser `hitSource`, built from them: a traced
+   * hit off screen is `traced`; a screen-space hit (confidence > 0, W52's reading) or a traced hit shaded from
+   * the on-screen colour is `screen`; anything else is `miss`. A `signal.hitSource` given by the
+   * caller is passed as is.
+   */
+  dispatch(frame: FrameInputs, signal: SpecularInputs, sources?: DenoiseHitSources | null): GPUTexture;
   resetHistory(): void;
   destroy(): void;
 }
@@ -120,6 +150,25 @@ struct U { size: vec2u, roughChannel: u32, flags: u32, motionScale: vec2f, norma
 }
 `;
 
+// W53 (D3660): HIT_SOURCE per pixel from the confidence and the ray-traced pass's RT_SOURCE codes.
+// A traced hit shaded from the on-screen colour (onScreenHit) counts as a screen-space hit: its
+// radiance is the screen's, re-shaded as the screen-space hits are (D3540).
+const HIT_SOURCE_WGSL = /* wgsl */ `
+@group(0) @binding(0) var<uniform> size: vec4u; // xy size, z = 1 with a trace source
+@group(0) @binding(1) var tConfidence: texture_2d<f32>;
+@group(0) @binding(2) var tTrace: texture_2d<f32>;
+@group(0) @binding(3) var oSource: texture_storage_2d<r32float, write>;
+@compute @workgroup_size(8, 8) fn main(@builtin(global_invocation_id) id: vec3u) {
+  if (any(id.xy >= size.xy)) { return; }
+  let rt = select(0u, u32(textureLoad(tTrace, id.xy, 0).x + 0.5), size.z != 0u);
+  var s = select(${HIT_SOURCE.miss}.0, ${HIT_SOURCE.screen}.0, textureLoad(tConfidence, id.xy, 0).x > 0.0);
+  if (rt == ${RT_SOURCE.tracedHit}u) { s = ${HIT_SOURCE.traced}.0; }
+  if (rt == ${RT_SOURCE.onScreenHit}u) { s = ${HIT_SOURCE.screen}.0; }
+  if (rt == ${RT_SOURCE.tracedMiss}u) { s = ${HIT_SOURCE.miss}.0; }
+  textureStore(oSource, id.xy, vec4f(s, 0.0, 0.0, 0.0));
+}
+`;
+
 export function createReflectionDenoiseSeam(device: GPUDevice, options: ReflectionDenoiseSeamOptions): ReflectionDenoiseSeam {
   const { denoiser } = options;
   const motionOut = options.motion ?? 'ndc';
@@ -146,6 +195,51 @@ export function createReflectionDenoiseSeam(device: GPUDevice, options: Reflecti
   let width = 0, height = 0;
   let motion: GPUTexture | null = null, roughness: GPUTexture | null = null, normal: GPUTexture | null = null;
   let guides: DenoiseGuides | null = null;
+  // W53: the hit-source pass, made on first use
+  let source: { pipeline: GPUComputePipeline; layout: GPUBindGroupLayout; uniforms: GPUBuffer; none: GPUTexture; out: GPUTexture | null } | null = null;
+  let lastSource: GPUTexture | null = null;
+  const buildHitSource = (enc: GPUCommandEncoder, s: DenoiseHitSources): GPUTexture => {
+    if (!source) {
+      const l = device.createBindGroupLayout({
+        label: 'denoise seam hit source',
+        entries: [
+          { binding: 0, visibility: C, buffer: { type: 'uniform' } },
+          { binding: 1, visibility: C, texture: { sampleType: 'unfilterable-float' } },
+          { binding: 2, visibility: C, texture: { sampleType: 'unfilterable-float' } },
+          { binding: 3, visibility: C, storageTexture: { access: 'write-only', format: 'r32float' } },
+        ],
+      });
+      source = {
+        layout: l,
+        pipeline: device.createComputePipeline({
+          label: 'denoise seam hit source', layout: device.createPipelineLayout({ bindGroupLayouts: [l] }),
+          compute: { module: device.createShaderModule({ label: 'denoise seam hit source', code: HIT_SOURCE_WGSL }), entryPoint: 'main' },
+        }),
+        uniforms: device.createBuffer({ label: 'denoise seam hit source', size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
+        none: device.createTexture({ label: 'denoise seam no trace source', size: [1, 1], format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING }),
+        out: null,
+      };
+    }
+    if (!source.out || source.out.width !== width || source.out.height !== height) {
+      source.out?.destroy();
+      source.out = device.createTexture({ label: 'denoise seam hit source', size: [width, height], format: 'r32float', usage });
+    }
+    device.queue.writeBuffer(source.uniforms, 0, new Uint32Array([width, height, s.traceSource ? 1 : 0, 0]));
+    const pass = enc.beginComputePass({ label: 'denoise seam hit source' });
+    pass.setPipeline(source.pipeline);
+    pass.setBindGroup(0, device.createBindGroup({
+      layout: source.layout,
+      entries: [
+        { binding: 0, resource: { buffer: source.uniforms } },
+        { binding: 1, resource: s.confidence.createView() },
+        { binding: 2, resource: (s.traceSource ?? source.none).createView() },
+        { binding: 3, resource: source.out.createView() },
+      ],
+    }));
+    pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
+    pass.end();
+    return source.out;
+  };
   const usage = GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC;
 
   const ensure = (w: number, h: number) => {
@@ -161,7 +255,8 @@ export function createReflectionDenoiseSeam(device: GPUDevice, options: Reflecti
   return {
     denoiser,
     get guides() { return guides; },
-    dispatch(frame, signal) {
+    get hitSource() { return lastSource; },
+    dispatch(frame, signal, sources) {
       const c = frame.conventions;
       if (c.depthLinear) throw new Error('denoise seam: the denoiser reads device depth; linear depth (depthLinear) is not supported');
       ensure(frame.width, frame.height);
@@ -193,6 +288,7 @@ export function createReflectionDenoiseSeam(device: GPUDevice, options: Reflecti
       }));
       pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
       pass.end();
+      lastSource = sources && !signal.hitSource ? buildHitSource(enc, sources) : null;
       device.queue.submit([enc.finish()]);
       guides = {
         depth: frame.textures.depth,
@@ -201,13 +297,15 @@ export function createReflectionDenoiseSeam(device: GPUDevice, options: Reflecti
         roughness: roughness!,
         albedo: frame.textures.albedo,
       };
-      return denoiser.dispatch(signal, guides, frame.camera);
+      return denoiser.dispatch(lastSource ? { ...signal, hitSource: lastSource } : signal, guides, frame.camera);
     },
     resetHistory() { denoiser.resetHistory(); },
     destroy() {
       for (const t of [motion, roughness, normal]) t?.destroy();
       motion = roughness = normal = null;
       uniforms.destroy();
+      if (source) { source.out?.destroy(); source.none.destroy(); source.uniforms.destroy(); source = null; }
+      lastSource = null;
     },
   };
 }

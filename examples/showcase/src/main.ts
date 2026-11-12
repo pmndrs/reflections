@@ -27,7 +27,7 @@
 //
 // W51: ?lobeFilter=<k> (`settings.hitLobeFilter`, D3550; default the package's 1; also a slider), ?bvh=three-mesh-bvh (the RT
 // stopgap; @pmndrs/bvh is the default), and every other knob on ./bench.html (the tuning bench; docs/SETTINGS.md).
-// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=0|1|<k> ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?shadeVis=all ?lobeMix=<0..1> ?shadeOcc=screen ?lobeFilter=<k> (W52) ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
+// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=0|1|<k> ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?shadeVis=all ?lobeMix=<0..1> ?shadeOcc=screen ?lobeFilter=<k> (W52) ?hitSource=hits|all ?hitDistW=<k> (W53: the denoiser keeps hit sources apart / weights by hit distance) ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
 import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';
@@ -38,7 +38,7 @@ import {
   createPmndrsBvhTraceProviderFromObjects, installCubeArraySupport, reflectionProbes, sampleReflectionProbes,
 } from '@pmndrs/reflections/three';
 import { availableAssets, probeAtlasBytes } from '../../shared';
-import { createReflectionDenoiser, denoiserAvailable } from '../../shared/denoiser';
+import { createReflectionDenoiser, denoiserAvailable, hitSourceDenoiserOptions, hitSourceFromQuery, setDenoiserHitSource, type DenoiserHitSourceSettings } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
 import { SHOWCASE, type FloorKind, type ShowcaseEntry, type ShowcaseScene } from './scenes';
@@ -106,8 +106,10 @@ async function main() {
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });
   const timestampsOn = device.features.has('timestamp-query');
   // hybrid resolve + denoise seam: FFX's reflection denoiser gated at the tracer's roughness threshold
-  const denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, timestampsOn) : null;
-  const hybrid = new HybridReflections(ssr, { denoiser });
+  // W53 (D3660): ?hitSource=hits|all / ?hitDistW=<k>, off by default
+  const hs = hitSourceFromQuery(q);
+  const denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, timestampsOn, hitSourceDenoiserOptions(hs)) : null;
+  const hybrid = new HybridReflections(ssr, { denoiser, denoiserHitSource: hs.hitSource });
   hybrid.denoise = q.get('denoise') !== '0' && !!denoiser;
   const nextNodeFrame = () => (renderer as N)._nodes.nodeFrame.update();
 
@@ -484,6 +486,15 @@ async function main() {
   const rtBox = check('Ray-traced fallback (BVH)', state.rt, (v) => { setRT(v).catch(fail); });
   const denoiseBox = check(denoiser ? `Denoise (${denoiser.name})` : 'Denoise (no denoiser found)', hybrid.denoise, (v) => { hybrid.denoise = v && !!denoiser; aa.reset(); });
   denoiseBox.disabled = !denoiser;
+  // W53: off | screen-space vs traced hits apart | hits and misses apart
+  const HIT_SOURCE_MODES = { off: 'off', hits: 'screen vs traced hits', all: 'hits and misses' } as const;
+  const hitSourceMode = () => (!hybrid.denoiserHitSource ? 'off' : hs.missesMatchAnySource ? 'hits' : 'all');
+  const hitSourceSel = select(HIT_SOURCE_MODES, hitSourceMode(), (v) => {
+    hs.hitSource = v !== 'off'; hs.missesMatchAnySource = v === 'hits';
+    setDenoiserHitSource(hybrid, hs); aa.reset();
+  });
+  hitSourceSel.disabled = !denoiser;
+  row('Denoiser: keep hit sources apart', hitSourceSel);
   const aaSel = select(AA_MODES, aa.mode, (v) => setAA(v as AAMode));
   row(aa.ratio > 1 ? `Anti-aliasing (upscale x${aa.ratio})` : 'Anti-aliasing', aaSel);
   function setAA(m: AAMode) { aa.mode = m; aaSel.value = m; }
@@ -616,6 +627,8 @@ async function main() {
         refreshUI();
       },
       setHit: (m: HitMode) => setHit(m),
+      /** W53 (D3660): the denoiser keeps screen-space hits, traced hits and misses apart / weights by hit distance (k; 0 = off). */
+      setHitSource(s: Partial<DenoiserHitSourceSettings>) { Object.assign(hs, s); setDenoiserHitSource(hybrid, hs); hitSourceSel.value = hitSourceMode(); aa.reset(); },
       /** W44: 'reshade' (default) | 'off'. */
       setReshade: (m: HitShadingMode) => { setReshade(m); reshadeSel.value = m; },
       /** W39: Lagarde's specular occlusion from GTAO on the composite's probe part (D66, D4510). */
