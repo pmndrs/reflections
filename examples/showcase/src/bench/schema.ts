@@ -295,6 +295,11 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W54: isolates what the eye sees through transmissive glass (carConcept\'s cabin): black keeps only the glass\'s own reflection, hidden only the cabin behind it, noShadow lets the key light through as the path tracer does. Every method alike, the path tracer too.',
   }),
 
+  sel('geometryRoughness', 'materials', 'Geometry roughness (three)', [['three', 'three\'s (normal derivative added)'], ['off', 'off'], ['0.5', 'x 0.5'], ['0.25', 'x 0.25']], null, {
+    defaultNote: 'three', apply: 'rebuild', appliesTo: RASTER, api: 'examples geometryRoughness.ts (W56)',
+    tradeoff: 'W56 (D3720): three r187 adds the screen-space derivative of the view normal to every standard material\'s roughness (getRoughness); off / scaled re-assigns three\'s roughness after its setupVariants. Reaches three\'s lit term, the G-buffer\'s shading roughness (the composite\'s probe term) and the bake; never the path tracer. Any other scale by URL (?geometryRoughness=0.75).',
+  }),
+
   // ---- three's SSR ---------------------------------------------------------------------------------------------
   num('mirrorBias', 'three', 'SSR mirror bias', 0, 1, 0.01, 0, { pageDefault: 0.5, appliesTo: THREE, api: 'SSRNode.mirrorBias', tradeoff: 'three\'s lobe truncation (the example\'s 0.5): less noise, sharper.' }),
   num('ssrMaxDistance', 'three', 'SSR max distance', 0, 50, 0.1, 1, { defaultNote: 'example: scene far / 4 (D2301)', appliesTo: THREE, api: 'SSRNode.maxDistance', tradeoff: 'March length in world units; the example\'s 0.4 is for its 0.1-scaled dungeon.' }),
