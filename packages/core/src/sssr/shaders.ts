@@ -52,6 +52,8 @@
 //   rough-pixel lookup, per pixel, quad copies included); FFX's roughness-0 lookup along the sampled
 //   direction is `fallbackRoughness: 'mirror'` (D1806).
 
+import { SCREEN_VISIBILITY_WGSL } from '../trace/hitShading';
+
 /** Byte size of the uniform block (struct Params below). */
 export const PARAMS_SIZE = 560;
 
@@ -98,6 +100,9 @@ struct Params {
   hasHitMaterial: u32,
   hasClearcoat: u32,
   hitLobeFilter: f32,
+  hitLobeFilterMixed: f32,
+  hitShadeOcclusion: u32,
+  hasHitSource: u32,
 };
 @group(0) @binding(0) var<uniform> P: Params;
 `;
@@ -385,9 +390,10 @@ fn main() {
 
 /**
  * `hitShadingWgsl`: the hit-shading module (and stubs) that defines `hitShadeLobe` for the
- * re-shade (W44, D3540); see `screenSpaceHitShadingWgsl` in ./sssr.ts.
+ * re-shade (W44, D3540); see `screenSpaceHitShadingWgsl` in ./sssr.ts. `hitSource`: bind last
+ * frame's per-pixel hit source at binding 18 (W52, D3641).
  */
-export function intersectWgsl(variant: Variant, inverted: boolean, fallbackWgsl: string, missList: boolean, hitShadingWgsl: string): string {
+export function intersectWgsl(variant: Variant, inverted: boolean, fallbackWgsl: string, missList: boolean, hitShadingWgsl: string, hitSource = false): string {
   const sg = variant === 'subgroups';
   return /* wgsl */ `
 ${sg ? 'enable subgroups;\ndiagnostic(off, subgroup_uniformity);' : ''}
@@ -410,6 +416,7 @@ ${missList ? `@group(0) @binding(11) var<storage, read_write> missList: array<ve
 @group(0) @binding(15) var t_albedo: texture_2d<f32>;
 @group(0) @binding(16) var t_metalness: texture_2d<f32>;
 @group(0) @binding(17) var t_clearcoat: texture_2d<f32>;
+${hitSource ? '@group(0) @binding(18) var t_hit_source: texture_2d<f32>;' : ''}
 ${fallbackWgsl}
 ${hitShadingWgsl}
 
@@ -468,6 +475,44 @@ fn hitMaterialSpecular(p: vec2i) -> HitSpecular {
   if (P.hasClearcoat != 0u) { cc = textureLoad(t_clearcoat, p, 0).xy; }
   return HitSpecular(f0, roughness, clamp(cc.x, 0.0, 1.0), clamp(cc.y, 0.0, 1.0));
 }
+// Re-shade occlusion without a BVH (W52, D3642; SCREEN_VISIBILITY_WGSL): the hit shading's
+// visibility query, a depth-buffer march along R with hitShadeOcclusion 'screen', else visible.
+fn screenSpaceLobeVisible(hitP: vec3f, N: vec3f, R: vec3f) -> bool {
+  if (P.hitShadeOcclusion == 0u) { return true; }
+  return hitScreenVisible(hitP, N, R);
+}
+fn hsoProject(p: vec3f) -> vec3f {
+  let clip = P.projection * (P.viewMatrix * vec4f(p, 1.0));
+  let ndc = clip.xy / clip.w;
+  return vec3f(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5, clip.w);
+}
+fn hsoSceneDistance(c: vec2i) -> f32 {
+  let p = clamp(c, vec2i(0), vec2i(P.renderSize) - 1);
+  let z = loadDepth(p, 0);
+  if (isBackground(z)) { return FLOAT_MAX; }
+  return length(screenSpaceToWorldSpace(vec3f((vec2f(p) + 0.5) * P.inverseRenderSize, z)) - P.invView[3].xyz);
+}
+fn hsoCamera() -> vec3f { return P.invView[3].xyz; }
+fn hsoSize() -> vec2u { return P.renderSize; }
+${SCREEN_VISIBILITY_WGSL}
+
+// Lobe filter where hits mix (W52, D3641): the denoiser spreads a re-shaded screen-space hit over
+// its ray-traced neighbours (D3610), so where last frame's hit source has a traced hit (RT_SOURCE 1
+// or 4) among 3x3 samples 5 px apart around the reflecting pixel (11x11 px, about the FFX
+// denoiser's reach), hitLobeFilter is scaled by hitLobeFilterMixed. (A share-weighted scale over a
+// 7x7 footprint left the skirt lip at 73 vs 63 for this, PT 48: the denoiser reaches further.)
+fn lobeFilterMixScale(c: vec2u) -> f32 {
+${hitSource ? `  if (P.hasHitSource == 0u || P.hitLobeFilterMixed >= 1.0) { return 1.0; }
+  for (var j = -1; j <= 1; j++) {
+    for (var i = -1; i <= 1; i++) {
+      let p = clamp(vec2i(c) + vec2i(i, j) * 5, vec2i(0), vec2i(P.renderSize) - 1);
+      let code = u32(textureLoad(t_hit_source, p, 0).x + 0.5);
+      if (code == 1u || code == 4u) { return P.hitLobeFilterMixed; } // traced hit, on-screen traced hit
+    }
+  }
+  return 1.0;` : '  return 1.0;'}
+}
+
 fn reshadeHit(hit_uv: vec2f, world_hit: vec3f, ray_direction: vec3f) -> vec3f {
   let p = clamp(vec2i(vec2f(P.renderSize) * hit_uv), vec2i(0), vec2i(P.renderSize) - 1);
   let N = loadWorldSpaceNormal(p);
@@ -723,8 +768,9 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
   if (confidence > 0.0) {
     if (P.hitShadingMode == HIT_SHADING_RESHADE) {
-      let spread = P.hitLobeFilter * (*r).roughness; // D3550: the ray stands for its lobe
+      let spread = P.hitLobeFilter * lobeFilterMixScale((*r).coords) * (*r).roughness; // D3550: the ray stands for its lobe
       hitLobeSpread = spread * spread;
+      hsoPixel = (*r).coords;
       hit_radiance = reshadeHit(hit.xy, world_space_hit, normalize(world_space_reflected_direction));
     } else {
       hit_radiance = loadHitColor(hit.xy);
