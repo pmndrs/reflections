@@ -11,6 +11,7 @@ import {
 } from '@pmndrs/reflections/three';
 import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
 import { ScreenSpaceAO } from '../../../shared/ao';
+import { probeLayout, type ProbeLayoutName } from '../../../shared/probeLayouts';
 import { setSpecularAA, specAAHitMaterial } from '../specAA';
 import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, applySceneParams, applySpecAA, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
 
@@ -60,9 +61,11 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   if (params.has('lobeFilter')) ssr.settings.hitLobeFilter = Number(params.get('lobeFilter'));
   const motionScale = Number(params.get('motionScale') ?? 1);
 
-  // probes, as the showcase bakes them
+  // probes, as the showcase bakes them; W61: ?probeLayout=few|medium|many|manyCell|mixed (&probeBlend=) bakes
+  // that layout at the equal memory budget instead (../../../shared/probeLayouts.ts, Sponza only)
+  const layout = params.has('probeLayout') ? probeLayout(kit.id, params.get('probeLayout') as ProbeLayoutName, kit.probes, { blend: Number(params.get('probeBlend') ?? 0.25) }) : null;
   const probes = new ReflectionProbes();
-  for (const v of kit.probes) {
+  for (const v of layout?.volumes ?? kit.probes) {
     const p = new ReflectionProbe(...v.influenceSize);
     p.position.set(...v.position);
     if (v.projectionSize) p.projectionSize = new THREE.Vector3(...v.projectionSize);
@@ -77,6 +80,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   if (sc.background === sc.environment) { sc.backgroundIntensity = sc.environmentIntensity; sc.backgroundBlurriness = 0; }
   probes.bake(renderer, kit.scene, {
     ...(params.has('probeRes') ? { resolution: Number(params.get('probeRes')) } : {}),
+    ...(layout && layout.name !== 'shipped' ? { resolution: layout.resolution } : {}),
     ...(params.has('bounces') ? { bounces: Number(params.get('bounces')) } : {}), // default 2 (D4300)
     near: kit.bake.near, far: kit.bake.far,
   });
@@ -166,7 +170,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     status: () => (denoiser ? 'denoiser ffx-reflections' : wantDenoise ? 'no denoiser found' : '') + (provider ? ` | BVH ${provider.triangles.toLocaleString()} tris` : ''),
     info: () => ({
       samplesPerQuad: ssr.settings.samplesPerQuad ?? 1, hitColor: hit, hitShading: reshade, denoiser: denoiser ? { ...denoiserOptions } : null,
-      thickness: kit.thickness ?? 'default', rayTracing: !!provider, probes: kit.probes.length, specAA,
+      thickness: kit.thickness ?? 'default', rayTracing: !!provider, probes: probes.bakedProbes.length, probeLayout: layout?.name ?? null, specAA,
       varianceGuidedTracing: 'off (the seam passes no variance back to the tracer)',
     }),
     gpuErrors: () => errors,

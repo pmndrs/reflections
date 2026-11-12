@@ -22,6 +22,7 @@
 // URL: ?scene=<id> ?pose=<name> ?left=<method> ?right=<method> ?split=0.5 ?w=960&h=540 ?freeze ?manual
 // Experiment overrides (not product defaults): ?spq=1|2|4 ?tsf=<FFX temporalStabilityFactor>
 // ?hit=final|lit|current ?reshade=reshade|off ?specOcc=1 (ours; specOcc: Lagarde specular occlusion from GTAO, W39), ?mirrorBias= ?ssrMaxDistance= ?ssrThickness= (three's SSR), ?ptBounces=
+// W61: ?probeLayout=shipped|few|medium|many|manyCell|mixed &probeBlend= (ours and probes on Sponza: probe layouts at an equal memory budget, examples/shared/probeLayouts.ts)
 // ?ptMax= ?ptRaw=1 ?ptDenoise=0 ?ptClearcoat=0 (path tracer), ?floorRoughness= (every method's floor, before the bake)
 // W45: ?lobeFilter=<k> (ours: hitLobeFilter, D3550), ?keyLight=<scale> and ?paintRoughness=<r> (every method: scale the lights; set
 // clear-coated paint to roughness r without its normal map)
@@ -524,6 +525,8 @@ async function main() {
       showDenoised: (v = true) => { ptDenoisedBox.checked = v; q.set('ptRaw', v ? '0' : '1'); live.get('pathtraced')?.setShowDenoised?.(v); },
       ptInfo: () => { const m = live.get('pathtraced'); return m ? { ...m.info(), status: m.status(), done: m.done?.() ?? true } : null; },
       measure, get lastMeasure() { return lastMeasure; },
+      /** W61: set an experiment override (e.g. probeLayout) for the methods created after this; drop() the live ones to apply it. */
+      setParam(k: string, v: string | null) { if (v === null) q.delete(k); else q.set(k, v); },
       drop, prune,
       info: () => ({ scene: entry.id, pose, sides: [...sides], split, frozen, live: [...live.keys()], status: Object.fromEntries([...live].map(([k, m]) => [k, m.status()])) }),
       gpuErrors: () => [...errors, ...[...live.values()].flatMap((m) => m.gpuErrors())],

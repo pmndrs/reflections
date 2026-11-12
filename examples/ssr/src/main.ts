@@ -33,7 +33,11 @@ import {
   createPmndrsBvhTraceProviderFromObjects, type ThreePmndrsBvhTraceProvider,
 } from '@pmndrs/reflections/three';
 import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
-import { ASSET_SCENES, SCENES, probeAtlasBytes, type KitScene, type ProbeVolume } from '../../shared';
+import {
+  ASSET_SCENES, SCENES, PROBE_LAYOUT_BUDGET, PROBE_LAYOUT_NAMES, availableAssets, hasProbeLayouts, probeAtlasBytes, probeLayout, type KitScene, type ProbeLayout, type ProbeLayoutName, type ProbeVolume,
+} from '../../shared';
+import { HEAT_LEGEND, ProbeVolumesOverlay, gbufferWorldPosition, heatColor, probeColor, probeWeights } from '../../shared/probeDebug';
+import { SHOWCASE } from '../../showcase/src/scenes';
 import { createReflectionDenoiser, denoiserAvailable, denoiserSource } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
@@ -72,8 +76,19 @@ const bvhBuilder = (q.get('bvhBuilder') ?? 'auto') as BvhBuilderPreference;
 /** `&shadingNormals=0`: traced hits shaded with the flat geometric normal (D1700 A/B). */
 const shadingNormals = q.get('shadingNormals') !== '0';
 const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
+/**
+ * W61, probe layouts at an equal memory budget (../../shared/probeLayouts.ts): `?probeLayout=shipped|few|medium|many|manyCell|mixed`
+ * on the scenes that have them (rooms, offscreen, showcaseSponza = the showcase's Sponza); `?probeBlend=` the grid's
+ * blend distance as a share of its cell's shorter side (default 0.25); `?probeVolumes=1` draws the volumes. With a
+ * layout the page tracks GPU timestamps (three's passes and the core passes) for the HUD's "Time" button.
+ */
+const layoutMode = q.has('probeLayout');
+const timingOn = q.has('gpuTime') || layoutMode;
 
-const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'ssrWeight', 'hitFade', 'probeConsistency', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'coverage', 'source', 'rtSource', 'grid', 'ao', 'specularOcclusion'] as const;
+const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'ssrWeight', 'hitFade', 'probeConsistency', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'coverage', 'source', 'rtSource', 'grid', 'ao', 'specularOcclusion',
+  // W61 probe views: the dominant probe (its palette colour over the lit image), the volumes blended per px (heat),
+  // and two for the checks: raw data (r = dominant + 1, g = count, b = roughness, /255) and |weights' sum - coverage| x 50
+  'probeIndex', 'probeCount', 'probeData', 'probeCheck'] as const;
 type View = (typeof VIEWS)[number];
 /** Views that are a tone-mapped image: fed to the upscaler linear, tone-mapped after it. */
 const LINEAR_VIEWS: View[] = ['final', 'raw', 'split', 'signal', 'noSSR', 'ssr', 'specular', 'probeSpecular'];
@@ -164,7 +179,7 @@ async function main() {
   const adapter = await navigator.gpu.requestAdapter();
   // the composite needs the G-buffer's `lit` target: 36 bytes/sample
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, trackTimestamp: q.has('gpuTime'), requiredLimits: { ...(adapter ? reflectionsRequiredLimits(adapter) : {}), maxColorAttachmentBytesPerSample: maxBytes } } as N);
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, trackTimestamp: timingOn, requiredLimits: { ...(adapter ? reflectionsRequiredLimits(adapter) : {}), maxColorAttachmentBytesPerSample: maxBytes } } as N);
   renderer.setPixelRatio(1);
   renderer.setSize(DW, DH, false);
   renderer.shadowMap.enabled = true;
@@ -173,7 +188,7 @@ async function main() {
   // cube arrays on stock r187 (W20 shim, self-tested; patches nothing and probes keep the 2D array if it fails). ?shim=0 opts out.
   if (q.get('shim') !== '0') await installCubeArraySupport(renderer);
   const ssr = new ScreenSpaceReflectionsPass(renderer, {
-    gbufferOptions: { width: W, height: H }, missList: true, timestamps: q.has('timing'),
+    gbufferOptions: { width: W, height: H }, missList: true, timestamps: q.has('timing') || layoutMode,
     subgroups: q.get('variant') !== 'workgroup',
   });
   const device = ssr.device;
@@ -292,6 +307,10 @@ async function main() {
     const rawFinal = c.geometry.select(c.lit.add(c.weight.mul(c.signal.sub(c.probeSpecular)).mul(c.amount)).max(0), c.lit);
     const mask = texture(maskTex, at);
     const dim = tone(c.lit).mul(0.35);
+    // W61: the baked set's volume weights at this px's world position (../../shared/probeDebug.ts)
+    const pw = probeWeights(useProbes && probesEnabled ? probes : null, gbufferWorldPosition(ssr as N, at).P);
+    const litLuma: N = tone(c.lit).dot(vec3(0.2126, 0.7152, 0.0722));
+    const bg = vec3(0.02, 0.03, 0.08);
     // tone-mapped views (LINEAR_VIEWS): linear while the upscaler runs, which tone-maps after it
     const T = (x: N): N => aa.linear.equal(1).select(x, tone(x));
     const viewColor = (v: View): N => {
@@ -330,6 +349,12 @@ async function main() {
         // W39: the AO input (GTAO on the G-buffer) and the specular occlusion factor the composite applies (1 with specOcc off)
         case 'ao': return c.geometry.select(vec3(ao.sample(at)), vec3(0.02, 0.03, 0.08));
         case 'specularOcclusion': return c.geometry.select(vec3(c.specularOcclusion), vec3(0.02, 0.03, 0.08));
+        // W61: the dominant probe's colour (as the volume overlay draws it) over the lit image's luma
+        case 'probeIndex': return c.geometry.select(probeColor(pw.dominant, pw.volumes).mul(litLuma.mul(0.7).add(0.3)), bg);
+        // W61: how many volumes the lookup samples here (weight > 0): its cost (HEAT_LEGEND)
+        case 'probeCount': return c.geometry.select(heatColor(pw.count).mul(litLuma.mul(0.5).add(0.5)), bg);
+        case 'probeData': return c.geometry.select(vec3(pw.dominant.add(1).div(255), pw.count.div(255), c.roughness.mul(255).round().div(255)), vec3(0));
+        case 'probeCheck': return c.geometry.select(vec3(pw.sum.sub(c.coverage).abs().mul(50).min(1), 0, 0), vec3(0));
         default: return vec3(0);
       }
     };
@@ -395,7 +420,17 @@ async function main() {
   const probeBytes = () => probeAtlasBytes(probes as N);
   /** A probe set from volumes (the kit's suggestion, or W38's variants via `__p.setProbeVolumes`), baked and lit with. */
   function buildProbes(volumes: ProbeVolume[], extra: Partial<BakeOptions> = {}) {
-    probes = new ReflectionProbes();
+    probes = makeSet(volumes);
+    kit!.scene.add(probes);
+    // bake as on a fresh load: a previous set left on the scene would light the first pass's captures
+    kit!.scene.environmentNode = null;
+    probes.bake(renderer, kit!.scene, bakeOptions(extra));
+    nextNodeFrame();
+    kit!.scene.environmentNode = reflectionProbes(probes) as N;
+    refreshOverlay();
+  }
+  function makeSet(volumes: ProbeVolume[]) {
+    const probes = new ReflectionProbes();
     for (const v of volumes) {
       const p = new ReflectionProbe(...v.influenceSize);
       p.position.set(...v.position);
@@ -409,27 +444,96 @@ async function main() {
       if (size !== undefined && size !== '') p.resolution = Number(size) > 0 ? Number(size) : null;
       probes.add(p);
     }
-    kit!.scene.add(probes);
-    // bake as on a fresh load: a previous set left on the scene would light the first pass's captures
-    kit!.scene.environmentNode = null;
-    probes.bake(renderer, kit!.scene, bakeOptions(extra));
-    nextNodeFrame();
-    kit!.scene.environmentNode = reflectionProbes(probes) as N;
+    return probes;
+  }
+  /** W61: a fixed probe set for the traced hits' shading (`traceOptions.probes`), so a ?rt=1 reference doesn't move with the set under test. */
+  let traceRef: ReflectionProbes | null = null;
+
+  // ---- W61: probe layouts at an equal memory budget, the volume overlay, the HUD's numbers ------
+  let layoutName = q.get('probeLayout') as ProbeLayoutName | null;
+  let layoutBlend = Number(q.get('probeBlend') ?? 0.25);
+  /** The last bake: wall clock idle to idle (ms), atlas bytes, probe count. */
+  let lastBake: { ms: number; bytes: number; probes: number } | null = null;
+  /** The HUD's GPU ms: three's passes (rolling median of the running loop) and the last "Time" (loop stopped). */
+  const rolling: number[] = [];
+  let timingBusy = false;
+  let lastTiming: { renderMs: number; renderSpread: [number, number]; coreMs: number; size: [number, number] } | null = null;
+  let showVolumes = q.get('probeVolumes') === '1';
+  let overlay: ProbeVolumesOverlay | null = null;
+  function refreshOverlay() {
+    if (overlay) { overlay.removeFromParent(); overlay.dispose(); overlay = null; }
+    if (showVolumes && probes && kit) { overlay = new ProbeVolumesOverlay(probes); kit.scene.add(overlay); }
+  }
+  /** The current layout for the loaded scene (null: no layout asked, or the scene has none). */
+  function currentLayout(): ProbeLayout | null {
+    if (!layoutName || !kit || !hasProbeLayouts(kit.id)) return null;
+    return probeLayout(kit.id, layoutName, kit.probes, { blend: layoutBlend, shippedResolution: q.has('probeRes') ? Number(q.get('probeRes')) : 256 });
+  }
+  /** Bake options of a layout: its set default (the environment slot's size); 'shipped' keeps the page's. */
+  const layoutExtra = (L: ProbeLayout | null): Partial<BakeOptions> => (L && L.name !== 'shipped' ? { resolution: L.resolution } : {});
+  const queueIdle = () => device.queue.onSubmittedWorkDone();
+  /** Bakes `volumes` as the scene's set, timed (wall clock, idle to idle). */
+  async function timedBuild(volumes: ProbeVolume[], extra: Partial<BakeOptions> = {}) {
+    await queueIdle();
+    const t0 = performance.now();
+    buildProbes(volumes, extra);
+    await queueIdle();
+    lastBake = { ms: performance.now() - t0, bytes: probeAtlasBytes(probes as N), probes: probes!.bakedProbes.length };
+    return lastBake;
+  }
+  /** Replaces the scene's set with `volumes` (W38's setProbeVolumes): a clean bake, materials and display rebuilt. */
+  async function swapProbes(volumes: ProbeVolume[], extra: Partial<BakeOptions> = {}) {
+    const old = probes;
+    if (old) kit!.scene.remove(old);
+    let baked: Awaited<ReturnType<typeof timedBuild>>;
+    try { baked = await timedBuild(volumes, extra); } catch (e) {
+      // a set the bake refused (e.g. past maxTextureArrayLayers): put the old one back
+      if (probes && probes !== old) { kit!.scene.remove(probes); probes.dispose?.(); }
+      probes = old;
+      if (old) { kit!.scene.add(old); kit!.scene.environmentNode = reflectionProbes(old) as N; }
+      refreshOverlay();
+      throw e;
+    }
+    // every material's environment node changed: rebuild them before the old atlas goes
+    kit!.scene.traverse((o) => { const m = (o as THREE.Mesh).material; if (m) for (const x of ([] as THREE.Material[]).concat(m)) x.needsUpdate = true; });
+    buildDisplay();
+    frame(); await queueIdle();
+    old?.dispose?.();
+    ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
+    return baked;
+  }
+  /** W61: bake layout `name` (blend: the grid's share of its cell) for the loaded scene. */
+  async function setProbeLayout(name: ProbeLayoutName, blend = layoutBlend) {
+    layoutName = name; layoutBlend = blend;
+    const L = currentLayout();
+    if (!L) throw new Error(`no probe layout ${name} for ${kit?.id}`);
+    const baked = await swapProbes(L.volumes, layoutExtra(L));
+    const u = new URL(location.href); u.searchParams.set('probeLayout', name); if (L.blend !== undefined) u.searchParams.set('probeBlend', String(blend)); history.replaceState(null, '', u);
+    refreshUI();
+    return { layout: name, description: L.description, planned: L.bytes, spacing: L.spacing ?? null, blend: L.blend ?? null, ...baked, sizes: probes!.bakedResolutions };
+  }
+  /** The showcase's Sponza (polished floor, seven probes) as a kit scene. */
+  async function showcaseSponza(opts: { aspect?: number } = {}): Promise<KitScene> {
+    const s = await SHOWCASE.find((e) => e.id === 'sponza')!.build(opts.aspect ?? 16 / 9);
+    return { id: 'showcaseSponza', title: 'Sponza (the showcase\'s: polished floor, 7 probes)', scene: s.scene, camera: s.camera, target: new THREE.Vector3(...s.views.courtyard.target), views: s.views, probes: s.probes, exposure: s.exposure } as KitScene;
   }
 
   async function load(id: string) {
-    const factory = SCENES[id] ?? Object.values(ASSET_SCENES).find((a) => a.id === id)?.factory;
+    const factory = SCENES[id] ?? Object.values(ASSET_SCENES).find((a) => a.id === id)?.factory ?? (id === 'showcaseSponza' ? showcaseSponza : undefined);
     if (!factory) throw new Error(`unknown scene ${id}`);
     kit?.dispose?.();
     probes?.dispose?.();
     probes = null;
+    if (overlay) { overlay.removeFromParent(); overlay.dispose(); overlay = null; }
     status.textContent = `loading ${id}...`;
     kit = await factory({ aspect: W / H });
     controls.object = kit.camera;
     controls.target.copy(kit.target);
     controls.update();
     time = 0; kit.update?.(0);
-    if (useProbes && kit.probes.length) buildProbes(kit.probes);
+    renderer.toneMappingExposure = (kit as N).exposure ?? 1;
+    lastBake = null; lastTiming = null; rolling.length = 0;
+    if (useProbes && kit.probes.length) { const L = currentLayout(); await timedBuild(L ? L.volumes : kit.probes, layoutExtra(L)); }
     if (useRT) {
       // every visible mesh except helpers; one BVH per scene (two-level: instances over mesh trees)
       kit.scene.updateMatrixWorld(true);
@@ -473,6 +577,12 @@ async function main() {
     pipeline.render();
     renderer.setRenderTarget(prev);
     aa.resolve(kit.camera);
+    if (timingOn && !timingBusy) {
+      void renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER).then((ms) => {
+        if (typeof ms !== 'number' || !ms) return;
+        rolling.push(ms); if (rolling.length > 60) rolling.shift();
+      });
+    }
     if (hitMode === 'final') {
       const prev = renderer.getRenderTarget();
       renderer.setRenderTarget(historyRT);
@@ -498,9 +608,11 @@ async function main() {
   const viewSel = document.createElement('select');
   const poseSel = document.createElement('select');
   for (const id of Object.keys(SCENES)) sceneSel.append(new Option(id, id));
+  // W61: the showcase's Sponza (seven probes, polished floor), when `pnpm assets` fetched it
+  if ((await availableAssets()).some((a) => a.dir === 'Sponza')) sceneSel.append(new Option('showcaseSponza', 'showcaseSponza'));
   for (const v of VIEWS) viewSel.append(new Option(v, v));
   sceneSel.onchange = () => { const u = new URL(location.href); u.searchParams.set('scene', sceneSel.value); u.searchParams.delete('pose'); history.replaceState(null, '', u); load(sceneSel.value).then(() => !looping && frame()); };
-  viewSel.onchange = () => { setView(viewSel.value as View); if (!looping) frame(); };
+  viewSel.onchange = () => { setView(viewSel.value as View); refreshUI(); if (!looping) frame(); };
   poseSel.onchange = () => { setPose(poseSel.value); if (!looping) frame(); };
   row('Scene', sceneSel); row('Show', viewSel); row('Camera', poseSel);
   const thr = document.createElement('input'); thr.type = 'range'; thr.min = '0'; thr.max = '1'; thr.step = '0.01'; thr.value = '0.447';
@@ -541,6 +653,43 @@ async function main() {
   row('Specular occlusion (GTAO, D66)', soBox);
   const pauseBox = document.createElement('input'); pauseBox.type = 'checkbox'; pauseBox.onchange = () => { paused = pauseBox.checked; };
   row('Pause', pauseBox);
+  // ---- W61: probe layouts at an equal memory budget (rooms, offscreen, showcaseSponza) ----
+  const layoutSel = document.createElement('select');
+  layoutSel.append(new Option('(scene default)', ''));
+  for (const n of PROBE_LAYOUT_NAMES) layoutSel.append(new Option(n, n));
+  layoutSel.value = layoutName ?? '';
+  const relayout = () => {
+    if (!layoutSel.value || !kit || !hasProbeLayouts(kit.id)) return;
+    const was = looping; stopLoop();
+    setProbeLayout(layoutSel.value as ProbeLayoutName, Number(blendIn.value)).then(() => { if (was) startLoop(); else frame(); }).catch((e) => { status.textContent = String(e); });
+  };
+  layoutSel.onchange = relayout;
+  row('Probe layout', layoutSel);
+  const blendIn = document.createElement('input'); blendIn.type = 'range'; blendIn.min = '0.05'; blendIn.max = '0.5'; blendIn.step = '0.05'; blendIn.value = String(layoutBlend);
+  blendIn.onchange = relayout;
+  row('Grid blend (x cell)', blendIn);
+  const volBox = document.createElement('input'); volBox.type = 'checkbox'; volBox.checked = showVolumes;
+  volBox.onchange = () => { showVolumes = volBox.checked; refreshOverlay(); if (!looping) frame(); };
+  row('Probe volumes', volBox);
+  const timeBtn = document.createElement('button'); timeBtn.textContent = 'Time (loop stopped)'; timeBtn.disabled = !timingOn;
+  timeBtn.title = timingOn ? 'GPU ms over 30 frames with the render loop stopped' : 'needs ?gpuTime or ?probeLayout';
+  timeBtn.onclick = async () => {
+    const was = looping; stopLoop(); timeBtn.disabled = true;
+    try {
+      const P = (window as N).__p;
+      const r = await P.renderTime(30), t = await P.time(30);
+      lastTiming = { renderMs: r?.ms ?? NaN, renderSpread: [r?.p10 ?? NaN, r?.p90 ?? NaN], coreMs: Object.values(t.ms as Record<string, number>).reduce((a, b) => a + b, 0), size: [W, H] };
+    } finally { timeBtn.disabled = false; refreshUI(); if (was) startLoop(); else frame(); }
+  };
+  panel.append(timeBtn);
+  /** "2 x 512 + 24 x 128" for the baked set. */
+  const sizeSummary = () => {
+    if (!probes) return '';
+    const per = new Map<number, number>();
+    probes.bakedAtlases.forEach((a) => { const r = probes!.bakedResolutions[a]; per.set(r, (per.get(r) ?? 0) + 1); });
+    return [...per].sort((a, b) => b[0] - a[0]).map(([r, n]) => `${n} x ${r}`).join(' + ');
+  };
+  const medianOf = (a: number[]) => { const x = [...a].sort((p, q) => p - q); return x[x.length >> 1]; };
   function refreshUI() {
     sceneSel.value = kit!.id;
     const pose = poseSel.value;
@@ -551,6 +700,10 @@ async function main() {
       `variant ${ssr.variant ?? '(first frame pending)'} | hit colour ${hitMode} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | mirrorBias ${ssr.settings.mirrorBias ?? 0} | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
       `specular IBL term: ${probes ? `${probes.bakedProbes.length} probe(s) by coverage, then scene.environment` : 'scene.environment'} | specular occlusion ${specOcc ? 'on (GTAO, probe part)' : 'off'} (?specOcc=1)`,
       `denoise: ${denoiser ? `${hybrid.denoise ? 'on' : 'off'} (${denoiser.name}, from ${denoiserSource})` : 'unavailable (no sibling Denoiser repo; raw signal)'}`,
+      ...(probes ? [`probes: ${(() => { const L = currentLayout(); return L ? `layout '${L.name}' (${L.description}${L.blend !== undefined ? `, blend ${L.blend} x ${L.spacing!.toFixed(2)} m cell` : ''})` : (layoutName && kit && !hasProbeLayouts(kit.id) ? `(no layouts for ${kit.id}: rooms, offscreen, showcaseSponza)` : 'the scene\'s own'); })()} | ${sizeSummary()} px + environment ${probes.bakedResolutions[0]} px | atlases ${(probeAtlasBytes(probes as N) / 1e6).toFixed(1)} MB (layout budget ${(PROBE_LAYOUT_BUDGET / 1e6).toFixed(1)}) | bake ${lastBake ? lastBake.ms.toFixed(0) : '-'} ms (wall, 2 bounces unless ?bounces=)`] : []),
+      ...(timingOn ? [`GPU ms: three's passes (G-buffer + probe lookups, composite, display) ${rolling.length ? medianOf(rolling).toFixed(2) : '-'} running${lastTiming ? ` | loop stopped at ${lastTiming.size.join('x')}: three's passes ${lastTiming.renderMs.toFixed(2)} (p10 ${lastTiming.renderSpread[0].toFixed(2)}, p90 ${lastTiming.renderSpread[1].toFixed(2)}), core passes (SSR${ssr.rayTracing ? ' + RT' : ''}) ${lastTiming.coreMs.toFixed(2)}` : ' | press Time for loop-stopped numbers'}`] : []),
+      ...(viewSel.value === 'probeCount' ? [`probeCount: volumes blended per px (lookup samples): ${HEAT_LEGEND.map(([, l]) => l).join(' / ')} = dark blue / green / yellow / orange / red / magenta`] : []),
+      ...(viewSel.value === 'probeIndex' ? ['probeIndex: the dominant probe per px, in the colour the volume overlay draws it (?probeVolumes=1)'] : []),
       useRT ? `ray-traced misses: ${ssr.rayTracing ? 'on' : 'off'} (${bvhKind === 'pmndrs' ? '@pmndrs/bvh' : 'three-mesh-bvh'}${bvhInfo ? `, ${bvhInfo.meshes} meshes, ${bvhInfo.triangles} triangles, built in ${bvhInfo.buildMs.toFixed(0)} ms${bvhInfo.builder ? ` by ${bvhInfo.builder}${bvhInfo.fallbackReason ? ` (${bvhInfo.fallbackReason})` : ''}` : ''}` : ''}; &bvh=pmndrs|three-mesh-bvh)` : 'ray-traced misses: off (?rt=1)',
     ].join('\n');
   }
@@ -658,20 +811,40 @@ async function main() {
       async setProbeVolumes(volumes: ProbeVolume[] | null, extra: N = {}) {
         if (!kit) return null;
         stopLoop();
-        const old = probes;
-        if (old) kit.scene.remove(old);
+        const b = await swapProbes(volumes ?? kit.probes, extra);
+        return { probes: b.probes, ms: b.ms, bytes: b.bytes };
+      },
+      /** W61: bake probe layout `name` for the loaded scene (../../shared/probeLayouts.ts); loop stopped. */
+      async setProbeLayout(name: ProbeLayoutName, blend?: number) { stopLoop(); return setProbeLayout(name, blend); },
+      /** W61: the layout `name` as planned for the loaded scene (volumes, planned bytes), without baking. */
+      probeLayout: (name: ProbeLayoutName, blend?: number) => (kit ? probeLayout(kit.id, name, kit.probes, { blend: blend ?? layoutBlend }) : null),
+      layoutNames: () => [...PROBE_LAYOUT_NAMES], layoutBudget: PROBE_LAYOUT_BUDGET,
+      get lastBake() { return lastBake; },
+      /** W61: the volume overlay on / off. */
+      setShowVolumes(on: boolean) { showVolumes = on; volBox.checked = on; refreshOverlay(); },
+      /**
+       * W61: traced hits shaded by a fixed set baked from `volumes` (one size: D4702 leaves other atlases out
+       * at hits), `null` back to the scene's. Bakes with no environment node (D4402), off the scene graph after.
+       */
+      async setTraceProbes(volumes: ProbeVolume[] | null, extra: N = {}) {
+        if (!kit) return null;
+        stopLoop();
+        const o = (ssr as N).traceOptions;
+        traceRef?.dispose(); traceRef = null;
+        if (!o) return null;
+        if (!volumes) { delete o.probes; return null; }
+        const keep = kit.scene.environmentNode;
+        const ref = makeSet(volumes);
+        kit.scene.add(ref);
+        kit.scene.environmentNode = null;
+        ref.bake(renderer, kit.scene, bakeOptions(extra));
+        nextNodeFrame();
         await idle();
-        const t0 = performance.now();
-        buildProbes(volumes ?? kit.probes, extra);
-        await idle();
-        const ms = performance.now() - t0;
-        // every material's environment node changed: rebuild them before the old atlas goes
-        kit.scene.traverse((o) => { const m = (o as THREE.Mesh).material; if (m) for (const x of ([] as THREE.Material[]).concat(m)) x.needsUpdate = true; });
-        buildDisplay();
-        frame(); await idle();
-        old?.dispose?.();
-        ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
-        return { probes: probes!.bakedProbes.length, ms, bytes: probeBytes() };
+        kit.scene.remove(ref);
+        kit.scene.environmentNode = keep;
+        o.probes = traceRef = ref;
+        ssr.resetHistory(); hybrid.resetHistory();
+        return { probes: ref.bakedProbes.length, sizes: ref.bakedResolutions };
       },
       probeBytes: () => probeBytes(),
       /**
@@ -697,11 +870,15 @@ async function main() {
         stopLoop();
         if (!(renderer as N).backend.trackTimestamp) return null;
         const v: number[] = [];
-        for (let i = 0; i < n + 3; i++) {
-          frame(); await idle();
-          const ms = await renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
-          if (i >= 3 && typeof ms === 'number') v.push(ms);
-        }
+        timingBusy = true;
+        try {
+          await renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+          for (let i = 0; i < n + 3; i++) {
+            frame(); await idle();
+            const ms = await renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+            if (i >= 3 && typeof ms === 'number') v.push(ms);
+          }
+        } finally { timingBusy = false; }
         v.sort((a, b) => a - b);
         return { frames: v.length, ms: v[v.length >> 1], p10: v[Math.floor(v.length * 0.1)], p90: v[Math.floor(v.length * 0.9)] };
       },

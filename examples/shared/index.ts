@@ -11,3 +11,7 @@ export { ASSET_SCENES, assetUrl, availableAssets, loadGLTF, modelBounds, onMirro
 
 /** Every procedural scene by id (no downloads needed). */
 export const SCENES: Record<string, SceneFactory> = { mirrorWall, offscreen, contact, roughnessRamp, boxRoom, moving, explainer, rooms, facingMirrors };
+export {
+  PROBE_LAYOUT_BUDGET, PROBE_LAYOUT_NAMES, PROBE_LAYOUT_SCENES, PROBE_LAYOUT_TOLERANCE, LAYOUT_SET_RESOLUTION, cubeBytes, floorSlab, gridProbes, hasProbeLayouts, layoutBytes, probeLayout,
+  type LayoutRegion, type ProbeLayout, type ProbeLayoutName,
+} from './probeLayouts';
