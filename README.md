@@ -24,6 +24,12 @@ const radiance = sampleReflectionProbes(probes, positionWorld, direction, roughn
 
 The probes are this library's: an engine-agnostic core (GGX prefilter, cube-array / 2D-array / octahedral layouts, a WGSL lookup with box projection and blending) under a three adapter. The adapter keeps the API of Ben Houston's three.js [#35046](https://github.com/mrdoob/three.js/pull/35046); the two were built side by side and have traded ideas and fixes the whole way, so code moves between them. On three r187 (the floor), which can't bind cube arrays yet, `await installCubeArraySupport(renderer)` (a self-tested runtime port of three.js [#35053](https://github.com/mrdoob/three.js/pull/35053)) lets the adapter store the cubes in a real cube array; without it they live in a 2D array (`layout: 'auto' | 'cube-array' | 'cube2d'`, `bakedLayout` shows which). Extensions over #35046: `sampleReflectionProbes`, `reflectionProbesLocal`, `originOffset`, live/time-sliced `bake`, `bake({ exclude })` (keep moving mirrors out of captures), `bake({ environment: false })`, `seamFix`, and irradiance re-fit.
 
+### Which materials get reflections
+
+Physically based materials do: `MeshStandardMaterial` and `MeshPhysicalMaterial`, and their node versions. The probes, screen-space reflections and ray-traced fallback all take the place of three's own specular environment term, so they follow each material's roughness, metalness and clearcoat.
+
+`MeshBasicMaterial`, `MeshLambertMaterial` and `MeshPhongMaterial` don't, by design (DIVERGES D2802). They have no physically based specular term to replace, and adding one would make a material that says "not shiny" shiny. A basic material's classic `envMap` and `reflectivity` still render the way three draws them, but SSR and the ray-traced pass don't feed them. If a surface needs reflections, give it a standard material: `roughness` and `metalness` replace Phong's `shininess` and `specular`.
+
 ## Packages
 
 | import | what |
