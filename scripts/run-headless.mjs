@@ -6,6 +6,7 @@
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | probe-layouts)
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
+//   pnpm check -- --only hit-source              # W53: the denoiser's hit source through the seam (needs the Denoiser repo's W53 branch)
 //   pnpm check -- --only probe-bindings          # W62: Sponza's three-size probe set at the default 16 sampled textures
 //   pnpm check -- --only probe-bindings-measure  # W62: Sponza with fewer probe sizes vs the path tracer (MAD, PSNR), lookup ms; out/w62-probe-bindings.json
 //   pnpm check -- --only probe-layouts-measure   # W61: probe layouts at equal memory, error vs RT / path tracer, seams, timing (minutes); out/w61-probe-layouts.json
@@ -1172,6 +1173,47 @@ async function haloOptionChecks(pages) {
   const dMix = await ct.T(`(${HALO_FRAME})({ hitLobeFilterMixed: 0 }, {}, false)`);
   check('halo options: hitLobeFilterMixed 0 changes the glossy px next to traced hits (contact, D3641)', dMix.darker + dMix.brighter > 0.0005,
     `px > 2/255 darker ${(dMix.darker * 100).toFixed(2)}%, brighter ${(dMix.brighter * 100).toFixed(2)}%`);
+}
+
+/**
+ * `--only hit-source` (W53, D3660-D3662): the showcase, carConcept at W50's view, RT on, AA off,
+ * 960x540. Off, the seam hands the denoiser no hit source; on (`setHitSource`), it builds one with
+ * screen-space and traced codes, the FFX denoiser takes it, and the frame changes, with no
+ * validation errors. Skipped (a note) when the denoiser has no `setOptions` (Denoiser repo before W53).
+ */
+async function hitSourceChecks(pages) {
+  const sc = await openPage(`http://127.0.0.1:${PORT}/showcase/?manual&scene=carConcept&rt=1&aa=off&w=960&h=540`);
+  pages.push(sc);
+  const r = await sc.T(`(async () => {
+    const p = window.__p;
+    if (!p.hybrid.denoiser?.setOptions) return { skip: true };
+    const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+    const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+    p.stop(); await p.setSources({ rt: true }); p.setCamera([0.491, 2.302, 5.617], [0, 0.25, 0]);
+    await p.step(60);
+    const A = await px(await p.shot());
+    const offSource = p.hybrid.denoiseSeam.hitSource;
+    p.setHitSource({ hitSource: true }); await p.step(60);
+    const B = await px(await p.shot());
+    const t = p.hybrid.denoiseSeam.hitSource, dev = p.ssr.device;
+    const bpr = Math.ceil(t.width * 4 / 256) * 256;
+    const buf = dev.createBuffer({ size: bpr * t.height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = dev.createCommandEncoder(); enc.copyTextureToBuffer({ texture: t }, { buffer: buf, bytesPerRow: bpr }, [t.width, t.height]); dev.queue.submit([enc.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const counts = [0, 0, 0, 0];
+    const raw = buf.getMappedRange();
+    for (let y = 0; y < t.height; y++) { const f = new Float32Array(raw, y * bpr, t.width); for (const v of f) counts[Math.min(3, Math.max(0, Math.round(v)))]++; }
+    buf.unmap(); buf.destroy();
+    const lum = (a, k) => 0.2126 * a[k] + 0.7152 * a[k + 1] + 0.0722 * a[k + 2];
+    let changed = 0; for (let k = 0; k < A.length; k += 4) if (Math.abs(lum(A, k) - lum(B, k)) > 2) changed++;
+    p.setHitSource({ hitSource: false }); await p.step(2);
+    return { offSource: !!offSource, counts, changed: changed / (A.length / 4), opts: p.hybrid.denoiser.options, offAgain: !!p.hybrid.denoiseSeam.hitSource, errors: p.gpuErrors.length };
+  })()`);
+  if (r.skip) { console.log('  note: hit-source skipped (the denoiser has no setOptions: point DENOISER_REPO at the W53 branch)'); return; }
+  const n = r.counts.reduce((a, b) => a + b, 0);
+  check('hit source (W53): off, the seam hands the denoiser none; on, screen-space and traced codes and the frame changes; off again clears the FFX option and the input',
+    !r.offSource && r.counts[1] > 0.01 * n && r.counts[2] > 0.01 * n && r.counts[3] === 0 && r.opts.separateHitSources === false && !r.offAgain && r.changed > 0.001 && r.errors === 0,
+    `codes miss ${(r.counts[0] / n * 100).toFixed(1)}% / screen ${(r.counts[1] / n * 100).toFixed(1)}% / traced ${(r.counts[2] / n * 100).toFixed(1)}%; px changed > 2/255: ${(r.changed * 100).toFixed(2)}%; errors ${r.errors}`);
 }
 
 /** D4301: limits for {@link missFillChecks}, from W37's measurement (see DIVERGES D4301). */
@@ -2796,6 +2838,7 @@ async function main() {
     }
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (only === 'halo-options') await haloOptionChecks(pages); // W52 (D3640-D3642)
+    if (only === 'hit-source') await hitSourceChecks(pages); // W53 (D3660-D3662)
     if (runs('probe-layouts')) await probeLayoutChecks(pages); // W61
     if (runs('probe-bindings')) await probeBindingChecks(pages); // W62
     if (only === 'probe-bindings-measure') await probeBindingMeasure(pages); // W62: the measurement (minutes), JSON to out/w62-probe-bindings.json
