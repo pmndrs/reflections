@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { PROBE_MAX_ATLASES, createProbeLayout, planProbeAtlases, probeBytes } from '@pmndrs/reflections-core';
 import {
-  LAYOUT_SET_RESOLUTION, PROBE_LAYOUT_BUDGET, PROBE_LAYOUT_NAMES, PROBE_LAYOUT_TOLERANCE, cubeBytes, gridProbes, probeLayout, type LayoutRegion, type ProbeVolume,
+  LAYOUT_SET_RESOLUTION, PROBE_LAYOUT_BUDGET, PROBE_LAYOUT_NAMES, PROBE_LAYOUT_TOLERANCE, cubeBytes, gridProbes, probeLayout, type LayoutRegion,
 } from '../examples/shared/probeLayouts';
+import type { ProbeVolume } from '../examples/shared/kit';
 
 // W61: the probe layouts at an equal memory budget (examples/shared/probeLayouts.ts). The pure
 // parts: every non-shipped layout within 10 % of the budget, at most four sizes and 41 probes per

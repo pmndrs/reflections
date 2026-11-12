@@ -268,6 +268,14 @@ async function main() {
 
   // ---- display ------------------------------------------------------------------------------------
   const uView = uniform(0);
+  /**
+   * W61: the probe views walk every volume per px; the display graph selects its view with `select`, which
+   * evaluates every branch, so they are compiled in only while one of them is shown (else a 33-volume layout
+   * paid ~10 ms at 1080p in 'final' for a view nobody looked at).
+   */
+  const PROBE_VIEWS: View[] = ['probeIndex', 'probeCount', 'probeData', 'probeCheck'];
+  let shownView: View = 'final';
+  let probeViewsBuilt = false;
   const uGrid = uniform(0);
   const tone = (c: N) => (renderOutput(c, THREE.ACESFilmicToneMapping, THREE.SRGBColorSpace) as N).rgb;
   const pipeline = new THREE.RenderPipeline(renderer);
@@ -315,7 +323,8 @@ async function main() {
     const mask = texture(maskTex, at);
     const dim = tone(c.lit).mul(0.35);
     // W61: the baked set's volume weights at this px's world position (../../shared/probeDebug.ts)
-    const pw = probeWeights(useProbes && probesEnabled ? probes : null, gbufferWorldPosition(ssr as N, at).P);
+    probeViewsBuilt = PROBE_VIEWS.includes(shownView);
+    const pw = probeWeights(probeViewsBuilt && useProbes && probesEnabled ? probes : null, gbufferWorldPosition(ssr as N, at).P);
     const litLuma: N = tone(c.lit).dot(vec3(0.2126, 0.7152, 0.0722));
     const bg = vec3(0.02, 0.03, 0.08);
     // tone-mapped views (LINEAR_VIEWS): linear while the upscaler runs, which tone-maps after it
@@ -720,6 +729,8 @@ async function main() {
     uGrid.value = v === 'grid' ? 1 : 0;
     uView.value = VIEWS.indexOf(v);
     viewSel.value = v;
+    shownView = v;
+    if (PROBE_VIEWS.includes(v) !== probeViewsBuilt && composite) buildDisplay();
   }
 
   await load(q.get('scene') ?? 'mirrorWall');

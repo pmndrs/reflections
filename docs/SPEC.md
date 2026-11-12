@@ -154,7 +154,30 @@ It works as follows:
 - Larger is not always better: offscreen's floor at 1024 read worse than at 512 (17.59 vs 17.53).
 - At most four sizes per set (`PROBE_MAX_ATLASES`, D4700). Each size is one atlas and one more sampled-texture binding in every lookup shader (WebGPU guarantees 16 per stage, shared with the G-buffer, SSR and denoiser inputs). The table header has one lane per atlas in two vec4 rows. Four power-of-two sizes, 128 to 1024, cover the useful range: below 128 only rough surfaces read well, and a 2048 probe is about 268 MB. Raising the cap needs more header rows and more of the binding budget. A set that uses one size compiles to the old single-atlas shader byte for byte.
 
-Memory per probe (rgba16float, 6 faces, every mip down to 8 px; verified by `probeBytes`): 1.05 MB at 128, 4.19 MB at 256, 16.8 MB at 512, 67 MB at 1024. Bake time grows roughly with the texels captured (offscreen, 3 probes + environment, 2 bounces: all 256 9.8 ms, floor 512 13.9, floor + mirror 512 18.4, all 512 24.8). The lookup cost doesn't depend on the sizes (offscreen render GPU 1.39-1.45 ms for every mix). Many small probes against a few large ones at equal memory is still open (HANDOFF backlog, "Probe count vs resolution").
+Memory per probe (rgba16float, 6 faces, every mip down to 8 px; verified by `probeBytes`): 1.05 MB at 128, 4.19 MB at 256, 16.8 MB at 512, 67 MB at 1024. Bake time grows roughly with the texels captured (offscreen, 3 probes + environment, 2 bounces: all 256 9.8 ms, floor 512 13.9, floor + mirror 512 18.4, all 512 24.8). The lookup cost doesn't depend on the sizes (offscreen render GPU 1.39-1.45 ms for every mix).
+
+**Many small or few large (W61, equal memory).** At 34.6 MB (8 x 256 px worth plus a 128 px environment slot), on rooms, offscreen and the showcase's Sponza, a systematic grid of 32 x 128 px probes never beat a few large, well-placed probes, and it cost the most GPU time. Error of the RT-off image against `?rt=1` over lit traced px (/255; rooms default / table / doorway, offscreen default / mirror, Sponza courtyard / low / aisle):
+- few (2 x 512): 13.3 / 6.7 / 26.4, 10.6 / 16.7, 5.3 / 8.3 / 3.6;
+- many (32 x 128): 13.3 / 8.1 / 25.6, 15.6 / 19.1, 6.3 / 9.1 / 3.7;
+- mixed (512 on mirror-grade floors, a 128 grid elsewhere): 14.4 / 10.2 / 24.3, 11.1 / 17.4, 5.0 / 8.3 / 3.4.
+
+Sponza against the path tracer (glossy px, courtyard / low) agrees. Probe term alone: shipped 32.4 / 40.7, few 24.3 / 33.4, medium 28.5 / 37.7, many 27.6 / 38.4, mixed 19.9 / 28.9. The RT-off result, SSR included: 29.5 / 36.4, 23.6 / 31.8, 24.4 / 33.8, 22.6 / 31.2, 17.4 / 23.5.
+
+The 33 volumes of the grid add 10-13 ms of lookup at 1080p over the probe-free frame (Apple M-series), against 0.3-0.5 ms for 2-7 volumes. three unrolls every volume into every lit material, and each costs a box test per pixel whether it covers the pixel or not. So the probe count, not the resolution, sets the lookup's cost.
+
+When to use what:
+- **Few large probes** whose boxes match the rooms (the walls are the proxy) are the default.
+- **Mixed sizes** are the best spend when a mirror-grade floor dominates: Sponza 5.0 / 8.3 / 3.4, offscreen within 1 of its 41.9 MB set at 35.6 MB. A three-size set is three atlas bindings in every material, and Sponza's glTF materials then need 18 sampled textures, past WebGPU's default 16 (D4804). Keep it to two sizes, or raise the limit.
+- **More probes** pay where a receiver sits far from any capture point inside one box (rooms' doorway: 26.4 -> 25.6) or where the boxes don't fit the rooms (Sponza's shipped seven: 7.5 / 15.1 / 6.1, against 6.3 / 9.1 / 3.7 for the grid). Even then, a handful of better-fitted boxes did as well.
+- A grid needs capture points clear of geometry. A capture next to a column paints the column into the floor's reflection, the dark blocks in `docs/research/w61/`.
+- Project each probe onto the room's walls, not onto its own cell: offscreen 63 vs 15.6, rooms 14.4 vs 13.3.
+
+Blend distance relative to spacing (b over a cell's shorter side s; our walk is one-sided, D4800):
+- On glossy floors (r ~0.06-0.12) wider blends hide the seams: b = 0.25-0.5 s. Sponza many 8.4 / 13.6 / 5.6 at 0.05 s, 6.3 / 9.1 / 3.7 at 0.25 s, 6.0 / 9.5 / 3.3 at 0.5 s; rooms 13.7 -> 12.9.
+- On near-mirror floors (r <= 0.02) a wide blend shows two captures at once. Offscreen many 14.3 at 0.05 s, 15.6 at 0.25 s, 18.2 at 0.5 s; medium 11.5 at 0.1 s vs 14.6 at 0.25 s; there the error sits in the blend band (32.8 vs 7.5 outside it).
+- Default to b = 0.25 s, and go down to 0.1 s for mirror floors.
+
+Limits: one atlas holds 256 / 6 = 42 cubes at WebGPU's default `maxTextureArrayLayers`. So 41 probes plus the environment slot fit at the set's own size, and 42 at any other size; past that the bake throws (`--only probe-layouts` checks both edges).
 
 **Where it goes:**
 
