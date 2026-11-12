@@ -25,7 +25,7 @@ import { hitSourceDenoiserOptions, hitSourceFromQuery } from '../../../shared/de
 import { probeLayout, type ProbeLayoutName } from '../../../shared/probeLayouts';
 import { setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } from '../specAA';
 import type { FloorKind } from '../scenes';
-import { carInteriorProbes, type CarProbesMode } from '../carProbes';
+import { carInteriorProbes, carWheels, type CarProbesMode } from '../carProbes';
 import {
   type CompareMethod, type MethodContext, type MethodId, type SetResult, destroyWebGPU, applySceneParams, applySpecAA, freshEnvironment, mergedParams, newCanvas, sceneInfo, syncCamera,
 } from './method';
@@ -178,6 +178,8 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
       ...(layout && layout.name !== 'shipped' ? { resolution: layout.resolution } : {}),
       ...(params.has('bounces') ? { bounces: Number(params.get('bounces')) } : {}), // default 2 (D4300)
       near: kit.bake.near, far: kit.bake.far,
+      // W55 experiment: ?carProbeCapture=noWheels leaves the wheels out of every capture (bake's exclude is set-wide)
+      ...(params.get('carProbeCapture') === 'noWheels' ? { exclude: carWheels(kit) } : {}),
     });
     [sc.backgroundIntensity, sc.backgroundBlurriness] = keep;
     bakeMs = performance.now() - t0;
@@ -387,7 +389,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   }
   /** Keys read only at creation (a Rebuild applies them). */
   const REBUILD = new Set(['bvh', 'bvhBuilder', 'rtShadingNormals', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
-    'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'bgBlur', 'bgIntensity', 'timestamps', 'shim']);
+    'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'bgBlur', 'bgIntensity', 'timestamps', 'shim']);
 
   return {
     id, canvas, scene: sceneInfo(kit),

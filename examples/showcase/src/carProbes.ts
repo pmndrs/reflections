@@ -18,8 +18,8 @@ import * as THREE from 'three/webgpu';
 import type { Vec3 } from '../../shared';
 import type { ShowcaseScene } from './scenes';
 
-export type CarProbesMode = 'off' | 'wheels' | 'cabin' | 'both';
-export const CAR_PROBES_MODES: CarProbesMode[] = ['off', 'wheels', 'cabin', 'both'];
+export type CarProbesMode = 'off' | 'wheels' | 'cabin' | 'both' | 'cabinGlass';
+export const CAR_PROBES_MODES: CarProbesMode[] = ['off', 'wheels', 'cabin', 'both', 'cabinGlass'];
 
 export interface CarProbeVolume {
   name: string;
@@ -33,10 +33,9 @@ export interface CarProbeVolume {
 const WHEEL = /^Wheel(Front|Rear)(L|R)$/;
 const STEP = 0.01;
 
-const isShell = (m: THREE.Material) => {
-  const p = m as THREE.MeshPhysicalMaterial;
-  return (p.transmission ?? 0) > 0 || /^(Paint|Mirror)/.test(m.name);
-};
+// by name too: the bench's ?glass=black makes the glass opaque before the probes are placed, and the box must not move
+const isGlass = (m: THREE.Material) => ((m as THREE.MeshPhysicalMaterial).transmission ?? 0) > 0 || /^Glass/.test(m.name);
+const isPaint = (m: THREE.Material) => /^(Paint|Mirror)/.test(m.name);
 
 /** World-space points of a mesh: every vertex, plus every triangle's centroid (catches big triangles). */
 function meshPoints(mesh: THREE.Mesh, out: number[], stride = 1) {
@@ -149,6 +148,13 @@ const volumeOf = (name: string, box: THREE.Box3, capture: THREE.Vector3, resolut
   };
 };
 
+/** carConcept's four wheel groups (W55 `?carProbeCapture=noWheels` hides them from every capture). */
+export function carWheels(kit: ShowcaseScene): THREE.Object3D[] {
+  const out: THREE.Object3D[] = [];
+  kit.hero?.traverse((o) => { if (WHEEL.test(o.name)) out.push(o); });
+  return out;
+}
+
 /**
  * carConcept's interior probes for `mode` (none for 'off' or another scene), each at `resolution` px
  * (null = the set's default). Volumes in world space, for `ReflectionProbe`s next to the stage probe.
@@ -157,16 +163,17 @@ export function carInteriorProbes(kit: ShowcaseScene, mode: CarProbesMode, resol
   if (mode === 'off' || kit.id !== 'carConcept' || !kit.hero) return [];
   const hero = kit.hero;
   hero.updateMatrixWorld(true);
-  const shell: number[] = [], all: number[] = [];
+  const shell: number[] = [], paint: number[] = [], all: number[] = [];
   const wheels: THREE.Object3D[] = [];
   hero.traverse((o) => {
     if (WHEEL.test(o.name)) wheels.push(o);
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
     meshPoints(mesh, all, 3);
-    if (([] as THREE.Material[]).concat(mesh.material).some(isShell)) meshPoints(mesh, shell);
+    const ms = ([] as THREE.Material[]).concat(mesh.material);
+    if (ms.some(isPaint)) { meshPoints(mesh, shell); meshPoints(mesh, paint); } else if (ms.some(isGlass)) meshPoints(mesh, shell);
   });
-  const shellPts = new Float32Array(shell), allPts = new Float32Array(all);
+  const shellPts = new Float32Array(shell), paintPts = new Float32Array(paint), allPts = new Float32Array(all);
   const out: CarProbeVolume[] = [];
 
   if (mode === 'wheels' || mode === 'both') {
@@ -198,7 +205,8 @@ export function carInteriorProbes(kit: ShowcaseScene, mode: CarProbesMode, resol
     }
   }
 
-  if (mode === 'cabin' || mode === 'both') {
+  // 'cabinGlass' (experiment): the cabin grown against the paint only, so it takes in the glass (and its reflection)
+  if (mode === 'cabin' || mode === 'both' || mode === 'cabinGlass') {
     const seats = new THREE.Box3();
     const mats = new THREE.Box3();
     hero.traverse((o) => {
@@ -208,7 +216,7 @@ export function carInteriorProbes(kit: ShowcaseScene, mode: CarProbesMode, resol
     const car = new THREE.Box3().setFromObject(hero, true);
     const cap = car.clone();
     if (!mats.isEmpty()) cap.min.y = mats.max.y;
-    const box = grow(seats.getCenter(new THREE.Vector3()), cap, shellPts);
+    const box = grow(seats.getCenter(new THREE.Vector3()), cap, mode === 'cabinGlass' ? paintPts : shellPts);
     const capture = clearest(gridIn(box, 8), allPts) ?? box.getCenter(new THREE.Vector3());
     out.push(volumeOf('cabin', box, capture, resolution));
   }
