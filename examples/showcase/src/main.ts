@@ -43,6 +43,7 @@ import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type 
 import { ScreenSpaceAO } from '../../shared/ao';
 import { LINEAR_VIEWS, VIEWS, VIEW_IDS, VIEW_LEGENDS, buildDebugViews, type View } from './debugViews';
 import { SHOWCASE, type FloorKind, type ShowcaseEntry, type ShowcaseScene } from './scenes';
+import { geometryRoughnessFromQuery, setGeometryRoughness } from './geometryRoughness';
 import { SPEC_AA_DEFAULT, setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } from './specAA';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -311,6 +312,7 @@ async function main() {
     setPose(Object.keys(kit.views)[0]);
     state.exposure = kit.exposure;
     if (state.specAA > 0) { specAAStrength.value = state.specAA; setSpecularAA(kit.scene, true); }
+    setGeometryRoughness(kit.scene, geometryRoughnessFromQuery(q)); // W56: ?geometryRoughness=three|off|<scale> (URL only)
     delete ssr.settings.depthBufferThickness; delete ssr.settings.thicknessRoughnessFactor;
     if (kit.thickness) Object.assign(ssr.settings, kit.thickness);
     renderer.toneMappingExposure = state.exposure;

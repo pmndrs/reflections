@@ -7,6 +7,7 @@ import { assetUrl } from '../../../shared';
 import type { ShowcaseEntry, ShowcaseScene } from '../scenes';
 import type { CameraView } from '../../../shared';
 import { SPEC_AA_DEFAULT, setSpecularAA, specAAFromQuery, specAAStrength } from '../specAA';
+import { geometryRoughnessFromQuery, setGeometryRoughness } from '../geometryRoughness';
 
 export type MethodId = 'ours-raw' | 'ours-denoised' | 'ours-rt' | 'probes' | 'three-raw' | 'three-denoise' | 'three-ffx' | 'pathtraced';
 
@@ -193,6 +194,15 @@ export function applySceneParams(kit: ShowcaseScene, params: URLSearchParams) {
  * reference and supersamples the normal maps itself). Returns the strength (0 = off) and the number of
  * materials changed.
  */
+/**
+ * W56 (D3720): three's geometry roughness off / scaled for a raster method's scene (`?geometryRoughness=three|off|<scale>`),
+ * after specAA and before the bake. The path tracer never calls this. Returns the mode and the number of materials changed.
+ */
+export function applyGeometryRoughness(kit: ShowcaseScene, params: URLSearchParams) {
+  const mode = geometryRoughnessFromQuery(params);
+  return { mode, materials: setGeometryRoughness(kit.scene, mode) };
+}
+
 export function applySpecAA(kit: ShowcaseScene, params: URLSearchParams) {
   const strength = specAAFromQuery(params, SPEC_AA_DEFAULT);
   if (strength <= 0) return { strength: 0, materials: 0 };

@@ -28,7 +28,7 @@ import { setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } fro
 import type { FloorKind } from '../scenes';
 import { carInteriorProbes, carWheels, type CarProbesMode } from '../carProbes';
 import {
-  type CompareMethod, type MethodContext, type MethodId, type SetResult, destroyWebGPU, applySceneParams, applySpecAA, freshEnvironment, mergedParams, newCanvas, sceneInfo, syncCamera,
+  type CompareMethod, type MethodContext, type MethodId, type SetResult, destroyWebGPU, applySceneParams, applySpecAA, applyGeometryRoughness, freshEnvironment, mergedParams, newCanvas, sceneInfo, syncCamera,
 } from './method';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -111,6 +111,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   const floorRoughness0 = kit.floor.roughness;
   applySceneParams(kit, params);
   const specAA = applySpecAA(kit, params);
+  const geoRough = applyGeometryRoughness(kit, params); // W56
   const camera = kit.camera;
   delete ssr.settings.depthBufferThickness; delete ssr.settings.thicknessRoughnessFactor;
   if (kit.thickness) Object.assign(ssr.settings, kit.thickness);
@@ -405,7 +406,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   }
   /** Keys read only at creation (a Rebuild applies them). */
   const REBUILD = new Set(['bvh', 'bvhBuilder', 'rtShadingNormals', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
-    'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'bgBlur', 'bgIntensity', 'timestamps', 'shim']);
+    'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity', 'timestamps', 'shim']);
 
   return {
     id, canvas, scene: sceneInfo(kit),
@@ -440,7 +441,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     info: () => ({
       samplesPerQuad: ssr.settings.samplesPerQuad ?? 1, hitColor: hit, hitShading: ssr.settings.hitShading,
       hitShadeVisibility: ssr.traceSettings.hitShadeVisibility ?? 'offscreen', hitLobeFilterMixed: ssr.settings.hitLobeFilterMixed ?? 1, hitShadeOcclusion: ssr.settings.hitShadeOcclusion ?? 'off', denoiser: denoiser ? { ...denoiserOpts } : null,
-      thickness: kit.thickness ?? 'default', rayTracing: ssr.rayTracing, provider: providerInfo, probes: probes.bakedProbes.length, probeLayout: layout?.name ?? null, carProbes: carVolumes.map((v) => v.name), atlases: probes.bakedResolutions, specAA,
+      thickness: kit.thickness ?? 'default', rayTracing: ssr.rayTracing, provider: providerInfo, probes: probes.bakedProbes.length, probeLayout: layout?.name ?? null, carProbes: carVolumes.map((v) => v.name), atlases: probes.bakedResolutions, specAA, geometryRoughness: geoRough,
       aa: aa ? { mode: aa.mode, ratio: aa.ratio, renderSize: [RW, RH] } : 'off', bakeMs,
       varianceGuidedTracing: 'off (the seam passes no variance back to the tracer)',
     }),

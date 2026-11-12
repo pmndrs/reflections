@@ -33,7 +33,7 @@ import { ffxReflections } from '@pmndrs/denoiser-three-ffx';
 import { DisplayAA, aaFromQuery, renderSize, type AAMode } from '../../../shared/antialias';
 import { setSpecularAA, specAAFromQuery, specAAStrength } from '../specAA';
 import type { FloorKind } from '../scenes';
-import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, applySceneParams, applySpecAA, freshEnvironment, mergedParams, newCanvas, sceneInfo, syncCamera } from './method';
+import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, applySceneParams, applySpecAA, applyGeometryRoughness, freshEnvironment, mergedParams, newCanvas, sceneInfo, syncCamera } from './method';
 import { toneOf } from './ours';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -91,6 +91,7 @@ export async function createThreeSSR(id: Extract<MethodId, 'three-raw' | 'three-
   const floorRoughness0 = kit.floor.roughness;
   applySceneParams(kit, params);
   const specAA = applySpecAA(kit, params);
+  const geoRough = applyGeometryRoughness(kit, params); // W56
   const { scene, camera } = kit;
   // one velocity node per method: the display AA hands it the unjittered projection (a shared node would take
   // whichever method set it last); without AA it reads the camera's own projection, as three's `velocity`
@@ -221,7 +222,7 @@ export async function createThreeSSR(id: Extract<MethodId, 'three-raw' | 'three-
   if (tr) for (const [k, d] of Object.entries(REPROJECT)) live[`th.rp.${k}`] = (v) => { tr[k].value = v === null ? d : parseTh(d, v); };
   if (dn) for (const [k, d] of Object.entries(DENOISE)) live[`th.dn.${k}`] = (v) => { dn[k].value = v === null ? d : parseTh(d, v); };
   const REBUILD = new Set(['th.stepExponent', 'th.resolutionScale', 'th.binaryRefine', 'th.screenEdgeFadeBlack', 'th.ffx.tsf', 'th.ffx.roughnessThreshold', 'tone',
-    'keyLight', 'paintRoughness', 'bgBlur', 'bgIntensity']);
+    'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity']);
 
   return {
     id, canvas, scene: sceneInfo(kit),
@@ -261,7 +262,7 @@ export async function createThreeSSR(id: Extract<MethodId, 'three-raw' | 'three-
       },
       ...(id === 'three-denoise' ? { temporalReproject: REPROJECT, recurrentDenoise: DENOISE } : {}),
       ...(id === 'three-ffx' ? { ffx: 'ffxReflections defaults (roughnessThreshold 1, temporalStabilityFactor 0.7) unless th.ffx.*, SSR history = FFX output' } : {}),
-      envSpecularInLighting: 'off (the example patch)', probes: 'none', specAA, aa: aa ? { mode: aa.mode, ratio: aa.ratio } : 'off',
+      envSpecularInLighting: 'off (the example patch)', probes: 'none', specAA, geometryRoughness: geoRough, aa: aa ? { mode: aa.mode, ratio: aa.ratio } : 'off',
     }),
     gpuErrors: () => errors,
     dispose() { aa?.dispose(); motionRT.dispose(); destroyWebGPU(renderer as N); },
