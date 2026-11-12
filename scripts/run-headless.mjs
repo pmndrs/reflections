@@ -2083,6 +2083,11 @@ async function main() {
       check('rt probe fallback (misses + hit shading): constant probes = constant fallback', rt.stats && rt.stats.hits > 0 && rt.stats.tracedMisses > 0 && rt.constantVsProbes === 0,
         `${rt.constantVsProbes} px differ; ${rt.stats?.hits} hits, ${rt.stats?.tracedMisses} traced misses, trace changed ${rt.changedByTrace} px`);
       check('rt probe fallback: structured probes reach the traced frame', rt.structuredVsConstant > r.sssr.pixels * 0.05 && rt.changedByTrace > 0, `${rt.structuredVsConstant} of ${r.sssr.pixels} px`);
+      // W47 (D4702): core probeHitShading over a set with probes of two sizes (the wall's probe in atlas 1)
+      const hz = r.sssr.hitSizes;
+      check(`rt probe hit shading: slot sizes ${hz.mixed.sizes.join('/')} in ${hz.mixed.atlases} atlases = a one-size set at the wall probe's size, and its probe reaches the hits (D4702)`,
+        hz.errors.length === 0 && hz.mixed.atlases === 2 && hz.mixed.wgslAtlasBindings === 2 && hz.one.wgslAtlasBindings === 1 && hz.vsOneSize === 0 && hz.hits > 100 && hz.wallProbeReaches > 100,
+        hz.errors.length ? hz.errors.join(' | ') : `${hz.vsOneSize} px differ from the one-size set; the wall probe's capture changes ${hz.wallProbeReaches} of ${r.sssr.pixels} px (${hz.hits} traced hits)`);
     }
 
     if (runs('probe-bench')) {

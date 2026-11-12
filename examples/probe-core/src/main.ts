@@ -14,7 +14,7 @@
 //             bit; a structured capture must change the fallback pixels
 import {
   ProbeSet, probeLookupWgsl, ProbeCaptureRemap, LayoutPrefilter, createProbeLayout, maxLodFor, CAPTURE_MIRROR_X, CAPTURE_MIRROR_Y, CAPTURE_BABYLON_FACES, CAPTURE_CAMERA_FACES, type ProbeCaptureTransform,
-  createScreenSpaceReflections, createTracedReflections, constantRadianceFallback, type TraceProvider, type TracedReflectionsStats, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
+  createScreenSpaceReflections, createTracedReflections, constantRadianceFallback, probeHitShading, type HitShading, type TraceProvider, type TracedReflectionsStats, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
   type FrameInputs, type ProbeLayoutId, type ProbeSetFormat, type ProbeVolume, type ScreenSpaceReflectionsInputs, reflectionsRequiredLimits,
 } from '@pmndrs/reflections/core';
 import { lookAt, perspective, SCENE_WGSL } from '../../sssr-core/src/scene';
@@ -88,6 +88,25 @@ async function main() {
     device.queue.submit([enc.finish()]);
     return t;
   });
+
+  // W47: a test capture of `kind` at any face size (cached; `cubes` holds SOURCE's)
+  const sizedCubes = new Map<string, GPUTexture>();
+  const sizedCube = (size: number, kind: number) => {
+    if (size === SOURCE) return cubes[kind];
+    const key = `${size}:${kind}`;
+    let t = sizedCubes.get(key);
+    if (t) return t;
+    t = device.createTexture({ size: [size, size, 6], format: 'rgba16float', usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC });
+    const u = device.createBuffer({ size: 16, usage: U.UNIFORM | U.COPY_DST });
+    device.queue.writeBuffer(u, 0, new Uint32Array([size, kind, 0, 0]));
+    const enc = device.createCommandEncoder();
+    const p = enc.beginComputePass(); p.setPipeline(cubePipe);
+    p.setBindGroup(0, device.createBindGroup({ layout: cubePipe.getBindGroupLayout(0), entries: [{ binding: 0, resource: t.createView({ dimension: '2d-array' }) }, { binding: 1, resource: { buffer: u } }] }));
+    p.dispatchWorkgroups(Math.ceil(size / 8), Math.ceil(size / 8), 6); p.end();
+    device.queue.submit([enc.finish()]);
+    sizedCubes.set(key, t);
+    return t;
+  };
 
   // the probes example's rooms: two rooms and a doorway probe that wins where they overlap
   const volumes: ProbeVolume[] = [
@@ -489,12 +508,13 @@ fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
 }`,
     };
     let rtStats: TracedReflectionsStats | null = null;
-    const radianceOf = async (fallback: Parameters<typeof createScreenSpaceReflections>[1]['radianceFallback'], group?: GPUBindGroup, traced = false) => {
+    const radianceOf = async (fallback: Parameters<typeof createScreenSpaceReflections>[1]['radianceFallback'], group?: GPUBindGroup, traced = false,
+      shading?: { hitShading: HitShading; group: GPUBindGroup }) => {
       const ssr = createScreenSpaceReflections(device, { width: W, height: H, radianceFallback: fallback, missList: traced });
-      const rt = traced ? createTracedReflections(device, { width: W, height: H, provider: wall, radianceFallback: fallback }) : null;
+      const rt = traced ? createTracedReflections(device, { width: W, height: H, provider: wall, radianceFallback: fallback, hitShading: shading?.hitShading }) : null;
       const enc = device.createCommandEncoder();
       ssr.dispatch(enc, { ...inputs, fallbackBindGroup: group }, settings);
-      rt?.dispatch(enc, { tracer: ssr, inputs, fallbackBindGroup: group }, { fallbackColor: C });
+      rt?.dispatch(enc, { tracer: ssr, inputs, fallbackBindGroup: group, hitShadingBindGroup: shading?.group }, { fallbackColor: C });
       const out = ssr.outputs.radiance;
       const row = Math.ceil((W * 8) / 256) * 256;
       const rb = device.createBuffer({ size: row * H, usage: U.MAP_READ | U.COPY_DST });
@@ -531,10 +551,49 @@ fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
     const rtConstant = await radianceOf(constantRadianceFallback(), undefined, true);
     const rtViaProbes = await radianceOf(cfb, cfb.bindGroup, true);
     const rtStructured = await radianceOf(sfb, sfb.bindGroup, true);
+    // W47 (D4702): core probeHitShading over a set with probes of two sizes. The wall's probe (slot 1,
+    // 4 x SOURCE: atlas 1, not the primary) covers every wall hit at weight 1; the grey hits are lit by
+    // the lookup along N. The traced frame must equal a one-size set at 4 x SOURCE, half for half;
+    // and the wall probe's content must reach it (vs the same set with another capture there). Before
+    // the fix the shading did not compile over a multi-size set (its uniform and atlas 1 both at
+    // binding 3 of group 3).
+    const hitSizes = async () => {
+      const shaded = async (slotSizes: number[] | undefined, sourceSize: number, wallKind: number) => {
+        const set = new ProbeSet(device, { capacity: 2, sourceSize, slotSizes });
+        const enc = device.createCommandEncoder();
+        set.capture(enc, 0, sizedCube(set.slotSize(0), 0));
+        set.capture(enc, 1, sizedCube(set.slotSize(1), wallKind));
+        set.captureEnvironment(enc, sizedCube(set.slotSize(2), 3));
+        device.queue.submit([enc.finish()]);
+        set.setVolumes([{ slot: 1, center: [0, 2, -6], halfSize: [6, 4, 1.5], projectionSize: [16, 6, 12], fade: 0.1 }]);
+        set.update();
+        const hitShading = probeHitShading(device, set);
+        hitShading.setLighting(1);
+        const group = hitShading.createBindGroup({ atlas: set.atlasView, sampler: set.sampler, table: set.table, atlases: set.atlasViews.slice(1) });
+        device.pushErrorScope('validation');
+        const px = await radianceOf(constantRadianceFallback(), undefined, true, { hitShading, group });
+        const err = await device.popErrorScope();
+        const info = { atlases: set.atlases.length, sizes: set.plan.resolutions, wgslAtlasBindings: (hitShading.wgsl.match(/@group\(3\) @binding\(\d+\) var pr_atlas/g) ?? []).length };
+        hitShading.destroy(); set.dispose();
+        return { px, err: err?.message ?? null, info };
+      };
+      const sizes = [SOURCE, 4 * SOURCE];
+      const mixed = await shaded(sizes, SOURCE, 1);
+      const one = await shaded(undefined, 4 * SOURCE, 1);
+      const other = await shaded(sizes, SOURCE, 0);
+      const exact = (a: Uint16Array, b: Uint16Array) => { let n = 0; for (let i = 0; i < a.length; i += 4) for (let c = 0; c < 3; c++) if (a[i + c] !== b[i + c]) { n++; break; } return n; };
+      return {
+        mixed: mixed.info, one: one.info, errors: [mixed.err, one.err, other.err].filter((e) => e !== null).map((e) => e!.slice(0, 160)),
+        vsOneSize: exact(mixed.px, one.px), wallProbeReaches: differing(mixed.px, other.px), hits: (rtStats as TracedReflectionsStats | null)?.hits ?? 0,
+      };
+    };
+    const rtRes = { stats: rtStats as TracedReflectionsStats | null, constantVsProbes: differing(rtConstant, rtViaProbes), structuredVsConstant: differing(rtConstant, rtStructured), changedByTrace: differing(viaProbes, rtViaProbes) };
+    const hitSizesRes = await hitSizes();
     const res = {
       pixels: W * H, constantVsProbes: differing(constant, viaProbes), structuredVsConstant: differing(constant, structured),
-      rt: { stats: rtStats as TracedReflectionsStats | null, constantVsProbes: differing(rtConstant, rtViaProbes), structuredVsConstant: differing(rtConstant, rtStructured), changedByTrace: differing(viaProbes, rtViaProbes) },
+      rt: rtRes, hitSizes: hitSizesRes,
     };
+    say(`rt hit shading over slot sizes (D4702): ${JSON.stringify(hitSizesRes)}`);
     say(`sssr fallback: constant probes vs constant fallback ${res.constantVsProbes} px differ; structured probes change ${res.structuredVsConstant} of ${res.pixels} px`);
     say(`rt (analytic wall): ${JSON.stringify(res.rt)}`);
     cset.dispose(); sset.dispose();
