@@ -17,7 +17,8 @@
 //
 // What the walk gives back: `BvhHit.t / triangle / barycentrics / frontFace` map one to one onto
 // core's `Hit`; `BvhHit.instance` is the input instance's position; `BvhHit.normal` is the world
-// geometric normal of the authored front side; `BvhHit.material` is the instance's material.
+// geometric normal of the authored front side; `BvhHit.material` is the triangle's material
+// (`BvhMeshGeometry.triangleMaterials`, W49) when it has one, else the instance's.
 // `traceAny` (shadow rays, D903) is its `bvhTraceAny`. `traceHitShadingNormal` (D1700) interpolates
 // the caller's vertex normals (`BvhMeshGeometry.normals`) at `BvhHit.triangle` (the input triangle,
 // not the tree-order slot) with `BvhHit.barycentrics`, through the instance's normal matrix.
@@ -28,8 +29,11 @@ import type { BindingSlot, ModuleBindingEntry, TraceProvider } from './provider'
 /** The @pmndrs/bvh GPU layout version this wrapper was written against (`GPU_LAYOUT_VERSION`). */
 export const PMNDRS_BVH_LAYOUT_VERSION = 2;
 
-/** The largest material index @pmndrs/bvh's instance records hold (its `MAX_MATERIAL`, layout 2). */
+/** The largest material index @pmndrs/bvh's instance and triangle records hold (its `MAX_MATERIAL`, layout 2). */
 export const PMNDRS_BVH_MAX_MATERIAL = 65534;
+
+/** A {@link BvhMeshGeometry.triangleMaterials} entry for "no material here": the hit takes its instance's (@pmndrs/bvh's `TRIANGLE_MATERIAL_NONE`). */
+export const PMNDRS_BVH_TRIANGLE_MATERIAL_NONE = 0xffff;
 
 /** One mesh's geometry in object space (what @pmndrs/bvh's builders take). */
 export interface BvhMeshGeometry {
@@ -42,6 +46,14 @@ export interface BvhMeshGeometry {
    * shaded with them interpolated (D1700). Omit for flat shading with the geometric normal.
    */
   readonly normals?: Float32Array | null;
+  /**
+   * One material per triangle (an index into the scene's `materials`, at most
+   * {@link PMNDRS_BVH_MAX_MATERIAL}), or {@link PMNDRS_BVH_TRIANGLE_MATERIAL_NONE} where the
+   * instance's applies (W49, D1701). A mesh with several materials (three's `geometry.groups` with a
+   * material array) is one mesh and one instance whose triangles carry their group's. Omit for the
+   * instance's material everywhere.
+   */
+  readonly triangleMaterials?: Uint16Array | Uint32Array | null;
 }
 
 /** One placed copy of a mesh. */
@@ -50,7 +62,7 @@ export interface BvhTraceInstance {
   readonly mesh: number;
   /** Object-to-world, column-major 4x4 (any engine's matrix layout). Mirrors and non-uniform scales are fine. */
   readonly matrixWorld: ArrayLike<number>;
-  /** Index into `materials` (at most {@link PMNDRS_BVH_MAX_MATERIAL}); omit for the default grey. */
+  /** Index into `materials` (at most {@link PMNDRS_BVH_MAX_MATERIAL}); omit for the default grey. Triangles with their own (`BvhMeshGeometry.triangleMaterials`) take theirs. */
   readonly material?: number;
 }
 
@@ -377,7 +389,8 @@ function packShading(materials: readonly BvhTraceMaterial[], instances: readonly
  * Build @pmndrs/bvh trees over engine-free geometry and wrap them as a {@link TraceProvider}.
  * Loads @pmndrs/bvh on first use and checks its `GPU_LAYOUT_VERSION`. The mesh trees come from
  * H-PLOC on the GPU when the device has `subgroups`, from tinybvh otherwise (`options.builder`).
- * `Hit.instance` is the instance's position in `scene.instances`; `Hit.material` its `material`.
+ * `Hit.instance` is the instance's position in `scene.instances`; `Hit.material` the hit triangle's
+ * entry of its mesh's `triangleMaterials` when it has one, else the instance's `material`.
  */
 export async function createPmndrsBvhTraceProvider(
   device: GPUDevice,
@@ -400,6 +413,19 @@ export async function createPmndrsBvhTraceProvider(
       throw new RangeError(`instance uses material ${instance.material}; there are ${materials.length}`);
     }
   }
+  // per-triangle materials (W49): @pmndrs/bvh checks the range (0-65534 or none); we check the table
+  scene.meshes.forEach((mesh, i) => {
+    const tm = mesh.triangleMaterials;
+    if (!tm) return;
+    const triangles = mesh.indices ? Math.floor(mesh.indices.length / 3) : Math.floor(mesh.positions.length / 9);
+    if (tm.length < triangles) throw new RangeError(`mesh ${i}: triangleMaterials has ${tm.length} entries for ${triangles} triangles`);
+    for (let t = 0; t < triangles; t++) {
+      const m = tm[t];
+      if (m !== PMNDRS_BVH_TRIANGLE_MATERIAL_NONE && m !== NO_MATERIAL && !(m < materials.length)) {
+        throw new RangeError(`mesh ${i}: triangle ${t} uses material ${m}; there are ${materials.length}`);
+      }
+    }
+  });
   const data = bvh.assembleTraceScene(layouts, scene.instances.map((instance, i) => ({
     meshIndex: instance.mesh, instanceIndex: i, objectToWorld: instance.matrixWorld, material: instance.material,
   })));

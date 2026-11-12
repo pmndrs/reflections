@@ -1,0 +1,13 @@
+
+> @pmndrs/reflections@0.0.0 check /Users/dex/Developer/reflections/.claude/worktrees/agent-a1dc9a978fc07805a
+> node scripts/run-headless.mjs -- --only rt-materials --rt-material-assets
+
+examples/ssr (?rt=1, multiMaterial):
+  [PASS] rt three-mesh-bvh port: each material of a multi-material mesh at its own triangles, camera rays (D1701) - of 2552 hits (2 multi-material meshes, 12 groups): green emissive 321/321 (first material's colour 251), red 215/215 (first material's colour 195), mirror floor (alone) 1982/1982, blue (one material) (alone) 34/34
+  [PASS] rt three-mesh-bvh port: each material of a multi-material mesh at its own triangles, scene rays (D1701) - of 1766 hits (2 multi-material meshes, 12 groups): mirror floor (alone) 1617/1617, green emissive 71/71 (first material's colour 46), red 64/64 (first material's colour 43), blue (one material) (alone) 14/14
+  saved out/ssr-rt-multi-material-three-mesh-bvh-port.png
+  (info) rt three-mesh-bvh port materials, sponza: 124 meshes, 0 with a material array (0 groups); 3987 camera hits on 22 materials, 0 with another material's colour
+  (info) rt three-mesh-bvh port materials, toyCar: 4 meshes, 0 with a material array (0 groups); 3395 camera hits on 4 materials, 0 with another material's colour
+  (info) rt three-mesh-bvh port materials, carConcept: 110 meshes, 0 with a material array (0 groups); 3429 camera hits on 9 materials, 0 with another material's colour
+FAILED: timed out
+ ELIFECYCLE  Command failed with exit code 3.
