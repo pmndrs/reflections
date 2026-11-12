@@ -31,7 +31,7 @@ export interface PixiProbe {
   priority?: number;
 }
 
-export interface PixiProbeSetOptions extends Partial<Pick<ProbeSetOptions, 'sourceSize' | 'format' | 'dominantDirection' | 'lodMapping'>> {
+export interface PixiProbeSetOptions extends Partial<Pick<ProbeSetOptions, 'sourceSize' | 'format' | 'dominantDirection' | 'lodMapping' | 'slotSizes'>> {
   /** Probe slots. Default 1. */
   capacity?: number;
   /** An environment slot (the sky for what no probe covers). Default true. */
@@ -107,6 +107,9 @@ export class PixiProbeSet {
   readonly set: ProbeSet;
   private probes: PixiProbe[] = [];
   private readonly cube: GPUTexture;
+  /** Capture cubes of other face sizes (`slotSizes`, D4700), made on first use. */
+  private readonly cubes = new Map<number, GPUTexture>();
+  private lastCube: GPUTexture;
   private hemisphere: { pipeline: GPUComputePipeline; params: GPUBuffer; group: GPUBindGroup } | null = null;
   private stack: GPUComputePipeline | null = null;
 
@@ -120,16 +123,29 @@ export class PixiProbeSet {
       dominantDirection: options.dominantDirection,
       lodMapping: options.lodMapping,
       environment: options.environment ?? true,
+      slotSizes: options.slotSizes,
     });
-    const n = this.set.sourceSize;
-    this.cube = this.device.createTexture({
-      label: 'pixi probe capture', size: [n, n, 6], format: 'rgba16float',
-      usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC,
-    });
+    this.lastCube = this.cube = this.cubeFor(this.set.sourceSize);
   }
 
-  /** Face size in pixels: the size `captureFaces()` wants. */
+  /** The capture cube of `n` px faces (rgba16float, 6 layers). */
+  private cubeFor(n: number): GPUTexture {
+    let t = this.cubes.get(n);
+    if (t === undefined) {
+      t = this.device.createTexture({
+        label: 'pixi probe capture', size: [n, n, 6], format: 'rgba16float',
+        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC,
+      });
+      this.cubes.set(n, t);
+    }
+    return t;
+  }
+
+  /** Face size in pixels: the size `captureFaces()` wants (slots with their own `slotSizes` entry: {@link faceSizeOf}). */
   get faceSize() { return this.set.sourceSize; }
+
+  /** Face size `captureFaces( slot, ... )` wants (D4700). */
+  faceSizeOf(slot: number) { return this.set.slotSize(slot); }
 
   /** Local probes contribute (off: the environment slot only). */
   get enabled() { return this.set.enabled; }
@@ -157,7 +173,8 @@ export class PixiProbeSet {
    */
   captureFaces(slot: number, faces: readonly Texture[]) {
     if (faces.length !== 6) throw new Error(`PixiProbeSet: captureFaces wants 6 faces, got ${faces.length}`);
-    const n = this.set.sourceSize;
+    const n = this.set.slotSize(slot);
+    const cube = (this.lastCube = this.cubeFor(n));
     const device = this.device;
     const views = faces.map((face, layer) => {
       const src = getGPUTexture(this.renderer, face);
@@ -170,7 +187,7 @@ export class PixiProbeSet {
     });
     const group = device.createBindGroup({
       label: 'pixi probe faces', layout: this.stack.getBindGroupLayout(0),
-      entries: [...views.map((resource, binding) => ({ binding, resource })), { binding: 6, resource: this.cube.createView({ dimension: '2d-array' }) }],
+      entries: [...views.map((resource, binding) => ({ binding, resource })), { binding: 6, resource: cube.createView({ dimension: '2d-array' }) }],
     });
     const encoder = device.createCommandEncoder({ label: `pixi probe capture ${slot}` });
     const pass = encoder.beginComputePass({ label: 'pixi probe faces' });
@@ -178,7 +195,7 @@ export class PixiProbeSet {
     pass.setBindGroup(0, group);
     pass.dispatchWorkgroups(Math.ceil(n / 8), Math.ceil(n / 8), 6);
     pass.end();
-    this.set.capture(encoder, slot, this.cube);
+    this.set.capture(encoder, slot, cube);
     device.queue.submit([encoder.finish()]);
   }
 
@@ -210,15 +227,17 @@ export class PixiProbeSet {
     pass.dispatchWorkgroups(Math.ceil(n / 8), Math.ceil(n / 8), 6);
     pass.end();
     this.set.capture(encoder, this.set.environmentSlot, this.cube);
+    this.lastCube = this.cube;
     device.queue.submit([encoder.finish()]);
   }
 
   /** @internal the capture cube (rgba16float, 6 layers): the last capture. */
-  get captureTexture() { return this.cube; }
+  get captureTexture() { return this.lastCube; }
 
   dispose() {
     this.hemisphere?.params.destroy();
-    this.cube.destroy();
+    for (const t of this.cubes.values()) t.destroy();
+    this.cubes.clear();
     this.set.dispose();
   }
 }

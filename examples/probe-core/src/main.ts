@@ -221,6 +221,7 @@ async function main() {
     say(`constant capture: max rel err ${constErr.toExponential(2)}; re-fit x2: ${refitErr.toExponential(2)}; specular occlusion: ${soErr.toExponential(2)}`);
 
     result.mixed = await mixed();
+    result.sizes = await sizes();
     result.transform = await transform();
     result.sssr = await sssr();
     return result;
@@ -344,6 +345,101 @@ ${cfgs.map((c, k) => `  outv[${cfgs.length * 2}u * i + ${2 * k}u] = probeRadianc
       res.push({ layout: cfgs[k].layout, suffix: cfgs[k].suffix, maxAbs });
     }
     say(`mixed layouts in one module vs their own: ${res.map((r) => `${r.layout} max ${r.maxAbs}`).join(', ')}`);
+    return res;
+  }
+
+  /**
+   * W60 (D4700): ProbeSet `slotSizes`. Three disjoint probes (slots 0..2 at SOURCE, 4 x SOURCE, 2 x SOURCE:
+   * three atlases, the environment in SOURCE's), looked up deep inside each (weight 1) and outside
+   * every volume (the environment), plain and re-fit by a constant frame irradiance (the irradiance
+   * slots across atlases): each must equal a one-size set at that slot's size, bit for bit. Per layout
+   * cube-hw and cube2d-warp; the lookup module binds the extra atlases at 3.. of the set's group.
+   */
+  async function sizes() {
+    const sizes = [SOURCE, 4 * SOURCE, 2 * SOURCE];
+    const kinds = [0, 1, 3, 0];
+    const cubeAt = new Map<string, GPUTexture>();
+    const cube = (size: number, kind: number) => {
+      const key = `${size}:${kind}`;
+      let t = cubeAt.get(key);
+      if (t) return t;
+      t = device.createTexture({ size: [size, size, 6], format: 'rgba16float', usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC });
+      const u = device.createBuffer({ size: 16, usage: U.UNIFORM | U.COPY_DST });
+      device.queue.writeBuffer(u, 0, new Uint32Array([size, kind, 0, 0]));
+      const enc = device.createCommandEncoder();
+      const p = enc.beginComputePass(); p.setPipeline(cubePipe);
+      p.setBindGroup(0, device.createBindGroup({ layout: cubePipe.getBindGroupLayout(0), entries: [{ binding: 0, resource: t.createView({ dimension: '2d-array' }) }, { binding: 1, resource: { buffer: u } }] }));
+      p.dispatchWorkgroups(Math.ceil(size / 8), Math.ceil(size / 8), 6); p.end();
+      device.queue.submit([enc.finish()]);
+      cubeAt.set(key, t);
+      return t;
+    };
+    const vols: ProbeVolume[] = [-20, 0, 20].map((x, slot) => ({ slot, center: [x, 0, 0], halfSize: [3, 3, 3], projectionSize: [8, 8, 8], fade: 0.1 }));
+    const N = 3 * 64 + 64;
+    const lp = new Float32Array(N * 12);
+    for (let i = 0; i < N; i++) {
+      const k = Math.floor(i / 64);
+      const P = k < 3 ? [vols[k].center[0] + rnd() * 5 - 2.5, rnd() * 5 - 2.5, rnd() * 5 - 2.5] : [rnd() * 10 - 5, 10 + rnd() * 5, rnd() * 10 - 5];
+      lp.set([...P, 0, ...unit(), i % 8 === 0 ? 0 : i % 8 === 1 ? 1 : rnd(), ...unit(), 0], i * 12);
+    }
+    const inBuf = device.createBuffer({ size: lp.byteLength, usage: U.STORAGE | U.COPY_DST });
+    device.queue.writeBuffer(inBuf, 0, lp);
+    const frameIrradianceWgsl = 'fn frameIrradiance(P: vec3f, N: vec3f) -> vec3f { return vec3f(0.5); }';
+    const lookups = async (layout: ProbeLayoutId, slotSizes: (number | undefined)[] | undefined, sourceSize: number) => {
+      const set = new ProbeSet(device, { capacity: 3, sourceSize, layout, slotSizes, frameIrradianceWgsl, dominantDirection: true });
+      const enc = device.createCommandEncoder();
+      for (let s = 0; s < 3; s++) set.capture(enc, s, cube(set.slotSize(s), kinds[s]));
+      set.captureEnvironment(enc, cube(set.slotSize(3), kinds[3]));
+      set.setVolumes(vols);
+      set.update();
+      set.computeIrradiance(enc);
+      device.queue.submit([enc.finish()]);
+      const out = device.createBuffer({ size: N * 2 * 16, usage: U.STORAGE | U.COPY_SRC });
+      const code = set.wgsl({ group: 1 }) + /* wgsl */ `
+@group(0) @binding(0) var<storage, read> pts: array<vec4f>;
+@group(0) @binding(1) var<storage, read_write> outv: array<vec4f>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let i = id.x;
+  if (i >= arrayLength(&pts) / 3u) { return; }
+  let P = pts[3u * i].xyz; let R = pts[3u * i + 1u].xyz; let r = pts[3u * i + 1u].w; let Nn = pts[3u * i + 2u].xyz;
+  outv[2u * i] = vec4f(probeLookup(P, Nn, R, r, PR_IDENTITY, vec3f(-1.0), true).rgb, 1.0);
+  outv[2u * i + 1u] = vec4f(probeRadianceWithEnvironmentN(P, Nn, R, r), 1.0);
+}`;
+      const pipe = device.createComputePipeline({
+        layout: device.createPipelineLayout({ bindGroupLayouts: [evalBgl, set.bindGroupLayout] }),
+        compute: { module: device.createShaderModule({ code }), entryPoint: 'main' },
+      });
+      const e2 = device.createCommandEncoder();
+      const p = e2.beginComputePass(); p.setPipeline(pipe);
+      p.setBindGroup(0, device.createBindGroup({ layout: evalBgl, entries: [{ binding: 0, resource: { buffer: inBuf } }, { binding: 1, resource: { buffer: out } }] }));
+      p.setBindGroup(1, set.bindGroup);
+      p.dispatchWorkgroups(N / 64); p.end();
+      device.queue.submit([e2.finish()]);
+      const r = await readBuffer(out);
+      const info = { atlases: set.atlases.length, sizes: set.plan.resolutions, slotSizes: [0, 1, 2, 3].map((s) => set.slotSize(s)) };
+      out.destroy(); set.dispose();
+      return { r, info };
+    };
+    const res = [];
+    for (const layout of ['cube-hw', 'cube2d-warp'] as ProbeLayoutId[]) {
+      const mixedSet = await lookups(layout, sizes, SOURCE);
+      const per = [];
+      for (let k = 0; k < 4; k++) {
+        const size = k < 3 ? sizes[k] : SOURCE;
+        const ref = (await lookups(layout, undefined, size)).r;
+        let plain = 0, refit = 0;
+        for (let i = k * 64; i < (k + 1) * 64; i++) for (let c = 0; c < 3; c++) {
+          const d = (row: number) => { const a = mixedSet.r[(i * 2 + row) * 4 + c], b = ref[(i * 2 + row) * 4 + c]; return Number.isFinite(a) && Number.isFinite(b) ? Math.abs(a - b) : Infinity; };
+          plain = Math.max(plain, d(0)); refit = Math.max(refit, d(1));
+        }
+        per.push({ what: k < 3 ? `slot ${k} @${size}` : `environment @${size}`, plain, refit });
+      }
+      res.push({ layout, info: mixedSet.info, per });
+    }
+    inBuf.destroy();
+    for (const t of cubeAt.values()) t.destroy();
+    say(`slot sizes (D4700): ${res.map((x) => `${x.layout} ${x.per.map((q) => `${q.what} ${q.plain}/${q.refit}`).join(', ')}`).join('; ')}`);
     return res;
   }
 

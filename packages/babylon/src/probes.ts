@@ -128,7 +128,7 @@ export interface BabylonProbe {
   renderList?: AbstractMesh[];
 }
 
-export interface BabylonProbeSetOptions extends Partial<Pick<ProbeSetOptions, 'sourceSize' | 'format' | 'dominantDirection' | 'lodMapping'>> {
+export interface BabylonProbeSetOptions extends Partial<Pick<ProbeSetOptions, 'sourceSize' | 'format' | 'dominantDirection' | 'lodMapping' | 'slotSizes'>> {
   /** Probe slots. Default 4. */
   capacity?: number;
   /**
@@ -143,7 +143,8 @@ export class BabylonProbeSet {
   readonly set: ProbeSet;
   private probes: BabylonProbe[] = [];
   private readonly environmentMeshes: AbstractMesh[] | null;
-  private readonly capturer: BabylonCubeCapture;
+  /** One capture per face size (`slotSizes`, D4700). */
+  private readonly capturers = new Map<number, BabylonCubeCapture>();
 
   constructor(scene: Scene, options: BabylonProbeSetOptions = {}) {
     this.scene = scene;
@@ -157,8 +158,15 @@ export class BabylonProbeSet {
       dominantDirection: options.dominantDirection,
       lodMapping: options.lodMapping,
       environment: this.environmentMeshes !== null,
+      slotSizes: options.slotSizes,
     });
-    this.capturer = new BabylonCubeCapture(scene, this.set.sourceSize);
+    this.capturerFor(this.set.sourceSize);
+  }
+
+  private capturerFor(size: number): BabylonCubeCapture {
+    let c = this.capturers.get(size);
+    if (c === undefined) this.capturers.set(size, (c = new BabylonCubeCapture(this.scene, size)));
+    return c;
   }
 
   /** Local probes contribute (off: the environment slot only). */
@@ -197,7 +205,7 @@ export class BabylonProbeSet {
     // one capture texture: each job is captured, prefiltered and submitted before the next
     for (const job of jobs) {
       const encoder = device.createCommandEncoder({ label: `babylon probe capture ${job.slot}` });
-      const cube = this.capturer.capture(encoder, job.position, job.meshes);
+      const cube = this.capturerFor(this.set.slotSize(job.slot)).capture(encoder, job.position, job.meshes);
       this.set.capture(encoder, job.slot, cube);
       device.queue.submit([encoder.finish()]);
     }
@@ -205,7 +213,8 @@ export class BabylonProbeSet {
   }
 
   dispose() {
-    this.capturer.dispose();
+    for (const c of this.capturers.values()) c.dispose();
+    this.capturers.clear();
     this.set.dispose();
   }
 }

@@ -1944,6 +1944,11 @@ async function main() {
         `auto x2 max rel err ${r.refit.autoErr.toExponential(2)}, off x1 ${r.refit.offErr.toExponential(2)}`);
       check('probe core: sets of three layouts in one module match their own modules (D805)', r.mixed.length === 3 && r.mixed.every((m) => m.maxAbs === 0),
         r.mixed.map((m) => `${m.layout} max ${m.maxAbs}`).join(', '));
+      // W60 (D4700): ProbeSet slotSizes, one atlas per size; each slot (and the environment) as a one-size set at its size
+      for (const z of r.sizes) {
+        check(`probe core: slot sizes ${z.info.slotSizes.join('/')} in ${z.info.atlases} atlases (${z.layout}) = one-size sets at each size, plain and re-fit (D4700)`,
+          z.info.atlases === 3 && z.per.every((q) => q.plain === 0 && q.refit === 0), z.per.map((q) => `${q.what} ${q.plain} / ${q.refit}`).join(', '));
+      }
       {
         // W35 (D1805 / D2104): captures in three's, Babylon's and pixi-3d's conventions through the capture transform
         const T = r.transform, row = (n) => T.rows.find((x) => x.name.startsWith(n));
