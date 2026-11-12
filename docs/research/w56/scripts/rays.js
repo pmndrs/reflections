@@ -94,5 +94,23 @@ for (let y = 660; y < 1000; y += STEP) for (let x = 180; x < 520; x += STEP) {
   g2.fillStyle = COL[cls]; g2.fillRect(x, y, STEP, STEP);
 }
 save(flat ? 'rays-flat.png' : 'rays.png', c.toDataURL('image/png'));
+// FLOOR_MASK: the floor px under the car (first hit the floor, and straight up from there hits the car: red), and the
+// open floor (green), over y 820-1280; saved as floor.png
+let floorPx = 0, floorUnderPx = 0;
+if (typeof FLOOR_MASK !== 'undefined' && FLOOR_MASK) {
+  g2.fillStyle = '#000'; g2.fillRect(0, 0, W, H);
+  const up = new T.Vector3(0, 1, 0);
+  for (let y = 820; y < H; y++) for (let x = 0; x < W; x++) {
+    ndc.set(((x + 0.5) / W) * 2 - 1, -(((y + 0.5) / H) * 2 - 1), 0.5).unproject(cam);
+    const o = cam.position.clone();
+    const h = cast(o, ndc.sub(o).normalize());
+    if (!h || h.mesh !== floorMesh) continue;
+    floorPx++;
+    const under = !!cast(h.p.clone().addScaledVector(up, 1e-3), up);
+    if (under) floorUnderPx++;
+    g2.fillStyle = under ? '#ff0000' : '#00ff00'; g2.fillRect(x, y, 1, 1);
+  }
+  save('floor.png', c.toDataURL('image/png'));
+}
 const sortd = (o) => Object.fromEntries(Object.entries(o).sort((a, b) => b[1] - a[1]));
-return { meshes: meshes.length, buildMs: Math.round(buildMs), castMs: Math.round(performance.now() - t1), starPx: dirs.n, meanR: dirs.sum.divideScalar(dirs.n).toArray().map((v) => +v.toFixed(3)), counts: sortd(counts), second: sortd(second), third: sortd(third) };
+return { floorPx, floorUnderPx, meshes: meshes.length, buildMs: Math.round(buildMs), castMs: Math.round(performance.now() - t1), starPx: dirs.n, meanR: dirs.sum.divideScalar(dirs.n).toArray().map((v) => +v.toFixed(3)), counts: sortd(counts), second: sortd(second), third: sortd(third) };
