@@ -17,6 +17,8 @@ export interface Region {
   pose?: string;
   builtin?: boolean;
   note?: string;
+  /** The image aspect (w / h) it was defined at; the bench skips it at another aspect (W54's are 1:1). */
+  aspect?: number;
 }
 
 /** W50's camera, rebuilt by eye from the maintainer's shots (car-quality-w50.md "Setup"). */
@@ -33,6 +35,11 @@ export const NAMED_REGIONS: Record<string, Region[]> = {
     { name: 'wheel', rect: px(290, 410, 400, 500), pose: 'w50', builtin: true, note: 'the front wheel reflected in the floor (W50)' },
     { name: 'door', rect: px(470, 395, 640, 445), mask: 'refLuma60', pose: 'w50', builtin: true, note: 'the red door reflected in the floor, PT luma > 60 (W50)' },
     { name: 'car', rect: px(170, 380, 780, 520), pose: 'w50', builtin: true, note: 'the whole floor reflection of the car (W50)' },
+    // W54 (docs/research/car-wheels-cabin-w54.md): defined at 1280 x 1280 (the maintainer's bench size), shown at 1:1 only
+    { name: 'hub', rect: px(255, 758, 395, 882, 1280, 1280), pose: 'w50', aspect: 1, builtin: true, note: 'front wheel centre: the chrome star (Rim2) and the spokes around it (W54)' },
+    { name: 'wheelFace', rect: px(200, 690, 480, 960, 1280, 1280), pose: 'w50', aspect: 1, builtin: true, note: 'front wheel inside the tyre: rim, spokes, disc, caliper (W54)' },
+    { name: 'cabin', rect: px(330, 390, 640, 470, 1280, 1280), pose: 'w50', aspect: 1, builtin: true, note: 'the cabin seen through the windshield, 99% glass px (W54)' },
+    { name: 'floorWheel', rect: px(200, 990, 500, 1230, 1280, 1280), pose: 'w50', aspect: 1, builtin: true, note: 'the front wheel reflected in the floor at 1:1 (W54)' },
     { name: 'door (hero)', rect: px(560, 345, 721, 389, 1280, 720), pose: 'hero', builtin: true, note: 'W46\'s door paint probe (G-buffer roughness 0.25 -> 0.35)' },
   ],
 };
