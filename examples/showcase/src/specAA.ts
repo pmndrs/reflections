@@ -19,10 +19,10 @@
 // Applied as the material's `roughnessNode`, which three's lit term (setupVariants, then its geometry
 // roughness adjustment) and the frame G-buffer (`gbufferRoughness` / `gbufferShadingRoughness`) both read,
 // so the composite's weights, the screen-space hit re-shade and three's own term stay one model; traced
-// hits get the same adjustment once per mesh from the map's mean (`specAAHitMaterial`). The path tracer
+// hits get the same adjustment once per material from the map's mean (`specAAHitMaterial`). The path tracer
 // is left alone: it is the reference.
 import type * as THREE from 'three/webgpu';
-import { defaultHitMaterial, textureMeanColor, type HitMaterial } from '@pmndrs/reflections/three';
+import { defaultHitMaterial, hitMaterialSource, textureMeanColor, type HitMaterial, type HitMaterialSource } from '@pmndrs/reflections/three';
 import { float, materialReference, materialRoughness, texture, uniform } from 'three/tsl';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -111,9 +111,9 @@ export function setSpecularAA(root: THREE.Object3D, on: boolean): number {
  * Traced-hit material with the option on: {@link defaultHitMaterial}, its roughness raised by the whole
  * map's variance (the coarsest mip: one value per mesh, as the hit material is), at the current strength.
  */
-export function specAAHitMaterial(mesh: THREE.Mesh): HitMaterial {
-  const out = defaultHitMaterial(mesh);
-  const m = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshStandardMaterial;
+export function specAAHitMaterial(mesh: THREE.Mesh, source: HitMaterialSource = hitMaterialSource(mesh)): HitMaterial {
+  const out = defaultHitMaterial(mesh, source);
+  const m = source.material as THREE.MeshStandardMaterial;
   if (out.roughness === undefined || !m || applied.get(m) == null || (m as N).roughnessNode !== applied.get(m)) return out;
   const mean = m.normalMap ? textureMeanColor(m.normalMap) : null;
   if (!mean) return out;

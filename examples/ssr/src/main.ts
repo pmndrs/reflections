@@ -1889,7 +1889,8 @@ ${provider.code({ group: 1, firstBinding: 0 })}
       if (pmndrs) {
         const want = instanceOf.get(hit.object)?.get(hit.instanceId ?? -1);
         if (want !== undefined && u[i * 8 + 3] === want) instance++;
-        if (want !== undefined && u[i * 8 + 1] === (pmndrs.scene.instances[want].material ?? 0xffffffff)) material++;
+        // W49: the group's material for a multi-material mesh (three's face.materialIndex), else the instance's
+        if (want !== undefined && u[i * 8 + 1] === (pmndrs.materialIdOf(hit.object as THREE.Mesh, hit.face?.materialIndex ?? 0) ?? 0xffffffff)) material++;
       }
     }
     for (const [mat, sd] of sides) mat.side = sd;

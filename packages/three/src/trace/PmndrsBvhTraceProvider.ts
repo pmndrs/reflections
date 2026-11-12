@@ -2,24 +2,32 @@
 // live in core (`createPmndrsBvhTraceProvider`); this file only turns three objects into the
 // engine-free inputs it takes: positions, indices, vertex normals, world matrices and material ids.
 //
-// - One mesh tree per BufferGeometry, shared by every Mesh that uses it.
+// - One mesh tree per BufferGeometry, shared by every Mesh that uses it (per BufferGeometry and
+//   material table of its groups, for multi-material meshes).
 // - One instance per Mesh, and per instance of an InstancedMesh (matrixWorld x instanceMatrix).
-// - One material entry per three Material (the first of a multi-material mesh; D1702), coloured
-//   by `defaultHitMaterial` unless `options.material` says otherwise.
+// - One material entry per three Material, coloured by `defaultHitMaterial` unless
+//   `options.material` says otherwise (then one per mesh and material). A multi-material mesh
+//   (material array + geometry groups) stays one mesh and instance, each triangle carrying its
+//   group's material (`triangleMaterials`, W49, D1701 / D1702), as @pmndrs/bvh's own `/three` folds
+//   it; the instance carries the first material, for triangles no group draws.
 // - Positions are read through the attribute (interleaved, normalized and non-f32 work); morph
 //   targets and skinning are not applied (D1703).
 // - Vertex normals (the `normal` attribute, read the same way) shade traced hits (D1700); a
 //   geometry without them is shaded flat.
 import * as THREE from 'three/webgpu';
 import {
-  createPmndrsBvhTraceProvider, type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceScene,
+  createPmndrsBvhTraceProvider, PMNDRS_BVH_TRIANGLE_MATERIAL_NONE, type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceScene,
   type PmndrsBvhTraceProvider, type PmndrsBvhTraceProviderOptions,
 } from '@pmndrs/reflections-core';
-import { defaultHitMaterial, type HitMaterial } from './MeshBVHTraceProvider';
+import { defaultHitMaterial, hitMaterialSource, type HitMaterial, type HitMaterialSource } from './MeshBVHTraceProvider';
+import { isMultiMaterial, triangleMaterialIndices } from './materialGroups';
 
 export interface PmndrsBvhFromObjectsOptions extends PmndrsBvhTraceProviderOptions {
-  /** The material a mesh contributes to traced-hit shading. Default {@link defaultHitMaterial}. */
-  material?: (mesh: THREE.Mesh) => HitMaterial;
+  /**
+   * The material a mesh contributes to traced-hit shading. Default {@link defaultHitMaterial}. A
+   * multi-material mesh is asked once per material its groups draw with (`source`, W49).
+   */
+  material?: (mesh: THREE.Mesh, source: HitMaterialSource) => HitMaterial;
   /** Which meshes to trace. Default: visible meshes that aren't helpers and don't set `userData.noTrace`. */
   filter?: (mesh: THREE.Mesh) => boolean;
   /** Pass the geometries' vertex normals for the shading normal (D1700). Default true. */
@@ -31,6 +39,13 @@ export interface ThreeBvhTraceScene {
   scene: BvhTraceScene;
   /** The mesh behind each instance, and its InstancedMesh index (-1 for a plain mesh). */
   sources: { mesh: THREE.Mesh; instanceId: number }[];
+  /** What made each entry of `scene.materials`: the (first) mesh asked and which of its materials. */
+  materialSources: ({ mesh: THREE.Mesh } & HitMaterialSource)[];
+  /**
+   * The `scene.materials` entry a hit on `mesh` with three's `face.materialIndex` reports (the
+   * group's material for a multi-material mesh, else the mesh's), or undefined for a mesh not traced.
+   */
+  materialIdOf(mesh: THREE.Mesh, materialIndex?: number): number | undefined;
 }
 
 const defaultFilter = (m: THREE.Mesh) => !(m as unknown as { isHelper?: boolean }).isHelper && !m.userData.noTrace;
@@ -65,23 +80,55 @@ export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3
   const filter = options.filter ?? defaultFilter;
   const materialOf = options.material ?? defaultHitMaterial;
   const meshes: BvhMeshGeometry[] = [];
-  const meshIds = new Map<THREE.BufferGeometry, number>();
+  // the mesh tree per geometry and, for a multi-material mesh, the entries its groups take ('' for none)
+  const meshIds = new Map<THREE.BufferGeometry, Map<string, number>>();
   const materials: BvhTraceMaterial[] = [];
-  const materialIds = new Map<THREE.Material | THREE.Mesh, number>();
+  const materialSources: ThreeBvhTraceScene['materialSources'] = [];
+  const materialIds = new Map<unknown, number>();
+  // per traced mesh: its instance's entry and, multi-material, the entry of each materialIndex its groups use
+  const meshMaterials = new Map<THREE.Mesh, { instance: number; groups: Map<number, number> | null }>();
+  const groupIndices = new Map<THREE.BufferGeometry, Int32Array>();
   const instances: BvhTraceInstance[] = [];
   const sources: ThreeBvhTraceScene['sources'] = [];
   const m = new THREE.Matrix4();
+  // One entry per three material, unless a custom material function makes it per mesh and material.
+  const entry = (mesh: THREE.Mesh, source: HitMaterialSource) => {
+    const key = options.material ? `${mesh.id}:${source.materialIndex}` : source.material ?? mesh;
+    let id = materialIds.get(key);
+    if (id === undefined) { id = materials.length; materials.push(materialOf(mesh, source)); materialSources.push({ mesh, ...source }); materialIds.set(key, id); }
+    return id;
+  };
   const visit = (o: THREE.Object3D) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh || !filter(mesh)) return;
     const position = mesh.geometry?.getAttribute('position');
     if (!position || position.count < 3) return;
-    let mi = meshIds.get(mesh.geometry);
-    if (mi === undefined) { mi = meshes.length; meshes.push(geometryInput(mesh.geometry, options.shadingNormals !== false)); meshIds.set(mesh.geometry, mi); }
-    // One entry per three material, unless a custom material function makes it per mesh.
-    const key = options.material ? mesh : (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) ?? mesh;
-    let material = materialIds.get(key);
-    if (material === undefined) { material = materials.length; materials.push(materialOf(mesh)); materialIds.set(key, material); }
+    const material = entry(mesh, hitMaterialSource(mesh));
+    // W49 (D1701 / D1702): the materials of a multi-material mesh's groups, per triangle
+    let tri: Int32Array | null = null, groups: Map<number, number> | null = null, signature = '';
+    if (isMultiMaterial(mesh)) {
+      tri = groupIndices.get(mesh.geometry) ?? null;
+      if (!tri) groupIndices.set(mesh.geometry, tri = triangleMaterialIndices(mesh.geometry));
+      groups = new Map();
+      for (const i of new Set(tri)) if (i >= 0 && mesh.material[i]) groups.set(i, entry(mesh, { material: mesh.material[i], materialIndex: i }));
+      // every group drawn with the instance's entry: the tree needs no per-triangle materials
+      if ([...groups.values()].some((id) => id !== material)) signature = [...groups].sort((a, b) => a[0] - b[0]).map(([i, id]) => `${i}:${id}`).join(',');
+    }
+    meshMaterials.set(mesh, { instance: material, groups });
+    let trees = meshIds.get(mesh.geometry);
+    if (!trees) meshIds.set(mesh.geometry, trees = new Map());
+    let mi = trees.get(signature);
+    if (mi === undefined) {
+      mi = meshes.length;
+      const input = geometryInput(mesh.geometry, options.shadingNormals !== false);
+      let triangleMaterials: Uint16Array | null = null;
+      if (signature && tri && groups) {
+        triangleMaterials = new Uint16Array(tri.length).fill(PMNDRS_BVH_TRIANGLE_MATERIAL_NONE);
+        for (let t = 0; t < tri.length; t++) { const id = groups.get(tri[t]); if (id !== undefined) triangleMaterials[t] = id; }
+      }
+      meshes.push(triangleMaterials ? { ...input, triangleMaterials } : input);
+      trees.set(signature, mi);
+    }
     const inst = mesh as THREE.InstancedMesh;
     if (inst.isInstancedMesh) {
       for (let i = 0; i < inst.count; i++) {
@@ -95,15 +142,18 @@ export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3
     }
   };
   for (const root of ([] as THREE.Object3D[]).concat(objects)) root.traverseVisible(visit);
-  return { scene: { meshes, instances, materials }, sources };
+  const materialIdOf = (mesh: THREE.Mesh, materialIndex = 0) => {
+    const e = meshMaterials.get(mesh);
+    return e && (e.groups?.get(materialIndex) ?? e.instance);
+  };
+  return { scene: { meshes, instances, materials }, sources, materialSources, materialIdOf };
 }
 
 /** A core @pmndrs/bvh provider plus the three objects behind it, so it can follow them. */
-export interface ThreePmndrsBvhTraceProvider {
+export interface ThreePmndrsBvhTraceProvider extends ThreeBvhTraceScene {
   provider: PmndrsBvhTraceProvider;
   /** The engine-free inputs it was built from (instance i = sources[i]). */
   scene: BvhTraceScene;
-  sources: ThreeBvhTraceScene["sources"];
   /** Objects moved (same meshes, current world matrices): new top level, mesh trees untouched. */
   refit(): void;
 }
@@ -120,13 +170,13 @@ export async function createPmndrsBvhTraceProviderFromObjects(
   objects: THREE.Object3D | THREE.Object3D[],
   options: PmndrsBvhFromObjectsOptions = {},
 ): Promise<ThreePmndrsBvhTraceProvider> {
-  const { scene, sources } = bvhTraceSceneFromObjects(objects, options);
+  const built = bvhTraceSceneFromObjects(objects, options);
+  const { scene, sources } = built;
   const provider = await createPmndrsBvhTraceProvider(device, scene, options);
   const m = new THREE.Matrix4();
   return {
+    ...built,
     provider,
-    scene,
-    sources,
     refit() {
       provider.setTransforms(sources.map(({ mesh, instanceId }) => {
         if (instanceId < 0) return mesh.matrixWorld.elements;

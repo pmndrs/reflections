@@ -13,7 +13,9 @@
 //   transforms  36 words per slot: matrixWorld, inverseMatrixWorld, visible, 3 pad words. We pack
 //               the slot's material into the pad words (W41): albedo rgb8 + roughness 8, emissive
 //               rgb9e5, specular F0 as sqrt-encoded rgb565 + clear coat 8 + clear coat roughness 8;
-//               the hook three-mesh-bvh's writeTransformData comment names for this.
+//               the hook three-mesh-bvh's writeTransformData comment names for this. BVHComputeData
+//               gives each BVH root its own slot, and MeshBVH a root per run of triangles drawn by
+//               the same groups, so a multi-material mesh's slots take their group's material (W49).
 //   index       u32 triangle corners (rebased into the packed attributes)
 //   attributes  the interleaved per-vertex struct: `position` (first vec4f) and, when packed (the
 //               default of `fromObjects`), `normal` for the interpolated shading normal (D1700).
@@ -24,6 +26,7 @@
 // This is the stopgap until @pmndrs/bvh (core provider) passes its oracle on our scenes.
 import * as THREE from 'three/webgpu';
 import type { BindingSlot, ModuleBindingEntry, TraceProvider } from '@pmndrs/reflections-core';
+import { isMultiMaterial, rootMaterialIndices } from './materialGroups';
 
 /**
  * Linear diffuse albedo and emitted radiance of a traced hit (WGSL `HitMaterial`), and its specular
@@ -37,6 +40,25 @@ export interface HitMaterial {
   roughness?: number;
   clearcoat?: number;
   clearcoatRoughness?: number;
+}
+
+/**
+ * Which of a mesh's materials a hit material is asked for (W49, D1701 / D1702). A mesh with an array
+ * of materials and geometry groups is asked once per material its groups draw with; any other mesh
+ * once, for its material (the first of an array without groups, `materialIndex` 0).
+ */
+export interface HitMaterialSource {
+  /** The three material: the mesh's, or `mesh.material[materialIndex]`. */
+  readonly material: THREE.Material | undefined;
+  /** Index into the mesh's array of materials, or -1 for a mesh with one material. */
+  readonly materialIndex: number;
+}
+
+/** The {@link HitMaterialSource} of `mesh`'s material `materialIndex` (-1 or out of range: its first). */
+export function hitMaterialSource(mesh: THREE.Mesh, materialIndex = -1): HitMaterialSource {
+  if (!Array.isArray(mesh.material)) return { material: mesh.material, materialIndex: -1 };
+  const i = materialIndex >= 0 && materialIndex < mesh.material.length ? materialIndex : 0;
+  return { material: mesh.material[i], materialIndex: i };
 }
 
 /** The parts of three-mesh-bvh's `BVHComputeData` this provider reads (structural, so the optional peer stays optional for types too). */
@@ -64,9 +86,10 @@ export interface MeshBVHTraceProviderOptions {
    * The material a mesh contributes to traced-hit shading. Default {@link defaultHitMaterial}:
    * diffuse albedo `color x mean(map) x (1 - metalness) x (1 - transmission)`, `emissive x
    * mean(emissiveMap) x emissiveIntensity`, specular F0 `mix(0.04, base, metalness)`, roughness and
-   * clear coat (one set per mesh: D902, D3510).
+   * clear coat (one set per material: D902, D3510). A multi-material mesh is asked once per material
+   * its groups draw with (`source`, W49).
    */
-  material?: (mesh: THREE.Mesh) => HitMaterial;
+  material?: (mesh: THREE.Mesh, source: HitMaterialSource) => HitMaterial;
 }
 
 const mapMeans = new WeakMap<THREE.Texture, [number, number, number] | null>();
@@ -106,16 +129,17 @@ export function textureMeanColor(t: THREE.Texture): [number, number, number] | n
 }
 
 /**
- * Default hit material of a three mesh (first material of a multi-material mesh), one set per mesh
- * from the material's scalars x the mean of its maps (D902):
+ * Default hit material of a three mesh's material (`source`, W49: one of a multi-material mesh's;
+ * default the mesh's, or the first of an array), one set per material from its scalars x the mean of
+ * its maps (D902):
  * - diffuse albedo `color x mean(map) x (1 - metalness) x (1 - transmission)`;
  * - `emissive x mean(emissiveMap) x emissiveIntensity`;
  * - specular F0 `mix(0.04, color x mean(map), metalness)` (W41, D3510; standard and physical
  *   materials only), roughness `roughness x mean(roughnessMap).g`, metalness `x mean(metalnessMap).b`,
  *   clear coat `clearcoat x mean(clearcoatMap).r` and `clearcoatRoughness` (physical materials).
  */
-export function defaultHitMaterial(mesh: THREE.Mesh): HitMaterial {
-  const m = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshPhysicalMaterial | undefined;
+export function defaultHitMaterial(mesh: THREE.Mesh, source: HitMaterialSource = hitMaterialSource(mesh)): HitMaterial {
+  const m = source.material as THREE.MeshPhysicalMaterial | undefined;
   const albedo: [number, number, number] = [0.5, 0.5, 0.5];
   const emissive: [number, number, number] = [0, 0, 0];
   const out: HitMaterial = { albedo, emissive };
@@ -537,9 +561,18 @@ export class MeshBVHTraceProvider implements TraceProvider {
     const transforms = this.arrays()[1];
     const material = this.options.material ?? defaultHitMaterial;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const map: Map<string, { object: THREE.Object3D; slot: number }> = (this.data as any)._getTransformMap(this.data.bvh);
-    for (const { object, slot } of map.values()) {
-      const m = (object as THREE.Mesh).isMesh ? material(object as THREE.Mesh) : { albedo: [0.5, 0.5, 0.5], emissive: [0, 0, 0] } as HitMaterial;
+    const map: Map<string, { object: THREE.Object3D; slot: number; root: number }> = (this.data as any)._getTransformMap(this.data.bvh);
+    // W49 (D1701 / D1702): a slot per BVH root, a root per group range; per geometry, each root's group material
+    const roots = new Map<THREE.BufferGeometry, number[]>();
+    for (const { object, slot, root } of map.values()) {
+      const mesh = object as THREE.Mesh;
+      let index = -1;
+      if (mesh.isMesh && isMultiMaterial(mesh) && !(mesh.geometry as unknown as { boundsTree?: { indirect?: boolean } }).boundsTree?.indirect) {
+        let r = roots.get(mesh.geometry);
+        if (!r) roots.set(mesh.geometry, r = rootMaterialIndices(mesh.geometry));
+        index = r[root] ?? -1;
+      }
+      const m = mesh.isMesh ? material(mesh, hitMaterialSource(mesh, index)) : { albedo: [0.5, 0.5, 0.5], emissive: [0, 0, 0] } as HitMaterial;
       const o = slot * LAYOUT.transformWords + 33;
       transforms[o] = (unorm8(m.albedo[0]) | (unorm8(m.albedo[1]) << 8) | (unorm8(m.albedo[2]) << 16) | (unorm8(m.roughness ?? 1) << 24)) >>> 0;
       transforms[o + 1] = rgb9e5(m.emissive);

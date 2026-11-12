@@ -936,7 +936,7 @@ async function rtMaterialChecks(p, label, oracle) {
   const b = results.logs.length;
   await p.T("window.__p.load('multiMaterial')");
   await p.T('window.__p.step(2)');
-  const fmt = (r) => r.materials.map((m) => `${m.material}${m.multi ? '' : ' (alone)'} ${m.own}/${m.hits}${m.multi ? ` (first material ${m.first})` : ''}`).join(', ');
+  const fmt = (r) => r.materials.map((m) => `${m.material}${m.multi ? '' : ' (alone)'} ${m.own}/${m.hits}${m.multi ? ` (first material's colour ${m.first})` : ''}`).join(', ');
   for (const kind of ['camera', 'scene']) {
     const r = await p.T(`window.__p.rtMaterialCheck(4096, '${kind}')`);
     const e = results.logs.slice(b).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
@@ -950,8 +950,13 @@ async function rtMaterialChecks(p, label, oracle) {
     check(`rt ${label}: multiMaterial vs THREE.Raycaster, camera rays (triangle, instance, material ids)`, oracle(o),
       `${o.agree}/${o.rays} agree; of ${o.compared} hits: triangle ${o.triangle}, instance ${o.instance}, material ${o.material}`);
   }
+  // the final image with screen space off (no traversal steps: every reflection ray is traced)
+  const was = await p.T('window.__p.ssr.settings.maxTraversalIntersections');
   await p.T("window.__p.setView('final')");
-  savePng(`ssr-rt-multi-material-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.png`, await p.T('window.__p.shot()'));
+  await p.T('window.__p.setSettings({ maxTraversalIntersections: 0 })');
+  await p.T('window.__p.step(2)');
+  savePng(`ssr-rt-multi-material-${label.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase()}.png`, await p.T('window.__p.shot()'));
+  await p.T(was == null ? 'delete window.__p.ssr.settings.maxTraversalIntersections' : `window.__p.setSettings({ maxTraversalIntersections: ${was} })`);
   await p.T("window.__p.setView('grid')");
 }
 
