@@ -17,14 +17,14 @@
 // environmentIntensity, no TRAA / sharpen / grading.
 import * as THREE from 'three/webgpu';
 import {
-  diffuseColor, materialMetalness, materialRoughness, mrt, normalView, output, packNormalToRGB, pass, renderOutput, sample, unpackRGBToNormal,
+  Fn, diffuseColor, float, materialMetalness, materialRoughness, mrt, normalView, output, packNormalToRGB, pass, renderOutput, sample, unpackRGBToNormal,
   vec2, vec3, vec4, velocity,
 } from 'three/tsl';
 import { ssr as threeSSR } from 'three/addons/tsl/display/SSRNode.js';
 import { temporalReproject } from 'three/addons/tsl/display/TemporalReprojectNode.js';
 import { recurrentDenoise } from 'three/addons/tsl/display/RecurrentDenoiseNode.js';
 import { ffxReflections } from '@pmndrs/denoiser-three-ffx';
-import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, applySceneParams, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
+import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, applySceneParams, applySpecAA, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -72,12 +72,16 @@ export async function createThreeSSR(id: Extract<MethodId, 'three-raw' | 'three-
   const kit = await ctx.entry.build(W / H);
   await freshEnvironment(kit, ctx.entry);
   applySceneParams(kit, params);
+  const specAA = applySpecAA(kit, params);
   const { scene, camera } = kit;
+  // the material's roughness as its lit term shades it: its `roughnessNode` when it has one (W46's
+  // roughness from normal variance, ?specAA=1), else three's material roughness (scalar x map)
+  const roughnessOut: N = (Fn((builder: N) => (builder.material?.roughnessNode != null ? float(builder.material.roughnessNode) : materialRoughness)) as N)();
 
   const scenePass: N = pass(scene, camera);
   scenePass.setMRT(mrt({
     output, diffuseColor: vec4(diffuseColor.rgb, materialMetalness),
-    normal: vec4(packNormalToRGB(normalView).rgb, materialRoughness), velocity,
+    normal: vec4(packNormalToRGB(normalView).rgb, roughnessOut), velocity,
   }));
   const color = scenePass.getTextureNode('output'), depth = scenePass.getTextureNode('depth');
   const nrm = scenePass.getTextureNode('normal'), vel = scenePass.getTextureNode('velocity');
@@ -137,7 +141,7 @@ export async function createThreeSSR(id: Extract<MethodId, 'three-raw' | 'three-
       ssr: { ...EXAMPLE, mirrorBias, maxDistance, thickness, environmentIntensity: scene.environmentIntensity ?? 1, envMisses: !!env },
       ...(id === 'three-denoise' ? { temporalReproject: REPROJECT, recurrentDenoise: DENOISE } : {}),
       ...(id === 'three-ffx' ? { ffx: 'ffxReflections defaults (roughnessThreshold 1, temporalStabilityFactor 0.7), SSR history = FFX output' } : {}),
-      envSpecularInLighting: 'off (the example patch)', probes: 'none',
+      envSpecularInLighting: 'off (the example patch)', probes: 'none', specAA,
     }),
     gpuErrors: () => errors,
     dispose() { destroyWebGPU(renderer as N); },
