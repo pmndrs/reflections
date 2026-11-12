@@ -1532,10 +1532,11 @@ const LOOKUP_COST = `async (counts, pose) => {
   return rows;
 }`;
 /** W63: lookup variants A/B in one page, interleaved per round (a shared GPU drifts between pages). */
-const LOOKUP_AB = `async (counts, variants, pose, rounds) => {
+const LOOKUP_AB = `async (counts, variants, pose, rounds, stat) => {
   const p = window.__p; p.setDenoise(false); p.setRT(false); if (pose) p.setPose(pose); p.setView('final');
   const med = (a) => { const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
-  const t = async () => { await p.step(4); return (await p.renderTime(30)).ms; };
+  // the 10th percentile of 30 frames: on a shared GPU the low frames are the ones nobody else slowed
+  const t = async () => { await p.step(4); const r = await p.renderTime(30); return stat === 'p10' ? r.p10 : r.ms; };
   const rows = [];
   for (const n of counts) {
     const vols = n === 'shipped' ? null : p.probeGrid(n);
@@ -1567,7 +1568,7 @@ async function probeLookupAB(pages) {
     const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&w=1920&h=1080&probeLayout=shipped&texLimit=adapter&scene=${scene}`);
     pages.push(p);
     const before = results.logs.length;
-    const r = await p.T(`(${LOOKUP_AB})(${JSON.stringify(counts)}, ${JSON.stringify(variants)}, ${JSON.stringify(poses[scene] ?? null)}, ${rounds})`);
+    const r = await p.T(`(${LOOKUP_AB})(${JSON.stringify(counts)}, ${JSON.stringify(variants)}, ${JSON.stringify(poses[scene] ?? null)}, ${rounds}, ${JSON.stringify(process.env.W63_STAT ?? 'p10')})`);
     all[scene] = r;
     fs.writeFileSync(file, JSON.stringify(all, null, 1));
     for (const row of r) console.log(`  ${scene} n ${row.n} (${row.probes}), free ${row.free.map((x) => x.toFixed(2)).join('/')}: ` + Object.entries(row.lookup).map(([v, x]) => `[${v}] ${x.lookup.toFixed(2)} (mat ${x.material.toFixed(2)} + comp ${x.composite.toFixed(2)})`).join(', '));

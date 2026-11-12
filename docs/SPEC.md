@@ -165,6 +165,8 @@ Sponza against the path tracer (glossy px, courtyard / low) agrees. Probe term a
 
 The 33 volumes of the grid add 10-13 ms of lookup at 1080p over the probe-free frame (Apple M-series), against 0.3-0.5 ms for 2-7 volumes. three unrolls every volume into every lit material, and each costs a box test per pixel whether it covers the pixel or not. So the probe count, not the resolution, sets the lookup's cost.
 
+**Since W63 (D4950)** the volume table carries a world-space grid of the volumes that touch each cell, and above 4 volumes the lookup walks only P's cell. The cost was the unrolled bodies, not the box tests. 32 volumes now add ~0.8 ms at 1080p on rooms (9.6 before) and stay flat with the count, so adding probes to cover content is cheap. Up to 4 volumes the lookup compiles as before. Numbers, the options and what other engines do: `docs/research/probe-lookup-cost.md`.
+
 When to use what:
 - **Few large probes** whose boxes match the rooms (the walls are the proxy) are the default.
 - **Mixed sizes** are the best spend when a mirror-grade floor dominates: Sponza 5.0 / 8.3 / 3.4, offscreen within 1 of its 41.9 MB set at 35.6 MB. A three-size set is three atlas bindings in every material, and Sponza's glTF materials then need 18 sampled textures, past WebGPU's default 16 (D4804). Keep it to two sizes, or raise the limit.

@@ -1,0 +1,8 @@
+  showcaseSponza [grid] n 4 (5): all 10.51 ms, composite-only 9.80, free 9.59 | lookup 0.92 = material 0.70 + composite 0.21 | core 1.41
+  showcaseSponza [grid] n 8 (8): all 10.40 ms, composite-only 10.11, free 9.87 | lookup 0.53 = material 0.30 + composite 0.23 | core 1.48
+  showcaseSponza [grid] n 16 (16): all 10.86 ms, composite-only 10.65, free 10.14 | lookup 0.72 = material 0.21 + composite 0.51 | core 1.50
+  showcaseSponza [grid] n 32 (32): all 11.02 ms, composite-only 10.76, free 10.68 | lookup 0.35 = material 0.27 + composite 0.08 | core 1.52
+  showcaseSponza [grid,skip] n 4 (5): all 10.65 ms, composite-only 10.70, free 11.27 | lookup -0.63 = material -0.06 + composite -0.57 | core 2.07
+  showcaseSponza [grid,skip] n 8 (8): all 13.06 ms, composite-only 12.58, free 12.13 | lookup 0.92 = material 0.48 + composite 0.44 | core 1.98
+  showcaseSponza [grid,skip] n 16 (16): all 13.20 ms, composite-only 12.11, free 11.37 | lookup 1.83 = material 1.09 + composite 0.74 | core 1.98
+  showcaseSponza [grid,skip] n 32 (32): all 13.17 ms, composite-only 12.02, free 11.46 | lookup 1.71 = material 1.15 + composite 0.56 | core 1.95
