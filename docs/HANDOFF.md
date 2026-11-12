@@ -82,6 +82,8 @@ For the fine-tune pass once the phases are built and running. Nothing here block
 - pixi composite drops material occlusion on reflections (D4512); fix: multiply the added-back term by the material occlusion the scene-colour bit removed it with: no test scene has occlusion maps yet.
 - **W45 owns this.** ~~Specular occlusion near mirrors (D4513, W39)~~: done with RT by W45 (D3551: traced misses skip Lagarde; contact low pose r < 0.1 12.96 -> 3.96 vs the traced reference). RT off still darkens near-mirror misses beside lit objects (W39: 23.8 -> 33.4); a confidence- or hit-distance-weighted SO for untraced misses is the open half.
 
+- Blended seams between neighbouring probes (W38, D4401): floor-quadrant probes lower the showcase error (carConcept low 15.9 -> 9.1) but show hard seams and smeared copies of the hero. With blended seams, a fitted floor probe could show the hero in the RT-off floor. Maintainer parked it beside per-probe resolution (2026-11-12).
+
 **Correctness polish (not visible yet)**
 - contact under the upscaler drifts at rest (W39): frame 120 vs 240 with the camera still, mean 1.5/255, 3% px > 8/255 in blocks on the floor reflection of the cylinder and torus (AA off: 0.12, 0.04%). Jitter changes which rays validate; the 128-frame history doesn't settle it. Time-boxed, not chased.
 - The 75/255 point-light highlight flake on instanced lit spheres (about 430 px, below our code, likely Dawn/Metal). D1 row; repro in `docs/research/d1/`. Clue: only the warm light's highlights change. Draft upstream report in the D1 row.
