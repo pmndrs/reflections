@@ -280,7 +280,11 @@ export interface ProbeHitShading extends HitShading {
 
 // The probe lookup module sits at bindings 0..2 of group 3 (atlas, sampler, table: a ProbeSet's
 // own layout), the HitEnv uniform at 3, a multi-size set's atlases 1.. at 4.. (D4702: the lookup's
-// `atlasBinding`; a ProbeSet's own group has them at 3..).
+// `atlasBinding`; a ProbeSet's own group has them at 3..). Its set-level names carry
+// PROBE_HIT_SUFFIX (`pr_atlas_g3`, `probeRadianceWithEnvironment_g3`, ...), so a pass whose radiance
+// fallback is the same set's lookup at group 1 (`probeRadianceFallback`) holds both; the shared
+// includes are marked chunks the pass keeps once (`dedupeWgslChunks`, D4901).
+const PROBE_HIT_SUFFIX = '_g3';
 const PROBE_SHADE = /* wgsl */ `
 ${UNIFORM_WGSL}
 @group(3) @binding(3) var<uniform> hitEnv: HitEnv;
@@ -288,14 +292,14 @@ ${LIGHTS}
 // The probes along R at the hit's roughness (box-projected from the hit point, the environment slot
 // for the rest), as three's specular IBL with the probes as the environment (W41, D3510).
 fn hitSpecularRadiance(P: vec3f, R: vec3f, roughness: f32) -> vec3f {
-  return probeRadianceWithEnvironment(P, R, roughness) * hitEnv.intensity.x;
+  return probeRadianceWithEnvironment${PROBE_HIT_SUFFIX}(P, R, roughness) * hitEnv.intensity.x;
 }
 ${SPECULAR}
 fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f {
   let m = traceHitMaterial(hit);
   // three's diffuse IBL with the probes as the environment: lookup(P, N, roughness 1) x pi x
   // intensity x albedo / pi; probes first, the environment slot for the rest
-  let E = probeRadianceWithEnvironment(P, N, 1.0);
+  let E = probeRadianceWithEnvironment${PROBE_HIT_SUFFIX}(P, N, 1.0);
   return hitShadeSurface(hit, P, N, dir, m.emissive, m.albedo * (E * hitEnv.intensity.x + hitLights(P, N)));
 }
 `;
@@ -331,7 +335,9 @@ export function probeHitShading(device: GPUDevice, source: ProbeHitShadingSource
     ],
   });
   const { uniform, setLighting } = hitLightingUniform(device, 'rt hit probes');
-  const lookup = isProbeSet(source) ? source.wgsl({ group: 3, atlasBinding: 4 }) : probeLookupWgsl({ ...source, group: 3, binding: 0, atlasBinding: 4 });
+  const lookup = isProbeSet(source)
+    ? source.wgsl({ group: 3, atlasBinding: 4, suffix: PROBE_HIT_SUFFIX })
+    : probeLookupWgsl({ ...source, group: 3, binding: 0, atlasBinding: 4, suffix: PROBE_HIT_SUFFIX });
   return {
     wgsl: lookup + PROBE_SHADE,
     layout,
