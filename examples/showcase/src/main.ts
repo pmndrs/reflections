@@ -21,11 +21,11 @@
 // on the G-buffer, ../../shared/ao.ts) for Lagarde's specular occlusion on the probe / environment part; also a
 // checkbox, and the 'ao' / 'specularOcclusion' views.
 //
-// Roughness from normal variance (W46, D3570): ?specAA=1 (default off, see SPEC_AA_DEFAULT) raises every glTF material's
+// Roughness from normal variance (W46, D3570): on by default (SPEC_AA_DEFAULT; ?specAA=0 turns it off) raises every glTF material's
 // roughness by its normal map's variance at the sampled mip (Toksvig, vMF form; ./specAA.ts), in three's lit term, the
 // G-buffer and traced hits alike; ?specAA=<k> scales the added variance. Also a checkbox under "Materials".
 //
-// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=1 ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
+// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=0|1|<k> ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
 import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';

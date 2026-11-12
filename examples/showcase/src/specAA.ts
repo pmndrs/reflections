@@ -28,8 +28,12 @@ import { float, materialReference, materialRoughness, texture, uniform } from 't
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 
-/** The showcase's and compare page's default strength when the URL has no `?specAA=` (0 = off). W46: see D3570. */
-export const SPEC_AA_DEFAULT = 0;
+/**
+ * The showcase's and compare page's strength when the URL has no `?specAA=` (0 = off). On (W46, D3570):
+ * vs the path tracer it closes CarConcept's paint (door / skirt MAD 35.7 / 19.0 -> 8.0 / 9.4) and is
+ * neutral elsewhere (toyCar, chess within 0.1 MAD), for ~0.1 ms of render passes at 1280x720.
+ */
+export const SPEC_AA_DEFAULT = 1;
 
 /** Scales the added variance (1 = the formula). One uniform for every material: changing it needs no rebuild. */
 export const specAAStrength = uniform(1);

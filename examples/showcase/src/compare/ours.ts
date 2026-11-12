@@ -93,7 +93,8 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     const meshes: THREE.Mesh[] = [];
     kit.scene.updateMatrixWorld(true);
     kit.scene.traverseVisible((o) => { if ((o as THREE.Mesh).isMesh && !o.userData.noTrace) meshes.push(o as THREE.Mesh); });
-    provider = await MeshBVHTraceProvider.fromObjects(device, meshes, { material: specAAHitMaterial });
+    // W46: ?specAAHits=0 keeps the traced hits' authored roughness with ?specAA on
+    provider = await MeshBVHTraceProvider.fromObjects(device, meshes, params.get('specAAHits') === '0' ? {} : { material: specAAHitMaterial });
     ssr.setTraceProvider(provider);
     ssr.rayTracing = true;
   }
