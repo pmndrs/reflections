@@ -10,7 +10,8 @@
 // `?rt=1` attaches a ray-traced fallback for the misses (three-mesh-bvh behind core's trace seam,
 // MeshBVHTraceProvider), rebuilt per scene and refitted per frame for animated scenes.
 // `&bvh=pmndrs` uses core's @pmndrs/bvh provider instead (createPmndrsBvhTraceProviderFromObjects;
-// `&bvhBuilder=tinybvh|gpu-hploc|gpu-lbvh`, default auto = H-PLOC with subgroups, tinybvh without).
+// `&bvhBuilder=tinybvh|gpu-hploc|gpu-lbvh`, default auto = H-PLOC with subgroups, tinybvh without;
+// `&bvhRayMasks=1` compiles @pmndrs/bvh's instance-mask test in).
 // `window.__p.rtCompare(n)` traces the same rays through both providers (SPEC phase 4 gate).
 //
 // `?denoise=1|0` (default on when a denoiser is available): the hybrid resolve (HybridReflections)
@@ -69,6 +70,8 @@ const useRT = q.get('rt') === '1';
 type BvhKind = 'three-mesh-bvh' | 'pmndrs';
 const bvhKind: BvhKind = q.get('bvh') === 'pmndrs' ? 'pmndrs' : 'three-mesh-bvh';
 const bvhBuilder = (q.get('bvhBuilder') ?? 'auto') as BvhBuilderPreference;
+/** `&bvhRayMasks=1`: @pmndrs/bvh's walk with its instance-mask test compiled in (W48; default off, D3591). */
+const bvhRayMasks = q.get('bvhRayMasks') === '1';
 /** `&shadingNormals=0`: traced hits shaded with the flat geometric normal (D1700 A/B). */
 const shadingNormals = q.get('shadingNormals') !== '0';
 const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
@@ -369,7 +372,7 @@ async function main() {
   async function buildProvider(kind: BvhKind, meshes: THREE.Mesh[]) {
     const t0 = performance.now();
     if (kind === 'pmndrs') {
-      const built = await createPmndrsBvhTraceProviderFromObjects(device, meshes, { builder: bvhBuilder, shadingNormals });
+      const built = await createPmndrsBvhTraceProviderFromObjects(device, meshes, { builder: bvhBuilder, shadingNormals, rayMasks: bvhRayMasks });
       const i = built.provider.info;
       return { provider: built.provider as ExampleProvider, pmndrs: built, refit: built.refit, info: { kind, meshes: meshes.length, triangles: i.triangles, buildMs: performance.now() - t0, builder: i.builder, fallbackReason: i.fallbackReason } };
     }
