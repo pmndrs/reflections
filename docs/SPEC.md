@@ -102,12 +102,12 @@ Hit shading belongs to the resolve, not the provider. It looks up the probes at 
 - **Core provider: `@pmndrs/bvh`** (pmndrs/bvh, WIP; split out of webgpu-ddgi on 2026-11-10). This is ours, and it is the target.
   - It is engine-free.
   - It builds with tinybvh in WebAssembly on the CPU, or with H-PLOC or LBVH on the GPU, and refits on the GPU (instance top level, skinned meshes).
-  - Every builder writes one GPU layout, versioned by `GPU_LAYOUT_VERSION`, currently 1. Its WGSL walk is `giTraceClosest` / `giTraceAny`, with a CPU port and a ray oracle.
-  - The provider wraps that walk as `traceFirstHit`, and checks `GPU_LAYOUT_VERSION` at start-up.
+  - Every builder writes one GPU layout, versioned by `GPU_LAYOUT_VERSION`, currently 2 (bvh `main`, its 0.1 API). Its WGSL walk is `bvhTraceClosest` / `bvhTraceAny` (`BvhRay` in, `BvhHit` out, with the hit normal and per-instance material this repo asked for), with a CPU port and a ray oracle. Every name its trace module declares starts with `bvh`, `Bvh` or `BVH_`, so ours must not.
+  - The provider wraps that walk as `traceFirstHit` (`traceModuleWgsl({ traceSlot, rayMasks: false })`), and checks `GPU_LAYOUT_VERSION === 2` at start-up. Material indices go up to 65534 (`PMNDRS_BVH_MAX_MATERIAL`).
   - The GPU builders need the `subgroups` feature. Without it, `createMeshLayoutBuilder` falls back to tinybvh on its own.
   - Because it lives in core, babylon, pixi and raw WebGPU all get rays, not only three.
   - It is an optional peer: the pixel paths that don't trace never load it.
-  - As built (W14): `createPmndrsBvhTraceProvider` in `packages/core/src/trace/pmndrsBvh.ts`, linked as `link:` to `../bvh-worktrees/reflections-integration` (bvh's `reflections-integration` branch in a worktree next to this repo, which adds `GiHit.normal` and a per-instance `GiHit.material`); three builds it with `createPmndrsBvhTraceProviderFromObjects`. Opt-in in `examples/ssr` (`&bvh=pmndrs`); the gate numbers are in `docs/HANDOFF.md`, W14.
+  - As built (W14, moved to bvh `main` in W48): `createPmndrsBvhTraceProvider` in `packages/core/src/trace/pmndrsBvh.ts`, linked as `link:../bvh` (root) / `link:../../../bvh` (packages/core): bvh's main checkout next to this repo. bvh `main` exports its built `dist/`, so a bvh source change shows here only after `pnpm build` in bvh. three builds it with `createPmndrsBvhTraceProviderFromObjects`. Opt-in in `examples/ssr` (`&bvh=pmndrs`); the gate numbers are in `docs/HANDOFF.md`, W14 and W48. The `reflections-integration` branch (layout 1, `gi*` names) is no longer used.
 - **three stopgap:** wraps `three-mesh-bvh/webgpu` (`BVHComputeData`, `raycastFirstHit`), which the explainer pages already use. It stays until `@pmndrs/bvh` passes its own oracle on our scenes. After that, it remains only for apps that already have a three-mesh-bvh tree.
 
 ## Sources
@@ -366,7 +366,7 @@ Debug views:
 | 1 Layout bench | ✅ decided | — (r < 0.2 lookups, BC6H split: fine-tune backlog) |
 | 2 Probe core | ✅ done | — (three cube arrays now real via the W20 shim) |
 | 3 SSSR port | ✅ gate passes with the denoiser (W10) | Variance-guided extra rays (needs variance from the denoiser, PRs #24–26) |
-| 4 RT fallback | ✅ gate met: off-screen mirror confidence 0.01 → 1.0 with RT and RT closer to the path tracer than SSR (W8, W21); rays from the miss list only, trace 0.004 → 0.535 ms from 0 to 281k misses at 1080p (W8); @pmndrs/bvh agrees with three-mesh-bvh (W14) | Not gate items: make @pmndrs/bvh the default (its `reflections-integration` branch is unmerged); RT hit shading: shadow rays done (W25, D903), but hits read 0.67-0.91x the on-screen colour on the kit scenes (too dark since W12's sky; backlog) |
+| 4 RT fallback | ✅ gate met: off-screen mirror confidence 0.01 → 1.0 with RT and RT closer to the path tracer than SSR (W8, W21); rays from the miss list only, trace 0.004 → 0.535 ms from 0 to 281k misses at 1080p (W8); @pmndrs/bvh agrees with three-mesh-bvh (W14) | Not gate items: make @pmndrs/bvh the default (on bvh `main` since W48; the lead's call, numbers in W48); RT hit shading: shadow rays done (W25, D903), but hits read 0.67-0.91x the on-screen colour on the kit scenes (too dark since W12's sky; backlog) |
 | 5 Hybrid + denoise seam | ✅ gate met: draft PR https://github.com/pmndrs/denoiser/pull/27 switches the denoiser's three reflection pages to the package and deletes its copies (W24); same pages with vs without the package on r187: max 1/255 | Landing the PR waits for the release (follow-up). Not gate items: the pages keep their own SSR / ray pass rather than `HybridReflections`; feed the denoiser tile list / motion scale / variance once PRs #24–26 land; sharp environment for near-mirror misses (W21) |
 | 6 babylon / pixi adapters | ✅ babylon and pixi-3d adapters built (early, at the maintainer's request) | — (packed-subpath check and publish 0.1 are follow-ups once the package is stable) |
 

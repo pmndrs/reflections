@@ -91,7 +91,7 @@ export interface PmndrsBvhTraceProviderOptions {
   /**
    * Compile @pmndrs/bvh's instance-mask test into the walk (`traceModuleWgsl({ rayMasks })`).
    * Default false: the provider traces with the plain walk and sets no masks, so the test would
-   * always pass (W48: no measurable difference either way, D3591).
+   * always pass (W48: no difference seen, provisional, D3591).
    */
   rayMasks?: boolean;
 }
@@ -141,7 +141,7 @@ export async function loadPmndrsBvh(module?: unknown): Promise<PmndrsBvhModule> 
     throw new Error(`PmndrsBvhTraceProvider: @pmndrs/bvh writes GPU layout ${bvh.GPU_LAYOUT_VERSION}; this provider reads ${PMNDRS_BVH_LAYOUT_VERSION}`);
   }
   if (bvh.HIT_RECORD_WORD?.normal === undefined || bvh.HIT_RECORD_WORD?.material === undefined) {
-    throw new Error('PmndrsBvhTraceProvider: this @pmndrs/bvh has no BvhHit.normal / BvhHit.material (needs its main branch from 2026-11-11 on, GPU layout 2)');
+    throw new Error('PmndrsBvhTraceProvider: this @pmndrs/bvh has no BvhHit.normal / BvhHit.material (needs its main branch, GPU layout 2)');
   }
   return bvh;
 }
