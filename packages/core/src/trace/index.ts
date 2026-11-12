@@ -14,7 +14,7 @@ export {
 export { RT_SOURCE, RT_STATE, RT_STATE_HEADER } from './shaders';
 // The core provider: @pmndrs/bvh (optional peer, imported on demand) over engine-free geometry.
 export {
-  createPmndrsBvhTraceProvider, loadPmndrsBvh, PmndrsBvhTraceProvider, PMNDRS_BVH_LAYOUT_VERSION,
+  createPmndrsBvhTraceProvider, loadPmndrsBvh, PmndrsBvhTraceProvider, PMNDRS_BVH_LAYOUT_VERSION, PMNDRS_BVH_MAX_MATERIAL,
   type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceScene, type BvhBuilderPreference,
   type PmndrsBvhTraceProviderOptions, type PmndrsBvhBuildInfo,
 } from './pmndrsBvh';

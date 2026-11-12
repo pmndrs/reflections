@@ -91,7 +91,7 @@ const sharedDeps = {
 // from its real path, so that checkout has to be on the allow list.
 const downsamplerLink = resolve(root, '../packages/core/node_modules/downsampler');
 const downsamplerRepo = existsSync(downsamplerLink) ? realpathSync(downsamplerLink) : null;
-// @pmndrs/bvh is linked the same way (the bvh-worktrees/reflections-integration checkout).
+// @pmndrs/bvh is linked the same way (the bvh repo's main checkout next to this one, ../bvh; W48).
 const bvhLink = resolve(root, '../packages/core/node_modules/@pmndrs/bvh');
 const bvhRepo = existsSync(bvhLink) ? realpathSync(bvhLink) : null;
 

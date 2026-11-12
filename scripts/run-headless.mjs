@@ -1259,14 +1259,14 @@ async function ssrRtBvhChecks(pages) {
 }
 
 /**
- * W48: 'rt trace' GPU ms at 1080p per walk (three-mesh-bvh, @pmndrs/bvh, @pmndrs/bvh with
- * `rayMasks: false`), loop stopped, median of 20 frames per run, `--rt-bvh-rounds` runs (default 3)
+ * W48: 'rt trace' GPU ms at 1080p per walk (three-mesh-bvh, @pmndrs/bvh, @pmndrs/bvh with its
+ * instance-mask test compiled in, `&bvhRayMasks=1`), loop stopped, median of 20 frames per run, `--rt-bvh-rounds` runs (default 3)
  * in rotating order, median of the runs. Two loads per run: the default miss list, then every pixel
  * below confidence 1.01 traced (the walk's cost on a full screen of rays). Opt-in (`--rt-bvh-timing`).
  */
 async function rtBvhTiming(pages) {
   const rounds = args.includes('--rt-bvh-rounds') ? Number(args[args.indexOf('--rt-bvh-rounds') + 1]) : 3;
-  const variants = [['three-mesh-bvh', ''], ['@pmndrs/bvh', '&bvh=pmndrs'], ['@pmndrs/bvh rayMasks off', '&bvh=pmndrs&bvhRayMasks=0']];
+  const variants = [['three-mesh-bvh', ''], ['@pmndrs/bvh', '&bvh=pmndrs'], ['@pmndrs/bvh rayMasks on', '&bvh=pmndrs&bvhRayMasks=1']];
   const scenes = [['offscreen', 'mirror'], ['mirrorWall', ''], ['contact', ''], ['moving', ''], ['boxRoom', ''],
     ...(fs.existsSync(path.join(ROOT, 'examples/assets/Sponza')) ? [['sponza', '']] : [])];
   const url = (param, scene, pose) => `http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1${param}&scene=${scene}${pose ? `&pose=${pose}` : ''}`;

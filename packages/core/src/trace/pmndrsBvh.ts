@@ -1,5 +1,6 @@
-// The core trace provider (docs/SPEC.md "Trace seam"): @pmndrs/bvh's WGSL walk (`giTraceClosest`
-// over its two-level GPU layout) behind core's `TraceProvider`, built from engine-free geometry.
+// The core trace provider (docs/SPEC.md "Trace seam"): @pmndrs/bvh's WGSL walk (`bvhTraceClosest`
+// over its two-level GPU layout, version 2; bvh `main`, W48) behind core's `TraceProvider`, built
+// from engine-free geometry.
 //
 // @pmndrs/bvh is an optional peer: it is imported on demand by `createPmndrsBvhTraceProvider`, so
 // pixel paths that never trace never load it. Its types are not imported either: `PmndrsBvhModule`
@@ -11,19 +12,24 @@
 //   2 top level  header, instance records, top-level nodes          (@pmndrs/bvh)
 //   3 shading    ours, array<vec4f>: a header row, the materials (albedo + clear coat, emissive + clear coat
 //                roughness, F0 + roughness (W41); indexed by
-//                GiHit.material), per instance its normal matrix + mesh, per mesh where its vertex
+//                BvhHit.material), per instance its normal matrix + mesh, per mesh where its vertex
 //                normals and triangle corners are, then those corners and normals (D1700)
 //
-// What the walk gives back: `GiHit.t / triangle / barycentrics / frontFace` map one to one onto
-// core's `Hit`; `GiHit.instance` is the input instance's position; `GiHit.normal` is the world
-// geometric normal of the authored front side; `GiHit.material` is the instance's material.
-// `traceAny` (shadow rays, D903) is its `giTraceAny`. `traceHitShadingNormal` (D1700) interpolates
-// the caller's vertex normals (`BvhMeshGeometry.normals`) at `GiHit.triangle` (the input triangle,
-// not the tree-order slot) with `GiHit.barycentrics`, through the instance's normal matrix.
+// What the walk gives back: `BvhHit.t / triangle / barycentrics / frontFace` map one to one onto
+// core's `Hit`; `BvhHit.instance` is the input instance's position; `BvhHit.normal` is the world
+// geometric normal of the authored front side; `BvhHit.material` is the instance's material.
+// `traceAny` (shadow rays, D903) is its `bvhTraceAny`. `traceHitShadingNormal` (D1700) interpolates
+// the caller's vertex normals (`BvhMeshGeometry.normals`) at `BvhHit.triangle` (the input triangle,
+// not the tree-order slot) with `BvhHit.barycentrics`, through the instance's normal matrix.
+// Every name @pmndrs/bvh's module declares starts with `bvh`, `Bvh` or `BVH_`; ours here don't
+// (`pbvh*`, `traceFirstHit`, `Hit`, `HitMaterial`).
 import type { BindingSlot, ModuleBindingEntry, TraceProvider } from './provider';
 
 /** The @pmndrs/bvh GPU layout version this wrapper was written against (`GPU_LAYOUT_VERSION`). */
-export const PMNDRS_BVH_LAYOUT_VERSION = 1;
+export const PMNDRS_BVH_LAYOUT_VERSION = 2;
+
+/** The largest material index @pmndrs/bvh's instance records hold (its `MAX_MATERIAL`, layout 2). */
+export const PMNDRS_BVH_MAX_MATERIAL = 65534;
 
 /** One mesh's geometry in object space (what @pmndrs/bvh's builders take). */
 export interface BvhMeshGeometry {
@@ -44,7 +50,7 @@ export interface BvhTraceInstance {
   readonly mesh: number;
   /** Object-to-world, column-major 4x4 (any engine's matrix layout). Mirrors and non-uniform scales are fine. */
   readonly matrixWorld: ArrayLike<number>;
-  /** Index into `materials`; omit for the default grey. */
+  /** Index into `materials` (at most {@link PMNDRS_BVH_MAX_MATERIAL}); omit for the default grey. */
   readonly material?: number;
 }
 
@@ -82,6 +88,12 @@ export interface PmndrsBvhTraceProviderOptions {
    * dynamic import). Default: `import('@pmndrs/bvh')`.
    */
   module?: unknown;
+  /**
+   * Compile @pmndrs/bvh's instance-mask test into the walk (`traceModuleWgsl({ rayMasks })`).
+   * Default false: the provider traces with the plain walk and sets no masks, so the test would
+   * always pass (W48: no measurable difference either way, D3591).
+   */
+  rayMasks?: boolean;
 }
 
 // ---- the part of @pmndrs/bvh this file uses ---------------------------------------------------
@@ -105,10 +117,10 @@ interface BvhSceneData {
 }
 interface PmndrsBvhModule {
   readonly GPU_LAYOUT_VERSION: number;
-  /** Word positions in a batch hit record; `normal` and `material` exist from the reflections-integration branch on. */
+  /** Word positions in a batch hit record; `normal` and `material` exist on bvh main from layout 2 on. */
   readonly HIT_RECORD_WORD: Readonly<Record<string, number>>;
   readonly TRACE_MODULE_ENTRIES: readonly ModuleBindingEntry[];
-  traceModuleWgsl(slot: BindingSlot): string;
+  traceModuleWgsl(options: { traceSlot?: BindingSlot; triangleFilter?: string | null; rayMasks?: boolean }): string;
   createMeshLayoutBuilder(device: GPUDevice | null, options?: { prefer?: 'gpu-hploc' | 'gpu-lbvh' | 'tinybvh'; label?: string }): Promise<{
     readonly kind: string;
     readonly fallbackReason: string | null;
@@ -129,7 +141,7 @@ export async function loadPmndrsBvh(module?: unknown): Promise<PmndrsBvhModule> 
     throw new Error(`PmndrsBvhTraceProvider: @pmndrs/bvh writes GPU layout ${bvh.GPU_LAYOUT_VERSION}; this provider reads ${PMNDRS_BVH_LAYOUT_VERSION}`);
   }
   if (bvh.HIT_RECORD_WORD?.normal === undefined || bvh.HIT_RECORD_WORD?.material === undefined) {
-    throw new Error('PmndrsBvhTraceProvider: this @pmndrs/bvh has no GiHit.normal / GiHit.material (needs its reflections-integration branch, 2026-11-10)');
+    throw new Error('PmndrsBvhTraceProvider: this @pmndrs/bvh has no BvhHit.normal / BvhHit.material (needs its main branch from 2026-11-11 on, GPU layout 2)');
   }
   return bvh;
 }
@@ -138,21 +150,21 @@ const MATERIAL_VEC4S = 3; // albedo + clear coat, emissive + clear coat roughnes
 const INSTANCE_VEC4S = 3;
 const NO_MATERIAL = 0xffffffff;
 
-const providerWgsl = (bvh: PmndrsBvhModule, slot: BindingSlot, shadingNormal: boolean) => /* wgsl */ `
-${bvh.traceModuleWgsl(slot)}
+const providerWgsl = (bvh: PmndrsBvhModule, slot: BindingSlot, shadingNormal: boolean, rayMasks: boolean) => /* wgsl */ `
+${bvh.traceModuleWgsl({ traceSlot: slot, rayMasks })}
 @group(${slot.group}) @binding(${slot.firstBinding + bvh.TRACE_MODULE_ENTRIES.length}) var<storage, read> pbvhShading: array<vec4f>;
 // row 0: material count, first instance row, first mesh row, instance count
 fn pbvhHeader() -> vec4u { return bitcast<vec4u>(pbvhShading[0]); }
 
 fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
-  let h = giTraceClosest(GiRay(origin, 0.0, dir, tMax));
+  let h = bvhTraceClosest(BvhRay(origin, 0.0, dir, tMax));
   if (h.t < 0.0) { return noHit(); }
   return Hit(h.t, h.triangle, h.barycentrics, h.material, h.instance, h.normal, h.frontFace);
 }
 
 // any-hit: @pmndrs/bvh's own occlusion walk (stops at the first triangle, far child first)
 fn traceAny(origin: vec3f, dir: vec3f, tMax: f32) -> bool {
-  return giTraceAny(GiRay(origin, 0.0, dir, tMax));
+  return bvhTraceAny(BvhRay(origin, 0.0, dir, tMax));
 }
 
 fn traceHitMaterial(hit: Hit) -> HitMaterial {
@@ -229,6 +241,8 @@ export class PmndrsBvhTraceProvider implements TraceProvider {
     materials: readonly BvhTraceMaterial[],
     readonly info: PmndrsBvhBuildInfo,
     private readonly meshes: readonly BvhMeshGeometry[],
+    /** Whether the walk has @pmndrs/bvh's instance-mask test compiled in. */
+    readonly rayMasks = false,
   ) {
     this.layoutVersion = bvh.GPU_LAYOUT_VERSION;
     this.shading = packShading(materials, instances, meshes);
@@ -250,7 +264,7 @@ export class PmndrsBvhTraceProvider implements TraceProvider {
 
   get version() { return this._version; }
 
-  code(slot: BindingSlot) { return providerWgsl(this.bvh, slot, this.capabilities.shadingNormal); }
+  code(slot: BindingSlot) { return providerWgsl(this.bvh, slot, this.capabilities.shadingNormal, this.rayMasks); }
 
   resources(): readonly GPUBindingResource[] { return this.buffers.map((buffer) => ({ buffer })); }
 
@@ -377,6 +391,9 @@ export async function createPmndrsBvhTraceProvider(
   const built = await builder.buildLayouts(scene.meshes);
   const layouts = built.map((b) => b.layout);
   const materials = scene.materials ?? [];
+  if (materials.length > PMNDRS_BVH_MAX_MATERIAL + 1) {
+    throw new RangeError(`@pmndrs/bvh holds material indices up to ${PMNDRS_BVH_MAX_MATERIAL}; the scene has ${materials.length} materials`);
+  }
   for (const instance of scene.instances) {
     if (!(instance.mesh >= 0 && instance.mesh < layouts.length)) throw new RangeError(`instance uses mesh ${instance.mesh}; there are ${layouts.length}`);
     if (instance.material !== undefined && instance.material !== NO_MATERIAL && !(instance.material < materials.length)) {
@@ -397,7 +414,7 @@ export async function createPmndrsBvhTraceProvider(
     skippedSingular: data.topLevel.skippedSingular,
     buildMs: 0,
   };
-  const provider = new PmndrsBvhTraceProvider(device, bvh, layouts, data, scene.instances, materials, info, scene.meshes);
+  const provider = new PmndrsBvhTraceProvider(device, bvh, layouts, data, scene.instances, materials, info, scene.meshes, options.rayMasks ?? false);
   info.buildMs = performance.now() - t0;
   return provider;
 }

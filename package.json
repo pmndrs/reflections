@@ -81,7 +81,7 @@
   "devDependencies": {
     "@babylonjs/core": "9.35.0",
     "@pmndrs/reflections-babylon": "workspace:*",
-    "@pmndrs/bvh": "link:../bvh-worktrees/reflections-integration",
+    "@pmndrs/bvh": "link:../bvh",
     "@pmndrs/reflections-core": "workspace:*",
     "@pmndrs/reflections-pixi": "workspace:*",
     "@pmndrs/reflections-three": "workspace:*",

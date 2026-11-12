@@ -3,7 +3,7 @@
 //
 // A provider is WGSL text plus the resources it binds, in the shape of @pmndrs/ddgi's `WgslModule`
 // (packages/ddgi-core/src/platform/contract/wgsl.ts), so @pmndrs/bvh's trace module
-// (`giTraceClosest` over its GPU layout) wraps into one without changes on either side:
+// (`bvhTraceClosest` over its GPU layout) wraps into one without changes on either side:
 //
 //   - the pass decides where the bindings land (`code(slot)`), so the provider never owns a
 //     bind-group index and can share a group with other modules;
@@ -101,7 +101,7 @@ export interface TraceProvider {
  * - `t`: world distance along `dir` (unit); negative = no hit within `tMax`.
  * - `triangle`: the provider's triangle id (mesh-local or global, the provider documents which).
  * - `barycentrics`: weights of the triangle's vertices 1 and 2 (vertex 0 = 1 - x - y), as
- *   @pmndrs/bvh's `GiHit`.
+ *   @pmndrs/bvh's `BvhHit`.
  * - `material`: index into the engine's material table (three: the mesh's slot), 0xffffffff if none.
  * - `instance`: the provider's instance / object index.
  * - `normal`: world geometric normal if `capabilities.hitNormal`, else vec3f(0).

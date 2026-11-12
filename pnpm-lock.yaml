@@ -12,8 +12,8 @@ importers:
         specifier: 9.35.0
         version: 9.35.0
       '@pmndrs/bvh':
-        specifier: link:../bvh-worktrees/reflections-integration
-        version: link:../bvh-worktrees/reflections-integration
+        specifier: link:../bvh
+        version: link:../bvh
       '@pmndrs/reflections-babylon':
         specifier: workspace:*
         version: link:packages/babylon
@@ -83,8 +83,8 @@ importers:
         version: link:../../../downsampler-reflections
     devDependencies:
       '@pmndrs/bvh':
-        specifier: link:../../../bvh-worktrees/reflections-integration
-        version: link:../../../bvh-worktrees/reflections-integration
+        specifier: link:../../../bvh
+        version: link:../../../bvh
 
   packages/pixi:
     dependencies:
