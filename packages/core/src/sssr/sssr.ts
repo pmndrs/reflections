@@ -109,6 +109,12 @@ export interface ScreenSpaceReflectionsOptions {
    * `inputs.hitShadingBindGroup`). Default: the radiance fallback (`sampleRadianceFallback`).
    */
   hitSpecularShading?: HitShading;
+  /**
+   * Bind `inputs.hitSource` (last frame's per-pixel hit source) in intersect, for
+   * `settings.hitLobeFilterMixed` (W52, D3641). One more sampled texture in the intersect stage, so
+   * off unless asked for. Default false.
+   */
+  hitSource?: boolean;
 }
 
 /**
@@ -129,8 +135,9 @@ export function screenSpaceHitShadingWgsl(shading?: HitShading): string {
 ${HIT_WGSL}
 ${DEFAULT_HIT_MATERIAL_WGSL}
 ${DEFAULT_HIT_SPECULAR_WGSL}
-// No BVH in a screen-space pass: every light and every lobe is visible.
-fn traceLightVisible(P_world: vec3f, N: vec3f, L: vec3f, tMax: f32) -> bool { return true; }
+// No BVH in a screen-space pass: every light is visible; a lobe is unless the intersect pass's
+// depth-buffer march says otherwise (hitShadeOcclusion 'screen', W52, D3642).
+fn traceLightVisible(P_world: vec3f, N: vec3f, L: vec3f, tMax: f32) -> bool { return screenSpaceLobeVisible(P_world, N, L); }
 fn rtHitSpecularOn() -> bool { return true; }
 ${own}
 ${shadeLobeWgslFor(own)}`;
@@ -213,6 +220,23 @@ export interface ScreenSpaceReflectionsSettings {
    * that way). Default {@link DEFAULT_HIT_LOBE_FILTER}; 0 = the hit's own roughness (W44).
    */
   hitLobeFilter?: number;
+  /**
+   * The lobe filter where hits mix (W52, D3641): a re-shaded hit whose neighbourhood held
+   * ray-traced hits last frame (`inputs.hitSource`, RT_SOURCE 1 or 4, among 3x3 samples 3 px apart)
+   * looks up with hitLobeFilter x mix(1, this, min(1, 2 x traced share)). The FFX denoiser spreads
+   * such hits over their traced neighbours (D3610: carConcept's skirt lip), and the filter's wider
+   * lookup is what made them bright. Needs the option `hitSource` and the input. Default 1 (no
+   * change); 0 = no lobe filter where hits mix.
+   */
+  hitLobeFilterMixed?: number;
+  /**
+   * Re-shade occlusion without a BVH (W52, D3642): 'screen' = a re-shaded hit's lobe marches 8
+   * depth-buffer samples along R from the hit (out to 0.3 x its camera distance); blocked, its
+   * specular goes dark as a blocked traced lobe (D3513: x smoothstep(0.3, 1, roughness)). A rim's
+   * lobe into the wheel well, a sill's into the car's underside. Only blockers the camera sees
+   * count. Default 'off' (D3540: no visibility).
+   */
+  hitShadeOcclusion?: 'off' | 'screen';
 }
 
 export interface ScreenSpaceCamera {
@@ -261,6 +285,13 @@ export interface ScreenSpaceReflectionsInputs {
   clearcoat?: GPUTexture;
   /** Bind group for `hitSpecularShading`'s `@group(3)`, if it has one. */
   hitShadingBindGroup?: GPUBindGroup;
+  /**
+   * Last frame's per-pixel hit source (W52, D3641): RT_SOURCE codes in r (0 = the screen-space
+   * result, 1 traced hit, 2 traced miss, 3 capped, 4 traced hit shaded from the screen), render
+   * size, any float format; e.g. the traced pass's `source` before this frame's dispatch clears it.
+   * Read with the option `hitSource` for `settings.hitLobeFilterMixed`.
+   */
+  hitSource?: GPUTexture;
   camera: ScreenSpaceCamera;
   /** Bind group for the radiance fallback's `@group(1)`, if it has one. */
   fallbackBindGroup?: GPUBindGroup;
@@ -328,7 +359,7 @@ export interface ScreenSpaceReflections {
  */
 export function screenSpaceInputsFromFrame(
   frame: FrameInputs, tracer: Pick<ScreenSpaceReflections, 'depthInverted'>,
-  extra: Pick<ScreenSpaceReflectionsInputs, 'variance' | 'fallbackBindGroup' | 'history' | 'hitShadingBindGroup'> = {},
+  extra: Pick<ScreenSpaceReflectionsInputs, 'variance' | 'fallbackBindGroup' | 'history' | 'hitShadingBindGroup' | 'hitSource'> = {},
 ): ScreenSpaceReflectionsInputs {
   const { textures: t, conventions: c } = frame;
   if (c.depthLinear) throw new Error('ssr: linear depth is not supported; pass hardware (device) depth');
@@ -369,6 +400,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const inverted = options.depthInverted ?? false;
   const fallback = options.radianceFallback ?? constantRadianceFallback();
   const useMissList = options.missList ?? false;
+  const useHitSource = options.hitSource ?? false;
   const timer = options.timestamps && PassTimer.supported(device) ? new PassTimer(device) : undefined;
   // FFX: min(7, ceil(log2(max(w, h)))) -- a copy at mip 0 plus six reduced mips.
   const mipCount = depthPyramidMipCount(W, H);
@@ -446,21 +478,22 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     entries: [uniformEntry(0), texEntry(1), texEntry(2), texEntry(3), texEntry(4), texEntry(5),
       bufEntry(6, 'read-only-storage'), bufEntry(7, 'read-only-storage'),
       storageTexEntry(8, 'rgba16float'), storageTexEntry(9, 'r32float'), storageTexEntry(10, 'r32float'),
-      ...(useMissList ? [bufEntry(11), bufEntry(12)] : []), texEntry(13), texEntry(14), texEntry(15), texEntry(16), texEntry(17)],
+      ...(useMissList ? [bufEntry(11), bufEntry(12)] : []), texEntry(13), texEntry(14), texEntry(15), texEntry(16), texEntry(17),
+      ...(useHitSource ? [texEntry(18)] : [])],
   });
   // the re-shade's radiance (W44): the hit shading's @group(3), groups 1-2 empty where unused
   const hitShading = options.hitSpecularShading;
   const emptyBgl = device.createBindGroupLayout({ label: 'ssr empty', entries: [] });
   const emptyGroup = device.createBindGroup({ label: 'ssr empty', layout: emptyBgl, entries: [] });
-  // the intersect's own group 0 (sampled 1-5, 13-17; storage textures 8-10; buffers 6, 7, and 11, 12 with the miss list)
+  // the intersect's own group 0 (sampled 1-5, 13-17, 18 with hitSource; storage textures 8-10; buffers 6, 7, and 11, 12 with the miss list)
   // plus the fallback's and the hit shading's groups against the device (D4900: a probe set binds one atlas per size in each)
   checkStageLimits(device, 'ssr: the intersect pipeline', [
-    ['pass', { storageBuffers: useMissList ? 4 : 2, storageTextures: 3, sampledTextures: 10 }],
+    ['pass', { storageBuffers: useMissList ? 4 : 2, storageTextures: 3, sampledTextures: useHitSource ? 11 : 10 }],
     ['radiance fallback', { storageBuffers: fallback.storageBufferCount, storageTextures: fallback.storageTextureCount, sampledTextures: fallback.sampledTextureCount }],
     ['hit shading', hitShading?.layout ? { storageBuffers: hitShading.storageBufferCount, storageTextures: hitShading.storageTextureCount, sampledTextures: hitShading.sampledTextureCount } : {}],
   ]);
   const intersectLayouts = hitShading?.layout ? [intersectBgl, fallback.layout ?? emptyBgl, emptyBgl, hitShading.layout] : withFallback(intersectBgl);
-  const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading)), intersectLayouts);
+  const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource), intersectLayouts);
 
   let missArgsPipe: GPUComputePipeline | undefined, missArgsGroup: GPUBindGroup | undefined;
   if (useMissList) {
@@ -529,6 +562,9 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[134] = inputs.albedo ? 1 : 0;
     u[135] = inputs.clearcoat ? 1 : 0;
     f[136] = Math.max(0, s.hitLobeFilter ?? DEFAULT_HIT_LOBE_FILTER);
+    f[137] = Math.min(1, Math.max(0, s.hitLobeFilterMixed ?? 1));
+    u[138] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
+    u[139] = useHitSource && inputs.hitSource ? 1 : 0;
     device.queue.writeBuffer(params, 0, data);
   }
 
@@ -538,7 +574,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     }
     if (fallback.layout && !inputs.fallbackBindGroup) throw new Error('ssr: the radiance fallback needs inputs.fallbackBindGroup');
     if (hitShading?.layout && !inputs.hitShadingBindGroup) throw new Error('ssr: hitSpecularShading needs inputs.hitShadingBindGroup');
-    for (const [k, t] of [['albedo', inputs.albedo], ['metalness', inputs.metalness?.texture], ['clearcoat', inputs.clearcoat]] as const) {
+    for (const [k, t] of [['albedo', inputs.albedo], ['metalness', inputs.metalness?.texture], ['clearcoat', inputs.clearcoat], ['hitSource', useHitSource ? inputs.hitSource : undefined]] as const) {
       if (t && (t.width !== W || t.height !== H)) throw new Error(`ssr: ${k} is ${t.width}x${t.height}, expected ${W}x${H}`);
     }
     const useHistory = (settings.hitColor ?? 'current') === 'history';
@@ -579,7 +615,8 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
         { binding: 14, resource: (useHistory ? inputs.motion! : dummyHistory).createView() },
         { binding: 15, resource: (inputs.albedo ?? dummyMaterial).createView() },
         { binding: 16, resource: (inputs.metalness?.texture ?? dummyMaterial).createView() },
-        { binding: 17, resource: (inputs.clearcoat ?? dummyMaterial).createView() }],
+        { binding: 17, resource: (inputs.clearcoat ?? dummyMaterial).createView() },
+        ...(useHitSource ? [{ binding: 18, resource: (inputs.hitSource ?? dummyVariance).createView() }] : [])],
     });
 
     timer?.begin();

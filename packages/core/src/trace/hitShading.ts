@@ -111,6 +111,53 @@ const HIT_SHADOW_RAY_LENGTH: f32 = 1e30;
 fn hitSpecularRadiance(P: vec3f, R: vec3f, roughness: f32) -> vec3f { return sampleRadianceFallback(P, R, roughness); }
 ${SPECULAR}`;
 
+/**
+ * Re-shade occlusion without a BVH (W52, D3642): a short march along R from a re-shaded hit through
+ * the depth buffer, the screen-space stand-in for D3513's visibility ray. `false` when a sample
+ * along R lands behind the depth buffer by less than a thickness, i.e. something the camera sees
+ * stands in front of the lobe (a rim's R into the wheel well, a sill's R into the underside).
+ * Off screen, behind the camera or past the background: unknown, counted visible.
+ *
+ * Needs, from the pass that includes it: `hsoProject(p) -> vec3f` (uv and clip w of a world
+ * point), `hsoSceneDistance(c) -> f32` (camera distance of the depth buffer's surface at pixel c;
+ * a huge value for the background), `hsoCamera() -> vec3f`, `hsoSize() -> vec2u`, and the private
+ * `hsoPixel` (the reflecting pixel, for the step jitter).
+ *
+ * The march is HSO_STEPS samples on t = len x ((i + j) / n)^2 (denser near the hit), len =
+ * HSO_LENGTH x the hit's camera distance, thickness HSO_THICKNESS x that distance, starting past a
+ * normal offset of 3e-3 x the distance (the traced pass's own, D8). Samples within 1.5 px of the
+ * hit's own pixel are skipped (its own surface).
+ */
+export const SCREEN_VISIBILITY_WGSL = /* wgsl */ `
+const HSO_STEPS: u32 = 8u;
+const HSO_LENGTH: f32 = 0.3;
+const HSO_THICKNESS: f32 = 0.15;
+var<private> hsoPixel: vec2u = vec2u(0u);
+fn hitScreenVisible(hitP: vec3f, N: vec3f, R: vec3f) -> bool {
+  let cam = hsoCamera();
+  let d0 = length(hitP - cam);
+  let size = vec2f(hsoSize());
+  let start = hsoProject(hitP);
+  let c0 = start.xy * size;
+  let origin = hitP + N * (3e-3 * d0);
+  let len = HSO_LENGTH * d0;
+  let thickness = HSO_THICKNESS * d0;
+  // interleaved gradient noise (Jimenez 2014): one start offset per pixel, the denoiser blurs it
+  let j = fract(52.9829189 * fract(dot(vec2f(hsoPixel), vec2f(0.06711056, 0.00583715))));
+  for (var i = 0u; i < HSO_STEPS; i++) {
+    let s = (f32(i) + j) / f32(HSO_STEPS);
+    let X = origin + R * (len * s * s);
+    let q = hsoProject(X);
+    if (q.z <= 0.0 || any(q.xy <= vec2f(0.0)) || any(q.xy >= vec2f(1.0))) { return true; }
+    let c = q.xy * size;
+    if (all(abs(c - c0) < vec2f(1.5))) { continue; }
+    let behind = length(X - cam) - hsoSceneDistance(vec2i(c));
+    if (behind > 0.01 * d0 && behind < thickness) { return false; }
+  }
+  return true;
+}
+`;
+
 /** The WGSL to add after a hit shading's own so that `hitShadeLobe` / `hitShadeSurface` exist. */
 export function shadeLobeWgslFor(shadingWgsl: string): string {
   return /fn\s+hitShadeLobe\s*\(/.test(shadingWgsl) ? '' : FALLBACK_SHADE_LOBE_WGSL;

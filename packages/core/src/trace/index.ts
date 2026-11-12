@@ -4,7 +4,7 @@ export {
   type BindingSlot, type ModuleBindingEntry, type TraceProvider, type TraceProviderCapabilities, type HitShading,
 } from './provider';
 export {
-  environmentHitShading, probeHitShading, HIT_MAX_DIRECTIONAL, HIT_MAX_HEMISPHERE, FALLBACK_SHADE_LOBE_WGSL, shadeLobeWgslFor,
+  environmentHitShading, probeHitShading, HIT_MAX_DIRECTIONAL, HIT_MAX_HEMISPHERE, FALLBACK_SHADE_LOBE_WGSL, SCREEN_VISIBILITY_WGSL, shadeLobeWgslFor,
   type EnvironmentHitShading, type EnvironmentMapping, type HitLights, type ProbeHitShading, type ProbeHitShadingSource, type ProbeHitShadingResources,
 } from './hitShading';
 export {
