@@ -393,7 +393,7 @@ Debug views:
 | 5 Hybrid + denoise seam | ✅ gate met: draft PR https://github.com/pmndrs/denoiser/pull/27 switches the denoiser's three reflection pages to the package and deletes its copies (W24); same pages with vs without the package on r187: max 1/255 | Landing the PR waits for the release (follow-up). Not gate items: the pages keep their own SSR / ray pass rather than `HybridReflections`; feed the denoiser tile list / motion scale / variance once PRs #24–26 land; sharp environment for near-mirror misses (W21) |
 | 6 babylon / pixi adapters | ✅ babylon and pixi-3d adapters built (early, at the maintainer's request) | — (packed-subpath check and publish 0.1 are follow-ups once the package is stable) |
 
-**Follow-ups once stable (not phase gates):** land the denoiser PR; packed-subpath check; publish 0.1 (needs @pmndrs/bvh and the downsampler published instead of `link:`); @pmndrs/bvh as the default provider.
+**Follow-ups once stable (not phase gates):** (Maintainer 2026-11-12: @pmndrs/bvh and the downsampler go to npm first, as 0.1 candidates soon, since other libraries depend on them; switch our `link:`s to the npm versions when they land.) land the denoiser PR; packed-subpath check; publish 0.1 (needs @pmndrs/bvh and the downsampler published instead of `link:`); @pmndrs/bvh as the default provider.
 
 Details per phase in the table below; per-workstream state in `docs/HANDOFF.md`.
 
