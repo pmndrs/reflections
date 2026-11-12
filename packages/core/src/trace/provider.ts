@@ -219,6 +219,8 @@ export interface HitShading {
   storageBufferCount?: number;
   /** Storage textures in `layout`, likewise. Default 0. */
   storageTextureCount?: number;
+  /** Sampled textures in `layout` (probes: one atlas per size), likewise (D4900). Default 0. */
+  sampledTextureCount?: number;
 }
 
 /**

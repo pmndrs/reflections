@@ -218,7 +218,7 @@ async function main() {
   const sctx = scratch.getContext('2d', { willReadFrequently: true })!;
   const read = (c: HTMLCanvasElement) => { sctx.clearRect(0, 0, W, H); sctx.drawImage(c, 0, 0); return sctx.getImageData(0, 0, W, H).data; };
 
-  interface Row { method: MethodId; mad: number; bias: number; stdMean: number; stdP99: number; orbit: number | null; frames: number; warmup: number; info: Record<string, unknown> }
+  interface Row { method: MethodId; mad: number; /** W62: PSNR (dB) of the frames vs the reference over the glossy px, rgb /255 */ psnr: number; bias: number; stdMean: number; stdP99: number; orbit: number | null; frames: number; warmup: number; info: Record<string, unknown> }
   interface Measure { scene: string; pose: string; size: [number, number]; referenceSamples: number; glossyPixels: number; units: string; orbitDegPerFrame: number; rows: Row[]; seconds: number }
   let lastMeasure: Measure | null = null;
 
@@ -307,7 +307,7 @@ async function main() {
         for (let f = 0; f < warmup; f++) { m.frame(camera); await m.idle(); if (f % 8 === 0) { say(`${METHOD_SHORT[id]}: warm-up ${f} / ${warmup}`); await nextFrame(); } }
         const n = mask.length;
         const sumL = new Float64Array(n), sumL2 = new Float64Array(n), sumC = new Float64Array(n * 3);
-        let absTotal = 0;
+        let absTotal = 0, sqTotal = 0;
         for (let f = 0; f < K; f++) {
           m.frame(camera);
           const d = read(m.canvas);
@@ -316,6 +316,7 @@ async function main() {
             const o = mask[k] * 4;
             const r = d[o], g = d[o + 1], b = d[o + 2];
             absTotal += (Math.abs(r - ref[o]) + Math.abs(g - ref[o + 1]) + Math.abs(b - ref[o + 2])) / 3;
+            sqTotal += ((r - ref[o]) ** 2 + (g - ref[o + 1]) ** 2 + (b - ref[o + 2]) ** 2) / 3;
             const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
             sumL[k] += l; sumL2[k] += l * l;
             sumC[k * 3] += r; sumC[k * 3 + 1] += g; sumC[k * 3 + 2] += b;
@@ -334,7 +335,7 @@ async function main() {
         const sorted = Array.from(std).sort((a, b) => a - b);
         let orbit: number | null = null;
         if (orbitFrames > 0) { say(`${METHOD_SHORT[id]}: orbit`); orbit = await orbitFlicker(m, mask, orbitDeg, orbitFrames); }
-        rows.push({ method: id, mad: absTotal / (n * K), bias: bias / n, stdMean: stdSum / n, stdP99: sorted[Math.floor(n * 0.99)] ?? 0, orbit, frames: K, warmup, info: m.info() });
+        rows.push({ method: id, mad: absTotal / (n * K), psnr: 10 * Math.log10((255 * 255) / Math.max(1e-9, sqTotal / (n * K))), bias: bias / n, stdMean: stdSum / n, stdP99: sorted[Math.floor(n * 0.99)] ?? 0, orbit, frames: K, warmup, info: m.info() });
         if (!sides.includes(id) && id !== oursId) drop(id);
         say(table(rows, refSamples, n));
       }

@@ -7,7 +7,7 @@
 import * as THREE from 'three/webgpu';
 import { renderOutput, vec3, vec4 } from 'three/tsl';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, installCubeArraySupport, reflectionProbes,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
 } from '@pmndrs/reflections/three';
 import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
 import { ScreenSpaceAO } from '../../../shared/ao';
@@ -25,9 +25,10 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   const adapter = await navigator.gpu.requestAdapter();
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
   const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: {
-    maxColorAttachmentBytesPerSample: maxBytes,
-    // W61 (D4804): a probe layout of three sizes is three atlas bindings in every Sponza material (18 > the default 16)
-    ...(params.has('probeLayout') && adapter ? { maxSampledTexturesPerShaderStage: Math.min(adapter.limits.maxSampledTexturesPerShaderStage, 48) } : {}),
+    // W62 (D4900): the library's limits (up to 32 sampled textures per stage for probe sets of several sizes);
+    // ?texLimit=default pins WebGPU's default 16
+    ...(adapter ? reflectionsRequiredLimits(adapter) : {}), maxColorAttachmentBytesPerSample: maxBytes,
+    ...(params.get('texLimit') === 'default' ? { maxSampledTexturesPerShaderStage: 16 } : {}),
   } } as N);
   renderer.setPixelRatio(1);
   renderer.shadowMap.enabled = true;

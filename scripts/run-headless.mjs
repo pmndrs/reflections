@@ -5,6 +5,8 @@
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | probe-layouts)
+//   pnpm check -- --only probe-bindings          # W62: Sponza's three-size probe set at the default 16 sampled textures
+//   pnpm check -- --only probe-bindings-measure  # W62: Sponza with fewer probe sizes vs the path tracer (MAD, PSNR), lookup ms; out/w62-probe-bindings.json
 //   pnpm check -- --only probe-layouts-measure   # W61: probe layouts at equal memory, error vs RT / path tracer, seams, timing (minutes); out/w61-probe-layouts.json
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p: core on the 2D array (warp), core on the cube array, the pre-phase-2 TSL node
 //   pnpm check -- --only mirror-bias --mirror-bias   # W32 / D49: mirrorBias noise / bias sweep (minutes), JSON to out/mirror-bias.json
@@ -684,6 +686,13 @@ function f2Checks(r) {
     check('rt limits: 4-buffer provider + probe fallback (8) and a raised limit (9) build without errors',
       !l.fourBuffersAndProbes.threw && !l.fourBuffersAndProbes.validationError && (l.raised.skipped !== undefined || (!l.raised.threw && !l.raised.validationError)),
       `4 + probes: ${d(l.fourBuffersAndProbes)}; raised: ${d(l.raised)}`);
+    // with the library's limits the count passes; the module then fails WGSL parsing because the probe lookup is
+    // included twice (fallback at group 1, hit shading at group 3: 'redeclaration of pl_faceDirUV'), at any atlas
+    // count: D4901, a tracked fix, accepted here by name only
+    check(`sssr limits: a ${l.sampled.atlases}-size probe set as fallback + hit shading (18 sampled textures) throws a clear error at ${l.sampled.limit}, passes the count with reflectionsRequiredLimits (W62, D4900; the double lookup include is D4901)`,
+      l.sampled.atlases === 4 && !!l.sampled.threw && /maxSampledTexturesPerShaderStage/.test(l.sampled.threw) && /18 sampled textures/.test(l.sampled.threw) && !l.sampled.validationError
+        && (l.sampledRaised.skipped !== undefined || (!l.sampledRaised.threw && (!l.sampledRaised.validationError || /redeclaration of 'pl_/.test(l.sampledRaised.validationError)))),
+      `default: ${d(l.sampled)}; library limits (${l.sampledRaised.limit ?? '-'}): ${d(l.sampledRaised)}`);
   }
   const gf = section('gbufferFirstFrame');
   if (gf) {
@@ -1506,6 +1515,92 @@ async function probeLayoutMeasure(pages) {
   }
 }
 
+/**
+ * W62 (D4900): probe sizes against WebGPU's sampled-texture limit. `--only probe-bindings` (checks):
+ * Sponza's three-size mixed set on examples/ssr at the default 16 sampled textures per stage draws
+ * without validation errors and matches the same page at the adapter's limit (the composite shares
+ * its lookups' atlas nodes, so each size costs one binding there, not two); the library asks for
+ * up to 32. `--only probe-bindings-measure` (minutes): Sponza with fewer sizes against the path
+ * tracer (compare page, glossy px, 'probes' and 'ours-denoised': MAD and PSNR) and the lookup's GPU
+ * ms at 1080p; JSON to out/w62-probe-bindings.json (W62_PARTS=bake,timing,pt and W62_VARIANTS pick).
+ */
+const BINDING_VARIANTS = ['shipped', 'few', 'mixed', 'twoSize', 'twoSizeFew', 'mixedDown', 'oneSize256', 'oneSize128'];
+async function probeBindingChecks(pages) {
+  console.log('probe bindings (W62):');
+  const shots = {}, info = {};
+  // 'adapter' twice: the page's own run-to-run floor (SSR's ray noise is seeded, but a few px move between runs)
+  for (const lim of ['default', 'adapter', 'adapter2']) {
+    const before = results.logs.length;
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&scene=showcaseSponza&probeLayout=mixed&texLimit=${lim.replace('2', '')}`);
+    pages.push(p);
+    info[lim] = await p.T(`(async () => { const p = window.__p; p.setPose('courtyard'); p.setView('final'); await p.step(6);
+      return { limit: p.renderer.backend.device.limits.maxSampledTexturesPerShaderStage, sizes: p.probes.bakedResolutions }; })()`);
+    shots[lim] = await p.T('window.__p.shot()');
+    savePng(`w62-sponza-mixed-${lim}.png`, shots[lim]);
+    info[lim].bad = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|exceeds/i.test(l));
+    p.close(); pages.splice(pages.indexOf(p), 1);
+  }
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&scene=rooms`);
+  pages.push(p);
+  const st = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots.default)}, ${JSON.stringify(shots.adapter)})`);
+  const floor = await p.T(`(${IMAGE_STATS})(${JSON.stringify(shots.adapter2)}, ${JSON.stringify(shots.adapter)})`);
+  const lib = await p.T('window.__p.renderer.backend.device.limits.maxSampledTexturesPerShaderStage');
+  p.close(); pages.splice(pages.indexOf(p), 1);
+  const d = info.default;
+  check(`Sponza's ${d.sizes.length}-size probe set (${d.sizes.join(' / ')} px) draws at WebGPU's default ${d.limit} sampled textures per stage, as at the adapter's ${info.adapter.limit} (shared atlas nodes, D4900)`,
+    d.limit === 16 && d.sizes.length === 3 && d.bad.length === 0 && st.lum > 10 && st.mean <= 2 * floor.mean + 0.01,
+    `errors ${d.bad.length}${d.bad.length ? ` "${d.bad[0].slice(0, 200)}"` : ''}; vs ${info.adapter.limit}: mean ${st.mean.toFixed(4)}, max ${st.max} / 255 (the page against itself: mean ${floor.mean.toFixed(4)}, max ${floor.max}), luminance ${st.lum.toFixed(1)}`);
+  check('examples/ssr without ?texLimit gets the library limits: up to 32 sampled textures per stage (reflectionsRequiredLimits)', lib === 32 || lib === 16, `device limit ${lib}`);
+}
+
+async function probeBindingMeasure(pages) {
+  fs.mkdirSync(OUT, { recursive: true });
+  const file = path.join(OUT, 'w62-probe-bindings.json');
+  const all = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+  const parts = process.env.W62_PARTS?.split(',') ?? ['bake', 'timing', 'pt'];
+  const variants = process.env.W62_VARIANTS?.split(',') ?? BINDING_VARIANTS;
+  const save = () => fs.writeFileSync(file, JSON.stringify(all, null, 1));
+  if (parts.includes('bake')) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&scene=showcaseSponza&probeLayout=shipped`);
+    pages.push(p);
+    all.bake ??= {};
+    for (const name of variants) {
+      const b = await p.T(`window.__p.setProbeLayout(${JSON.stringify(name)})`);
+      all.bake[name] = { probes: b.probes, sizes: b.sizes, bytes: b.bytes, bakeMs: b.ms, description: b.description };
+      console.log(`  ${name}: ${b.probes} probes, sizes ${b.sizes.join(' / ')}, ${(b.bytes / 1e6).toFixed(1)} MB, bake ${b.ms.toFixed(0)} ms - ${b.description}`);
+    }
+    save(); p.close(); pages.splice(pages.indexOf(p), 1);
+  }
+  if (parts.includes('timing')) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&w=1920&h=1080&probeLayout=shipped&scene=showcaseSponza`);
+    pages.push(p);
+    all.timing = await p.T(`(${LAYOUT_TIMING})(${JSON.stringify(variants.map((v) => [v]))}, 'courtyard')`);
+    save();
+    for (const t of all.timing) console.log(`  1080p ${t.layout}: three's passes ${t.render.map((x) => x.toFixed(2)).join(' / ')} ms, probe-free ${t.probeFree.map((x) => x.toFixed(2)).join(' / ')}, lookup ${t.lookup.toFixed(2)}`);
+    p.close(); pages.splice(pages.indexOf(p), 1);
+  }
+  if (parts.includes('pt')) {
+    all.pt ??= {};
+    for (const pose of ['courtyard', 'low']) {
+      const p = await openPage(`http://127.0.0.1:${PORT}/showcase/compare.html?manual&scene=sponza&pose=${pose}&left=probes&right=pathtraced&texLimit=default`);
+      pages.push(p);
+      if (!(await p.T('window.__p.entries()')).length) { console.log('  (no showcase assets: path tracer skipped)'); p.close(); break; }
+      await p.T('window.__p.freeze(true)');
+      const rows = all.pt[pose] ?? [];
+      for (const name of variants) {
+        await p.T(`(window.__p.setParam('probeLayout', ${JSON.stringify(name === 'shipped' ? null : name)}), window.__p.drop('probes'), window.__p.drop('ours-denoised'), true)`);
+        const m = await p.T("window.__p.measure({ samples: 64, warmup: 24, frames: 8, methods: ['probes', 'ours-denoised'], orbitFrames: 0 })");
+        const row = { layout: name, glossyPixels: m.glossyPixels, referenceSamples: m.referenceSamples, rows: m.rows.map(({ method, mad, psnr, bias, stdMean, info }) => ({ method, mad, psnr, bias, stdMean, probes: info?.probes, probeLayout: info?.probeLayout })) };
+        const k = rows.findIndex((r) => r.layout === name);
+        if (k >= 0) rows[k] = row; else rows.push(row);
+        all.pt[pose] = rows; save();
+        console.log(`  sponza vs path traced ${pose} ${name}: ${m.glossyPixels} glossy px, ${m.rows.map((x) => `${x.method} MAD ${x.mad.toFixed(2)} PSNR ${x.psnr.toFixed(2)} (${x.info?.probes} probes)`).join(', ')}`);
+      }
+      p.close(); pages.splice(pages.indexOf(p), 1);
+    }
+  }
+}
+
 async function offscreenFillChecks(pages) {
   const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=offscreen`);
   pages.push(p);
@@ -2124,7 +2219,7 @@ async function pixi3dChecks(pages) {
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' ? 3_600_000 : 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -2428,6 +2523,8 @@ async function main() {
     }
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (runs('probe-layouts')) await probeLayoutChecks(pages); // W61
+    if (runs('probe-bindings')) await probeBindingChecks(pages); // W62
+    if (only === 'probe-bindings-measure') await probeBindingMeasure(pages); // W62: the measurement (minutes), JSON to out/w62-probe-bindings.json
     if (only === 'probe-layouts-measure') await probeLayoutMeasure(pages); // W61: the measurement (minutes), JSON to out/w61-probe-layouts.json
     if (only === 'offscreen-sizes') await offscreenSizeMeasure(pages); // W60 (D4700): offscreen per-probe sizes, JSON to out/w60-offscreen.json
     if (only === 'rt-hit-atlases') { await rtHitAtlasChecks(pages); await rtHitAtlasChecks(pages, 'pmndrs'); } // W47 (D4702): RT hits over a mixed-size set alone (also part of ssr-rt / ssr-rt-bvh)

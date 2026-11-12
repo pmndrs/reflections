@@ -12,6 +12,7 @@
 import { constantRadianceFallback, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs } from '../sssr/sssr';
 import { mat4Invert, mat4Mul } from '../sssr/math';
 import { PassTimer } from '../sssr/timer';
+import { checkStageLimits, countStageBindings } from '../limits';
 import { DEFAULT_HIT_LOBE_FILTER, DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, DEFAULT_SHADING_NORMAL_WGSL, DEFAULT_TRACE_ANY_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
 import { RT_BEGIN_WGSL, RT_PARAMS_SIZE, RT_STATE, RT_STATE_HEADER, rtTraceWgsl } from './shaders';
 
@@ -154,27 +155,24 @@ const tex = (binding: number): GPUBindGroupLayoutEntry => ({ binding, visibility
 const sto = (binding: number, format: GPUTextureFormat): GPUBindGroupLayoutEntry => ({ binding, visibility: C, storageTexture: { access: 'write-only', format } });
 const buf = (binding: number, type: GPUBufferBindingType): GPUBindGroupLayoutEntry => ({ binding, visibility: C, buffer: { type } });
 
-/** The trace pass's own bindings in group 0 (binding 7 is read-write, 5 and 6 read-only; 8-11 write-only). */
-const OWN_STORAGE_BUFFERS = 3, OWN_STORAGE_TEXTURES = 4;
+/** The trace pass's own bindings in group 0 (binding 7 is read-write, 5 and 6 read-only; 8-11 write-only; 1-4, 12, 13 sampled). */
+const OWN_STORAGE_BUFFERS = 3, OWN_STORAGE_TEXTURES = 4, OWN_SAMPLED_TEXTURES = 6;
 
 /**
  * Counts every group of the trace pipeline (0 the pass, 1 the radiance fallback, 2 the provider, 3
  * the hit shading) against the device's per-stage limits, so a combination that doesn't fit fails
- * here with what to change, not as a validation error at createPipelineLayout.
+ * here with what to change, not as a validation error at createPipelineLayout. Sampled textures
+ * too (D4900): a probe set of several sizes binds one atlas per size in the fallback and again in
+ * the hit shading.
  */
-function checkStageLimits(device: GPUDevice, provider: TraceProvider, fallback: RadianceFallback, shading: HitShading) {
-  const providerTextures = provider.entries.filter((e) => e.storageTexture !== undefined).length;
-  const rows: [string, keyof GPUSupportedLimits, number[]][] = [
-    ['storage buffers', 'maxStorageBuffersPerShaderStage', [OWN_STORAGE_BUFFERS, fallback.storageBufferCount ?? 0, provider.storageBufferCount, shading.storageBufferCount ?? 0]],
-    ['storage textures', 'maxStorageTexturesPerShaderStage', [OWN_STORAGE_TEXTURES, fallback.storageTextureCount ?? 0, providerTextures, shading.storageTextureCount ?? 0]],
-  ];
-  for (const [what, limit, [own, fb, pr, hs]] of rows) {
-    const total = own + fb + pr + hs, max = device.limits[limit] as number;
-    if (total <= max) continue;
-    throw new Error(`rt: the trace pipeline binds ${total} ${what} in the compute stage (pass ${own}, radiance fallback ${fb}, provider '${provider.name}' ${pr}, hit shading ${hs}); `
-      + `the device allows ${max} (${limit}). Request more at requestDevice ({ requiredLimits: { ${limit}: adapter.limits.${limit} } }; `
-      + `three: new WebGPURenderer({ requiredLimits: { ${limit}: ${total} } })), or use a provider / fallback that binds fewer.`);
-  }
+function checkTraceStageLimits(device: GPUDevice, provider: TraceProvider, fallback: RadianceFallback, shading: HitShading) {
+  const fromProvider = countStageBindings(provider.entries as GPUBindGroupLayoutEntry[]);
+  checkStageLimits(device, 'rt: the trace pipeline', [
+    ['pass', { storageBuffers: OWN_STORAGE_BUFFERS, storageTextures: OWN_STORAGE_TEXTURES, sampledTextures: OWN_SAMPLED_TEXTURES }],
+    ['radiance fallback', { storageBuffers: fallback.storageBufferCount, storageTextures: fallback.storageTextureCount, sampledTextures: fallback.sampledTextureCount }],
+    [`provider '${provider.name}'`, { storageBuffers: provider.storageBufferCount, storageTextures: fromProvider.storageTextures, sampledTextures: fromProvider.sampledTextures }],
+    ['hit shading', { storageBuffers: shading.storageBufferCount, storageTextures: shading.storageTextureCount, sampledTextures: shading.sampledTextureCount }],
+  ], 'or use a provider / fallback that binds fewer');
 }
 
 export function createTracedReflections(device: GPUDevice, options: TracedReflectionsOptions): TracedReflections {
@@ -184,7 +182,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   const tilesX = Math.ceil(W / 8), tilesY = Math.ceil(H / 8);
   const timer = options.timestamps && PassTimer.supported(device) ? new PassTimer(device, 4) : undefined;
 
-  checkStageLimits(device, provider, fallback, shading);
+  checkTraceStageLimits(device, provider, fallback, shading);
 
   const source = device.createTexture({
     label: 'rt source', size: [W, H], format: 'r32float',

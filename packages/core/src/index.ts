@@ -25,7 +25,8 @@ export {
 export { probeRadianceFallback, PROBE_FALLBACK_WGSL, type ProbeRadianceFallback } from './probes/fallback';
 export * from './sssr';
 // Mip chains and Hi-Z via `downsampler`: the device limits that let it run six levels per dispatch.
-export { reflectionsRequiredLimits, REFLECTIONS_COLOR_BYTES_PER_SAMPLE } from './downsample';
+export { reflectionsRequiredLimits, REFLECTIONS_COLOR_BYTES_PER_SAMPLE, REFLECTIONS_SAMPLED_TEXTURES_PER_STAGE } from './downsample';
+export { checkStageLimits, countStageBindings, type StageBindingCounts } from './limits';
 
 // Frame contract: the inputs every screen-space and hybrid pass reads (SPEC "Frame contract").
 export {

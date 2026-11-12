@@ -44,7 +44,17 @@ export const PROBE_LAYOUT_TOLERANCE = 0.1;
 export const LAYOUT_SET_RESOLUTION = 128;
 
 export const PROBE_LAYOUT_NAMES = ['shipped', 'few', 'medium', 'many', 'manyCell', 'mixed'] as const;
-export type ProbeLayoutName = (typeof PROBE_LAYOUT_NAMES)[number];
+/**
+ * W62 (D4900): Sponza's mixed layout with fewer probe sizes (each size is one sampled-texture
+ * binding wherever the set is sampled). Not held to the budget; memory is reported.
+ *   twoSize      512 courtyard floor slab, everything else at 256 (aisle slabs, the 8-cell grid, the environment)
+ *   twoSizeFew   512 courtyard floor slab, 256 aisle slabs, few's two volumes at 256, environment 256 (near the budget)
+ *   mixedDown    mixed with its 256 aisle slabs merged down to 128 (what merging the middle size away gives)
+ *   oneSize256   mixed's volumes all at 256 (one size per set: Unreal's / Godot's model)
+ *   oneSize128   mixed's volumes all at 128
+ */
+export const PROBE_BINDING_LAYOUT_NAMES = ['twoSize', 'twoSizeFew', 'mixedDown', 'oneSize256', 'oneSize128'] as const;
+export type ProbeLayoutName = (typeof PROBE_LAYOUT_NAMES)[number] | (typeof PROBE_BINDING_LAYOUT_NAMES)[number];
 
 export interface ProbeLayout {
   name: ProbeLayoutName;
@@ -219,4 +229,16 @@ export function probeLayout(sceneId: string, name: ProbeLayoutName, shipped: rea
     case 'manyCell': { const g = gridProbes(s.regions, 32, { resolution: 128, blend, cellProjection: true }); return make(g.volumes, `${g.volumes.length} x 128 px grid, each projected onto its own cell`, R, g); }
     case 'mixed': return make(s.mixed(shipped, blend), s.mixedNote, R);
   }
+  // W62: fewer sizes (Sponza's slabs + grid geometry, or few's volumes)
+  if (s !== SCENES.sponza) return null;
+  const at = (vs: ProbeVolume[], f: (r: number) => number) => vs.map((v) => sized(v, f(v.resolution ?? R)));
+  const mixed = s.mixed(shipped, blend);
+  switch (name) {
+    case 'twoSize': return make(at(mixed, (r) => (r === 512 ? 512 : 256)), 'courtyard floor slab 512, the rest (aisle slabs, 8-cell grid, environment) 256', 256);
+    case 'twoSizeFew': return make([...mixed.slice(0, 3), ...at(s.few(shipped), () => 256)], 'courtyard floor slab 512, aisle slabs 256, two room volumes 256, environment 256', 256);
+    case 'mixedDown': return make(at(mixed, (r) => (r === 256 ? 128 : r)), 'mixed with the 256 aisle slabs at 128 (512 + 128)', R);
+    case 'oneSize256': return make(at(mixed, () => 256), "mixed's 11 volumes and the environment all at 256", 256);
+    case 'oneSize128': return make(at(mixed, () => 128), "mixed's 11 volumes and the environment all at 128", 128);
+  }
+  return null;
 }
