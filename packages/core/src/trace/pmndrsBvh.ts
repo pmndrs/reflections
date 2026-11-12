@@ -91,7 +91,7 @@ export interface PmndrsBvhTraceProviderOptions {
   /**
    * Compile @pmndrs/bvh's instance-mask test into the walk (`traceModuleWgsl({ rayMasks })`).
    * Default false: the provider traces with the plain walk and sets no masks, so the test would
-   * always pass (W48: no difference seen, provisional, D3591).
+   * always pass (W48: on costs 1-6% of the trace pass at 1080p, D3591).
    */
   rayMasks?: boolean;
 }
