@@ -3,7 +3,9 @@
 // with the FFX reflection denoiser behind the denoise seam, and the BVH ray-traced fallback for
 // 'ours-rt'. Same settings as the showcase defaults; `ctx.params` only carries explicit experiment
 // overrides (?spq= samples per quad, ?tsf= the denoiser's temporal stability, ?hit=current|lit|final,
-// ?specOcc=1 Lagarde's specular occlusion from GTAO on the probe part, W39 / D4510).
+// ?specOcc=1 Lagarde's specular occlusion from GTAO on the probe part, W39 / D4510; ?hitSource=1 keeps
+// screen-space hits, traced hits and misses apart in the denoiser (&hitMissAny=1: misses blend with
+// either), ?hitDistW=<k> weights its neighbours by relative hit distance, W53 / D3660).
 import * as THREE from 'three/webgpu';
 import { renderOutput, vec3, vec4 } from 'three/tsl';
 import {
@@ -11,6 +13,7 @@ import {
 } from '@pmndrs/reflections/three';
 import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
 import { ScreenSpaceAO } from '../../../shared/ao';
+import { hitSourceDenoiserOptions, hitSourceFromQuery } from '../../../shared/denoiser';
 import { probeLayout, type ProbeLayoutName } from '../../../shared/probeLayouts';
 import { setSpecularAA, specAAHitMaterial } from '../specAA';
 import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, applySceneParams, applySpecAA, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
@@ -45,9 +48,13 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; errors.push(m); console.error('[ours webgpu]', m); });
   const wantDenoise = id === 'ours-denoised' || id === 'ours-rt';
   const tsf = params.has('tsf') ? Number(params.get('tsf')) : undefined;
-  const denoiserOptions = { roughnessThreshold: GLOSSY * GLOSSY, timestamps: false, ...(tsf !== undefined ? { temporalStabilityFactor: tsf } : {}) };
+  const hs = hitSourceFromQuery(params);
+  const denoiserOptions = {
+    roughnessThreshold: GLOSSY * GLOSSY, timestamps: false, ...(tsf !== undefined ? { temporalStabilityFactor: tsf } : {}),
+    ...hitSourceDenoiserOptions(hs),
+  };
   const denoiser = wantDenoise && FfxReflectionDenoiser ? new FfxReflectionDenoiser(device, denoiserOptions) : null;
-  const hybrid = new HybridReflections(ssr, { denoiser });
+  const hybrid = new HybridReflections(ssr, { denoiser, denoiserHitSource: hs.hitSource });
   hybrid.denoise = !!denoiser;
 
   const kit = await ctx.entry.build(W / H);

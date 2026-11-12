@@ -40,6 +40,8 @@ export interface HybridReflectionsOptions extends Omit<ScreenSpaceCompositeOptio
   denoiserMotion?: 'ndc' | 'uv';
   /** Roughness space the denoiser reads in `guides.roughness`: 'perceptual' (default, FFX's default) or 'alpha'. */
   denoiserRoughness?: 'perceptual' | 'alpha';
+  /** Initial value of `HybridReflections.denoiserHitSource`. Default false. */
+  denoiserHitSource?: boolean;
 }
 
 /** Source codes of `sourceIndex()` (debug view): what filled each pixel's reflection. */
@@ -65,6 +67,13 @@ export class HybridReflections {
   readonly roughnessThreshold = uniform(0.447);
   /** Denoise when a denoiser is attached. Default true. */
   denoise = true;
+  /**
+   * W53 (D3660): hand the denoiser a per-pixel hit source (screen-space hit / traced hit / miss,
+   * core `HIT_SOURCE`, built by the seam from the tracer's confidence and the ray-traced pass's
+   * codes), so a denoiser that supports it keeps them apart (FFX: `separateHitSources: true`, set on
+   * the denoiser itself). Default false: the denoiser gets what it got before.
+   */
+  denoiserHitSource = false;
   private seam: ReflectionDenoiseSeam | null = null;
   private readonly quad: THREE.QuadMesh;
   private readonly signalMaterial = new THREE.NodeMaterial();
@@ -82,6 +91,7 @@ export class HybridReflections {
     this.signalTarget = new THREE.RenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: false });
     this.signalTarget.texture.name = 'hybrid specular signal';
     this.quad = new THREE.QuadMesh(this.signalMaterial);
+    this.denoiserHitSource = options.denoiserHitSource ?? false;
     this.setDenoiser(options.denoiser ?? null);
   }
 
@@ -115,7 +125,7 @@ export class HybridReflections {
    * `uv` to composite at another screen uv (e.g. a debug grid cell).
    */
   composite(opts: { uv?: N; signalOnly?: boolean } = {}): ScreenSpaceComposite {
-    const { denoiser: _d, denoiserMotion: _m, denoiserRoughness: _r, ...rest } = this.options;
+    const { denoiser: _d, denoiserMotion: _m, denoiserRoughness: _r, denoiserHitSource: _h, ...rest } = this.options;
     return screenSpaceComposite(this.ssr, {
       ...rest, uv: opts.uv ?? uv(),
       denoised: opts.signalOnly ? null : this.denoised, denoise: this.denoiseActive, depthAware: this.depthAware,
@@ -142,7 +152,10 @@ export class HybridReflections {
     const out = this.seam.dispatch(frame, {
       radiance: getGPUTexture(renderer, this.signalTarget.texture),
       hitDistance: tracer.outputs.hitDistance,
-    });
+    }, this.denoiserHitSource ? {
+      confidence: tracer.outputs.confidence,
+      traceSource: this.ssr.rayTracing ? getGPUTexture(renderer, this.ssr.source) : null,
+    } : null);
     if (!(renderer as N).backend.get(this.denoised)?.texture) renderer.initTexture(this.denoised);
     const device = this.ssr.device;
     const enc = device.createCommandEncoder({ label: 'hybrid denoised copy' });

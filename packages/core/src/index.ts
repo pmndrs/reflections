@@ -41,6 +41,7 @@ export * from './trace';
 export {
   createReflectionDenoiseSeam,
   type ReflectionDenoiseSeam, type ReflectionDenoiseSeamOptions, type TemporalDenoiser, type SpecularInputs, type DenoiseGuides, type DenoiseCamera,
+  HIT_SOURCE, type DenoiseHitSources,
 } from './denoise/seam';
 
 // Split-sum environment BRDF (DFG) for adapters without an engine BRDF table (D2004).

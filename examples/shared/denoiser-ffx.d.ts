@@ -9,6 +9,12 @@ declare module '@pmndrs/denoiser-ffx' {
     missDistance?: number;
     currentFrameStatistics?: boolean;
     timestamps?: boolean;
+    /** W53: keep hit sources apart (needs SpecularInputs.hitSource). */
+    separateHitSources?: boolean;
+    /** W53: relative hit-distance weight, 0 = off. */
+    hitDistanceWeight?: number;
+    /** W53: with separateHitSources, a miss blends with either hit source. */
+    missesMatchAnySource?: boolean;
   }
   export const FfxReflectionDenoiser:
     | (new (device: GPUDevice, options?: FfxReflectionDenoiserOptions) => TemporalDenoiser<SpecularInputs>)
