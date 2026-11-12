@@ -509,11 +509,11 @@ fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
     };
     let rtStats: TracedReflectionsStats | null = null;
     const radianceOf = async (fallback: Parameters<typeof createScreenSpaceReflections>[1]['radianceFallback'], group?: GPUBindGroup, traced = false,
-      shading?: { hitShading: HitShading; group: GPUBindGroup }) => {
-      const ssr = createScreenSpaceReflections(device, { width: W, height: H, radianceFallback: fallback, missList: traced });
+      shading?: { hitShading: HitShading; group: GPUBindGroup }, ssrShading?: { hitShading: HitShading; group: GPUBindGroup }) => {
+      const ssr = createScreenSpaceReflections(device, { width: W, height: H, radianceFallback: fallback, missList: traced, hitSpecularShading: ssrShading?.hitShading });
       const rt = traced ? createTracedReflections(device, { width: W, height: H, provider: wall, radianceFallback: fallback, hitShading: shading?.hitShading }) : null;
       const enc = device.createCommandEncoder();
-      ssr.dispatch(enc, { ...inputs, fallbackBindGroup: group }, settings);
+      ssr.dispatch(enc, { ...inputs, fallbackBindGroup: group, hitShadingBindGroup: ssrShading?.group }, settings);
       rt?.dispatch(enc, { tracer: ssr, inputs, fallbackBindGroup: group, hitShadingBindGroup: shading?.group }, { fallbackColor: C });
       const out = ssr.outputs.radiance;
       const row = Math.ceil((W * 8) / 256) * 256;
@@ -587,11 +587,47 @@ fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
         vsOneSize: exact(mixed.px, one.px), wallProbeReaches: differing(mixed.px, other.px), hits: (rtStats as TracedReflectionsStats | null)?.hits ?? 0,
       };
     };
+    // W64 (D4901): one set as both the SSSR radiance fallback and its hitSpecularShading (the lookup at
+    // group 1 and group 3 of one module; before the fix the module did not parse). With the hit
+    // shading's intensity 1 the re-shade's lookup is the fallback's, so the frame must equal the
+    // fallback-only frame (the seam run alone, its re-shade along the fallback); the hit shading's
+    // own copy must be live (intensity 0 changes the frame) and, alone over the constant fallback,
+    // reach the hits. The traced pass takes the same pair. One size and four (four atlases).
+    const both = async (slotSizes?: number[]) => {
+      const set = new ProbeSet(device, { capacity: 3, sourceSize: SOURCE, slotSizes });
+      const enc = device.createCommandEncoder();
+      [0, 1, 3].forEach((kind, s) => set.capture(enc, s, sizedCube(set.slotSize(s), kind)));
+      set.captureEnvironment(enc, sizedCube(set.slotSize(3), 0));
+      device.queue.submit([enc.finish()]);
+      set.setVolumes([{ slot: 0, center: [0, 2.5, -1], halfSize: [8, 3, 6], projectionSize: [16, 6, 12] }]);
+      set.update();
+      const fb = probeRadianceFallback(set);
+      const hitShading = probeHitShading(device, set);
+      const hs = { hitShading, group: hitShading.createBindGroup({ atlas: set.atlasView, sampler: set.sampler, table: set.table, atlases: set.atlasViews.slice(1) }) };
+      device.pushErrorScope('validation');
+      hitShading.setLighting(1);
+      const separate = await radianceOf(fb, fb.bindGroup);
+      const combined = await radianceOf(fb, fb.bindGroup, false, undefined, hs);
+      const hitAlone = await radianceOf(constantRadianceFallback(), undefined, false, undefined, hs);
+      const rtCombined = await radianceOf(fb, fb.bindGroup, true, hs, hs);
+      hitShading.setLighting(0);
+      const unlit = await radianceOf(fb, fb.bindGroup, false, undefined, hs);
+      const err = await device.popErrorScope();
+      const atlases = set.atlases.length;
+      hitShading.destroy(); set.dispose();
+      return {
+        atlases, error: err?.message.slice(0, 200) ?? null, vsSeparate: differing(combined, separate), hitShadingLive: differing(combined, unlit),
+        hitAloneVsConstant: differing(hitAlone, constant), rtVsSsr: differing(rtCombined, combined), rtHits: (rtStats as TracedReflectionsStats | null)?.hits ?? 0,
+      };
+    };
     const rtRes = { stats: rtStats as TracedReflectionsStats | null, constantVsProbes: differing(rtConstant, rtViaProbes), structuredVsConstant: differing(rtConstant, rtStructured), changedByTrace: differing(viaProbes, rtViaProbes) };
     const hitSizesRes = await hitSizes();
+    // after rtRes and hitSizes, which read rtStats
+    const bothRes = { one: await both(), four: await both([2 * SOURCE, 4 * SOURCE, 8 * SOURCE]) };
+    say(`sssr fallback + hit shading on one set (D4901): ${JSON.stringify(bothRes)}`);
     const res = {
       pixels: W * H, constantVsProbes: differing(constant, viaProbes), structuredVsConstant: differing(constant, structured),
-      rt: rtRes, hitSizes: hitSizesRes,
+      rt: rtRes, hitSizes: hitSizesRes, both: bothRes,
     };
     say(`rt hit shading over slot sizes (D4702): ${JSON.stringify(hitSizesRes)}`);
     say(`sssr fallback: constant probes vs constant fallback ${res.constantVsProbes} px differ; structured probes change ${res.structuredVsConstant} of ${res.pixels} px`);

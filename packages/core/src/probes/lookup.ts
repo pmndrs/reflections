@@ -47,7 +47,7 @@
 // CubeCamera) is its alias for ['-x', 'y', 'z'].
 
 import { PROBE_GRID_LANE_BITS, PROBE_HEADER_ROWS, PROBE_IRRADIANCE_ROWS, PROBE_MAX_ATLASES, PROBE_ROWS_PER_VOLUME } from './table';
-import { dedupeChunks } from './layouts';
+import { dedupeChunks, markedChunkWgsl } from './layouts';
 import { captureAxesWgsl, resolveCaptureTransform, type ProbeCaptureTransform } from './capture';
 import type { ProbeLayout, ProbeWgslChunk } from './layouts/types';
 
@@ -460,10 +460,12 @@ export function probeLookupIncludeChunks(options: Pick<ProbeLookupOptions, 'layo
  * Module-scope WGSL for engines that own the bindings: the layout's sampling code and the shared
  * helpers (no bindings). Include it once per shader module, then call the function of
  * {@link probeLookupFunctionWgsl}. For lookups of several layouts in one module, pass all their
- * options at once (each piece is emitted once); the result depends only on the layouts.
+ * options at once (each piece is emitted once); the result depends only on the layouts. Each chunk
+ * carries its markers ({@link markedChunkWgsl}), so a module that ends up with two copies (two
+ * seams' WGSL concatenated) keeps one with `dedupeWgslChunks` (D4901).
  */
 export function probeLookupIncludesWgsl(options: Pick<ProbeLookupOptions, 'layout'> | readonly Pick<ProbeLookupOptions, 'layout'>[]): string {
-  return probeLookupIncludeChunks(options).map((c) => c.wgsl).join('\n');
+  return probeLookupIncludeChunks(options).map(markedChunkWgsl).join('\n');
 }
 
 /**
@@ -573,6 +575,7 @@ export function probeLookupWgsl(moduleOptions: ProbeLookupModuleOptions | readon
   ]);
   if (new Set(slots).size !== slots.length) throw new Error('probeLookupWgsl: two sets in one module share a binding (give each its own group or binding)');
   const parts = list.map(moduleWgsl);
-  const frames = [...new Set(parts.map((p) => p.frame).filter((f) => f !== ''))];
+  // the frame irradiance provider is a marked chunk too: one per module however many seams carry it
+  const frames = [...new Set(parts.map((p) => p.frame).filter((f) => f !== ''))].map((wgsl) => markedChunkWgsl({ key: 'pr_frame_irradiance', wgsl }));
   return `${probeLookupIncludesWgsl(list)}\n${frames.join('\n')}${parts.map((p) => p.body).join('')}`;
 }

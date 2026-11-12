@@ -688,12 +688,11 @@ function f2Checks(r) {
     check('rt limits: 4-buffer provider + probe fallback (8) and a raised limit (9) build without errors',
       !l.fourBuffersAndProbes.threw && !l.fourBuffersAndProbes.validationError && (l.raised.skipped !== undefined || (!l.raised.threw && !l.raised.validationError)),
       `4 + probes: ${d(l.fourBuffersAndProbes)}; raised: ${d(l.raised)}`);
-    // with the library's limits the count passes; the module then fails WGSL parsing because the probe lookup is
-    // included twice (fallback at group 1, hit shading at group 3: 'redeclaration of pl_faceDirUV'), at any atlas
-    // count: D4901, a tracked fix, accepted here by name only
-    check(`sssr limits: a ${l.sampled.atlases}-size probe set as fallback + hit shading (18 sampled textures) throws a clear error at ${l.sampled.limit}, passes the count with reflectionsRequiredLimits (W62, D4900; the double lookup include is D4901)`,
+    // with the library's limits the pipeline builds: the probe lookup's includes are kept once and the hit
+    // shading's copy has its own names (W64, D4901; before, 'redeclaration of pl_faceDirUV')
+    check(`sssr limits: a ${l.sampled.atlases}-size probe set as fallback + hit shading (18 sampled textures) throws a clear error at ${l.sampled.limit}, builds without errors with reflectionsRequiredLimits (W62, D4900; W64, D4901)`,
       l.sampled.atlases === 4 && !!l.sampled.threw && /maxSampledTexturesPerShaderStage/.test(l.sampled.threw) && /18 sampled textures/.test(l.sampled.threw) && !l.sampled.validationError
-        && (l.sampledRaised.skipped !== undefined || (!l.sampledRaised.threw && (!l.sampledRaised.validationError || /redeclaration of 'pl_/.test(l.sampledRaised.validationError)))),
+        && (l.sampledRaised.skipped !== undefined || (!l.sampledRaised.threw && !l.sampledRaised.validationError)),
       `default: ${d(l.sampled)}; library limits (${l.sampledRaised.limit ?? '-'}): ${d(l.sampledRaised)}`);
   }
   const gf = section('gbufferFirstFrame');
@@ -2870,6 +2869,12 @@ async function main() {
       check('rt probe fallback (misses + hit shading): constant probes = constant fallback', rt.stats && rt.stats.hits > 0 && rt.stats.tracedMisses > 0 && rt.constantVsProbes === 0,
         `${rt.constantVsProbes} px differ; ${rt.stats?.hits} hits, ${rt.stats?.tracedMisses} traced misses, trace changed ${rt.changedByTrace} px`);
       check('rt probe fallback: structured probes reach the traced frame', rt.structuredVsConstant > r.sssr.pixels * 0.05 && rt.changedByTrace > 0, `${rt.structuredVsConstant} of ${r.sssr.pixels} px`);
+      // W64 (D4901): one set as the SSSR fallback and its hitSpecularShading; the frame = the fallback-only frame
+      for (const [k, b] of Object.entries(r.sssr.both)) {
+        check(`sssr probe fallback + hit shading on one set (${b.atlases} atlas${b.atlases > 1 ? 'es' : ''}): builds, = the fallback seam alone (to one f16 step), the hit shading's copy live, + the traced pass (D4901)`,
+          b.error === null && b.vsSeparate === 0 && b.hitShadingLive > 100 && b.hitAloneVsConstant > 100 && b.rtHits > 100 && (k === 'one' ? b.atlases === 1 : b.atlases === 4),
+          b.error ?? `${b.vsSeparate} px differ from the fallback alone; intensity 0 changes ${b.hitShadingLive}, the hit shading alone over the constant fallback ${b.hitAloneVsConstant} of ${r.sssr.pixels} px; traced ${b.rtHits} hits`);
+      }
       // W47 (D4702): core probeHitShading over a set with probes of two sizes (the wall's probe in atlas 1)
       const hz = r.sssr.hitSizes;
       check(`rt probe hit shading: slot sizes ${hz.mixed.sizes.join('/')} in ${hz.mixed.atlases} atlases = a one-size set at the wall probe's size, and its probe reaches the hits (D4702)`,

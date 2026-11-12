@@ -10,6 +10,7 @@
 //
 // Bind groups: 0 the pass, 1 the radiance fallback (misses), 2 the provider, 3 the hit shading.
 import { constantRadianceFallback, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs } from '../sssr/sssr';
+import { dedupeWgslChunks } from '../probes/layouts';
 import { mat4Invert, mat4Mul } from '../sssr/math';
 import { PassTimer } from '../sssr/timer';
 import { checkStageLimits, countStageBindings } from '../limits';
@@ -255,7 +256,8 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     shadingNormalWgsl: provider.capabilities.shadingNormal ? '' : DEFAULT_SHADING_NORMAL_WGSL,
     hitShadingWgsl: shading.wgsl,
   });
-  const traceModule = device.createShaderModule({ label: `rt trace (${provider.name})`, code });
+  // the fallback and the hit shading may both carry the probe lookup's includes (D4901): keep one copy
+  const traceModule = device.createShaderModule({ label: `rt trace (${provider.name})`, code: dedupeWgslChunks(code) });
   const tracePipe = device.createComputePipeline({
     label: `rt trace (${provider.name})`,
     layout: device.createPipelineLayout({ bindGroupLayouts: [traceBgl, fallback.layout ?? empty, providerBgl, shading.layout ?? empty] }),

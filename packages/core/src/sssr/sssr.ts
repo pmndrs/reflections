@@ -24,6 +24,7 @@ import type { FrameInputs } from '../frame/contract';
 import { DEFAULT_HIT_LOBE_FILTER, DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, HIT_WGSL, type HitShading } from '../trace/provider';
 import { shadeLobeWgslFor } from '../trace/hitShading';
 import { checkStageLimits } from '../limits';
+import { dedupeWgslChunks } from '../probes/layouts';
 
 export type ScreenSpaceVariant = Variant;
 
@@ -444,7 +445,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const pipe = (label: string, code: string, layouts: GPUBindGroupLayout[]) => device.createComputePipeline({
     label: `ssr ${label}`,
     layout: device.createPipelineLayout({ label: `ssr ${label}`, bindGroupLayouts: layouts }),
-    compute: { module: device.createShaderModule({ label: `ssr ${label}`, code }), entryPoint: 'main' },
+    compute: { module: device.createShaderModule({ label: `ssr ${label}`, code: dedupeWgslChunks(code) }), entryPoint: 'main' },
   });
   const withFallback = (bgl: GPUBindGroupLayout) => (fallback.layout ? [bgl, fallback.layout] : [bgl]);
 
