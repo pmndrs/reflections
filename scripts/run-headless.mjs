@@ -962,6 +962,7 @@ async function ssrRtChecks(pages) {
   if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '');
   await missFillChecks(pages);
   await offscreenFillChecks(pages);
+  await rtHitAtlasChecks(pages); // W47 (D4702)
 
   // GPU ms vs miss count at 1080p: the same frame, misses varied with the miss-list threshold
   const big = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1&scene=offscreen&pose=mirror`);
@@ -1163,6 +1164,91 @@ async function offscreenFillChecks(pages) {
 }
 
 /**
+ * W47 (D4702): traced hits over a mixed-size probe set. offscreen's kit (room 256, floor + wall
+ * mirror 512: two atlases) against all three at 512 (one atlas: the hit shading always saw these)
+ * and the room probe alone (what a hit saw of the kit while the RT hit shading bound only the
+ * primary atlas: the 512 probes took no weight there). Per pose, the tracer's radiance on the same
+ * rays (`rtHitRadiance`: frame index pinned, on-screen reuse off), over the px that are traced hits
+ * in both frames: mean abs diff of rgb vs all 512, and the px where the kit's hit differs from the
+ * room-only hit by > 1%. `self` is the kit read twice (noise floor).
+ */
+const RT_HIT_ATLASES = `async (poses) => {
+  const p = window.__p;
+  p.setHitColor('current'); p.setDenoise(false); p.setRT(true); p.setView('final');
+  const variants = { kit: {}, all512: { sizes: [512, 512, 512], resolution: 512 }, room: { probes: [0] } };
+  const runs = {};
+  for (const [name, v] of Object.entries(variants)) {
+    const volumes = (v.probes ? v.probes.map((i) => p.kit.probes[i]) : p.kit.probes).map((x, i) => (v.sizes ? { ...x, resolution: v.sizes[i] } : x));
+    await p.setProbeVolumes(volumes, v.resolution ? { resolution: v.resolution } : {});
+    runs[name] = { sizes: p.probes.bakedResolutions.slice(), atlases: p.probes.textures.length, poses: {} };
+    for (const pose of poses) {
+      p.setPose(pose); await p.step(3);
+      const r = await p.rtHitRadiance();
+      runs[name].kind = r.kind;
+      runs[name].poses[pose] = r;
+      if (name === 'kit') runs[name].poses[pose + ':again'] = await p.rtHitRadiance();
+    }
+  }
+  const lum = (r, i) => (r[i * 4] + r[i * 4 + 1] + r[i * 4 + 2]) / 3;
+  const diff = (a, b) => {
+    let n = 0, d = 0, ref = 0;
+    for (let i = 0; i < a.source.length; i++) {
+      if (a.source[i] !== 1 || b.source[i] !== 1) continue;
+      n++; ref += lum(b.radiance, i);
+      for (let c = 0; c < 3; c++) d += Math.abs(a.radiance[i * 4 + c] - b.radiance[i * 4 + c]) / 3;
+    }
+    return { px: n, mad: n ? d / n : 0, rel: ref ? d / ref : 0 };
+  };
+  // px where a's hit differs from b's by > 1%; with ref, over those px, the mean abs rgb diff of a and of b vs ref
+  const changed = (a, b, ref) => {
+    let n = 0, ch = 0, da = 0, db = 0;
+    const d = (x, y, i) => (Math.abs(x.radiance[i * 4] - y.radiance[i * 4]) + Math.abs(x.radiance[i * 4 + 1] - y.radiance[i * 4 + 1]) + Math.abs(x.radiance[i * 4 + 2] - y.radiance[i * 4 + 2])) / 3;
+    for (let i = 0; i < a.source.length; i++) {
+      if (a.source[i] !== 1 || b.source[i] !== 1) continue;
+      n++; const x = lum(a.radiance, i), y = lum(b.radiance, i);
+      if (!(Math.abs(x - y) > 0.01 * y + 1e-4)) continue;
+      ch++;
+      if (ref && ref.source[i] === 1) { da += d(a, ref, i); db += d(b, ref, i); }
+    }
+    return { px: n, changed: ch, ...(ref ? { madA: ch ? da / ch : 0, madB: ch ? db / ch : 0 } : {}) };
+  };
+  const out = { variants: Object.fromEntries(Object.entries(runs).map(([k, v]) => [k, { sizes: v.sizes, atlases: v.atlases, kind: v.kind }])), poses: {} };
+  for (const pose of poses) {
+    const ref = runs.all512.poses[pose];
+    out.poses[pose] = {
+      kit: diff(runs.kit.poses[pose], ref), room: diff(runs.room.poses[pose], ref),
+      self: diff(runs.kit.poses[pose + ':again'], runs.kit.poses[pose]),
+      kitVsRoom: changed(runs.kit.poses[pose], runs.room.poses[pose], ref), allVsRoom: changed(ref, runs.room.poses[pose]),
+    };
+  }
+  await p.setProbeVolumes(null);
+  return out;
+}`;
+/** examples/ssr offscreen, `bvh` '' (three-mesh-bvh) or 'pmndrs': the {@link RT_HIT_ATLASES} check. JSON to out/w47-rt-hit-atlases[-pmndrs].json. */
+async function rtHitAtlasChecks(pages, bvh = '') {
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=offscreen${bvh ? `&bvh=${bvh}` : ''}`);
+  pages.push(p);
+  const r = await p.T(`(${RT_HIT_ATLASES})(['default', 'mirror'])`);
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, `w47-rt-hit-atlases${bvh ? `-${bvh}` : ''}.json`), JSON.stringify(r, null, 1));
+  // the kit with RT on as a user sees it (on-screen reuse on): the wall mirror's traced hits behind the camera
+  for (const pose of ['default', 'mirror']) {
+    for (const view of ['final', 'ssr']) {
+      await p.T(`(async () => { const p = window.__p; p.setPose('${pose}'); p.setRT(true); p.setView('${view}'); await p.step(3); })()`);
+      savePng(`w47-rt-${pose}-${view}${bvh ? `-${bvh}` : ''}.png`, await p.T('window.__p.shot()'));
+    }
+  }
+  const v = r.variants, fmt = (x) => `${x.mad.toFixed(4)} (rel ${x.rel.toFixed(3)})`;
+  const detail = `${Object.entries(r.poses).map(([pose, x]) => `${pose}: ${x.kit.px} hit px, vs all 512: kit ${fmt(x.kit)}, room only ${fmt(x.room)}, self ${x.self.mad.toExponential(1)}; kit != room on ${x.kitVsRoom.changed} px (all 512 != room on ${x.allVsRoom.changed}), there vs all 512: kit ${x.kitVsRoom.madA.toFixed(4)}, room ${x.kitVsRoom.madB.toFixed(4)}`).join('; ')}; kit atlases ${v.kit.atlases} [${v.kit.sizes}]`;
+  // the kit's hits read the 512 px floor / mirror probes: they move off the room probe's answer (before
+  // the fix on no px) and toward all-512's (the room probe's own 256 vs 512 is the rest of the gap)
+  check(`rt${bvh ? ` (${bvh})` : ''}: traced hits over a mixed-size probe set see the probes outside the primary atlas (offscreen, floor + mirror 512 px, D4702)`,
+    v.kit.atlases === 2 && v.kit.kind === 'probes' && v.all512.atlases === 1 && Object.values(r.poses).every((x) => x.kit.px > 10000 && x.self.mad === 0
+      && x.kitVsRoom.changed > 1000 && x.kitVsRoom.madA < 0.5 * x.kitVsRoom.madB && x.kit.mad < x.room.mad),
+    detail);
+}
+
+/**
  * examples/ssr?rt=1&bvh=pmndrs (W14): core's @pmndrs/bvh provider.
  *  - the ray oracle against THREE.Raycaster (camera rays and rays spread through the scene): first
  *    hit, triangle, normal, frontFace, instance and material, for each builder (auto, tinybvh);
@@ -1242,6 +1328,7 @@ async function ssrRtBvhChecks(pages) {
     }
   }
   if (args.includes('--rt-shadow-timing')) await rtShadowTiming('@pmndrs/bvh', '&bvh=pmndrs');
+  await rtHitAtlasChecks(pages, 'pmndrs'); // W47 (D4702)
 
   // Information, not a gate: trace-pass GPU ms of both walks on the same frame (1080p, offscreen
   // 'mirror', every confidence below 1.01 traced), loop stopped, median of 20.
@@ -1933,6 +2020,7 @@ async function main() {
     }
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (only === 'offscreen-sizes') await offscreenSizeMeasure(pages); // W60 (D4700): offscreen per-probe sizes, JSON to out/w60-offscreen.json
+    if (only === 'rt-hit-atlases') { await rtHitAtlasChecks(pages); await rtHitAtlasChecks(pages, 'pmndrs'); } // W47 (D4702): RT hits over a mixed-size set alone (also part of ssr-rt / ssr-rt-bvh)
     if (runs('babylon')) await babylonChecks(pages);
     if (runs('ssr-rt-bvh')) await ssrRtBvhChecks(pages);
     if (runs('pixi3d')) await pixi3dChecks(pages);
