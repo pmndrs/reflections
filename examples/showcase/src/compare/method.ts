@@ -34,7 +34,25 @@ export interface MethodContext {
   exposure: number;
   /** Experiment overrides from the URL (?spq=, ?tsf=, ...); never product defaults. */
   params: URLSearchParams;
+  /**
+   * W51 (bench.html): the page's own defaults for keys the URL leaves out (e.g. `aa: 'upscaler'`,
+   * `timestamps: '1'`); `params` wins. The compare page passes none.
+   */
+  defaults?: Record<string, string>;
 }
+
+/** `ctx.params` over `ctx.defaults` (W51): what a method reads its settings from. */
+export function mergedParams(ctx: MethodContext): URLSearchParams {
+  const out = new URLSearchParams(ctx.defaults ?? {});
+  for (const [k, v] of ctx.params) out.set(k, v);
+  return out;
+}
+
+/**
+ * How a method took a setting change (W51, bench.html): 'live' = applied now; 'rebuild' = the method
+ * reads it at creation only (the bench recreates it on Rebuild); 'ignored' = not this method's.
+ */
+export type SetResult = 'live' | 'rebuild' | 'ignored';
 
 /** What the page needs from a method's own copy of the scene: camera presets and the camera. */
 export interface SceneInfo {
@@ -71,6 +89,15 @@ export interface CompareMethod {
   renderMask?(camera: THREE.PerspectiveCamera): void;
   /** Settings actually used (for the readout and the write-up). */
   info(): Record<string, unknown>;
+  /**
+   * W51 (bench.html): apply one setting by its URL key (`value` null = back to the page's default).
+   * Keys the method reads only at creation return 'rebuild'; keys it doesn't know, 'ignored'.
+   */
+  set?(key: string, value: string | null): SetResult;
+  /** W51: the value a setting has on this method now (for the bench's controls when unset), if it can tell. */
+  get?(key: string): string | undefined;
+  /** W51: GPU ms per pass of the last timed frame (ours with `timestamps=1`). */
+  timings?(): ReadonlyMap<string, number>;
   gpuErrors(): string[];
   dispose(): void;
 }
@@ -117,6 +144,9 @@ export async function freshEnvironment(kit: ShowcaseScene, entry: ShowcaseEntry)
 /** Scene overrides every method applies the same way, before baking or rendering: ?floorRoughness=. */
 export function applySceneParams(kit: ShowcaseScene, params: URLSearchParams) {
   if (params.has('floorRoughness')) kit.floor.setRoughness(Number(params.get('floorRoughness')));
+  // W51 (bench): ?floor=mirror|lacquer (the stages) and ?floorPolish=0 (Sponza's polished override off)
+  if (params.has('floor') && kit.floor.kinds?.includes(params.get('floor') as never)) kit.floor.setKind?.(params.get('floor') as never);
+  if (params.get('floorPolish') === '0') kit.floor.setPolished?.(false);
   // Background display, every method alike. The blurred backdrop is blurred two different ways (three: a
   // PMREM mip at roughness = blurriness; the path tracer: a cone jitter per camera ray, which smears the
   // studio's key light into a big bright disc the PMREM blur doesn't show). The compare page therefore
