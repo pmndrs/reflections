@@ -303,6 +303,7 @@ async function main() {
       if (v.originOffset) p.originOffset.set(...v.originOffset);
       if (v.projectionOffset) p.projectionOffset.set(...v.projectionOffset);
       if (v.blendDistance !== undefined) p.blendDistance = v.blendDistance;
+      if (v.resolution !== undefined) p.resolution = v.resolution;
       probes.add(p);
     }
     kit.scene.add(probes);

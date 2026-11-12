@@ -18,6 +18,27 @@ export interface ProbeVolume {
   /** Capture point relative to `position` (our extension over #35046). */
   originOffset?: Vec3;
   blendDistance?: number;
+  /**
+   * Cube face size of this probe (`ReflectionProbe.resolution`, W60 / D4700); absent: the set's
+   * (`?probeRes=`, default 256). Give a probe more where it holds fine detail its receivers show
+   * sharp (offscreen's floor under the thin ring), fewer where only rough surfaces see it.
+   */
+  resolution?: number;
+}
+
+/**
+ * Bytes of a baked probe set's atlases (rgba16float, 6 faces per slot, every mip; the environment
+ * slot included), over every atlas when its probes have several resolutions (W38, W60).
+ */
+export function probeAtlasBytes(probes: { textures: { image?: { width?: number }; mipmaps?: unknown[] }[]; bakedAtlases: number[]; bakedEnvironmentSlot: number } | null): number {
+  if (!probes) return 0;
+  let b = 0;
+  probes.textures.forEach((t, a) => {
+    const res = t.image?.width ?? 0;
+    const slots = (a === 0 ? probes.bakedEnvironmentSlot + 1 : probes.bakedAtlases.filter((x) => x === a).length) * 6;
+    for (let l = 0; l < Math.max(1, t.mipmaps?.length ?? 1); l++) b += (res >> l) ** 2 * slots * 8;
+  });
+  return b;
 }
 
 /**

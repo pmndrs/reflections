@@ -105,11 +105,14 @@ export function offscreen(opts: SceneOptions = {}): KitScene {
     //    captured 0.2 m above the floor (lower captures keep the sky over the back wall where it is);
     //  - the wall mirror: a thin box around it, projected onto the room, captured 0.25 m in front of it.
     // vs ?rt=1 over the SSR misses (default view; mirror view, the wall mirror's bars and sphere): 17.8 /
-    // 13.4, against 15.6 / 11.4 with the emissives out of one probe (not shown) and 26.7 / 17.6 with them in it.
+    // 13.4 at 256 px, against 15.6 / 11.4 with the emissives out of one probe (not shown) and 26.7 / 17.6 with them in it.
+    // Per-probe sizes (W60, D4701): the floor (r 0.02, under the thin ring) and the wall mirror (r 0) are
+    // the mirror-grade receivers, so their probes are 512 px; the room's (rough walls) stays at the set's
+    // 256. 17.3 / 13.3, as all three at 512 (17.4 / 13.2) at 42 MB instead of 67 (all 256: 17 MB).
     probes: [
       floorProbe({ position: [0, 2.5, 2], influenceSize: [15.2, 5, 13.2], projectionSize: [14, 5, 12] }),
-      { position: [0, -0.05, 2], influenceSize: [14.6, 0.9, 12.6], blendDistance: 0.3, projectionSize: [14, RING_Y, 12], projectionOffset: [0, RING_Y / 2 + 0.05, 0], originOffset: [0, 0.25, 0] },
-      { position: [0, 1.2, -3.95], influenceSize: [3.6, 2.2, 0.8], blendDistance: 0.2, projectionSize: [14, 5, 12], projectionOffset: [0, 1.3, 5.95], originOffset: [0, 0, 0.25] },
+      { position: [0, -0.05, 2], influenceSize: [14.6, 0.9, 12.6], blendDistance: 0.3, projectionSize: [14, RING_Y, 12], projectionOffset: [0, RING_Y / 2 + 0.05, 0], originOffset: [0, 0.25, 0], resolution: 512 },
+      { position: [0, 1.2, -3.95], influenceSize: [3.6, 2.2, 0.8], blendDistance: 0.2, projectionSize: [14, 5, 12], projectionOffset: [0, 1.3, 5.95], originOffset: [0, 0, 0.25], resolution: 512 },
     ],
   };
 }

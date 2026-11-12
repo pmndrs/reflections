@@ -1033,7 +1033,7 @@ const MISS_FILL_MAX = { default: 22.5, left: 27 };
  * ring's px (warm: r > 200, r - b > 60) in the RT frame, the RT-off frame and both. `single` bakes
  * the room's probe alone (the kit before W38, emissives in) for the comparison.
  */
-const OFFSCREEN_FILL = `async (poses, rects) => {
+const OFFSCREEN_FILL = `async (poses, rects, variants = { single: { probes: [0] }, kit: {} }, ringRects = {}) => {
   const p = window.__p;
   const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
   const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
@@ -1046,13 +1046,26 @@ const OFFSCREEN_FILL = `async (poses, rects) => {
     const M = await px(await p.shot());
     p.setView('final');
     out[pose] = {};
-    for (const [name, volumes] of [['single', [p.kit.probes[0]]], ['kit', null]]) {
-      await p.setProbeVolumes(volumes);
+    // a variant: some of the kit's probes ('probes', indices), per-probe sizes ('sizes', W60) and the
+    // set's default size ('resolution'); {} is the kit as it ships
+    for (const [name, v] of Object.entries(variants)) {
+      const volumes = (v.probes ? v.probes.map((i) => p.kit.probes[i]) : p.kit.probes).map((x, i) => (v.sizes ? { ...x, resolution: v.sizes[i] } : x));
+      const baked = await p.setProbeVolumes(volumes, v.resolution ? { resolution: v.resolution } : {});
       p.setRT(true); await p.step(3);
       const R = await px(await p.shot());
       p.setRT(false); await p.step(3);
       const F = await px(await p.shot());
       const rc = rects[pose], W = 960;
+      // W60: the floor ring alone (ringRects[pose], all px, not only misses): its warm px in each frame
+      const rr = ringRects[pose];
+      let ring = null;
+      if (rr) {
+        ring = { rt: 0, off: 0, both: 0 };
+        for (let y = rr[1]; y < rr[3]; y++) for (let x = rr[0]; x < rr[2]; x++) {
+          const k = (y * W + x) * 4, a = warm(R, k), b = warm(F, k);
+          ring.rt += a; ring.off += b; ring.both += a && b;
+        }
+      }
       let n = 0, d = 0, ringRT = 0, ringOff = 0, both = 0;
       for (let k = 0; k < M.length; k += 4) {
         if (!(M[k] > 200 && M[k + 1] < 80 && M[k + 2] < 80)) continue;
@@ -1062,7 +1075,7 @@ const OFFSCREEN_FILL = `async (poses, rects) => {
         const a = warm(R, k), b = warm(F, k);
         ringRT += a; ringOff += b; both += a && b;
       }
-      out[pose][name] = { px: n, mad: n ? d / n : 0, ringRT, ringOff, both, probes: p.probes.bakedProbes.length };
+      out[pose][name] = { px: n, mad: n ? d / n : 0, ringRT, ringOff, both, probes: p.probes.bakedProbes.length, sizes: p.probes.bakedResolutions, bytes: baked.bytes, bakeMs: baked.ms, ring };
     }
   }
   p.setView('grid');
@@ -1070,25 +1083,80 @@ const OFFSCREEN_FILL = `async (poses, rects) => {
 }`;
 
 /**
- * D4400: limits for {@link offscreenFillChecks}: W38's measurement plus ~1 / 255 (default 17.8, the
- * wall mirror's upper part 13.4), and below the room probe alone by a margin (26.7 / 17.5). The
+ * D4400: limits for {@link offscreenFillChecks}: the measurement plus ~1 / 255 (W60, floor and wall
+ * mirror probes at 512 px: default 17.34, the wall mirror's upper part 13.27; W38 at 256: 17.8 / 13.4),
+ * and below the room probe alone by a margin (26.7 / 17.5). The
  * 'mirror' pose counts only the wall mirror's upper part (the bars and the glow sphere, 960x540 px
  * [335, 185, 630, 300]): below it the mirror shows the floor, where the RT reference is black (a
  * metal hit seen in a mirror, D3513).
  */
-const OFFSCREEN_FILL_MAX = { default: 19, mirror: 14.5 };
+const OFFSCREEN_FILL_MAX = { default: 18.3, mirror: 14.2 }; // W60: 17.34 / 13.27 with the floor and mirror probes at 512 (was 19 / 14.5 over W38's 17.8 / 13.4)
 const OFFSCREEN_FILL_MARGIN = { default: 5, mirror: 2 };
 const OFFSCREEN_FILL_RECT = { mirror: [335, 185, 630, 300] };
+/** W60: the floor ring's box in the default view (960x540), for its warm px alone (the miss-wide count also takes the wall mirror's yellow bar). */
+const OFFSCREEN_RING_RECT = { default: [390, 430, 570, 540] };
+
+/**
+ * W60 (D4700): offscreen with per-probe sizes (kit order: room, floor, wall mirror). Each variant is a
+ * clean bake (`setProbeVolumes`); per pose W38's numbers ({@link OFFSCREEN_FILL}) plus the atlas bytes
+ * and bake ms, then GPU ms of three's render passes at 960x540 (`?gpuTime`, loop stopped, median of
+ * 30; the G-buffer runs every material's probe lookup, the composite its own). JSON to out/w60-offscreen.json.
+ * `pnpm check -- --only offscreen-sizes`.
+ */
+const OFFSCREEN_SIZE_VARIANTS = {
+  all256: { sizes: [256, 256, 256] },
+  floor512: { sizes: [256, 512, 256] },
+  floor512mirror512: { sizes: [256, 512, 512] },
+  all512: { sizes: [512, 512, 512], resolution: 512 },
+  floor1024: { sizes: [256, 1024, 256] },
+};
+async function offscreenSizeMeasure(pages) {
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&gpuTime&scene=offscreen`);
+  pages.push(p);
+  const r = await p.T(`(${OFFSCREEN_FILL})(['default', 'mirror'], ${JSON.stringify(OFFSCREEN_FILL_RECT)}, ${JSON.stringify(OFFSCREEN_SIZE_VARIANTS)}, ${JSON.stringify(OFFSCREEN_RING_RECT)})`);
+  const timing = {};
+  for (const [name, v] of Object.entries(OFFSCREEN_SIZE_VARIANTS)) {
+    timing[name] = await p.T(`(async () => { const p = window.__p; p.setPose('default'); p.setRT(false); p.setView('final');
+      const vols = p.kit.probes.map((x, i) => ({ ...x, resolution: ${JSON.stringify(v.sizes)}[i] }));
+      const bakes = [];
+      for (let k = 0; k < 3; k++) bakes.push((await p.setProbeVolumes(vols, ${v.resolution ? `{ resolution: ${v.resolution} }` : '{}'})).ms);
+      bakes.sort((a, b) => a - b);
+      // the shots as the metric takes them (3 frames after a clean bake), then the timing
+      p.setRT(true); await p.step(3); const on = await p.shot();
+      p.setRT(false); await p.step(3); const off = await p.shot();
+      p.setView('noSSR'); await p.step(3); const noSSR = await p.shot(); p.setView('ssr'); await p.step(3); const ssrv = await p.shot(); p.setView('final');
+      const render = await p.renderTime(30);
+      return { render, bakeMs: bakes[1], bakes, off, on, noSSR, ssrv }; })()`);
+    savePng(`w60-offscreen-${name}-rtoff.png`, timing[name].off);
+    savePng(`w60-offscreen-${name}-nossr.png`, timing[name].noSSR); savePng(`w60-offscreen-${name}-ssr.png`, timing[name].ssrv);
+    delete timing[name].noSSR; delete timing[name].ssrv;
+    if (name === 'all256') savePng('w60-offscreen-rt.png', timing[name].on);
+    delete timing[name].off; delete timing[name].on;
+  }
+  for (const pose of ['default', 'mirror']) {
+    for (const [name, v] of Object.entries(r[pose])) {
+      console.log(`  offscreen ${pose} ${name} [${v.sizes}]: mad ${v.mad.toFixed(2)} over ${v.px} px; warm px rt ${v.ringRT}, rt-off ${v.ringOff}, both ${v.both}${v.ring ? `; floor ring rt ${v.ring.rt}, rt-off ${v.ring.off}, both ${v.ring.both}` : ''}; atlas ${(v.bytes / 1e6).toFixed(1)} MB${pose === 'default' ? `; bake ${timing[name].bakeMs.toFixed(1)} ms (${timing[name].bakes.map((x) => x.toFixed(1)).join(', ')}), render GPU ${timing[name].render?.ms?.toFixed(3)} ms (p10 ${timing[name].render?.p10?.toFixed(3)}, p90 ${timing[name].render?.p90?.toFixed(3)})` : ''}`);
+    }
+  }
+  fs.writeFileSync(path.join(OUT, 'w60-offscreen.json'), JSON.stringify({ fill: r, timing }, null, 2));
+}
 
 async function offscreenFillChecks(pages) {
   const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=offscreen`);
   pages.push(p);
-  const r = await p.T(`(${OFFSCREEN_FILL})(['default', 'mirror'], ${JSON.stringify(OFFSCREEN_FILL_RECT)})`);
+  // W60: `all256` is the kit with every probe at the set's 256 px (the kit before per-probe sizes)
+  const r = await p.T(`(${OFFSCREEN_FILL})(['default', 'mirror'], ${JSON.stringify(OFFSCREEN_FILL_RECT)}, { single: { probes: [0] }, all256: { sizes: [256, 256, 256] }, kit: {} }, ${JSON.stringify(OFFSCREEN_RING_RECT)})`);
   const d = r.default;
-  const ring = (v) => `ring px rt ${v.ringRT}, rt-off ${v.ringOff}, both ${v.both}`;
-  check('offscreen: the ring shows in the RT-off fallback where ?rt=1 has it (emissives captured, floor probe lidded at the ring, D4400)',
-    d.kit.probes === 3 && d.kit.ringRT > 500 && d.kit.both >= 0.9 * d.kit.ringRT && d.kit.ringOff <= 2.5 * d.kit.ringRT && d.single.both < 0.6 * d.single.ringRT,
-    `kit (${d.kit.probes} probes): ${ring(d.kit)}; one room probe: ${ring(d.single)}`);
+  const ring = (v) => `warm px rt ${v.ringRT}, rt-off ${v.ringOff}, both ${v.both}; floor ring rt ${v.ring.rt}, rt-off ${v.ring.off}, both ${v.ring.both}`;
+  // rt-off / rt warm px: the excess is the ring and the wall mirror's yellow bar drawn fat by the probes
+  // (W60: all 256 1.70 / 1.18 for the floor ring alone, kit 1.44 / 1.12; W38 allowed 2.5)
+  check('offscreen: the ring shows in the RT-off fallback where ?rt=1 has it (emissives captured, floor probe lidded at the ring, D4400; floor + mirror probes 512 px, D4701)',
+    d.kit.probes === 3 && d.kit.sizes.join(',') === '256,512' && d.kit.ringRT > 500 && d.kit.both >= 0.9 * d.kit.ringRT && d.kit.ringOff <= 1.6 * d.kit.ringRT
+      && d.kit.ring.both >= 0.97 * d.kit.ring.rt && d.kit.ring.off <= 1.15 * d.kit.ring.rt && d.single.both < 0.6 * d.single.ringRT,
+    `kit (${d.kit.probes} probes, atlases ${d.kit.sizes} px): ${ring(d.kit)}; all 256 px: ${ring(d.all256)}; one room probe: ${ring(d.single)}`);
+  check('offscreen: per-probe sizes (floor and mirror at 512 px) fill the SSR misses closer to RT than all 256 px (D4701)',
+    r.default.kit.mad < r.default.all256.mad - 0.3 && r.mirror.kit.mad < r.mirror.all256.mad && d.kit.bytes < 0.7 * 67.1e6,
+    `default ${r.default.all256.mad.toFixed(2)} -> ${r.default.kit.mad.toFixed(2)}, mirror ${r.mirror.all256.mad.toFixed(2)} -> ${r.mirror.kit.mad.toFixed(2)}; atlases ${(d.all256.bytes / 1e6).toFixed(1)} -> ${(d.kit.bytes / 1e6).toFixed(1)} MB (all 512: 67.1)`);
   check('offscreen: the probe fallback in the SSR misses stays near the ray-traced fill (D4400)',
     ['default', 'mirror'].every((k) => r[k].kit.px > 10000 && r[k].kit.mad < OFFSCREEN_FILL_MAX[k] && r[k].kit.mad < r[k].single.mad - OFFSCREEN_FILL_MARGIN[k]),
     `mean abs diff / 255 vs rt=1 over the misses (mirror: the wall mirror's upper part); ${['default', 'mirror'].map((k) => `${k}: ${r[k].kit.px} miss px, one room probe ${r[k].single.mad.toFixed(2)} -> kit ${r[k].kit.mad.toFixed(2)}`).join('; ')} (limits ${JSON.stringify(OFFSCREEN_FILL_MAX)}, margins ${JSON.stringify(OFFSCREEN_FILL_MARGIN)})`);
@@ -1845,6 +1913,7 @@ async function main() {
       }
     }
     if (runs('ssr-rt')) await ssrRtChecks(pages);
+    if (only === 'offscreen-sizes') await offscreenSizeMeasure(pages); // W60 (D4700): offscreen per-probe sizes, JSON to out/w60-offscreen.json
     if (runs('babylon')) await babylonChecks(pages);
     if (runs('ssr-rt-bvh')) await ssrRtBvhChecks(pages);
     if (runs('pixi3d')) await pixi3dChecks(pages);
