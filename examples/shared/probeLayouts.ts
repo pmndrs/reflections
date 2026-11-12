@@ -242,3 +242,12 @@ export function probeLayout(sceneId: string, name: ProbeLayoutName, shipped: rea
   }
   return null;
 }
+
+/**
+ * W63: an `n`-cell grid (every cell 128 px unless `resolution`) over the scene's regions, for the
+ * lookup-cost sweep at 4 / 8 / 16 / 32 volumes. Null when the scene has no layouts.
+ */
+export function probeGrid(sceneId: string, n: number, opts: { resolution?: number; blend?: number } = {}): ProbeVolume[] | null {
+  const s = SCENES[ALIASES[sceneId] ?? sceneId];
+  return s ? gridProbes(s.regions, n, { resolution: opts.resolution ?? 128, blend: opts.blend ?? 0.25 }).volumes : null;
+}

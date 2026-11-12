@@ -265,7 +265,7 @@ export class ProbeSet {
     const volumes = multi ? this.volumes.map((v) => { const w = this.where(v.slot); return { ...v, atlas: w.atlas, slot: w.slot }; }) : this.volumes;
     this.packed = packProbeTable({
       maxLod: this.maxLod, enabled: this.enabled, environmentSlot: this.environmentSlot >= 0 ? this.plan.environmentSlot : -1,
-      irradianceRow: this.irradianceRow, refitClamp: this.refitClamp,
+      irradianceRow: this.irradianceRow, refitClamp: this.refitClamp, capacity: this.capacity,
       ...(multi ? { atlases: this.layouts.map((l, a) => ({ maxLod: l.mipLevelCount - 1, irradianceBase: this.plan.irradianceBases[a] })) } : {}),
     }, volumes, this.packed.length ? this.packed : undefined);
     this.device.queue.writeBuffer(this.table, 0, this.packed);
