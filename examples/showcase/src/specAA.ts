@@ -42,9 +42,12 @@ const vmfVariance = (r: N): N => {
 };
 const vmfVarianceCPU = (r: number) => { const c = Math.min(Math.max(r, 1e-3), 0.9999); return (2 * (1 - c * c)) / (c * (3 - c * c)); };
 
-/** A standard / physical material's perceptual roughness raised by its normal map's variance at the sampled mip. */
-export function normalVarianceRoughness(material: THREE.MeshStandardMaterial): N {
-  const map = material.normalMap!;
+/**
+ * A standard / physical material's perceptual roughness raised by `map`'s variance at the sampled mip.
+ * The map is fixed in the node; the roughness (scalar x map) and the normal scale are references to the
+ * material being drawn, so materials that share a normal map share the node (and the pipeline).
+ */
+export function normalVarianceRoughness(map: THREE.Texture): N {
   // texture(map) with no uv: three's own uv channel and texture matrix (KHR_texture_transform), hardware mip
   const r: N = (texture(map) as N).rgb.mul(2).sub(1).length();
   const r0: N = (texture(map, null, float(0)) as N).rgb.mul(2).sub(1).length();
@@ -55,29 +58,43 @@ export function normalVarianceRoughness(material: THREE.MeshStandardMaterial): N
   return alpha.mul(alpha).add(extra).sqrt().sqrt().min(1);
 }
 
-const nodes = new WeakMap<THREE.Material, N>();
+const byMap = new WeakMap<THREE.Texture, N>();
+/** Materials this module gave a roughnessNode, and the node. */
+const applied = new WeakMap<THREE.Material, N>();
 const applies = (m: THREE.Material): m is THREE.MeshStandardMaterial => {
   const s = m as THREE.MeshStandardMaterial;
   return (s.isMeshStandardMaterial === true) && s.normalMap != null && (s as N).roughnessNode == null;
 };
+const baseCacheKey = (m: THREE.Material) => Object.getPrototypeOf(m).customProgramCacheKey.call(m) as string;
 
 /**
  * Turn the option on or off for every standard / physical material with a normal map under `root`
  * (materials with their own `roughnessNode` are left alone). Returns the number of materials changed.
+ *
+ * three's WebGPU renderer keys a non-node material's pipeline (and its node graph, bindings included) by
+ * the material's properties, where a `roughnessNode` counts as "an object" and a texture by its sampler,
+ * not its identity: two materials that differ only in their normal map would share the first one's
+ * node, and with it the first one's map (W46: Sponza's curtains shaded with a column's normal variance).
+ * The material's `customProgramCacheKey` therefore carries the map's id while the node is on.
  */
 export function setSpecularAA(root: THREE.Object3D, on: boolean): number {
   const seen = new Set<THREE.Material>();
   root.traverse((o) => {
     for (const m of ([] as THREE.Material[]).concat((o as THREE.Mesh).material ?? [])) {
       if (seen.has(m)) continue;
-      const ours = nodes.get(m);
+      const ours = applied.get(m);
       const current = (m as N).roughnessNode;
       if (on && current == null && applies(m)) {
-        const node = ours ?? normalVarianceRoughness(m);
-        nodes.set(m, node);
+        const map = m.normalMap!;
+        let node = byMap.get(map);
+        if (!node) byMap.set(map, (node = normalVarianceRoughness(map)));
+        applied.set(m, node);
         (m as N).roughnessNode = node;
+        m.customProgramCacheKey = () => `${baseCacheKey(m)}|specAA:${map.id}`;
       } else if (!on && ours != null && current === ours) {
         (m as N).roughnessNode = null;
+        applied.delete(m);
+        delete (m as Partial<THREE.Material>).customProgramCacheKey;
       } else continue;
       m.needsUpdate = true;
       seen.add(m);
@@ -93,7 +110,7 @@ export function setSpecularAA(root: THREE.Object3D, on: boolean): number {
 export function specAAHitMaterial(mesh: THREE.Mesh): HitMaterial {
   const out = defaultHitMaterial(mesh);
   const m = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshStandardMaterial;
-  if (out.roughness === undefined || !m || nodes.get(m) == null || (m as N).roughnessNode !== nodes.get(m)) return out;
+  if (out.roughness === undefined || !m || applied.get(m) == null || (m as N).roughnessNode !== applied.get(m)) return out;
   const mean = m.normalMap ? textureMeanColor(m.normalMap) : null;
   if (!mean) return out;
   const r = Math.hypot(mean[0] * 2 - 1, mean[1] * 2 - 1, mean[2] * 2 - 1);
