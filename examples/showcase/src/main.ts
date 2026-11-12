@@ -34,7 +34,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, installCubeArraySupport, reflectionProbes, sampleReflectionProbes,
 } from '@pmndrs/reflections/three';
-import { availableAssets } from '../../shared';
+import { availableAssets, probeAtlasBytes } from '../../shared';
 import { createReflectionDenoiser, denoiserAvailable } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
@@ -318,19 +318,13 @@ async function main() {
       if (v.originOffset) p.originOffset.set(...v.originOffset);
       if (v.projectionOffset) p.projectionOffset.set(...v.projectionOffset);
       if (v.blendDistance !== undefined) p.blendDistance = v.blendDistance;
+      if (v.resolution !== undefined) p.resolution = v.resolution;
       set.add(p);
     }
     return set;
   }
-  /** W38: bytes of the probe atlas (rgba16float, 6 faces per slot incl. the environment slot, every mip). */
-  function probeBytes() {
-    const t = probes?.texture as N;
-    if (!t) return 0;
-    const res = t.image?.width ?? 0, slots = (probes!.bakedProbes.length + 1) * 6;
-    let b = 0;
-    for (let l = 0; l < Math.max(1, t.mipmaps?.length ?? 1); l++) b += (res >> l) ** 2 * slots * 8;
-    return b;
-  }
+  /** W38: bytes of the probe atlases (rgba16float, 6 faces per slot incl. the environment slot, every mip; every atlas, W60). */
+  const probeBytes = () => probeAtlasBytes(probes as N);
 
   // ---- scene loading ---------------------------------------------------------------------------------
   const controls = new OrbitControls(new THREE.PerspectiveCamera(), canvas);

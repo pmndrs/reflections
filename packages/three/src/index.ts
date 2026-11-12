@@ -9,7 +9,7 @@ export {
 export {
   ReflectionProbesNode, reflectionProbes, reflectionProbesLocal, sampleReflectionProbes, sampleReflectionProbesLocal,
   ReflectionProbesProxyNode, sampleReflectionProbesProxyShare, parallaxCorrect, cubeFaceUV, reflectionProbeVolumes, packReflectionProbesTable,
-  type ProbeLookupInputs, type ProbeLookupOptions,
+  type ProbeLookupInputs, type ProbeLookupOptions, type PackReflectionProbesTableOptions,
 } from './probes/ReflectionProbesNode';
 export { ReflectionProbesHelper } from './probes/ReflectionProbesHelper';
 

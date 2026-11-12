@@ -47,7 +47,7 @@
 // environment fallback (docs/DIVERGES.md D20).
 
 import * as THREE from 'three/webgpu';
-import { DEFAULT_PROBE_LOD_MAPPING, PROBE_IRRADIANCE_ROWS, ProbeIrradiance, ProbePrefilter, createProbeLayout, maxLodFor, type ProbeLodMapping } from '@pmndrs/reflections-core';
+import { DEFAULT_PROBE_LOD_MAPPING, PROBE_IRRADIANCE_ROWS, ProbeIrradiance, ProbePrefilter, createProbeLayout, maxLodFor, planProbeAtlases, type ProbeLodMapping } from '@pmndrs/reflections-core';
 import { cubeArraySupported, cubeArraySupportStatus, cubeArrayTextureClass } from '../compat/cubeArray';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -87,6 +87,16 @@ export class ReflectionProbe extends THREE.Object3D {
    * sees the most of the room. Scaled with the probe like the volume sizes; rotation is ignored.
    */
   readonly originOffset = new THREE.Vector3();
+  /**
+   * This probe's cube face size (not in #35046; D4700): null (default) takes the set's
+   * {@link BakeOptions.resolution}. Rounded down to a power of two, at least 64, like it. Probes of
+   * each size share one atlas (a set holds up to 4 sizes, the set default's atlas first): a 512 px
+   * probe for a polished floor beside 256 px room probes costs one 512 px cube, not 4x the set.
+   * Sizing: the sharpest surface that samples the probe, the detail it must hold (a thin emissive,
+   * a sign) and how near it is; see {@link BakeOptions.resolution} for memory and bake time.
+   * Changing it re-bakes the set on the next bake.
+   */
+  resolution: number | null = null;
 
   constructor(width = 1, height = 1, depth = 1) {
     super();
@@ -101,6 +111,7 @@ export class ReflectionProbe extends THREE.Object3D {
     this.projectionOffset.copy(source.projectionOffset);
     this.blendDistance = source.blendDistance;
     this.originOffset.copy(source.originOffset);
+    this.resolution = source.resolution;
     return this;
   }
 }
@@ -113,9 +124,14 @@ export interface BakeOptions {
    * (polished floors, mirrors, metal below roughness ~0.2: Lagarde 2014's minimum for mirror-like
    * surfaces, Godot's default); 128 when many probes share the scene or on mobile (a quarter of the
    * memory and bake time; Godot's mobile size), and for probes that only glossy or rough surfaces
-   * see. Memory per probe (rgba16f, 6 faces, all mips): ~4.2 MB at 256, ~1.0 MB at 128. Bake time grows about
-   * 2x from 128 to 256 (W31: 3 probes ~2.3 -> ~4 ms). Whether many small probes beat a few large
-   * ones at equal memory is open (docs/HANDOFF.md fine-tune backlog, "Probe count vs resolution").
+   * see. Memory per probe (rgba16f, 6 faces, all mips): ~16.8 MB at 512, ~4.2 MB at 256, ~1.0 MB
+   * at 128. Bake time grows about 2x from 128 to 256 (W31: 3 probes ~2.3 -> ~4 ms). Whether many
+   * small probes beat a few large ones at equal memory is open (docs/HANDOFF.md fine-tune backlog,
+   * "Probe count vs resolution").
+   *
+   * This is the set's default: a probe's own {@link ReflectionProbe.resolution} overrides it
+   * (D4700), so one probe that holds fine detail (a floor under a thin emissive, a mirror) can be
+   * 512 while the rest stay 256. The environment slot always takes this size.
    */
   resolution?: number;
   /** Near plane of the capture camera. Default 0.1. */
@@ -173,6 +189,8 @@ export interface BakeOptions {
 const DEFAULT_DISTANCE_ROUGHNESS = true;
 /** Default {@link BakeOptions.resolution} (D23, decided 2026-11-11: #35046's 256). */
 const DEFAULT_RESOLUTION = 256;
+/** A face size as the bake takes it: rounded down to a power of two like #35046 (2712ba1b23), but from 64 (D23). */
+const faceSize = (resolution: number) => Math.max(64, THREE.MathUtils.floorPowerOfTwo(resolution));
 const DEFAULT_ROUGHNESS_LERP = false;
 /** Default {@link BakeOptions.bounces} (D4300, decided 2026-11-11, maintainer Q1: 2, tunable). */
 const DEFAULT_BOUNCES = 2;
@@ -207,10 +225,25 @@ export class ReflectionProbes extends THREE.Object3D {
   /**
    * The baked texture: one cube per probe, then one for the environment; mips = roughness. A
    * CubeArrayTexture when {@link bakedLayout} is 'cube-array', else a 2D array texture of 6 layers per cube.
+   * With probes of several resolutions (D4700) this is the set default's atlas (its probes and the
+   * environment), `textures[0]`; the others are in {@link textures}.
    */
   texture: THREE.Texture | null = null;
+  /**
+   * Every atlas of the last bake, one per probe resolution (D4700): `[texture]` when every probe
+   * uses the set default. Same storage and seam fix for all; each has its own size and mips.
+   */
+  textures: THREE.Texture[] = [];
+  /** Face size of each of {@link textures}. */
+  bakedResolutions: number[] = [];
   /** The probes in baked order, smallest volume first. */
   bakedProbes: ReflectionProbe[] = [];
+  /** Per baked probe: the index in {@link textures} of the atlas holding it (D4700). */
+  bakedAtlases: number[] = [];
+  /** Per baked probe: its slot (cube index) within that atlas. */
+  bakedSlots: number[] = [];
+  /** The environment's slot in `textures[0]` (after the probes that live there). */
+  bakedEnvironmentSlot = 0;
   /** The seam fix the current `texture` was baked with (the node samples to match); 'none' on cube arrays. */
   bakedSeamFix: SeamFix = 'warp';
   /** The storage the current `texture` uses ('cube2d' before the first bake). */
@@ -256,11 +289,12 @@ export class ReflectionProbes extends THREE.Object3D {
   /** Bumped when `irradiance` is recomputed. */
   irradianceVersion = 0;
 
-  private renderTarget: THREE.RenderTarget | null = null;
-  private cubeTarget: THREE.CubeRenderTarget | null = null;
-  private cubeCamera: THREE.CubeCamera | null = null;
-  private prefilter: ProbePrefilter | null = null;
-  private irradianceFilter: ProbeIrradiance | null = null;
+  /** One atlas per probe resolution, `textures[k]`'s render target (D4700). */
+  private renderTargets: THREE.RenderTarget[] = [];
+  /** Capture cube, camera and prefilter per face size. */
+  private readonly captures = new Map<number, { cubeTarget: THREE.CubeRenderTarget; cubeCamera: THREE.CubeCamera; prefilter: ProbePrefilter | null }>();
+  /** One irradiance filter per atlas layout (id and mip count). */
+  private readonly irradianceFilters = new Map<string, ProbeIrradiance>();
   private readonly environment = new THREE.Scene();
   /** The environment the fallback slot holds (null: black), and its versions when captured. */
   private environmentTexture: THREE.Texture | null = null;
@@ -270,7 +304,7 @@ export class ReflectionProbes extends THREE.Object3D {
   private readonly users = new Set<WeakRef<THREE.Node>>();
   /** In a bounce pass (D25): lookups stay on during the captures, which go to {@link bounceScratch}. */
   private bouncePass = false;
-  private bounceScratch: GPUTexture | null = null;
+  private bounceScratch: (GPUTexture | null)[] = [];
 
   constructor() {
     super();
@@ -306,60 +340,78 @@ export class ReflectionProbes extends THREE.Object3D {
     if (r.backend.isWebGPUBackend !== true) throw new Error('ReflectionProbes: .bake() requires the WebGPU backend.');
     const { near = 0.1, far = 100, environment: environmentOption = true } = options;
     // default 256 and rounded down like #35046 (2712ba1b23), but from 64: our prefilter has no 256 floor (D23)
-    const resolution = Math.max(64, THREE.MathUtils.floorPowerOfTwo(options.resolution ?? DEFAULT_RESOLUTION));
+    const resolution = faceSize(options.resolution ?? DEFAULT_RESOLUTION);
 
     this.updateWorldMatrix(true, true);
     const probes = (this.children.filter((c) => (c as ReflectionProbe).isReflectionProbe) as ReflectionProbe[]).sort((a, b) => volume(a) - volume(b));
-    const maxLod = maxLodFor(resolution);
-    const depth = (probes.length + 1) * 6;
+    // one atlas per probe resolution, the set default's first with the environment slot (D4700);
+    // with every probe at the default this is the one atlas of (probes + 1) cubes it always was
+    const plan = planProbeAtlases(probes.map((p) => (p.resolution == null ? null : faceSize(p.resolution))), resolution);
     const storage = this.storageFor(r);
     const cubeArray = storage === 'cube-array';
     // cube arrays filter across face edges in hardware, so they take plain texel centres ('none')
     const seamFix: SeamFix = cubeArray ? 'none' : this.seamFix;
     const warp = seamFix === 'warp';
     const device0: GPUDevice = r.backend.device;
-    // 6 layers per slot: the default limit (256 layers) holds 41 probes plus the environment
-    if (depth > device0.limits.maxTextureArrayLayers) {
-      throw new Error(`ReflectionProbes: ${probes.length} probes need ${depth} array layers (6 per probe + 6 for the environment), `
-        + `but this device allows ${device0.limits.maxTextureArrayLayers}. Create the renderer with a larger limit `
-        + `(new WebGPURenderer({ requiredLimits: { maxTextureArrayLayers: adapter.limits.maxTextureArrayLayers } })) or use fewer probes per set.`);
-    }
+    // 6 layers per slot: the default limit (256 layers) holds 41 probes plus the environment per atlas
+    plan.slots.forEach((slots, a) => {
+      if (slots * 6 > device0.limits.maxTextureArrayLayers) {
+        throw new Error(`ReflectionProbes: ${slots} cubes of ${plan.resolutions[a]} px need ${slots * 6} array layers (6 per probe${a === 0 ? ' + 6 for the environment' : ''}), `
+          + `but this device allows ${device0.limits.maxTextureArrayLayers}. Create the renderer with a larger limit `
+          + `(new WebGPURenderer({ requiredLimits: { maxTextureArrayLayers: adapter.limits.maxTextureArrayLayers } })) or use fewer probes per set.`);
+      }
+    });
 
-    let renderTarget = this.renderTarget;
-    let previous: THREE.RenderTarget | null = null;
-    // a new array, or every slot to be filtered again (the seam fix changed)
-    const newTarget = renderTarget === null || renderTarget.width !== resolution || renderTarget.depth !== depth || this.bakedLayout !== storage;
-    const layoutChanged = newTarget || this.bakedSeamFix !== seamFix;
-    if (newTarget || renderTarget === null) {
-      // materials keep sampling the previous array while the probes are captured
-      previous = renderTarget;
-      renderTarget = new THREE.RenderTarget(resolution, resolution, {
-        depth, type: THREE.HalfFloatType, depthBuffer: false, generateMipmaps: false,
-        minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter,
-        ...(cubeArray ? { mapping: THREE.CubeReflectionMapping } : {}),
+    let renderTargets = this.renderTargets;
+    let previous: THREE.RenderTarget[] = [];
+    // new arrays (a size, a slot count or the storage changed), or every slot to be filtered again
+    // (the seam fix changed, or probes moved between atlases)
+    const newTarget = renderTargets.length !== plan.resolutions.length || this.bakedLayout !== storage
+      || plan.resolutions.some((res, a) => renderTargets[a].width !== res || renderTargets[a].depth !== plan.slots[a] * 6);
+    const sameAssignment = plan.atlas.length === this.bakedAtlases.length && plan.atlas.every((a, i) => a === this.bakedAtlases[i] && plan.slot[i] === this.bakedSlots[i]);
+    const layoutChanged = newTarget || this.bakedSeamFix !== seamFix || !sameAssignment;
+    if (newTarget) {
+      // materials keep sampling the previous arrays while the probes are captured
+      previous = renderTargets;
+      renderTargets = plan.resolutions.map((res, a) => {
+        const maxLod = maxLodFor(res);
+        const target = new THREE.RenderTarget(res, res, {
+          depth: plan.slots[a] * 6, type: THREE.HalfFloatType, depthBuffer: false, generateMipmaps: false,
+          minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter,
+          ...(cubeArray ? { mapping: THREE.CubeReflectionMapping } : {}),
+        });
+        // six face layers per cube, as #35046 allocates its CubeArrayTexture (depth counts cubes)
+        if (cubeArray) target.texture = new (cubeArrayTextureClass())().copy(target.texture);
+        target.texture.name = a === 0 ? 'ReflectionProbes' : `ReflectionProbes.${res}`;
+        for (let lod = 0; lod <= maxLod; lod++) target.texture.mipmaps.push({ width: res >> lod, height: res >> lod } as never);
+        r.initRenderTarget(target);
+        return target;
       });
-      // six face layers per cube, as #35046 allocates its CubeArrayTexture (depth counts cubes)
-      if (cubeArray) renderTarget.texture = new (cubeArrayTextureClass())().copy(renderTarget.texture);
-      renderTarget.texture.name = 'ReflectionProbes';
-      for (let lod = 0; lod <= maxLod; lod++) renderTarget.texture.mipmaps.push({ width: resolution >> lod, height: resolution >> lod } as never);
-      r.initRenderTarget(renderTarget);
     }
-    if (this.cubeTarget === null || this.cubeTarget.width !== resolution) {
-      this.cubeTarget?.dispose();
-      this.cubeTarget = new THREE.CubeRenderTarget(resolution, { type: THREE.HalfFloatType, generateMipmaps: false });
-      this.cubeCamera = new THREE.CubeCamera(near, far, this.cubeTarget);
+    // a capture cube, camera and prefilter per face size in use
+    for (const [res, c] of this.captures) {
+      if (plan.resolutions.includes(res)) continue;
+      c.cubeTarget.dispose(); c.prefilter?.dispose();
+      this.captures.delete(res);
     }
-    if (this.prefilter === null || this.prefilter.size !== resolution || this.prefilter.warp !== warp) {
-      this.prefilter?.dispose();
-      this.prefilter = new ProbePrefilter(r.backend.device, resolution, warp);
+    for (const res of plan.resolutions) {
+      let c = this.captures.get(res);
+      if (c === undefined) {
+        const cubeTarget = new THREE.CubeRenderTarget(res, { type: THREE.HalfFloatType, generateMipmaps: false });
+        this.captures.set(res, (c = { cubeTarget, cubeCamera: new THREE.CubeCamera(near, far, cubeTarget), prefilter: null }));
+      }
+      if (c.prefilter === null || c.prefilter.warp !== warp) {
+        c.prefilter?.dispose();
+        c.prefilter = new ProbePrefilter(r.backend.device, res, warp);
+      }
+      for (const cam of c.cubeCamera.children as THREE.PerspectiveCamera[]) {
+        if (cam.near !== near || cam.far !== far) { cam.near = near; cam.far = far; cam.updateProjectionMatrix(); }
+      }
     }
 
-    const cubeCamera = this.cubeCamera!;
-    for (const cam of cubeCamera.children as THREE.PerspectiveCamera[]) {
-      if (cam.near !== near || cam.far !== far) { cam.near = near; cam.far = far; cam.updateProjectionMatrix(); }
-    }
     // Capturing only some probes keeps the other slots, so it needs the slots of the last bake.
     const sameProbes = probes.length === this.bakedProbes.length && probes.every((probe, i) => probe === this.bakedProbes[i]);
+    const envSlot = plan.environmentSlot;
     const captured = options.probes !== undefined && !layoutChanged && sameProbes ? probes.filter((probe) => options.probes!.includes(probe)) : probes;
 
     // The environment is captured again only when it changed. A new array starts black, which is
@@ -369,7 +421,7 @@ export class ReflectionProbes extends THREE.Object3D {
     const environmentChanged = environmentTexture !== this.environmentTexture || (environmentTexture !== null
       && (environmentTexture.version !== this.environmentVersion || environmentTexture.pmremVersion !== this.environmentPMREMVersion));
     const captureEnvironment = environmentTexture !== null && (layoutChanged || environmentChanged || environmentOption === 'always');
-    const clearEnvironment = environmentTexture === null && this.environmentTexture !== null && renderTarget === this.renderTarget;
+    const clearEnvironment = environmentTexture === null && this.environmentTexture !== null && !newTarget;
     const environment = this.environment;
     environment.background = environmentTexture;
 
@@ -402,17 +454,18 @@ export class ReflectionProbes extends THREE.Object3D {
     });
 
     const device: GPUDevice = r.backend.device;
-    const target: GPUTexture = r.backend.get(renderTarget.texture).texture;
-    // a bounce pass prefilters into a scratch copy of the atlas: the captures keep sampling the
+    const targets: GPUTexture[] = renderTargets.map((t) => r.backend.get(t.texture).texture);
+    // a bounce pass prefilters into scratch copies of the atlases: the captures keep sampling the
     // previous pass's probes, and the pass lands at once below
-    const out = this.bouncePass ? this.scratchFor(device, target) : target;
-    const captureSlot = (source: THREE.Scene, position: THREE.Vector3, slot: number) => {
-      cubeCamera.position.copy(position);
-      cubeCamera.updateMatrixWorld(true);
-      cubeCamera.update(r, source);
+    const outs = this.bouncePass ? targets.map((t, a) => this.scratchFor(device, t, a)) : targets;
+    const captureSlot = (source: THREE.Scene, position: THREE.Vector3, atlas: number, slot: number) => {
+      const c = this.captures.get(plan.resolutions[atlas])!;
+      c.cubeCamera.position.copy(position);
+      c.cubeCamera.updateMatrixWorld(true);
+      c.cubeCamera.update(r, source);
       // three submitted the six face renders; the prefilter goes after them on the same queue
       const encoder = device.createCommandEncoder({ label: 'ReflectionProbes.bake' });
-      this.prefilter!.encode(encoder, r.backend.get(this.cubeTarget!.texture).texture, out, slot);
+      c.prefilter!.encode(encoder, r.backend.get(c.cubeTarget.texture).texture, outs[atlas], slot);
       device.queue.submit([encoder.finish()]);
     };
 
@@ -425,10 +478,13 @@ export class ReflectionProbes extends THREE.Object3D {
     // captures see only the environment, except in a bounce pass (D25)
     this.capturing = !this.bouncePass;
     try {
-      if (clearEnvironment) clearSlot(device, target, probes.length);
+      if (clearEnvironment) clearSlot(device, targets[0], envSlot);
       // the environment goes first: the probe captures reflect it
-      if (captureEnvironment) captureSlot(environment, _position.set(0, 0, 0), probes.length);
-      for (const probe of captured) captureSlot(scene, probeOrigin(probe, _position), probes.indexOf(probe));
+      if (captureEnvironment) captureSlot(environment, _position.set(0, 0, 0), 0, envSlot);
+      for (const probe of captured) {
+        const i = probes.indexOf(probe);
+        captureSlot(scene, probeOrigin(probe, _position), plan.atlas[i], plan.slot[i]);
+      }
     } finally {
       for (const o of hidden) o.visible = true;
       for (const shadow of shadows) shadow.autoUpdate = true;
@@ -436,10 +492,10 @@ export class ReflectionProbes extends THREE.Object3D {
       scene.background = background;
       Object.assign(r, { autoClear, autoClearColor, autoClearDepth, autoClearStencil });
     }
-    if (out !== target) {
+    if (outs !== targets) {
       const encoder = device.createCommandEncoder({ label: 'ReflectionProbes.bounce' });
       for (const probe of captured) {
-        const slot = probes.indexOf(probe);
+        const i = probes.indexOf(probe), slot = plan.slot[i], target = targets[plan.atlas[i]], out = outs[plan.atlas[i]];
         for (let mip = 0; mip < target.mipLevelCount; mip++) {
           const s = Math.max(1, target.width >> mip);
           encoder.copyTextureToTexture({ texture: out, mipLevel: mip, origin: [0, 0, slot * 6] }, { texture: target, mipLevel: mip, origin: [0, 0, slot * 6] }, [s, s, 6]);
@@ -448,15 +504,20 @@ export class ReflectionProbes extends THREE.Object3D {
       device.queue.submit([encoder.finish()]);
     }
 
-    if (options.irradiance !== false) this.computeIrradiance(device, target, probes.length + 1, cubeArray ? 'cube-hw' : warp ? 'cube2d-warp' : 'cube2d-none');
+    if (options.irradiance !== false) this.computeIrradiance(device, targets, plan.slots, plan.irradianceBases, cubeArray ? 'cube-hw' : warp ? 'cube2d-warp' : 'cube2d-none');
 
     this.environmentTexture = environmentTexture;
     this.environmentVersion = environmentTexture?.version ?? -1;
     this.environmentPMREMVersion = environmentTexture?.pmremVersion ?? -1;
 
-    previous?.dispose();
-    this.renderTarget = renderTarget;
-    this.texture = renderTarget.texture;
+    for (const t of previous) t.dispose();
+    this.renderTargets = renderTargets;
+    this.textures = renderTargets.map((t) => t.texture);
+    this.texture = this.textures[0];
+    this.bakedResolutions = plan.resolutions;
+    this.bakedAtlases = plan.atlas;
+    this.bakedSlots = plan.slot;
+    this.bakedEnvironmentSlot = envSlot;
     this.bakedProbes = probes;
     this.bakedSeamFix = seamFix;
     this.bakedLayout = storage;
@@ -468,7 +529,7 @@ export class ReflectionProbes extends THREE.Object3D {
     // The captures above were lit through the previous array (materials sample it until the bake
     // ends), whose environment slot still holds the old environment: when both changed, capture
     // the probes once more, now through this array (F2).
-    if (previous !== null && captureEnvironment && captured.length > 0) {
+    if (previous.length > 0 && captureEnvironment && captured.length > 0) {
       this.bake(renderer, scene, { ...options, probes: captured, environment: environmentOption === false ? false : true, bounces: 1 });
     }
     // D25: further passes in which the captures see the previous pass's probes
@@ -485,12 +546,12 @@ export class ReflectionProbes extends THREE.Object3D {
     }
   }
 
-  /** A texture shaped like the atlas `target` (layers, mips, format) for a bounce pass (D25). */
-  private scratchFor(device: GPUDevice, target: GPUTexture): GPUTexture {
-    const s = this.bounceScratch;
+  /** A texture shaped like atlas `atlas`'s `target` (layers, mips, format) for a bounce pass (D25). */
+  private scratchFor(device: GPUDevice, target: GPUTexture, atlas: number): GPUTexture {
+    const s = this.bounceScratch[atlas];
     if (s && s.width === target.width && s.depthOrArrayLayers === target.depthOrArrayLayers && s.mipLevelCount === target.mipLevelCount && s.format === target.format) return s;
     s?.destroy();
-    return (this.bounceScratch = device.createTexture({
+    return (this.bounceScratch[atlas] = device.createTexture({
       label: 'ReflectionProbes.bounce', size: [target.width, target.height, target.depthOrArrayLayers], format: target.format,
       mipLevelCount: target.mipLevelCount, usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC,
     }));
@@ -508,40 +569,43 @@ export class ReflectionProbes extends THREE.Object3D {
   }
 
   /**
-   * L1 SH of every slot into `irradiance` (core ProbeIrradiance, x mirrored), reading the atlas as
+   * L1 SH of every slot into `irradiance` (core ProbeIrradiance, x mirrored), reading each atlas as
    * the layout it was baked in: a cube array through a 'cube-array' view (`cube-hw`), never as a 2D
-   * array, which compatibility-mode WebGPU rejects (D2204); a 2D array through '2d-array'.
+   * array, which compatibility-mode WebGPU rejects (D2204); a 2D array through '2d-array'. Slots
+   * are numbered across the atlases (atlas k's from `bases[k]`, core table rows 2 / 3, D4700).
    */
-  private computeIrradiance(device: GPUDevice, target: GPUTexture, slots: number, id: 'cube-hw' | 'cube2d-warp' | 'cube2d-none') {
-    const layout = createProbeLayout(id, { maxLod: target.mipLevelCount - 1 });
-    if (this.irradianceFilter === null || this.irradianceFilter.layout.id !== layout.id || this.irradianceFilter.layout.mipLevelCount !== layout.mipLevelCount) {
-      this.irradianceFilter?.dispose();
-      this.irradianceFilter = new ProbeIrradiance(device, layout, { mirrorX: true });
-    }
-    const size = slots * PROBE_IRRADIANCE_ROWS * 16;
+  private computeIrradiance(device: GPUDevice, targets: GPUTexture[], slots: number[], bases: number[], id: 'cube-hw' | 'cube2d-warp' | 'cube2d-none') {
+    const size = slots.reduce((x, y) => x + y, 0) * PROBE_IRRADIANCE_ROWS * 16;
     if (this.irradiance === null || this.irradiance.size !== size) {
       this.irradiance?.destroy();
       this.irradiance = device.createBuffer({ label: 'ReflectionProbes.irradiance', size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     }
     const encoder = device.createCommandEncoder({ label: 'ReflectionProbes.irradiance' });
-    this.irradianceFilter.encode(encoder, target, this.irradiance, 0, Array.from({ length: slots }, (_, i) => i));
+    targets.forEach((target, a) => {
+      const layout = createProbeLayout(id, { maxLod: target.mipLevelCount - 1 });
+      const key = `${layout.id}:${layout.mipLevelCount}`;
+      let filter = this.irradianceFilters.get(key);
+      if (filter === undefined) this.irradianceFilters.set(key, (filter = new ProbeIrradiance(device, layout, { mirrorX: true })));
+      filter.encode(encoder, target, this.irradiance!, bases[a] * PROBE_IRRADIANCE_ROWS, Array.from({ length: slots[a] }, (_, i) => i));
+    });
     device.queue.submit([encoder.finish()]);
     this.irradianceVersion++;
   }
 
   /** Frees the GPU resources allocated by this instance. */
   dispose() {
-    this.irradianceFilter?.dispose();
+    for (const f of this.irradianceFilters.values()) f.dispose();
+    this.irradianceFilters.clear();
     this.irradiance?.destroy();
-    this.bounceScratch?.destroy();
-    this.bounceScratch = null;
-    this.irradianceFilter = null;
     this.irradiance = null;
-    this.renderTarget?.dispose();
-    this.cubeTarget?.dispose();
-    this.prefilter?.dispose();
-    this.renderTarget = this.cubeTarget = this.cubeCamera = this.prefilter = null;
+    for (const t of this.bounceScratch) t?.destroy();
+    this.bounceScratch = [];
+    for (const t of this.renderTargets) t.dispose();
+    this.renderTargets = [];
+    for (const c of this.captures.values()) { c.cubeTarget.dispose(); c.prefilter?.dispose(); }
+    this.captures.clear();
     this.texture = null;
+    this.textures = [];
     this.environmentTexture = null;
   }
 }

@@ -33,7 +33,7 @@ import {
   createPmndrsBvhTraceProviderFromObjects, type ThreePmndrsBvhTraceProvider,
 } from '@pmndrs/reflections/three';
 import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
-import { ASSET_SCENES, SCENES, type KitScene, type ProbeVolume } from '../../shared';
+import { ASSET_SCENES, SCENES, probeAtlasBytes, type KitScene, type ProbeVolume } from '../../shared';
 import { createReflectionDenoiser, denoiserAvailable, denoiserSource } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
@@ -378,26 +378,21 @@ async function main() {
   }
   let time = 0, paused = false;
   /**
-   * The bake's options: `?probeRes=` (default 256), `?bounces=` (default 2, D25 / D4300; 1 halves
+   * The bake's options: `?probeRes=` (the set's default face size, 256; a kit probe's own
+   * `resolution` and `?probeSizes=` override it per probe, W60), `?bounces=` (default 2, D25 / D4300; 1 halves
    * the bake where no mirror or glossy surface faces another). The kit scenes keep their free-standing
    * objects out of the captures (`userData.reflectionProbeExclude`, D4301).
    */
+  /** `?probeSizes=512,,256` (W60, D4700): per-probe face sizes in kit order over the kit's own (0: the set's `?probeRes=`). */
+  const probeSizes = (q.get('probeSizes') ?? '').split(',').map((x) => x.trim());
   const bakeOptions = (extra: Partial<BakeOptions> = {}): BakeOptions => ({
     ...(q.has('probeRes') ? { resolution: Number(q.get('probeRes')) } : {}),
     ...(q.has('bounces') ? { bounces: Number(q.get('bounces')) } : {}),
     near: 0.05, far: 60, ...extra,
   });
 
-  /** W38: bytes of the probe atlas (rgba16float, 6 faces per slot incl. the environment slot, every mip). */
-  function probeBytes() {
-    const t = probes?.texture as N;
-    if (!t) return 0;
-    const res = t.image?.width ?? 0, slots = (probes!.bakedProbes.length + 1) * 6;
-    const mips = Math.max(1, t.mipmaps?.length ?? 1);
-    let b = 0;
-    for (let l = 0; l < mips; l++) b += (res >> l) ** 2 * slots * 8;
-    return b;
-  }
+  /** W38: bytes of the probe atlases (rgba16float, 6 faces per slot incl. the environment slot, every mip; every atlas, W60). */
+  const probeBytes = () => probeAtlasBytes(probes as N);
   /** A probe set from volumes (the kit's suggestion, or W38's variants via `__p.setProbeVolumes`), baked and lit with. */
   function buildProbes(volumes: ProbeVolume[], extra: Partial<BakeOptions> = {}) {
     probes = new ReflectionProbes();
@@ -408,6 +403,10 @@ async function main() {
       if (v.originOffset) p.originOffset.set(...v.originOffset);
       if (v.projectionOffset) p.projectionOffset.set(...v.projectionOffset);
       if (v.blendDistance !== undefined) p.blendDistance = v.blendDistance;
+      if (v.resolution !== undefined) p.resolution = v.resolution;
+      // `?probeSizes=` (W60): per probe in kit order, a face size, 0 for the set's, empty for the kit's
+      const size = probeSizes[probes.children.length];
+      if (size !== undefined && size !== '') p.resolution = Number(size) > 0 ? Number(size) : null;
       probes.add(p);
     }
     kit!.scene.add(probes);
