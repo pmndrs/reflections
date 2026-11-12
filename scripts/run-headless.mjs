@@ -1602,6 +1602,230 @@ async function probeBindingMeasure(pages) {
   }
 }
 
+/**
+ * W63 (`--only probe-lookup-cost`): the probe lookup's GPU cost at 1920x1080 on examples/ssr, RT off,
+ * loop stopped, per lookup variant (`?lookupExp=`, core's bench-only PROBE_LOOKUP_EXPERIMENT; '' = the
+ * shipped lookup) and grid size (n x 128 px cells over the scene's regions, ../examples/shared/probeLayouts.ts).
+ * Per row: three's passes (median of 30, 3 repeats), the same with the materials' lookups off (composite only)
+ * and with every lookup off (probe-free). W63_SCENES, W63_VARIANTS ('|'-separated), W63_COUNTS pick.
+ * JSON to out/w63-probe-lookup-cost.json (merged by scene / variant).
+ */
+const LOOKUP_COST = `async (counts, pose) => {
+  const p = window.__p; p.setDenoise(false); p.setRT(false); if (pose) p.setPose(pose); p.setView('final');
+  const rep = async () => { const v = []; for (let i = 0; i < 3; i++) v.push((await p.renderTime(30)).ms); v.sort((a, b) => a - b); return v; };
+  const rows = [];
+  for (const n of counts) {
+    const vols = n === 'shipped' ? null : p.probeGrid(n);
+    await p.setProbeVolumes(vols, vols ? { resolution: 128 } : {});
+    await p.step(4);
+    const all = await rep();
+    p.setProbeParts(false, true); await p.step(4); const compositeOnly = await rep();
+    p.setProbeParts(false, false); await p.step(4); const free = await rep();
+    p.setProbeParts(true, true); await p.step(4);
+    const core = await p.time(30);
+    rows.push({ n, probes: p.probes?.bakedProbes?.length ?? null, all, compositeOnly, free, material: all[1] - compositeOnly[1], composite: compositeOnly[1] - free[1], lookup: all[1] - free[1], core: Object.values(core.ms).reduce((a, b) => a + b, 0) });
+  }
+  return rows;
+}`;
+/** W63: lookup variants A/B in one page, interleaved per round (a shared GPU drifts between pages). */
+const LOOKUP_AB = `async (counts, variants, pose, rounds, stat) => {
+  const p = window.__p; p.setDenoise(false); p.setRT(false); if (pose) p.setPose(pose); p.setView('final');
+  const med = (a) => { const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
+  // the 10th percentile of 30 frames: on a shared GPU the low frames are the ones nobody else slowed
+  const t = async () => { await p.step(4); const r = await p.renderTime(30); return stat === 'p10' ? r.p10 : r.ms; };
+  const rows = [];
+  for (const n of counts) {
+    const vols = n === 'shipped' ? null : p.probeGrid(n);
+    await p.setProbeVolumes(vols, vols ? { resolution: 128 } : {});
+    const free = [], all = {}, comp = {};
+    for (let r = 0; r < rounds; r++) {
+      p.setProbeParts(false, false); free.push(await t());
+      for (const v of variants) {
+        p.setLookupExp(v); (all[v] ??= []).push(await t());
+        p.setProbeParts(false, true); (comp[v] ??= []).push(await t());
+      }
+    }
+    p.setLookupExp('');
+    const f = med(free);
+    rows.push({ n, probes: p.probes?.bakedProbes?.length ?? null, free, all, comp, lookup: Object.fromEntries(variants.map((v) => [v || 'base', { lookup: med(all[v]) - f, material: med(all[v]) - med(comp[v]), composite: med(comp[v]) - f }])) });
+  }
+  return rows;
+}`;
+async function probeLookupAB(pages) {
+  fs.mkdirSync(OUT, { recursive: true });
+  const file = path.join(OUT, 'w63-probe-lookup-ab.json');
+  const all = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+  const scenes = process.env.W63_SCENES?.split(',') ?? ['rooms', 'showcaseSponza'];
+  const variants = process.env.W63_VARIANTS?.split('|') ?? ['', 'loop,skip', 'grid,skip'];
+  const counts = process.env.W63_COUNTS?.split(',').map((c) => (c === 'shipped' ? c : Number(c))) ?? [4, 8, 16, 32];
+  const rounds = Number(process.env.W63_ROUNDS ?? 3);
+  const poses = { rooms: 'default', offscreen: 'default', showcaseSponza: 'courtyard' };
+  for (const scene of scenes) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&w=1920&h=1080&probeLayout=shipped&texLimit=adapter&scene=${scene}`);
+    pages.push(p);
+    const before = results.logs.length;
+    const r = await p.T(`(${LOOKUP_AB})(${JSON.stringify(counts)}, ${JSON.stringify(variants)}, ${JSON.stringify(poses[scene] ?? null)}, ${rounds}, ${JSON.stringify(process.env.W63_STAT ?? 'p10')})`);
+    all[scene] = r;
+    fs.writeFileSync(file, JSON.stringify(all, null, 1));
+    for (const row of r) console.log(`  ${scene} n ${row.n} (${row.probes}), free ${row.free.map((x) => x.toFixed(2)).join('/')}: ` + Object.entries(row.lookup).map(([v, x]) => `[${v}] ${x.lookup.toFixed(2)} (mat ${x.material.toFixed(2)} + comp ${x.composite.toFixed(2)})`).join(', '));
+    const bad = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    if (bad.length) console.log(`  !! ${bad.slice(0, 3).join(' | ')}`);
+    p.close(); pages.splice(pages.indexOf(p), 1);
+  }
+}
+/**
+ * W63: what a per-frame clustered volume list (HDRP / Unreal / Godot style: froxels, each cluster's
+ * volume bitmask built by a compute pass from the view) costs to build, on its own device in the
+ * probe-core page: tiles x slices clusters, n volumes as view-space boxes, one thread per cluster.
+ * GPU ms, median of 50 dispatches (timestamp queries).
+ */
+const CLUSTER_BUILD = `async (configs, counts) => {
+  const adapter = await navigator.gpu.requestAdapter();
+  const device = await adapter.requestDevice({ requiredFeatures: ['timestamp-query'] });
+  const code = \`
+struct P { dims: vec4u, proj: vec4f };
+@group(0) @binding(0) var<uniform> pr: P;
+@group(0) @binding(1) var<storage, read> boxes: array<vec4f>;   // per volume: view min.xyz, view max.xyz (2 rows)
+@group(0) @binding(2) var<storage, read_write> masks: array<u32>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let nx = pr.dims.x; let ny = pr.dims.y; let nz = pr.dims.z; let n = pr.dims.w;
+  let k = id.x; if (k >= nx * ny * nz) { return; }
+  let x = k % nx; let y = (k / nx) % ny; let z = k / (nx * ny);
+  // exponential slices from near to far, the tile's frustum corners at both depths -> view AABB
+  let near = pr.proj.z; let far = pr.proj.w;
+  let z0 = near * pow(far / near, f32(z) / f32(nz)); let z1 = near * pow(far / near, f32(z + 1u) / f32(nz));
+  let t0 = (vec2f(f32(x), f32(y)) / vec2f(f32(nx), f32(ny)) * 2.0 - 1.0) * pr.proj.xy;
+  let t1 = (vec2f(f32(x + 1u), f32(y + 1u)) / vec2f(f32(nx), f32(ny)) * 2.0 - 1.0) * pr.proj.xy;
+  let lo = vec3f(min(min(t0 * z0, t0 * z1), min(t1 * z0, t1 * z1)), -z1);
+  let hi = vec3f(max(max(t0 * z0, t0 * z1), max(t1 * z0, t1 * z1)), -z0);
+  let words = (n + 31u) / 32u;
+  for (var w = 0u; w < words; w++) {
+    var m = 0u;
+    for (var b = 0u; b < 32u; b++) {
+      let i = w * 32u + b; if (i >= n) { break; }
+      let bmin = boxes[2u * i].xyz; let bmax = boxes[2u * i + 1u].xyz;
+      if (all(bmin <= hi) && all(bmax >= lo)) { m |= 1u << b; }
+    }
+    masks[k * words + w] = m;
+  }
+}\`;
+  const pipe = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+  const qs = device.createQuerySet({ type: 'timestamp', count: 2 });
+  const res = device.createBuffer({ size: 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC });
+  const read = device.createBuffer({ size: 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+  const out = [];
+  for (const [nx, ny, nz] of configs) for (const n of counts) {
+    const cells = nx * ny * nz, words = Math.ceil(n / 32);
+    const u = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const ub = new ArrayBuffer(32); new Uint32Array(ub, 0, 4).set([nx, ny, nz, n]); new Float32Array(ub, 16, 4).set([Math.tan(0.6) * 16 / 9, Math.tan(0.6), 0.05, 80]);
+    device.queue.writeBuffer(u, 0, ub);
+    const bx = new Float32Array(n * 8);
+    for (let i = 0; i < n; i++) { const c = [(i % 8) * 2.7 - 10, 0, -2 - Math.floor(i / 8) * 2.4]; bx.set([c[0] - 1.7, c[1] - 2.7, c[2] - 1.6, 0, c[0] + 1.7, c[1] + 2.7, c[2] + 1.6, 0], i * 8); }
+    const b = device.createBuffer({ size: bx.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST }); device.queue.writeBuffer(b, 0, bx);
+    const m = device.createBuffer({ size: cells * words * 4, usage: GPUBufferUsage.STORAGE });
+    const bg = device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: u } }, { binding: 1, resource: { buffer: b } }, { binding: 2, resource: { buffer: m } }] });
+    const ms = [];
+    for (let r = 0; r < 55; r++) {
+      const e = device.createCommandEncoder();
+      const pass = e.beginComputePass({ timestampWrites: { querySet: qs, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } });
+      pass.setPipeline(pipe); pass.setBindGroup(0, bg); pass.dispatchWorkgroups(Math.ceil(cells / 64)); pass.end();
+      e.resolveQuerySet(qs, 0, 2, res, 0); e.copyBufferToBuffer(res, 0, read, 0, 16);
+      device.queue.submit([e.finish()]);
+      await read.mapAsync(GPUMapMode.READ); const t = new BigUint64Array(read.getMappedRange().slice(0)); read.unmap();
+      if (r >= 5) ms.push(Number(t[1] - t[0]) / 1e6);
+    }
+    ms.sort((a, b) => a - b);
+    out.push({ clusters: [nx, ny, nz], cells, n, ms: ms[ms.length >> 1], p10: ms[5], p90: ms[45] });
+    u.destroy(); b.destroy(); m.destroy();
+  }
+  device.destroy();
+  return out;
+}`;
+async function probeClusterBuild(pages) {
+  const p = await openPage(`http://127.0.0.1:${PORT}/probe-core/`);
+  pages.push(p);
+  const r = await p.T(`(${CLUSTER_BUILD})(${JSON.stringify([[30, 17, 32], [60, 34, 32], [120, 68, 32]])}, [4, 8, 16, 32, 64, 128])`);
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, 'w63-cluster-build.json'), JSON.stringify(r, null, 1));
+  for (const x of r) console.log(`  clusters ${x.clusters.join('x')} (${x.cells}), ${x.n} volumes: build ${x.ms.toFixed(4)} ms (p10 ${x.p10.toFixed(4)}, p90 ${x.p90.toFixed(4)})`);
+  p.close(); pages.splice(pages.indexOf(p), 1);
+}
+/**
+ * W63 (`--only probe-lookup-parity`): the lookup variant `W63_VARIANT` (default 'grid,skip') against the
+ * shipped lookup, image for image, at 960x540: per scene and layout (shipped, few, many, mixed = several
+ * atlases), views final and probeSpecular, RT off in one page (the variant switched in place), and
+ * `?rt=1` (traced hits shade through core's lookup too) as two pages. Mean / max abs diff per channel /255.
+ */
+const PARITY_SHOTS = `async (layouts, views, mode, stats) => {
+  const p = window.__p; p.setDenoise(false); p.setHitColor('current');
+  const diff = stats ? eval('(' + stats + ')') : null;
+  const out = {}; window.__w63shots = {};
+  for (const L of layouts) {
+    if (L !== 'shipped') await p.setProbeLayout(L); else await p.setProbeVolumes(null);
+    for (const v of views) {
+      p.setView(v);
+      if (mode !== null) p.setLookupExp('');
+      await p.step(3); const a = await p.shot();
+      if (mode !== null) { p.setLookupExp(mode); await p.step(3); out[L + ':' + v] = await diff(a, await p.shot()); p.setLookupExp(''); }
+      else { window.__w63shots[L + ':' + v] = a; out[L + ':' + v] = true; }
+    }
+  }
+  return out;
+}`;
+async function probeLookupParity(pages) {
+  const mode = process.env.W63_VARIANT ?? 'legacy';
+  const scenes = process.env.W63_SCENES?.split(',') ?? ['rooms', 'offscreen', 'showcaseSponza'];
+  const layouts = ['shipped', 'few', 'many', 'mixed'], views = ['final', 'probeSpecular'];
+  const rows = [];
+  for (const scene of scenes) {
+    const url = `http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&probeLayout=shipped&texLimit=adapter&scene=${scene}`;
+    const before = results.logs.length;
+    const p = await openPage(url); pages.push(p);
+    // RT off: the variant switched in place, diffed in the page (several MB in one CDP reply never arrive)
+    const d = await p.T(`(${PARITY_SHOTS})(${JSON.stringify(layouts)}, ${JSON.stringify(views)}, ${JSON.stringify(mode)}, ${JSON.stringify(IMAGE_STATS)})`);
+    for (const [k, x] of Object.entries(d)) rows.push({ scene, rt: false, k, ...x });
+    p.close(); pages.splice(pages.indexOf(p), 1);
+    // RT: the traced hits' lookup compiles once per page, so one page per variant; shots move one per reply
+    const base = await openPage(url + '&rt=1'); pages.push(base);
+    const keys = Object.keys(await base.T(`(${PARITY_SHOTS})(${JSON.stringify(layouts)}, ['final'], null, null)`));
+    const sa = {};
+    for (const k of keys) sa[k] = await base.T(`window.__w63shots[${JSON.stringify(k)}]`);
+    base.close(); pages.splice(pages.indexOf(base), 1);
+    const alt = await openPage(url + `&rt=1&lookupExp=${mode}`); pages.push(alt);
+    await alt.T(`(${PARITY_SHOTS})(${JSON.stringify(layouts)}, ['final'], null, null)`);
+    for (const k of keys) { const x = await alt.T(`(${IMAGE_STATS})(${JSON.stringify(sa[k])}, window.__w63shots[${JSON.stringify(k)}])`); rows.push({ scene, rt: true, k, ...x }); }
+    alt.close(); pages.splice(pages.indexOf(alt), 1);
+    const bad = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    check(`lookup parity ${scene}: no validation errors or exceptions`, bad.length === 0, bad.slice(0, 2).join(' | '));
+    for (const r of rows.filter((x) => x.scene === scene)) console.log(`  ${r.scene}${r.rt ? ' rt=1' : ''} ${r.k}: mean ${r.mean.toFixed(4)} max ${r.max} /255`);
+  }
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, 'w63-probe-lookup-parity.json'), JSON.stringify({ mode, rows }, null, 1));
+  return rows;
+}
+async function probeLookupCost(pages) {
+  fs.mkdirSync(OUT, { recursive: true });
+  const file = path.join(OUT, 'w63-probe-lookup-cost.json');
+  const all = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+  const scenes = process.env.W63_SCENES?.split(',') ?? ['rooms', 'showcaseSponza'];
+  const variants = process.env.W63_VARIANTS?.split('|') ?? [''];
+  const counts = process.env.W63_COUNTS?.split(',').map((c) => (c === 'shipped' ? c : Number(c))) ?? [4, 8, 16, 32];
+  const poses = { rooms: 'default', offscreen: 'default', showcaseSponza: 'courtyard' };
+  for (const scene of scenes) for (const v of variants) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&w=1920&h=1080&probeLayout=shipped&texLimit=adapter&scene=${scene}${v ? `&lookupExp=${v}` : ''}`);
+    pages.push(p);
+    const before = results.logs.length;
+    const r = await p.T(`(${LOOKUP_COST})(${JSON.stringify(counts)}, ${JSON.stringify(poses[scene] ?? null)})`);
+    (all[scene] ??= {})[v || 'base'] = r;
+    fs.writeFileSync(file, JSON.stringify(all, null, 1));
+    for (const t of r) console.log(`  ${scene} [${v || 'base'}] n ${t.n} (${t.probes}): all ${t.all[1].toFixed(2)} ms, composite-only ${t.compositeOnly[1].toFixed(2)}, free ${t.free[1].toFixed(2)} | lookup ${t.lookup.toFixed(2)} = material ${t.material.toFixed(2)} + composite ${t.composite.toFixed(2)} | core ${t.core.toFixed(2)}`);
+    const bad = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    if (bad.length) console.log(`  !! ${bad.slice(0, 3).join(' | ')}`);
+    p.close(); pages.splice(pages.indexOf(p), 1);
+  }
+}
+
 async function offscreenFillChecks(pages) {
   const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=offscreen`);
   pages.push(p);
@@ -2220,7 +2444,7 @@ async function pixi3dChecks(pages) {
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' ? 3_600_000 : 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -2527,6 +2751,10 @@ async function main() {
     if (runs('probe-bindings')) await probeBindingChecks(pages); // W62
     if (only === 'probe-bindings-measure') await probeBindingMeasure(pages); // W62: the measurement (minutes), JSON to out/w62-probe-bindings.json
     if (only === 'probe-layouts-measure') await probeLayoutMeasure(pages); // W61: the measurement (minutes), JSON to out/w61-probe-layouts.json
+    if (only === 'probe-lookup-ab') await probeLookupAB(pages); // W63: lookup variants interleaved in one page, JSON to out/w63-probe-lookup-ab.json
+    if (only === 'probe-cluster-build') await probeClusterBuild(pages); // W63: a clustered volume list's build cost (compute), JSON to out/w63-cluster-build.json
+    if (only === 'probe-lookup-parity') await probeLookupParity(pages); // W63: a lookup variant vs the shipped lookup, image for image
+    if (only === 'probe-lookup-cost') await probeLookupCost(pages); // W63: the lookup's cost per variant and volume count, JSON to out/w63-probe-lookup-cost.json
     if (only === 'offscreen-sizes') await offscreenSizeMeasure(pages); // W60 (D4700): offscreen per-probe sizes, JSON to out/w60-offscreen.json
     if (only === 'rt-hit-atlases') { await rtHitAtlasChecks(pages); await rtHitAtlasChecks(pages, 'pmndrs'); } // W47 (D4702): RT hits over a mixed-size set alone (also part of ssr-rt / ssr-rt-bvh)
     if (only === 'rt-materials') await rtMaterialsAlone(pages); // W49 (D1701 / D1702): per-triangle hit materials on both providers alone (also part of ssr-rt / ssr-rt-bvh)
