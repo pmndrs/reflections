@@ -265,12 +265,26 @@ export function probeLayoutFor(probes: ReflectionProbes): ProbeLayout {
   return createProbeLayout(id, { maxLod: tex.mipmaps.length - 1 });
 }
 
-/** The texture node a lookup binds atlas `k` with: `cubeTexture()` for a cube array (cube-array view), else `texture()`. */
+/**
+ * Atlas texture nodes per set (and storage), shared by every lookup of the set. three binds one
+ * texture node once per shader, so a shader that looks the set up more than once (the composite:
+ * radiance with the environment, and coverage) costs one sampled texture per atlas, not one per
+ * atlas per lookup (D4900; with its own nodes the composite bound each atlas twice, 18 textures
+ * for Sponza's three-size set, past WebGPU's default 16).
+ */
+const sharedAtlasNodes = new WeakMap<ReflectionProbes, { storage: string; nodes: N[] }>();
+
+/** The texture node a lookup binds atlas `k` with: `cubeTexture()` for a cube array (cube-array view), else `texture()`. Shared per set (D4900). */
 function atlasNode(probes: ReflectionProbes, k = 0): N {
+  let shared = sharedAtlasNodes.get(probes);
+  if (shared === undefined || shared.storage !== probes.bakedLayout) sharedAtlasNodes.set(probes, (shared = { storage: probes.bakedLayout, nodes: [] }));
   const tex = probes.textures[k] ?? probes.texture!;
+  let node: N = shared.nodes[k];
+  if (node !== undefined) { node.value = tex; return node; }
   // an explicit (unused) uv: the default, reflectVector, needs a camera, which compute shaders lack
-  const node: N = probes.bakedLayout === 'cube-array' ? cubeTexture(tex as N, vec3(0, 0, 1)) : texture(tex);
+  node = probes.bakedLayout === 'cube-array' ? cubeTexture(tex as N, vec3(0, 0, 1)) : texture(tex);
   node.mergeable = false;
+  shared.nodes[k] = node;
   return node;
 }
 

@@ -21,6 +21,8 @@ export interface ProbeRadianceFallback {
   bindGroup: GPUBindGroup;
   /** The volume table (1). */
   storageBufferCount: number;
+  /** One atlas per probe size (D4700, D4900). */
+  sampledTextureCount: number;
 }
 
 /** WGSL of sampleRadianceFallback over the probe lookup module (which must be in the same module). */
@@ -32,5 +34,5 @@ fn sampleRadianceFallback(P_world: vec3f, dir: vec3f, roughness: f32) -> vec3f {
 
 /** The radiance-fallback seam over `set` (its bind group at @group(1); visibility must include COMPUTE). */
 export function probeRadianceFallback(set: ProbeSet): ProbeRadianceFallback {
-  return { wgsl: set.wgsl({ group: 1 }) + PROBE_FALLBACK_WGSL, layout: set.bindGroupLayout, bindGroup: set.bindGroup, storageBufferCount: 1 };
+  return { wgsl: set.wgsl({ group: 1 }) + PROBE_FALLBACK_WGSL, layout: set.bindGroupLayout, bindGroup: set.bindGroup, storageBufferCount: 1, sampledTextureCount: set.atlasViews.length };
 }

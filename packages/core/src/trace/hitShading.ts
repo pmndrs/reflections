@@ -233,6 +233,7 @@ export function environmentHitShading(device: GPUDevice, mapping: EnvironmentMap
   return {
     wgsl: (mapping === 'equirect' ? EQUIRECT : CUBE) + SHADE,
     layout,
+    sampledTextureCount: 1,
     mapping,
     createBindGroup(view) {
       const entries: GPUBindGroupEntry[] = [{ binding: 0, resource: view }, { binding: 1, resource: { buffer: uniform } }];
@@ -335,6 +336,7 @@ export function probeHitShading(device: GPUDevice, source: ProbeHitShadingSource
     wgsl: lookup + PROBE_SHADE,
     layout,
     storageBufferCount: 1,
+    sampledTextureCount: atlases,
     layoutId: layoutDesc.id,
     createBindGroup({ atlas, sampler, table, atlases: extra = [] }) {
       if (extra.length !== atlases - 1) throw new Error(`probeHitShading: compiled for ${atlases} atlases, got ${1 + extra.length} (resources.atlases holds atlases 1..)`);

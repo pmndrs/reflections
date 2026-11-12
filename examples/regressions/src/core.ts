@@ -11,7 +11,7 @@
 //              reflectionsRequiredLimits (6), forward and reverse Z, at an odd size; mip 0 is a copy
 //              and every other mip matches a CPU fold of the mip below it, odd row/column included (D1600).
 import {
-  ProbeSet, createDepthPyramidBuilder, createDepthPyramidTexture, createTracedReflections, probeRadianceFallback, reflectionsRequiredLimits,
+  ProbeSet, createDepthPyramidBuilder, createDepthPyramidTexture, createScreenSpaceReflections, createTracedReflections, probeHitShading, probeRadianceFallback, reflectionsRequiredLimits,
   type TraceProvider,
 } from '@pmndrs/reflections/core';
 import { readBufferF32 } from './util';
@@ -81,8 +81,33 @@ export async function rtLimitChecks() {
     out.raised = await attempt(raised, fakeProvider(raised, 5), true);
     raised.destroy();
   } else out.raised = { skipped: `adapter allows ${max}` };
+  // W62 (D4900): a four-size probe set as both the SSSR radiance fallback and its hit shading: the
+  // intersect binds 10 + 4 + 4 = 18 sampled textures; the default 16 throws a clear error, the
+  // library's limits (up to 32) build
+  out.sampled = { limit: device.limits.maxSampledTexturesPerShaderStage, ...(await intersectAttempt(device)) };
+  const lib = reflectionsRequiredLimits(adapter);
+  if ((lib.maxSampledTexturesPerShaderStage ?? 16) >= 18) {
+    const raised = (await newDevice(lib)).device;
+    out.sampledRaised = { limit: raised.limits.maxSampledTexturesPerShaderStage, ...(await intersectAttempt(raised)) };
+    raised.destroy();
+  } else out.sampledRaised = { skipped: `adapter allows ${adapter.limits.maxSampledTexturesPerShaderStage}` };
   device.destroy();
   return out;
+}
+
+/** SSSR over a ProbeSet of four slot sizes as radiance fallback and hit shading (D4900). */
+async function intersectAttempt(device: GPUDevice) {
+  const set = new ProbeSet(device, { capacity: 4, sourceSize: 64, slotSizes: [64, 128, 256, 512] });
+  device.pushErrorScope('validation');
+  let threw: string | null = null;
+  try {
+    const ssr = createScreenSpaceReflections(device, { width: 64, height: 64, radianceFallback: probeRadianceFallback(set), hitSpecularShading: probeHitShading(device, set) });
+    ssr.destroy();
+  } catch (e) { threw = String((e as Error).message ?? e); }
+  const err = await device.popErrorScope();
+  const atlases = set.atlasViews.length;
+  set.dispose();
+  return { atlases, threw, validationError: err?.message ?? null };
 }
 
 // ---- depth pyramid ------------------------------------------------------------------------------

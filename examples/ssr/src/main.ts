@@ -87,12 +87,16 @@ const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
  */
 const layoutMode = q.has('probeLayout');
 /**
- * W61 (D4804): every probe size is one more atlas binding in every lit material's fragment stage. Sponza's
- * materials with a three-size set (mixed: 512 + 256 + 128) need 18 sampled textures, past WebGPU's default 16,
- * so with a layout (or `?texLimit=adapter`) the page asks for the adapter's limit (up to 48); `?texLimit=default` keeps 16.
+ * W61 (D4804) / W62 (D4900): every probe size is one more atlas binding wherever the set is sampled. The library
+ * asks for up to 32 sampled textures per stage (`reflectionsRequiredLimits`); `?texLimit=default` pins WebGPU's
+ * default 16 (Sponza's three-size set fits since the lookups share their atlas nodes, D4900); `?texLimit=adapter`
+ * asks for the adapter's own limit (up to 48).
  */
-const texLimit = (adapter: GPUAdapter | null): Record<string, number> =>
-  adapter && (q.get('texLimit') ?? (layoutMode ? 'adapter' : 'default')) === 'adapter' ? { maxSampledTexturesPerShaderStage: Math.min(adapter.limits.maxSampledTexturesPerShaderStage, 48) } : {};
+const texLimit = (adapter: GPUAdapter | null): Record<string, number> => {
+  const v = q.get('texLimit');
+  if (v === 'default') return { maxSampledTexturesPerShaderStage: 16 };
+  return adapter && v === 'adapter' ? { maxSampledTexturesPerShaderStage: Math.min(adapter.limits.maxSampledTexturesPerShaderStage, 48) } : {};
+};
 const timingOn = q.has('gpuTime') || layoutMode;
 
 const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'ssrWeight', 'hitFade', 'probeConsistency', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'coverage', 'source', 'rtSource', 'grid', 'ao', 'specularOcclusion',

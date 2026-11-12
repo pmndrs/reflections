@@ -23,6 +23,7 @@ import { PassTimer } from './timer';
 import type { FrameInputs } from '../frame/contract';
 import { DEFAULT_HIT_LOBE_FILTER, DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, HIT_WGSL, type HitShading } from '../trace/provider';
 import { shadeLobeWgslFor } from '../trace/hitShading';
+import { checkStageLimits } from '../limits';
 
 export type ScreenSpaceVariant = Variant;
 
@@ -55,6 +56,8 @@ export interface RadianceFallback {
   storageBufferCount?: number;
   /** Storage textures in `layout`, likewise. Default 0. */
   storageTextureCount?: number;
+  /** Sampled textures in `layout` (a probe set: one atlas per size), likewise (D4900). Default 0. */
+  sampledTextureCount?: number;
 }
 
 /** Default fallback: `settings.fallbackColor * settings.iblFactor`, no bindings. */
@@ -77,6 +80,7 @@ export function environmentRadianceFallback(device: GPUDevice): RadianceFallback
   return {
     wgsl: ENVIRONMENT_FALLBACK_WGSL,
     layout,
+    sampledTextureCount: 1,
     createBindGroup(cube, sampler) {
       sampler ??= defaultSampler ??= device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear' });
       return device.createBindGroup({ layout, entries: [{ binding: 0, resource: cube }, { binding: 1, resource: sampler }] });
@@ -447,6 +451,13 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const hitShading = options.hitSpecularShading;
   const emptyBgl = device.createBindGroupLayout({ label: 'ssr empty', entries: [] });
   const emptyGroup = device.createBindGroup({ label: 'ssr empty', layout: emptyBgl, entries: [] });
+  // the intersect's own group 0 (sampled 1-5, 13-17; storage textures 8-10; buffers 6, 7, and 11, 12 with the miss list)
+  // plus the fallback's and the hit shading's groups against the device (D4900: a probe set binds one atlas per size in each)
+  checkStageLimits(device, 'ssr: the intersect pipeline', [
+    ['pass', { storageBuffers: useMissList ? 4 : 2, storageTextures: 3, sampledTextures: 10 }],
+    ['radiance fallback', { storageBuffers: fallback.storageBufferCount, storageTextures: fallback.storageTextureCount, sampledTextures: fallback.sampledTextureCount }],
+    ['hit shading', hitShading?.layout ? { storageBuffers: hitShading.storageBufferCount, storageTextures: hitShading.storageTextureCount, sampledTextures: hitShading.sampledTextureCount } : {}],
+  ]);
   const intersectLayouts = hitShading?.layout ? [intersectBgl, fallback.layout ?? emptyBgl, emptyBgl, hitShading.layout] : withFallback(intersectBgl);
   const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading)), intersectLayouts);
 
