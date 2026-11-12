@@ -25,6 +25,8 @@
 // roughness by its normal map's variance at the sampled mip (Toksvig, vMF form; ./specAA.ts), in three's lit term, the
 // G-buffer and traced hits alike; ?specAA=<k> scales the added variance. Also a checkbox under "Materials".
 //
+// W51: ?lobeFilter=<k> (`settings.hitLobeFilter`, D3550; default the package's 1; also a slider), ?bvh=three-mesh-bvh (the RT
+// stopgap; @pmndrs/bvh is the default), and every other knob on ./bench.html (the tuning bench; docs/SETTINGS.md).
 // URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=0|1|<k> ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
@@ -32,7 +34,8 @@ import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';
 import * as TSL from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, installCubeArraySupport, reflectionProbes, sampleReflectionProbes,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, bvhTraceSceneFromObjects,
+  createPmndrsBvhTraceProviderFromObjects, installCubeArraySupport, reflectionProbes, sampleReflectionProbes,
 } from '@pmndrs/reflections/three';
 import { availableAssets, probeAtlasBytes } from '../../shared';
 import { createReflectionDenoiser, denoiserAvailable } from '../../shared/denoiser';
@@ -129,8 +132,11 @@ async function main() {
   let entry: ShowcaseEntry | null = null;
   let probes: ReflectionProbes | null = null;
   let helper: ReflectionProbesHelper | null = null;
-  let provider: MeshBVHTraceProvider | null = null;
-  let bvhInfo: { triangles: number; ms: number } | null = null;
+  /** W51: @pmndrs/bvh is the examples' provider (the maintainer's call on D1705); `?bvh=three-mesh-bvh` the stopgap. */
+  const bvhKind = q.get('bvh') === 'three-mesh-bvh' ? 'three-mesh-bvh' : 'pmndrs';
+  let provider: { destroy(): void } | null = null;
+  let updateHitMaterials: () => void = () => {};
+  let bvhInfo: { kind: string; triangles: number; ms: number } | null = null;
   let building = false;
   let bakeMs = 0;
 
@@ -230,6 +236,7 @@ async function main() {
     aa.reset();
   }
   ssr.settings.hitShading = state.reshade;
+  if (q.has('lobeFilter')) ssr.settings.hitLobeFilter = Number(q.get('lobeFilter'));
   function applySources() {
     // SSR off + RT on: no screen-space march, so every traced pixel is a miss and goes to the ray tracer
     if (state.ssr) delete ssr.settings.maxTraversalIntersections; else ssr.settings.maxTraversalIntersections = 0;
@@ -258,12 +265,21 @@ async function main() {
     kit.scene.traverseVisible((o) => { if ((o as THREE.Mesh).isMesh && !o.userData.noTrace) meshes.push(o as THREE.Mesh); });
     const t0 = performance.now();
     const forKit = kit;
-    const p = await MeshBVHTraceProvider.fromObjects(device, meshes, { material: specAAHitMaterial });
+    let p: { destroy(): void }, tp: N, triangles: number, update: () => void;
+    if (bvhKind === 'pmndrs') {
+      const built = await createPmndrsBvhTraceProviderFromObjects(device, meshes, { material: specAAHitMaterial });
+      p = tp = built.provider; triangles = built.provider.info.triangles;
+      update = () => { const s = bvhTraceSceneFromObjects(meshes, { material: specAAHitMaterial }); if (s.scene.materials) built.provider.setMaterials(s.scene.materials); };
+    } else {
+      const m = await MeshBVHTraceProvider.fromObjects(device, meshes, { material: specAAHitMaterial });
+      p = tp = m; triangles = m.triangles; update = () => m.updateMaterials();
+    }
     building = false;
     if (kit !== forKit) { p.destroy(); return; }
     provider = p;
-    bvhInfo = { triangles: p.triangles, ms: performance.now() - t0 };
-    ssr.setTraceProvider(provider);
+    updateHitMaterials = update;
+    bvhInfo = { kind: bvhKind === 'pmndrs' ? '@pmndrs/bvh' : 'three-mesh-bvh', triangles, ms: performance.now() - t0 };
+    ssr.setTraceProvider(tp);
   }
   async function setRT(on: boolean) {
     state.rt = on;
@@ -277,7 +293,7 @@ async function main() {
     if (strength > 0) specAAStrength.value = strength;
     if (!kit) return;
     setSpecularAA(kit.scene, strength > 0);
-    provider?.updateMaterials();
+    updateHitMaterials();
     bake();
     ssr.gbuffer.resetHistory(); ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
   }
@@ -336,7 +352,7 @@ async function main() {
     const next = await e.build(W / H);
     probes?.dispose();
     provider?.destroy();
-    provider = null; bvhInfo = null; probes = null; helper = null;
+    provider = null; updateHitMaterials = () => {}; bvhInfo = null; probes = null; helper = null;
     ssr.setTraceProvider(null);
     kit = next; entry = e;
     controls.object = kit.camera;
@@ -469,6 +485,9 @@ async function main() {
   row('Hit colour', select(HIT_MODES, state.hit, (v) => setHit(v as HitMode)));
   const reshadeSel = select(HIT_SHADING_MODES, state.reshade, (v) => setReshade(v as HitShadingMode));
   row('Hit specular', reshadeSel);
+  // W51 (settings guide): filtered importance sampling at re-shaded / traced hits (D3550); 0 = the hit's own roughness
+  const lobe = slider('Hit lobe filter', 0, 2, 0.05, ssr.settings.hitLobeFilter ?? 1, (v) => { ssr.settings.hitLobeFilter = v; ssr.resetHistory(); aa.reset(); });
+  lobe.input.parentElement!.title = 'hitLobeFilter (D3550): 0 = the hit\'s own roughness, 1 = default (a softbox seen through a mirror floor no longer fireflies; W50: lifts the carConcept skirt lip with the re-shade), 1.5 = wider. docs/SETTINGS.md';
   const soBox = check('Specular occlusion (GTAO)', state.specOcc, (v) => setSpecOcc(v));
   function setSpecOcc(on: boolean) { state.specOcc = on; soBox.checked = on; buildDisplay(); hybrid.resetHistory(); aa.reset(); }
   check('Show probe volumes', state.helpers, (v) => setHelpers(v));
@@ -546,7 +565,7 @@ async function main() {
     if (building) return;
     status.textContent = [
       `${kit.title} | ${W}x${H} | three r${THREE.REVISION} | ${ssr.variant ?? ''} | ${probes?.bakedProbes.length ?? 0} probes (${probes?.bakedLayout ?? '-'}) baked in ${bakeMs.toFixed(0)} ms` +
-        (bvhInfo ? ` | BVH ${bvhInfo.triangles.toLocaleString()} triangles, ${bvhInfo.ms.toFixed(0)} ms` : ''),
+        (bvhInfo ? ` | BVH (${bvhInfo.kind}) ${bvhInfo.triangles.toLocaleString()} triangles, ${bvhInfo.ms.toFixed(0)} ms` : ''),
       kit.credit,
       gpuErrors.length ? `GPU errors: ${gpuErrors.length} (${gpuErrors[0].slice(0, 120)})` : '',
     ].filter(Boolean).join('\n');

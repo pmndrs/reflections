@@ -991,7 +991,7 @@ async function rtMaterialAssetSurvey(p, label) {
 async function rtMaterialsAlone(pages) {
   console.log('examples/ssr (?rt=1, multiMaterial):');
   const oracleOk = (o) => o.agree / o.rays > 0.995 && [o.triangle, o.instance, o.material].every((k) => k >= o.compared * 0.995);
-  for (const [bvhParam, builder] of [['', null], ['&bvh=pmndrs', 'auto'], ['&bvh=pmndrs', 'tinybvh']]) {
+  for (const [bvhParam, builder] of [['&bvh=three-mesh-bvh', null], ['&bvh=pmndrs', 'auto'], ['&bvh=pmndrs', 'tinybvh']]) {
     const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1${bvhParam}${builder ? `&bvhBuilder=${builder}` : ''}&probeRes=128&scene=multiMaterial`);
     pages.push(p);
     const bvh = await p.T('window.__p.bvh');
@@ -1006,7 +1006,7 @@ async function ssrRtChecks(pages) {
   console.log('examples/ssr (?rt=1):');
   // probes at 128 px: the size W25 / W28 measured the hit-shading checks at (the page follows the
   // 256 px default since 443e35d; at 256 contact's D901 ratio reads 1.10 with @pmndrs/bvh, HANDOFF backlog)
-  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&probeRes=128`);
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&bvh=three-mesh-bvh&probeRes=128`);
   pages.push(p);
   const before = results.logs.length;
   await p.T("window.__p.load('offscreen')");
@@ -1061,13 +1061,13 @@ async function ssrRtChecks(pages) {
   }
   await rtMaterialChecks(p, 'three-mesh-bvh port'); // W49 (D1701 / D1702)
   if (args.includes('--rt-material-assets')) await rtMaterialAssetSurvey(p, 'three-mesh-bvh');
-  if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '');
+  if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '&bvh=three-mesh-bvh');
   await missFillChecks(pages);
   await offscreenFillChecks(pages);
   await rtHitAtlasChecks(pages); // W47 (D4702)
 
   // GPU ms vs miss count at 1080p: the same frame, misses varied with the miss-list threshold
-  const big = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1&scene=offscreen&pose=mirror`);
+  const big = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1&bvh=three-mesh-bvh&scene=offscreen&pose=mirror`);
   pages.push(big);
   const rows = [];
   for (const thr of [0, 0.3, 0.9, 1.01]) {
@@ -1118,7 +1118,7 @@ const MISS_FILL = `async (poses, variants) => {
 }`;
 
 async function missFillChecks(pages) {
-  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=facingMirrors`);
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&bvh=three-mesh-bvh&denoise=0&scene=facingMirrors`);
   pages.push(p);
   const r = await p.T(`(${MISS_FILL})(['default', 'left'], { all: { include: true }, kit: {} })`);
   const line = (k) => `${k}: ${r[k].kit.px} miss px, all captured ${r[k].all.mad.toFixed(2)} -> kit ${r[k].kit.mad.toFixed(2)}`;
@@ -1214,7 +1214,7 @@ const OFFSCREEN_SIZE_VARIANTS = {
   floor1024: { sizes: [256, 1024, 256] },
 };
 async function offscreenSizeMeasure(pages) {
-  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&gpuTime&scene=offscreen`);
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&bvh=three-mesh-bvh&denoise=0&gpuTime&scene=offscreen`);
   pages.push(p);
   const r = await p.T(`(${OFFSCREEN_FILL})(['default', 'mirror'], ${JSON.stringify(OFFSCREEN_FILL_RECT)}, ${JSON.stringify(OFFSCREEN_SIZE_VARIANTS)}, ${JSON.stringify(OFFSCREEN_RING_RECT)})`);
   const timing = {};
@@ -1469,7 +1469,7 @@ async function probeLayoutMeasure(pages) {
     const poses = PROBE_LAYOUT_MEASURE[scene];
     all[scene] ??= {};
     if (parts.includes('error')) {
-      const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&probeLayout=shipped&scene=${scene}`);
+      const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&bvh=three-mesh-bvh&denoise=0&probeLayout=shipped&scene=${scene}`);
       pages.push(p);
       const t0 = Date.now();
       const r = await p.T(`(${LAYOUT_MEASURE})(${JSON.stringify(poses)}, ${JSON.stringify(PROBE_LAYOUT_VARIANTS)})`);
@@ -1603,7 +1603,7 @@ async function probeBindingMeasure(pages) {
 }
 
 async function offscreenFillChecks(pages) {
-  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=offscreen`);
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&bvh=three-mesh-bvh&denoise=0&scene=offscreen`);
   pages.push(p);
   // W60: `all256` is the kit with every probe at the set's 256 px (the kit before per-probe sizes)
   const r = await p.T(`(${OFFSCREEN_FILL})(['default', 'mirror'], ${JSON.stringify(OFFSCREEN_FILL_RECT)}, { single: { probes: [0] }, all256: { sizes: [256, 256, 256] }, kit: {} }, ${JSON.stringify(OFFSCREEN_RING_RECT)})`);
@@ -1686,7 +1686,7 @@ const RT_HIT_ATLASES = `async (poses) => {
 }`;
 /** examples/ssr offscreen, `bvh` '' (three-mesh-bvh) or 'pmndrs': the {@link RT_HIT_ATLASES} check. JSON to out/w47-rt-hit-atlases[-pmndrs].json. */
 async function rtHitAtlasChecks(pages, bvh = '') {
-  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=offscreen${bvh ? `&bvh=${bvh}` : ''}`);
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&bvh=three-mesh-bvh&denoise=0&scene=offscreen&bvh=${bvh || 'three-mesh-bvh'}`);
   pages.push(p);
   const r = await p.T(`(${RT_HIT_ATLASES})(['default', 'mirror'])`);
   fs.mkdirSync(OUT, { recursive: true });
@@ -1816,7 +1816,7 @@ async function ssrRtBvhChecks(pages) {
  */
 async function rtBvhTiming(pages) {
   const rounds = args.includes('--rt-bvh-rounds') ? Number(args[args.indexOf('--rt-bvh-rounds') + 1]) : 3;
-  const variants = [['three-mesh-bvh', ''], ['@pmndrs/bvh', '&bvh=pmndrs'], ['@pmndrs/bvh rayMasks on', '&bvh=pmndrs&bvhRayMasks=1']];
+  const variants = [['three-mesh-bvh', '&bvh=three-mesh-bvh'], ['@pmndrs/bvh', '&bvh=pmndrs'], ['@pmndrs/bvh rayMasks on', '&bvh=pmndrs&bvhRayMasks=1']];
   const scenes = [['offscreen', 'mirror'], ['mirrorWall', ''], ['contact', ''], ['moving', ''], ['boxRoom', ''],
     ...(fs.existsSync(path.join(ROOT, 'examples/assets/Sponza')) ? [['sponza', '']] : [])];
   const url = (param, scene, pose) => `http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1${param}&scene=${scene}${pose ? `&pose=${pose}` : ''}`;

@@ -7,9 +7,9 @@
 // with (`scene.environmentNode = reflectionProbes(probes)`) unless `?probes=0`; the composite then
 // reads them with `sampleReflectionProbesLocal` and falls back to `scene.environment` by coverage.
 //
-// `?rt=1` attaches a ray-traced fallback for the misses (three-mesh-bvh behind core's trace seam,
+// `?rt=1` attaches a ray-traced fallback for the misses (W51: @pmndrs/bvh by default, D1705; before, three-mesh-bvh behind core's trace seam,
 // MeshBVHTraceProvider), rebuilt per scene and refitted per frame for animated scenes.
-// `&bvh=pmndrs` uses core's @pmndrs/bvh provider instead (createPmndrsBvhTraceProviderFromObjects;
+// `&bvh=three-mesh-bvh` keeps that stopgap; `&bvh=pmndrs` (the default) is core's @pmndrs/bvh provider (createPmndrsBvhTraceProviderFromObjects;
 // `&bvhBuilder=tinybvh|gpu-hploc|gpu-lbvh`, default auto = H-PLOC with subgroups, tinybvh without;
 // `&bvhRayMasks=1` compiles @pmndrs/bvh's instance-mask test in).
 // `window.__p.rtCompare(n)` traces the same rays through both providers (SPEC phase 4 gate).
@@ -70,9 +70,9 @@ type HitColorMode = 'current' | 'lit' | 'final';
 type RayKind = 'camera' | 'scene';
 const HIT_MODES: HitColorMode[] = ['current', 'lit', 'final'];
 const useRT = q.get('rt') === '1';
-/** Which BVH the ray-traced fallback uses: three-mesh-bvh (default, the stopgap) or core's @pmndrs/bvh. */
+/** Which BVH the ray-traced fallback uses: core's @pmndrs/bvh (default since W51, the maintainer's call on D1705) or three-mesh-bvh (`?bvh=three-mesh-bvh`, the stopgap). */
 type BvhKind = 'three-mesh-bvh' | 'pmndrs';
-const bvhKind: BvhKind = q.get('bvh') === 'pmndrs' ? 'pmndrs' : 'three-mesh-bvh';
+const bvhKind: BvhKind = q.get('bvh') === 'three-mesh-bvh' ? 'three-mesh-bvh' : 'pmndrs';
 const bvhBuilder = (q.get('bvhBuilder') ?? 'auto') as BvhBuilderPreference;
 /** `&bvhRayMasks=1`: @pmndrs/bvh's walk with its instance-mask test compiled in (W48; default off, D3591). */
 const bvhRayMasks = q.get('bvhRayMasks') === '1';

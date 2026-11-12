@@ -20,7 +20,8 @@ import { mrt, diffuseColor, normalView } from 'three/tsl';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { WebGPUPathTracer, RenderToScreenNodeMaterial } from 'three-gpu-pathtracer-webgpu';
 import { Denoiser, type OidnDenoiser } from '@pmndrs/denoiser-oidn';
-import { type CompareMethod, type MethodContext, applySceneParams, destroyWebGPU, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
+import { type CompareMethod, type MethodContext, applySceneParams, destroyWebGPU, freshEnvironment, mergedParams, newCanvas, sceneInfo, syncCamera } from './method';
+import { toneOf } from './ours';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -43,7 +44,8 @@ async function maxDevice(): Promise<GPUDevice> {
 
 export async function createPathTracer(ctx: MethodContext): Promise<CompareMethod> {
   if (!WebGPUPathTracer || !RenderToScreenNodeMaterial) throw new Error('three-gpu-pathtracer/webgpu not found (the Denoiser repo\'s node_modules, or $PATHTRACER_REPO)');
-  const { width: W, height: H, params } = ctx;
+  const { width: W, height: H } = ctx;
+  const params = mergedParams(ctx);
   const canvas = newCanvas(W, H);
   const device = await maxDevice();
   const errors: string[] = [];
@@ -52,7 +54,7 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
   renderer.setPixelRatio(1);
   renderer.setSize(W, H, false);
   await renderer.init();
-  renderer.toneMapping = THREE.AgXToneMapping;
+  renderer.toneMapping = toneOf(params); // AgX (W51: ?tone=)
   renderer.toneMappingExposure = ctx.exposure;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
@@ -187,7 +189,7 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
     state = 'done'; dirty = true;
   }
 
-  return {
+  const method: CompareMethod = {
     id: 'pathtraced', canvas, scene: sceneInfo(kit),
     frame(cam) {
       syncCamera(camera as N, cam);
@@ -219,6 +221,13 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
       if (!lower) traceStart = performance.now();
     },
     setShowDenoised(v: boolean) { showDenoised = v; dirty = true; },
+    /** W51 (bench): the reference's live settings; a scene / floor / material change rebuilds it (a fresh `setScene`). */
+    set(key, value) {
+      if (key === 'ptMax') { method.setMaxSamples!(Number(value ?? DEFAULT_MAX_SAMPLES)); return 'live'; }
+      if (key === 'ptRaw') { showDenoised = value !== '1'; dirty = true; return 'live'; }
+      if (['ptBounces', 'ptDenoise', 'ptClearcoat', 'floorRoughness', 'floor', 'floorPolish', 'tone', 'keyLight', 'paintRoughness', 'bgBlur', 'bgIntensity'].includes(key)) return 'rebuild';
+      return 'ignored';
+    },
     status: () => {
       const spp = `${Math.min(reached, maxSamples)} / ${maxSamples} spp`;
       if (state === 'tracing') return `${spp}, tracing`;
@@ -242,4 +251,5 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
       destroyWebGPU(renderer as N);
     },
   };
+  return method;
 }
