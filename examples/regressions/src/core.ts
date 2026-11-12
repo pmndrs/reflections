@@ -83,7 +83,8 @@ export async function rtLimitChecks() {
   } else out.raised = { skipped: `adapter allows ${max}` };
   // W62 (D4900): a four-size probe set as both the SSSR radiance fallback and its hit shading: the
   // intersect binds 10 + 4 + 4 = 18 sampled textures; the default 16 throws a clear error, the
-  // library's limits (up to 32) build
+  // library's limits (up to 32) build, without a validation error since W64 (D4901: the lookup's
+  // includes kept once, the hit shading's names suffixed)
   out.sampled = { limit: device.limits.maxSampledTexturesPerShaderStage, ...(await intersectAttempt(device)) };
   const lib = reflectionsRequiredLimits(adapter);
   if ((lib.maxSampledTexturesPerShaderStage ?? 16) >= 18) {
