@@ -1,0 +1,170 @@
+{
+  "offscreen": {
+    "misses": {
+      "def": 166013,
+      "all": 280649
+    },
+    "def": {
+      "tmbBranchRuns": 0.33494999999999997,
+      "tmbMainRuns": 0.32199999999999995,
+      "branch": 0.27305,
+      "main": 0.2808,
+      "mainMasksOn": 0.2864,
+      "branchVsTmb": 0.8159062835113821,
+      "mainVsTmb": 0.8703489344113837,
+      "masksOnVsOff": 1.0199491986381948,
+      "branchDupVsOff": 1.0155626504987958
+    },
+    "all": {
+      "tmbBranchRuns": 0.5244500000000001,
+      "tmbMainRuns": 0.50135,
+      "branch": 0.45115000000000005,
+      "main": 0.4445,
+      "mainMasksOn": 0.453,
+      "branchVsTmb": 0.855800117574302,
+      "mainVsTmb": 0.8808931039690748,
+      "masksOnVsOff": 1.0216542492244303,
+      "branchDupVsOff": 1.0229255786789637
+    }
+  },
+  "mirrorWall": {
+    "misses": {
+      "def": 67568,
+      "all": 582972
+    },
+    "def": {
+      "tmbBranchRuns": 0.17815,
+      "tmbMainRuns": 0.18155,
+      "branch": 0.10715,
+      "main": 0.1169,
+      "mainMasksOn": 0.1132,
+      "branchVsTmb": 0.6014410781034822,
+      "mainVsTmb": 0.6444431488367771,
+      "masksOnVsOff": 0.9751231238273921,
+      "branchDupVsOff": 1.0017227217227218
+    },
+    "all": {
+      "tmbBranchRuns": 0.5528500000000001,
+      "tmbMainRuns": 0.5448999999999999,
+      "branch": 0.51545,
+      "main": 0.5246999999999999,
+      "mainMasksOn": 0.5253,
+      "branchVsTmb": 0.9493657941766616,
+      "mainVsTmb": 0.9645574914440765,
+      "masksOnVsOff": 1.0019280129678865,
+      "branchDupVsOff": 0.9998432076884936
+    }
+  },
+  "contact": {
+    "misses": {
+      "def": 99619,
+      "all": 271893
+    },
+    "def": {
+      "tmbBranchRuns": 0.611,
+      "tmbMainRuns": 0.6073,
+      "branch": 0.47555000000000003,
+      "main": 0.48215,
+      "mainMasksOn": 0.49850000000000005,
+      "branchVsTmb": 0.760978971654639,
+      "mainVsTmb": 0.8075429647746091,
+      "masksOnVsOff": 1.0153177399383564,
+      "branchDupVsOff": 0.9892621147271927
+    },
+    "all": {
+      "tmbBranchRuns": 0.94685,
+      "tmbMainRuns": 0.92415,
+      "branch": 0.795,
+      "main": 0.7749,
+      "mainMasksOn": 0.7979,
+      "branchVsTmb": 0.8310873097342255,
+      "mainVsTmb": 0.8442295213940876,
+      "masksOnVsOff": 1.0252914787636178,
+      "branchDupVsOff": 1.002570185844207
+    }
+  },
+  "moving": {
+    "misses": {
+      "def": 165521,
+      "all": 583384
+    },
+    "def": {
+      "tmbBranchRuns": 0.84075,
+      "tmbMainRuns": 0.8509,
+      "branch": 0.51015,
+      "main": 0.5223500000000001,
+      "mainMasksOn": 0.5321,
+      "branchVsTmb": 0.6022915570622068,
+      "mainVsTmb": 0.6137236635501224,
+      "masksOnVsOff": 1.0186327926173295,
+      "branchDupVsOff": 1.0036772743085733
+    },
+    "all": {
+      "tmbBranchRuns": 1.47015,
+      "tmbMainRuns": 1.4616,
+      "branch": 1.0982,
+      "main": 1.0872,
+      "mainMasksOn": 1.1025,
+      "branchVsTmb": 0.7474931527748656,
+      "mainVsTmb": 0.7351735780978061,
+      "masksOnVsOff": 1.0224963399990201,
+      "branchDupVsOff": 1.008424181379059
+    }
+  },
+  "boxRoom": {
+    "misses": {
+      "def": 46385,
+      "all": 171412
+    },
+    "def": {
+      "tmbBranchRuns": 0.26115,
+      "tmbMainRuns": 0.2603,
+      "branch": 0.2098,
+      "main": 0.21475,
+      "mainMasksOn": 0.22325,
+      "branchVsTmb": 0.7912296849950733,
+      "mainVsTmb": 0.851059502160924,
+      "masksOnVsOff": 1.0079667305111073,
+      "branchDupVsOff": 1.0028150827367512
+    },
+    "all": {
+      "tmbBranchRuns": 0.514,
+      "tmbMainRuns": 0.5142,
+      "branch": 0.4308,
+      "main": 0.4207,
+      "mainMasksOn": 0.44215,
+      "branchVsTmb": 0.840116383033161,
+      "mainVsTmb": 0.845543552932567,
+      "masksOnVsOff": 1.0213960573542817,
+      "branchDupVsOff": 1.0034114112823593
+    }
+  },
+  "sponza": {
+    "misses": {
+      "def": 27294,
+      "all": 43461
+    },
+    "def": {
+      "tmbBranchRuns": 1.42595,
+      "tmbMainRuns": 1.4165,
+      "branch": 0.78425,
+      "main": 0.7708999999999999,
+      "mainMasksOn": 0.8103,
+      "branchVsTmb": 0.5509061424924622,
+      "mainVsTmb": 0.5419590143722816,
+      "masksOnVsOff": 1.0620867529022036,
+      "branchDupVsOff": 0.9890873087852032
+    },
+    "all": {
+      "tmbBranchRuns": 1.89715,
+      "tmbMainRuns": 1.86745,
+      "branch": 1.1101999999999999,
+      "main": 1.04345,
+      "mainMasksOn": 1.0884,
+      "branchVsTmb": 0.5841048437371748,
+      "mainVsTmb": 0.5605646454666913,
+      "masksOnVsOff": 1.0313677173113098,
+      "branchDupVsOff": 0.992488984520643
+    }
+  }
+}
