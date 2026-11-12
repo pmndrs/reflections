@@ -712,6 +712,13 @@ async function main() {
   const modeSeg = el('span', { className: 'seg' });
   const modeBtns = (['split', 'side', 'diff'] as const).map((m) => btn({ split: 'Split', side: 'Side by side', diff: '|A - B| heat map' }[m], () => setMode(m), modeSeg));
   toolbar.append(modeSeg);
+  // W58: the debug view on the toolbar (the same setting as Settings > Scene > Debug view); ours only
+  const viewSetting = settingById.get('view')!;
+  const viewSel = el('select', { title: 'Debug view (ours only): what our methods draw. ' + viewSetting.tradeoff });
+  viewSel.append(...(viewSetting.choices ?? []).map(([v, t]) => new Option(t, v)));
+  viewSel.value = q.get('view') ?? 'final';
+  viewSel.onchange = () => setSetting('view', viewSel.value === 'final' ? null : viewSel.value);
+  toolbar.append(el('label', {}, 'debug ', viewSel));
   const scaleIn = el('input', { type: 'range', min: '2', max: '128', step: '1', value: String(diffScale), title: 'Heat-map scale: the 8-bit difference shown at full colour' });
   const scaleVal = el('span', { textContent: String(diffScale) });
   scaleIn.oninput = () => { diffScale = Number(scaleIn.value); scaleVal.textContent = scaleIn.value; q.set('diffScale', scaleIn.value); urlSync(); refreshLegend(); };
@@ -892,6 +899,7 @@ async function main() {
     if (id === 'scene') sceneSel.value = String(v ?? entry.id);
   }
   function refreshControls() {
+    viewSel.value = q.get('view') ?? 'final';
     for (const id of rows.keys()) refreshRow(id);
     for (const [g, { count }] of groupEls) { const n = SETTINGS.filter((s) => s.group === g && q.has(s.id)).length; count.textContent = n ? `${n} changed` : ''; }
     refreshActions();
