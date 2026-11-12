@@ -19,6 +19,7 @@ import {
   GGXReference, LayoutPrefilter, ProbeFormatWriter, ProbePrefilter, createBC6HEncoder, createProbeLayout, lodToRoughness,
   maxLodFor, octaGutter, probeBytes, referenceModeFor, reflectionsRequiredLimits, type ProbeFormat, type ProbeLayout, type ProbeLayoutId,
 } from '@pmndrs/reflections/core';
+import { atlasBench } from './atlas';
 import { ENV_CUBE_WGSL, ENV_WGSL } from './env';
 import { cubeEdgeTexels, errorStats, fibonacciDirs, median, octaFoldTexels } from './stats';
 
@@ -645,7 +646,8 @@ async function main() {
     deviceInfo = await init();
     log(`device: ${JSON.stringify(deviceInfo)}`);
     preview();
-    const api = { run, lowRoughness, get log() { return lines.join('\n'); }, get results() { return (window as unknown as { __results: unknown }).__results; }, device: deviceInfo };
+    const atlas = (o: Parameters<typeof atlasBench>[1] = {}) => atlasBench({ device, envCube, buffer, readBuffer, log }, o);
+    const api = { run, lowRoughness, atlas, get log() { return lines.join('\n'); }, get results() { return (window as unknown as { __results: unknown }).__results; }, device: deviceInfo };
     (window as unknown as { __p: typeof api }).__p = api;
     document.querySelector('#go')!.addEventListener('click', () => run());
     document.querySelector('#smoke')!.addEventListener('click', () => run({ smoke: true }));

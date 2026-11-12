@@ -14,6 +14,7 @@
 //   pnpm check -- --only probes --probes-layout cube2d   # run the probe feature checks on the 2D array (default: 'auto', a cube array through the shim)
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
 //   pnpm check -- --probe-bench      # the full probe layout x format bench (minutes); JSON to out/probe-bench.json
+//   pnpm check -- --only probe-bench --probe-atlas   # W62: mixed probe sizes in one 2D octahedral atlas vs cube arrays; out/w62-probe-atlas.json
 //   pnpm check -- --only ssr-bench --ssr-bench   # the phase 3 gate bench: ours vs three's SSRNode (minutes); JSON to out/ssr-bench.json
 //                                    # (--ssr-scenes rooms,mirrorWall to narrow it)
 //   pnpm check -- --only ssr-rt --rt-shadow-timing   # D903: GPU ms of hit shadow rays, kit scenes, 960x540 + 1080p (also ssr-rt-bvh)
@@ -2623,6 +2624,25 @@ async function main() {
       check('probe bench ran every layout', new Set(bench.error.map((e) => e.layout)).size === 4 && bench.lookup.length > 0, `${bench.error.length} error rows, ${bench.lookup.length} lookup rows`);
       check('layout prefilter is bit-identical to ProbePrefilter (cube2d)', bench.parity.every((p) => p.differing === 0), bench.parity.map((p) => `${p.layout}@${p.source}: ${p.differing}`).join(', '));
       check('probe bench errors are finite', bench.error.every((e) => Number.isFinite(e.all.mean) && Number.isFinite(e.all.max)));
+      // W62 (D4902): three probe sizes in one 2D octahedral atlas (HDRP-style) read exactly what each probe
+      // reads in its own texture (no bleed into the 1000-filled rest; UV rounding only). `--probe-atlas`: the
+      // full run (65536 directions, error vs GGX, lookup timing, side 2x and 4x the capture), JSON to out/w62-probe-atlas.json
+      const full = args.includes('--probe-atlas');
+      const atlasRuns = [];
+      for (const ratio of full ? [2, 4] : [2]) {
+        const r = await pb.T(`window.__p.atlas(${JSON.stringify(full ? { ratio } : { ratio, nDirs: 4096, timing: false })})`);
+        atlasRuns.push(r);
+        const worst = Math.max(...r.identity.map((x) => x.maxTone));
+        // bleed would read the 1000 fill (tone ~254 / 255); what is left is filtering precision: a small tile's
+        // bilinear weights are quantized against the atlas's width, not its own (W62: <= 2.4 / 255, lod 0 near the sun, 128 px tile in 2048)
+        check(`octa atlas (side ${ratio}x, ${r.memory.tiles.map((t) => t.capture).join(' / ')} px in one ${r.memory.atlasSize.join('x')} texture): every tile reads as its own probe at every lod, no bleed (W62, D4902)`,
+          r.identity.length > 0 && worst <= 4, `max ${worst.toFixed(2)} / 255 over ${r.identity.length} tile x lod lookups (bleed would read ~254)`);
+      }
+      if (full) {
+        console.log((await pb.cdp.evalJs('window.__p.log', false)).split('\n').filter((l) => /atlas|error vs|lookup 1920/.test(l)).join('\n').replace(/^/gm, '    '));
+        fs.mkdirSync(OUT, { recursive: true });
+        fs.writeFileSync(path.join(OUT, 'w62-probe-atlas.json'), JSON.stringify(atlasRuns, null, 1));
+      }
     }
 
     const validation = results.logs.filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
