@@ -151,6 +151,8 @@ export class ScreenSpaceReflectionsPass {
   private sceneLights: HitLights = {};
   private blackEnvironment: THREE.DataTexture | null = null;
   private sourceDirty = false;
+  /** The core tracer binds last frame's hit source (W52, D3641): only while `settings.hitLobeFilterMixed` < 1 with `trace`. */
+  private coreHitSource = false;
   private traceOptions: ScreenSpaceTraceOptions | null;
 
   constructor(renderer: THREE.WebGPURenderer, options: ScreenSpaceReflectionsPassOptions = {}) {
@@ -233,7 +235,10 @@ export class ScreenSpaceReflectionsPass {
     if (source && this.historySource) cmd.copyTextureToTexture({ texture: source }, { texture: history! }, size);
     // the re-shade's radiance along a hit's reflected ray (W44, D3540) and the traced hits' shading: one group 3
     const hitShadingBindGroup = this.hitShadingGroup();
-    const inputs = screenSpaceInputsFromFrame(frame, core, { history: useHistory ? history : undefined, hitShadingBindGroup });
+    // W52 (D3641): last frame's hit source for the lobe filter where hits mix; the traced pass's own
+    // texture still holds it (its dispatch below clears it first)
+    const hitSource = this.coreHitSource && this.rt && this.rayTracing ? this.rt.source : undefined;
+    const inputs = screenSpaceInputsFromFrame(frame, core, { history: useHistory ? history : undefined, hitShadingBindGroup, hitSource });
     const hitShading = this.settings.hitShading ?? 'reshade';
     const out = core.dispatch(cmd, inputs, {
       frameIndex: frame.frameIndex, ...this.settings, hitColor: useHistory ? 'history' : 'current', fallbackColor: [0, 0, 0],
@@ -241,7 +246,8 @@ export class ScreenSpaceReflectionsPass {
     if (this.rt && this.rayTracing) {
       // traced misses take black like the tracer's fallback: the composite adds probes /
       // environment for 1 - confidence, exactly the term three's lit image already has
-      this.rt.dispatch(cmd, { tracer: core, inputs, hitShadingBindGroup }, { ...this.traceSettings, hitColor: useHistory ? 'history' : 'current', hitShading, hitLobeFilter: this.traceSettings.hitLobeFilter ?? this.settings.hitLobeFilter, fallbackColor: [0, 0, 0] });
+      this.rt.dispatch(cmd, { tracer: core, inputs, hitShadingBindGroup }, { ...this.traceSettings, hitColor: useHistory ? 'history' : 'current', hitShading, hitLobeFilter: this.traceSettings.hitLobeFilter ?? this.settings.hitLobeFilter, hitShadeOcclusion: this.traceSettings.hitShadeOcclusion ?? this.settings.hitShadeOcclusion,
+        hitLobeFilterMixed: this.traceSettings.hitLobeFilterMixed ?? this.settings.hitLobeFilterMixed, roughnessThreshold: this.settings.roughnessThreshold, fallbackColor: [0, 0, 0] });
       cmd.copyTextureToTexture({ texture: this.rt.source }, { texture: this.gpu(this.source) }, size);
       this.sourceDirty = true;
     } else if (this.sourceDirty) {
@@ -346,6 +352,9 @@ export class ScreenSpaceReflectionsPass {
       this.rt?.destroy(); this.rt = null;
       this.core?.destroy(); this.core = null;
     }
+    // W52 (D3641): the lobe filter where hits mix binds one more texture in intersect: rebuild on a flip
+    const wantHitSource = !!trace && (this.settings.hitLobeFilterMixed ?? 1) < 1;
+    if (this.core && wantHitSource !== this.coreHitSource) { this.rt?.destroy(); this.rt = null; this.core.destroy(); this.core = null; }
     const c = this.core;
     if (c && c.width === w && c.height === h && c.depthInverted === inverted) {
       if (trace && !this.rt) this.createTraced(w, h);
@@ -358,8 +367,9 @@ export class ScreenSpaceReflectionsPass {
     this.core = createScreenSpaceReflections(device, {
       width: w, height: h, depthInverted: inverted, variant: sub ? 'subgroups' : 'workgroup',
       missList: (this.options.missList ?? false) || !!this.options.trace || !!trace, timestamps: this.options.timestamps ?? false,
-      hitSpecularShading: this.hitShading.shading,
+      hitSpecularShading: this.hitShading.shading, hitSource: wantHitSource,
     });
+    this.coreHitSource = wantHitSource;
     if (trace) this.createTraced(w, h);
     for (const t of [this.radiance, this.hitDistance, this.confidence, this.source]) (t as unknown as { setSize(w: number, h: number): void }).setSize(w, h);
   }

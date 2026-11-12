@@ -10,6 +10,7 @@
 //
 // Bind groups: 0 the pass, 1 the radiance fallback (misses), 2 the provider, 3 the hit shading.
 import { constantRadianceFallback, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs } from '../sssr/sssr';
+import { dedupeWgslChunks } from '../probes/layouts';
 import { mat4Invert, mat4Mul } from '../sssr/math';
 import { PassTimer } from '../sssr/timer';
 import { checkStageLimits, countStageBindings } from '../limits';
@@ -85,6 +86,30 @@ export interface TracedReflectionsSettings {
    * alpha. Default {@link DEFAULT_HIT_LOBE_FILTER}; 0 = the hit's own roughness.
    */
   hitLobeFilter?: number;
+  /**
+   * Which re-shaded hits take D3513's visibility ray along R (W52, D3640): 'offscreen' (default) =
+   * only hits shaded from the BVH's material (as before: on-screen re-shades take none, D3542, so a
+   * surface shades the same whichever pass found it); 'all' = on-screen re-shades too, so a rim's
+   * lobe into the wheel well or a mirror seen in a mirror (blocked by the facing mirror) goes dark
+   * as the path tracer has it where the blocker is dark. Needs `hitShadows` (the ray is a shadow
+   * query). Costs one any-hit ray per on-screen hit.
+   */
+  hitShadeVisibility?: 'offscreen' | 'all';
+  /**
+   * Re-shade occlusion without a BVH ray (W52, D3642), as the SSSR tracer's `hitShadeOcclusion`
+   * (pass the tracer's): 'screen' = an on-screen re-shaded hit that takes no visibility ray (with
+   * `hitShadeVisibility` 'offscreen') marches 8 depth-buffer samples along R instead. Default 'off'.
+   */
+  hitShadeOcclusion?: 'off' | 'screen';
+  /**
+   * The lobe filter where hits mix (W52, D3641), as the SSSR tracer's `hitLobeFilterMixed` (pass
+   * the tracer's): a traced hit with a screen-space hit near it last frame (this pass's own `source`
+   * 0 on a glossy pixel, among 3x3 samples 5 px apart) looks up with hitLobeFilter x this. Below 1,
+   * the pass keeps a copy of last frame's `source` (r32float, render size). Default 1 (no change).
+   */
+  hitLobeFilterMixed?: number;
+  /** The SSSR tracer's `roughnessThreshold` (perceptual; pass the tracer's), read by `hitLobeFilterMixed` only. Default 0.447. */
+  roughnessThreshold?: number;
   /** Relative view-distance tolerance for that test. Default 0.02. */
   onScreenDepthTolerance?: number;
   /** The fallback's `P.iblFactor`. Default 1. */
@@ -155,8 +180,8 @@ const tex = (binding: number): GPUBindGroupLayoutEntry => ({ binding, visibility
 const sto = (binding: number, format: GPUTextureFormat): GPUBindGroupLayoutEntry => ({ binding, visibility: C, storageTexture: { access: 'write-only', format } });
 const buf = (binding: number, type: GPUBufferBindingType): GPUBindGroupLayoutEntry => ({ binding, visibility: C, buffer: { type } });
 
-/** The trace pass's own bindings in group 0 (binding 7 is read-write, 5 and 6 read-only; 8-11 write-only; 1-4, 12, 13 sampled). */
-const OWN_STORAGE_BUFFERS = 3, OWN_STORAGE_TEXTURES = 4, OWN_SAMPLED_TEXTURES = 6;
+/** The trace pass's own bindings in group 0 (binding 7 is read-write, 5 and 6 read-only; 8-11 write-only; 1-4, 12-14 sampled). */
+const OWN_STORAGE_BUFFERS = 3, OWN_STORAGE_TEXTURES = 4, OWN_SAMPLED_TEXTURES = 7;
 
 /**
  * Counts every group of the trace pipeline (0 the pass, 1 the radiance fallback, 2 the provider, 3
@@ -211,9 +236,12 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     label: 'rt trace',
     entries: [buf(0, 'uniform'), tex(1), tex(2), tex(3), tex(4),
       buf(5, 'read-only-storage'), buf(6, 'read-only-storage'), buf(7, 'storage'),
-      sto(8, 'rgba16float'), sto(9, 'r32float'), sto(10, 'r32float'), sto(11, 'r32float'), tex(12), tex(13)],
+      sto(8, 'rgba16float'), sto(9, 'r32float'), sto(10, 'r32float'), sto(11, 'r32float'), tex(12), tex(13), tex(14)],
   });
   const noHistory = device.createTexture({ label: 'rt no history', size: [1, 1], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING });
+  // last frame's source for hitLobeFilterMixed (W52, D3641), made on first use
+  let prevSource: GPUTexture | null = null;
+  const noSource = device.createTexture({ label: 'rt no previous source', size: [1, 1], format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING });
   const providerBgl = device.createBindGroupLayout({
     label: `rt provider ${provider.name}`,
     entries: provider.entries.map((e, i) => ({ ...e, binding: i } as GPUBindGroupLayoutEntry)),
@@ -228,7 +256,8 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     shadingNormalWgsl: provider.capabilities.shadingNormal ? '' : DEFAULT_SHADING_NORMAL_WGSL,
     hitShadingWgsl: shading.wgsl,
   });
-  const traceModule = device.createShaderModule({ label: `rt trace (${provider.name})`, code });
+  // the fallback and the hit shading may both carry the probe lookup's includes (D4901): keep one copy
+  const traceModule = device.createShaderModule({ label: `rt trace (${provider.name})`, code: dedupeWgslChunks(code) });
   const tracePipe = device.createComputePipeline({
     label: `rt trace (${provider.name})`,
     layout: device.createPipelineLayout({ bindGroupLayouts: [traceBgl, fallback.layout ?? empty, providerBgl, shading.layout ?? empty] }),
@@ -281,6 +310,10 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     u[60] = s.hitSpecular ?? true ? 1 : 0;
     u[61] = (s.hitShading ?? 'reshade') === 'off' ? 0 : 1;
     f[62] = Math.max(0, s.hitLobeFilter ?? DEFAULT_HIT_LOBE_FILTER);
+    u[63] = (s.hitShadeVisibility ?? 'offscreen') === 'all' ? 1 : 0;
+    u[64] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
+    f[65] = Math.min(1, Math.max(0, s.hitLobeFilterMixed ?? 1));
+    f[66] = (s.roughnessThreshold ?? 0.447) ** 2;
     device.queue.writeBuffer(params, 0, data);
   }
 
@@ -296,6 +329,8 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     if (useHistory && (!inputs.history || !inputs.motion)) throw new Error("rt: hitColor 'history' needs inputs.history and inputs.motion");
     if (useHistory && (inputs.history!.width !== W || inputs.history!.height !== H)) throw new Error(`rt: history is ${inputs.history!.width}x${inputs.history!.height}, expected ${W}x${H}`);
     writeParams(frame, settings);
+    const mixed = (settings.hitLobeFilterMixed ?? 1) < 1;
+    if (mixed) prevSource ??= device.createTexture({ label: 'rt previous source', size: [W, H], format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
     const traceGroup = device.createBindGroup({
       label: 'rt trace', layout: traceBgl,
       entries: [
@@ -314,9 +349,11 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
         // last frame's colour with hitColor 'history' (D1002)
         { binding: 12, resource: (useHistory ? inputs.history! : noHistory).createView() },
         { binding: 13, resource: (useHistory ? inputs.motion! : noHistory).createView() },
+        { binding: 14, resource: (mixed ? prevSource! : noSource).createView() },
       ],
     });
     timer?.begin();
+    if (mixed) cmd.copyTextureToTexture({ texture: source }, { texture: prevSource! }, [W, H]);
     // source = 0 everywhere; the trace pass marks the pixels it touches
     cmd.beginRenderPass({ label: 'rt clear source', colorAttachments: [{ view: source.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end();
     cmd.clearBuffer(state, RT_STATE_HEADER * 4, tilesX * tilesY * 4);
@@ -370,7 +407,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
       return timer.timings;
     },
     destroy() {
-      source.destroy(); state.destroy(); params.destroy(); for (const x of statsSlots) x.buffer.destroy(); noHistory.destroy();
+      source.destroy(); state.destroy(); params.destroy(); for (const x of statsSlots) x.buffer.destroy(); noHistory.destroy(); noSource.destroy(); prevSource?.destroy();
       timer?.destroy();
     },
   };

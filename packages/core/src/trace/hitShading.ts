@@ -111,6 +111,53 @@ const HIT_SHADOW_RAY_LENGTH: f32 = 1e30;
 fn hitSpecularRadiance(P: vec3f, R: vec3f, roughness: f32) -> vec3f { return sampleRadianceFallback(P, R, roughness); }
 ${SPECULAR}`;
 
+/**
+ * Re-shade occlusion without a BVH (W52, D3642): a short march along R from a re-shaded hit through
+ * the depth buffer, the screen-space stand-in for D3513's visibility ray. `false` when a sample
+ * along R lands behind the depth buffer by less than a thickness, i.e. something the camera sees
+ * stands in front of the lobe (a rim's R into the wheel well, a sill's R into the underside).
+ * Off screen, behind the camera or past the background: unknown, counted visible.
+ *
+ * Needs, from the pass that includes it: `hsoProject(p) -> vec3f` (uv and clip w of a world
+ * point), `hsoSceneDistance(c) -> f32` (camera distance of the depth buffer's surface at pixel c;
+ * a huge value for the background), `hsoCamera() -> vec3f`, `hsoSize() -> vec2u`, and the private
+ * `hsoPixel` (the reflecting pixel, for the step jitter).
+ *
+ * The march is HSO_STEPS samples on t = len x ((i + j) / n)^2 (denser near the hit), len =
+ * HSO_LENGTH x the hit's camera distance, thickness HSO_THICKNESS x that distance, starting past a
+ * normal offset of 3e-3 x the distance (the traced pass's own, D8). Samples within 1.5 px of the
+ * hit's own pixel are skipped (its own surface).
+ */
+export const SCREEN_VISIBILITY_WGSL = /* wgsl */ `
+const HSO_STEPS: u32 = 8u;
+const HSO_LENGTH: f32 = 0.3;
+const HSO_THICKNESS: f32 = 0.15;
+var<private> hsoPixel: vec2u = vec2u(0u);
+fn hitScreenVisible(hitP: vec3f, N: vec3f, R: vec3f) -> bool {
+  let cam = hsoCamera();
+  let d0 = length(hitP - cam);
+  let size = vec2f(hsoSize());
+  let start = hsoProject(hitP);
+  let c0 = start.xy * size;
+  let origin = hitP + N * (3e-3 * d0);
+  let len = HSO_LENGTH * d0;
+  let thickness = HSO_THICKNESS * d0;
+  // interleaved gradient noise (Jimenez 2014): one start offset per pixel, the denoiser blurs it
+  let j = fract(52.9829189 * fract(dot(vec2f(hsoPixel), vec2f(0.06711056, 0.00583715))));
+  for (var i = 0u; i < HSO_STEPS; i++) {
+    let s = (f32(i) + j) / f32(HSO_STEPS);
+    let X = origin + R * (len * s * s);
+    let q = hsoProject(X);
+    if (q.z <= 0.0 || any(q.xy <= vec2f(0.0)) || any(q.xy >= vec2f(1.0))) { return true; }
+    let c = q.xy * size;
+    if (all(abs(c - c0) < vec2f(1.5))) { continue; }
+    let behind = length(X - cam) - hsoSceneDistance(vec2i(c));
+    if (behind > 0.01 * d0 && behind < thickness) { return false; }
+  }
+  return true;
+}
+`;
+
 /** The WGSL to add after a hit shading's own so that `hitShadeLobe` / `hitShadeSurface` exist. */
 export function shadeLobeWgslFor(shadingWgsl: string): string {
   return /fn\s+hitShadeLobe\s*\(/.test(shadingWgsl) ? '' : FALLBACK_SHADE_LOBE_WGSL;
@@ -280,7 +327,11 @@ export interface ProbeHitShading extends HitShading {
 
 // The probe lookup module sits at bindings 0..2 of group 3 (atlas, sampler, table: a ProbeSet's
 // own layout), the HitEnv uniform at 3, a multi-size set's atlases 1.. at 4.. (D4702: the lookup's
-// `atlasBinding`; a ProbeSet's own group has them at 3..).
+// `atlasBinding`; a ProbeSet's own group has them at 3..). Its set-level names carry
+// PROBE_HIT_SUFFIX (`pr_atlas_g3`, `probeRadianceWithEnvironment_g3`, ...), so a pass whose radiance
+// fallback is the same set's lookup at group 1 (`probeRadianceFallback`) holds both; the shared
+// includes are marked chunks the pass keeps once (`dedupeWgslChunks`, D4901).
+const PROBE_HIT_SUFFIX = '_g3';
 const PROBE_SHADE = /* wgsl */ `
 ${UNIFORM_WGSL}
 @group(3) @binding(3) var<uniform> hitEnv: HitEnv;
@@ -288,14 +339,14 @@ ${LIGHTS}
 // The probes along R at the hit's roughness (box-projected from the hit point, the environment slot
 // for the rest), as three's specular IBL with the probes as the environment (W41, D3510).
 fn hitSpecularRadiance(P: vec3f, R: vec3f, roughness: f32) -> vec3f {
-  return probeRadianceWithEnvironment(P, R, roughness) * hitEnv.intensity.x;
+  return probeRadianceWithEnvironment${PROBE_HIT_SUFFIX}(P, R, roughness) * hitEnv.intensity.x;
 }
 ${SPECULAR}
 fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f {
   let m = traceHitMaterial(hit);
   // three's diffuse IBL with the probes as the environment: lookup(P, N, roughness 1) x pi x
   // intensity x albedo / pi; probes first, the environment slot for the rest
-  let E = probeRadianceWithEnvironment(P, N, 1.0);
+  let E = probeRadianceWithEnvironment${PROBE_HIT_SUFFIX}(P, N, 1.0);
   return hitShadeSurface(hit, P, N, dir, m.emissive, m.albedo * (E * hitEnv.intensity.x + hitLights(P, N)));
 }
 `;
@@ -331,7 +382,9 @@ export function probeHitShading(device: GPUDevice, source: ProbeHitShadingSource
     ],
   });
   const { uniform, setLighting } = hitLightingUniform(device, 'rt hit probes');
-  const lookup = isProbeSet(source) ? source.wgsl({ group: 3, atlasBinding: 4 }) : probeLookupWgsl({ ...source, group: 3, binding: 0, atlasBinding: 4 });
+  const lookup = isProbeSet(source)
+    ? source.wgsl({ group: 3, atlasBinding: 4, suffix: PROBE_HIT_SUFFIX })
+    : probeLookupWgsl({ ...source, group: 3, binding: 0, atlasBinding: 4, suffix: PROBE_HIT_SUFFIX });
   return {
     wgsl: lookup + PROBE_SHADE,
     layout,

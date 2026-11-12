@@ -1,0 +1,293 @@
+{
+ "mode": "legacy",
+ "rows": [
+  {
+   "scene": "rooms",
+   "rt": false,
+   "k": "shipped:final",
+   "lum": 84.03605324073963,
+   "mean": 0.8258918467078189,
+   "max": 181
+  },
+  {
+   "scene": "rooms",
+   "rt": false,
+   "k": "shipped:probeSpecular",
+   "lum": 67.48949845678752,
+   "mean": 0,
+   "max": 0
+  },
+  {
+   "scene": "rooms",
+   "rt": false,
+   "k": "few:final",
+   "lum": 84.14639981996137,
+   "mean": 0.8228639403292181,
+   "max": 175
+  },
+  {
+   "scene": "rooms",
+   "rt": false,
+   "k": "few:probeSpecular",
+   "lum": 67.96960583847022,
+   "mean": 0,
+   "max": 0
+  },
+  {
+   "scene": "rooms",
+   "rt": false,
+   "k": "many:final",
+   "lum": 79.4890348508314,
+   "mean": 0.9530420524691358,
+   "max": 171
+  },
+  {
+   "scene": "rooms",
+   "rt": false,
+   "k": "many:probeSpecular",
+   "lum": 68.8639165380711,
+   "mean": 0,
+   "max": 0
+  },
+  {
+   "scene": "rooms",
+   "rt": false,
+   "k": "mixed:final",
+   "lum": 78.82489969135884,
+   "mean": 1.120846836419753,
+   "max": 204
+  },
+  {
+   "scene": "rooms",
+   "rt": false,
+   "k": "mixed:probeSpecular",
+   "lum": 74.02798996912158,
+   "mean": 0,
+   "max": 0
+  },
+  {
+   "scene": "rooms",
+   "rt": true,
+   "k": "shipped:final",
+   "lum": 83.44434027778253,
+   "mean": 0.002642746913580247,
+   "max": 46
+  },
+  {
+   "scene": "rooms",
+   "rt": true,
+   "k": "few:final",
+   "lum": 83.53349022634829,
+   "mean": 0.0025122170781893003,
+   "max": 46
+  },
+  {
+   "scene": "rooms",
+   "rt": true,
+   "k": "many:final",
+   "lum": 79.66951131688117,
+   "mean": 0.00279320987654321,
+   "max": 35
+  },
+  {
+   "scene": "rooms",
+   "rt": true,
+   "k": "mixed:final",
+   "lum": 79.00384194959523,
+   "mean": 0.004122299382716049,
+   "max": 56
+  },
+  {
+   "scene": "offscreen",
+   "rt": false,
+   "k": "shipped:final",
+   "lum": 46.76559542176048,
+   "mean": 0.14220357510288065,
+   "max": 243
+  },
+  {
+   "scene": "offscreen",
+   "rt": false,
+   "k": "shipped:probeSpecular",
+   "lum": 90.9552025463266,
+   "mean": 0,
+   "max": 0
+  },
+  {
+   "scene": "offscreen",
+   "rt": false,
+   "k": "few:final",
+   "lum": 46.50483281887511,
+   "mean": 0.11563143004115227,
+   "max": 141
+  },
+  {
+   "scene": "offscreen",
+   "rt": false,
+   "k": "few:probeSpecular",
+   "lum": 90.51588220167157,
+   "mean": 0,
+   "max": 0
+  },
+  {
+   "scene": "offscreen",
+   "rt": false,
+   "k": "many:final",
+   "lum": 60.89923161009335,
+   "mean": 0.47914094650205763,
+   "max": 220
+  },
+  {
+   "scene": "offscreen",
+   "rt": false,
+   "k": "many:probeSpecular",
+   "lum": 108.82664994889151,
+   "mean": 0,
+   "max": 0
+  },
+  {
+   "scene": "offscreen",
+   "rt": false,
+   "k": "mixed:final",
+   "lum": 55.60849344133142,
+   "mean": 0.2402662037037037,
+   "max": 184
+  },
+  {
+   "scene": "offscreen",
+   "rt": false,
+   "k": "mixed:probeSpecular",
+   "lum": 100.62604873981441,
+   "mean": 0,
+   "max": 0
+  },
+  {
+   "scene": "offscreen",
+   "rt": true,
+   "k": "shipped:final",
+   "lum": 44.20998713985128,
+   "mean": 0.0033686985596707818,
+   "max": 112
+  },
+  {
+   "scene": "offscreen",
+   "rt": true,
+   "k": "few:final",
+   "lum": 44.32069958839005,
+   "mean": 0.0024279835390946503,
+   "max": 16
+  },
+  {
+   "scene": "offscreen",
+   "rt": true,
+   "k": "many:final",
+   "lum": 62.32776363161575,
+   "mean": 0.0067007458847736625,
+   "max": 134
+  },
+  {
+   "scene": "offscreen",
+   "rt": true,
+   "k": "mixed:final",
+   "lum": 55.369246399098586,
+   "mean": 0.008141075102880658,
+   "max": 244
+  },
+  {
+   "scene": "showcaseSponza",
+   "rt": false,
+   "k": "shipped:final",
+   "lum": 47.03817772633848,
+   "mean": 0.49597286522633743,
+   "max": 184
+  },
+  {
+   "scene": "showcaseSponza",
+   "rt": false,
+   "k": "shipped:probeSpecular",
+   "lum": 128.97065329216107,
+   "mean": 0,
+   "max": 0
+  },
+  {
+   "scene": "showcaseSponza",
+   "rt": false,
+   "k": "few:final",
+   "lum": 39.49585583847711,
+   "mean": 0.3267547582304527,
+   "max": 171
+  },
+  {
+   "scene": "showcaseSponza",
+   "rt": false,
+   "k": "few:probeSpecular",
+   "lum": 95.04377379112961,
+   "mean": 0,
+   "max": 0
+  },
+  {
+   "scene": "showcaseSponza",
+   "rt": false,
+   "k": "many:final",
+   "lum": 39.24685249485804,
+   "mean": 0.40017875514403295,
+   "max": 213
+  },
+  {
+   "scene": "showcaseSponza",
+   "rt": false,
+   "k": "many:probeSpecular",
+   "lum": 97.79617991252964,
+   "mean": 0,
+   "max": 0
+  },
+  {
+   "scene": "showcaseSponza",
+   "rt": false,
+   "k": "mixed:final",
+   "lum": 37.97595486110955,
+   "mean": 0.3027681327160494,
+   "max": 171
+  },
+  {
+   "scene": "showcaseSponza",
+   "rt": false,
+   "k": "mixed:probeSpecular",
+   "lum": 91.96558899177118,
+   "mean": 0,
+   "max": 0
+  },
+  {
+   "scene": "showcaseSponza",
+   "rt": true,
+   "k": "shipped:final",
+   "lum": 46.54839634773752,
+   "mean": 0.0075225051440329215,
+   "max": 67
+  },
+  {
+   "scene": "showcaseSponza",
+   "rt": true,
+   "k": "few:final",
+   "lum": 39.26253600823019,
+   "mean": 0.004969135802469136,
+   "max": 110
+  },
+  {
+   "scene": "showcaseSponza",
+   "rt": true,
+   "k": "many:final",
+   "lum": 38.79553433642036,
+   "mean": 0.004704218106995885,
+   "max": 55
+  },
+  {
+   "scene": "showcaseSponza",
+   "rt": true,
+   "k": "mixed:final",
+   "lum": 37.623490226335626,
+   "mean": 0.004979423868312757,
+   "max": 132
+  }
+ ]
+}

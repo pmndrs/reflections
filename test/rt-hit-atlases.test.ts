@@ -30,15 +30,15 @@ describe('core probeHitShading over several atlases (D4702)', () => {
     const { device, layouts } = fakeDevice();
     const o = { layout, mirrorX: true, count: 3 };
     const s = probeHitShading(device, o);
-    expect(s.wgsl.startsWith(probeLookupWgsl({ ...o, group: 3, binding: 0 }))).toBe(true);
-    expect(s.wgsl).not.toMatch(/pr_atlas_1/);
+    expect(s.wgsl.startsWith(probeLookupWgsl({ ...o, group: 3, binding: 0, suffix: '_g3' }))).toBe(true);
+    expect(s.wgsl).not.toMatch(/pr_atlas_g3_1/);
     expect(bindings(layouts[0])).toEqual([0, 1, 2, 3]);
   });
   it('several atlases: atlases 1.. at 4.., past the uniform at 3', () => {
     const { device, layouts, groups } = fakeDevice();
     const s = probeHitShading(device, { layout, mirrorX: true, count: 3, atlases: 3, volumeAtlases: [0, 2, 1] });
-    expect(s.wgsl).toContain('@group(3) @binding(4) var pr_atlas_1: texture_cube_array<f32>;');
-    expect(s.wgsl).toContain('@group(3) @binding(5) var pr_atlas_2: texture_cube_array<f32>;');
+    expect(s.wgsl).toContain('@group(3) @binding(4) var pr_atlas_g3_1: texture_cube_array<f32>;');
+    expect(s.wgsl).toContain('@group(3) @binding(5) var pr_atlas_g3_2: texture_cube_array<f32>;');
     expect(s.wgsl).toContain('@group(3) @binding(3) var<uniform> hitEnv: HitEnv;');
     expect(s.wgsl.match(/@group\(3\) @binding\(3\)/g)).toHaveLength(1);
     expect(bindings(layouts[0])).toEqual([0, 1, 2, 3, 4, 5]);
@@ -80,7 +80,7 @@ describe('three: RT hit shading binds every atlas of a mixed-size set (D4702)', 
     const set = makeSet(true);
     const hs = new ThreeHitShading(device, gpu);
     expect(hs.prepare(new THREE.Texture(), set)).toBe(true);
-    expect(hs.shading.wgsl).toContain('@group(3) @binding(4) var pr_atlas_1');
+    expect(hs.shading.wgsl).toContain('@group(3) @binding(4) var pr_atlas_g3_1');
     hs.bindGroup(1, {});
     const g = groups[groups.length - 1];
     expect(bindings(g)).toEqual([0, 1, 2, 3, 4]);

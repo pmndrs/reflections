@@ -3,18 +3,19 @@ export { ProbePrefilter, LOD_MIN, maxLodFor, lodToRoughness } from './probes/pre
 export { createBC6HEncoder, type BC6HEncodeOptions, type BC6HEncoder, type BC6HEncoderOptions } from './encode/bc6h';
 // Probe layouts (phase 1 bench, docs/research/probe-layouts.md): parameterizations, the
 // layout-generic prefilter, storage formats, and the brute-force GGX reference.
-export { createProbeLayout, probeLayoutsWgsl, dedupeChunks, probeBytes, bytesPerTexel, octaGutter, type ProbeLayout, type ProbeLayoutId, type ProbeLayoutOptions, type ProbeWgslChunk } from './probes/layouts';
+export { createProbeLayout, probeLayoutsWgsl, dedupeChunks, dedupeWgslChunks, markedChunkWgsl, probeBytes, bytesPerTexel, octaGutter, type ProbeLayout, type ProbeLayoutId, type ProbeLayoutOptions, type ProbeWgslChunk } from './probes/layouts';
 export { LayoutPrefilter } from './probes/layouts/prefilter';
 export { ProbeFormatWriter, type ProbeFormat, type BC6HEncoderLike } from './probes/layouts/formats';
 export { GGXReference, lobeTexels, referenceModeFor, type ReferenceMode } from './probes/reference';
 // Probe core (phase 2): the atlas + volume table + WGSL lookup, the radiance-fallback seam, re-fit irradiance.
 export { ProbeSet, type ProbeSetOptions, type ProbeSetFormat } from './probes/set';
 export {
-  probeLookupWgsl, probeLookupIncludesWgsl, probeLookupIncludeChunks, probeLookupFunctionWgsl, probeProxyShareFunctionWgsl, lodWgsl, DEFAULT_PROBE_LOD_MAPPING,
+  probeLookupWgsl, probeLookupIncludesWgsl, probeLookupIncludeChunks, probeLookupFunctionWgsl, probeProxyShareFunctionWgsl, lodWgsl, DEFAULT_PROBE_LOD_MAPPING, PROBE_UNROLL_MAX_VOLUMES,
   type ProbeLookupOptions, type ProbeLookupModuleOptions, type ProbeLodMapping,
 } from './probes/lookup';
 export {
   packProbeTable, sortProbeVolumes, probeTableRows, probeIrradianceRow, planProbeAtlases, PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, PROBE_IRRADIANCE_ROWS, PROBE_MAX_ATLASES,
+  probeGridRow, probeGridRows, PROBE_GRID_MAX_CELLS, PROBE_GRID_MIN_VOLUMES, PROBE_GRID_LANE_BITS,
   type ProbeVolume, type ProbeTableHeader, type ProbeTableAtlas, type ProbeAtlasPlan,
 } from './probes/table';
 export { ProbeIrradiance, type ProbeIrradianceOptions } from './probes/irradiance';

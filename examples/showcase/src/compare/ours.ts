@@ -71,6 +71,14 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   ssr.settings.hitShading = reshade;
   // W45 (D3550): ?lobeFilter=<k> filtered importance sampling at hits (default: the package's)
   if (params.has('lobeFilter')) ssr.settings.hitLobeFilter = Number(params.get('lobeFilter'));
+  // W52 halo options (D3640-D3642): ?shadeVis=all the visibility ray for on-screen re-shaded traced hits,
+  // ?lobeMix=<0..1> the lobe filter's scale where traced and screen-space hits mix, ?shadeOcc=screen the
+  // re-shade's depth-buffer occlusion march (screen-space hits, and on-screen traced hits without the ray)
+  if (params.has('shadeVis')) ssr.traceSettings.hitShadeVisibility = params.get('shadeVis') as 'offscreen' | 'all';
+  if (params.has('lobeMix')) ssr.settings.hitLobeFilterMixed = Number(params.get('lobeMix'));
+  if (params.has('shadeOcc')) ssr.settings.hitShadeOcclusion = params.get('shadeOcc') as 'off' | 'screen';
+  // ?rtLobeFilter=<k>: the traced pass's own hitLobeFilter (default: the tracer's), to split the lobe filter's effect by pass
+  if (params.has('rtLobeFilter')) ssr.traceSettings.hitLobeFilter = Number(params.get('rtLobeFilter'));
   const motionScale = Number(params.get('motionScale') ?? 1);
 
   // probes, as the showcase bakes them; W61: ?probeLayout=few|medium|many|manyCell|mixed (&probeBlend=) bakes
@@ -181,7 +189,8 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     setExposure(e) { renderer.toneMappingExposure = e; },
     status: () => (denoiser ? 'denoiser ffx-reflections' : wantDenoise ? 'no denoiser found' : '') + (provider ? ` | BVH ${provider.triangles.toLocaleString()} tris` : ''),
     info: () => ({
-      samplesPerQuad: ssr.settings.samplesPerQuad ?? 1, hitColor: hit, hitShading: reshade, denoiser: denoiser ? { ...denoiserOptions } : null,
+      samplesPerQuad: ssr.settings.samplesPerQuad ?? 1, hitColor: hit, hitShading: reshade,
+      hitShadeVisibility: ssr.traceSettings.hitShadeVisibility ?? 'offscreen', hitLobeFilterMixed: ssr.settings.hitLobeFilterMixed ?? 1, hitShadeOcclusion: ssr.settings.hitShadeOcclusion ?? 'off', denoiser: denoiser ? { ...denoiserOptions } : null,
       thickness: kit.thickness ?? 'default', rayTracing: !!provider, probes: probes.bakedProbes.length, probeLayout: layout?.name ?? null, specAA,
       varianceGuidedTracing: 'off (the seam passes no variance back to the tracer)',
     }),
