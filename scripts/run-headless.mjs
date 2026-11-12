@@ -4,7 +4,8 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | probe-layouts)
+//   pnpm check -- --only probe-layouts-measure   # W61: probe layouts at equal memory, error vs RT / path tracer, seams, timing (minutes); out/w61-probe-layouts.json
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p: core on the 2D array (warp), core on the cube array, the pre-phase-2 TSL node
 //   pnpm check -- --only mirror-bias --mirror-bias   # W32 / D49: mirrorBias noise / bias sweep (minutes), JSON to out/mirror-bias.json
 //   pnpm check -- --only seam        # W26 / D53: the SSR-to-probe seam sweep (Lagarde's options off / on), JSON to out/seam.json (SEAM_SHOTS=1: images)
@@ -16,7 +17,7 @@
 //   pnpm check -- --only ssr-rt --rt-shadow-timing   # D903: GPU ms of hit shadow rays, kit scenes, 960x540 + 1080p (also ssr-rt-bvh)
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -82,6 +83,26 @@ const savePng = (name, dataUrl) => {
   console.log('  saved', path.relative(process.cwd(), file));
 };
 
+/**
+ * Every Chrome this run started (process -> its temp profile). Every exit path (a page's close(), the
+ * normal end, a failure, the global timeout, SIGINT / SIGTERM / SIGHUP) kills each one's process group
+ * (its GPU / renderer helpers too: SIGKILL of the browser alone left them running under PID 1) plus any
+ * process still naming its profile, then removes the profile (W61).
+ */
+const liveChromes = new Map();
+function killChrome(chrome) {
+  const dir = liveChromes.get(chrome);
+  liveChromes.delete(chrome);
+  try { process.kill(-chrome.pid, 'SIGKILL'); } catch { /* group gone */ }
+  try { chrome.kill('SIGKILL'); } catch { /* gone */ }
+  if (dir) {
+    try { spawnSync('pkill', ['-9', '-f', dir]); } catch { /* none left */ }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+const killAllChromes = () => { for (const c of [...liveChromes.keys()]) killChrome(c); };
+process.on('exit', killAllChromes);
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { killAllChromes(); process.exit(130); });
 /** Open `url` in a fresh headless Chrome; resolves once `window.__p` exists. */
 async function openPage(url, extraArgs = []) {
   // Port 0: Chrome picks a free port and writes it to DevToolsActivePort. A random fixed port could
@@ -91,7 +112,8 @@ async function openPage(url, extraArgs = []) {
     '--headless=new', '--no-sandbox', '--use-angle=metal', '--enable-unsafe-webgpu',
     '--enable-features=Vulkan', '--window-size=1100,900', '--remote-debugging-port=0', ...extraArgs,
     `--user-data-dir=${userDataDir}`, url,
-  ], { stdio: 'ignore' });
+  ], { stdio: 'ignore', detached: true });
+  liveChromes.set(chrome, userDataDir);
   let port = null;
   for (const deadline = Date.now() + 30_000; port === null && Date.now() < deadline; await sleep(100)) {
     try { port = Number(fs.readFileSync(path.join(userDataDir, 'DevToolsActivePort'), 'utf8').split('\n')[0]) || null; } catch { /* not written yet */ }
@@ -122,7 +144,7 @@ async function openPage(url, extraArgs = []) {
     throw new Error(`page not ready: ${url}\n${status}\n${results.logs.join('\n')}`);
   }
   const T = (expr) => cdp.evalJs(`(async () => JSON.stringify(await (${expr})))()`).then((s) => (s === undefined ? undefined : JSON.parse(s)));
-  const close = () => { try { ws.close(); } catch { /* noop */ } chrome.kill('SIGKILL'); };
+  const close = () => { try { ws.close(); } catch { /* noop */ } killChrome(chrome); };
   /** Load another URL in the same browser (same profile, so IndexedDB carries over); resolves once its `__p` exists. */
   const navigate = async (next) => {
     await cdp.send('Page.navigate', { url: next });
@@ -1142,6 +1164,278 @@ async function offscreenSizeMeasure(pages) {
   fs.writeFileSync(path.join(OUT, 'w60-offscreen.json'), JSON.stringify({ fill: r, timing }, null, 2));
 }
 
+/**
+ * W61: probe layouts at an equal memory budget (examples/shared/probeLayouts.ts) on examples/ssr
+ * `?probeLayout=`: every layout on rooms, offscreen and the showcase's Sponza (when its assets are
+ * there) bakes and renders with no GPU errors; the non-shipped layouts' atlases are within 10 % of
+ * the budget and equal to the plan; the debug views' volume weights sum to the composite's own
+ * coverage (core's walk, so the views can't drift from the lookup); the views and the volume overlay
+ * render. Then WebGPU's default 256 array layers per atlas: 41 probes + the environment at one size
+ * bake, 42 throw the bake's own error (and the page keeps its set); 42 in an atlas without the
+ * environment bake, 43 throw.
+ */
+const PROBE_LAYOUT_SCENES = [['rooms', 'default'], ['offscreen', 'default'], ['showcaseSponza', 'courtyard']];
+/** Page-side: px stats of the views of the current set (probeCheck max, probeData count mean / max). */
+const LAYOUT_VIEW_STATS = `async () => {
+  const p = window.__p;
+  const px = async (u) => { const i = new Image(); i.src = u; await i.decode(); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+  const mark = (m) => { window.__w61 = m; };
+  mark('check view'); p.setView('probeCheck'); await p.step(2); mark('check shot'); const C = await px(await p.shot());
+  mark('data view'); p.setView('probeData'); await p.step(2); mark('data shot'); const D = await px(await p.shot());
+  mark('stats');
+  let checkMax = 0, geo = 0, sum = 0, max = 0, env = 0; const seen = new Set();
+  for (let k = 0; k < D.length; k += 4) {
+    checkMax = Math.max(checkMax, C[k]);
+    if (D[k] === 0) continue; // background
+    geo++; const n = D[k + 1]; sum += n; max = Math.max(max, n); if (n === 0) env++; seen.add(D[k] - 1);
+  }
+  // the shots stay in the page (window.__w61shots) and come back one per call: several Sponza PNGs in one
+  // CDP reply (~5 MB) never arrived (W61: the page reached the end, the evaluation never returned)
+  window.__w61shots = {};
+  for (const v of ['final', 'probeIndex', 'probeCount']) { mark('shot ' + v); p.setView(v); await p.step(2); window.__w61shots[v] = await p.shot(); }
+  mark('done');
+  p.setView('final');
+  return { checkMax, geo, countMean: geo ? sum / geo : 0, countMax: max, envOnly: env, dominantSeen: seen.size };
+}`;
+async function probeLayoutChecks(pages) {
+  console.log('examples/ssr ?probeLayout (W61):');
+  const sponza = await fetch(`http://127.0.0.1:${PORT}/assets/manifest.json`).then((r) => r.json()).then((l) => l.some((a) => a.dir === 'Sponza')).catch(() => false);
+  const only = process.env.W61_SCENES?.split(',');
+  for (const [scene, pose] of PROBE_LAYOUT_SCENES) {
+    if (only && !only.includes(scene)) continue;
+    if (scene === 'showcaseSponza' && !sponza) { console.log('  (no Sponza assets: showcaseSponza skipped)'); continue; }
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&probeLayout=shipped&probeVolumes=1&scene=${scene}&pose=${pose}`);
+    pages.push(p);
+    const before = results.logs.length;
+    const budget = await p.T('window.__p.layoutBudget');
+    console.log(`  ${scene}: page ready (${new Date().toISOString().slice(11, 19)})`);
+    for (const name of await p.T('window.__p.layoutNames()')) {
+      const t0 = Date.now();
+      const r = await p.T(`window.__p.setProbeLayout('${name}')`);
+      const t1 = Date.now();
+      const v = await p.T(`(${LAYOUT_VIEW_STATS})()`);
+      if (process.env.W61_VERBOSE) console.log(`  ${scene} ${name}: bake + first frame ${((t1 - t0) / 1000).toFixed(1)} s, views ${((Date.now() - t1) / 1000).toFixed(1)} s`);
+      for (const k of ['final', 'probeIndex', 'probeCount']) savePng(`w61-${scene}-${name}-${k}.png`, await p.T(`window.__w61shots.${k}`));
+      const errs = (await p.T('window.__p.gpuErrors')).length;
+      const share = r.bytes / budget - 1;
+      const memOk = name === 'shipped' || Math.abs(share) <= 0.1;
+      check(`probe layout ${scene} '${name}': bakes and renders, ${name === 'shipped' ? 'the scene\'s own set' : 'atlases within 10 % of the budget'}, views' weights = the lookup's coverage`,
+        errs === 0 && r.bytes === r.planned && memOk && v.checkMax <= 13 && v.geo > 1000 && v.countMax >= 1,
+        `${r.probes} probes (${r.description}), ${(r.bytes / 1e6).toFixed(2)} MB (plan ${(r.planned / 1e6).toFixed(2)}, budget ${(budget / 1e6).toFixed(2)}, ${(share * 100).toFixed(1)} %), bake ${r.ms.toFixed(0)} ms; `
+        + `|sum - coverage| x 50 max ${v.checkMax} / 255; volumes per px mean ${v.countMean.toFixed(2)}, max ${v.countMax}, env-only px ${v.envOnly}; ${v.dominantSeen} probes dominant somewhere${errs ? `; ${errs} GPU errors` : ''}`);
+    }
+    if (scene === 'rooms') {
+      // WebGPU's default maxTextureArrayLayers (256): 6 layers per cube, so 42 cubes per atlas, the environment one of them in the set default's
+      const limit = await p.T(`(async () => {
+        const p = window.__p, lim = p.renderer.backend.device.limits.maxTextureArrayLayers;
+        const grid = (n, res) => Array.from({ length: n }, (_, i) => ({ position: [-7.5 + (i % 8) * 2, 2.5, -3.5 + Math.floor(i / 8) * 1.4], influenceSize: [2, 5, 1.4], blendDistance: 0.2, resolution: res }));
+        const tryBake = async (n, res, setRes) => { try { const b = await p.setProbeVolumes(grid(n, res), { resolution: setRes }); return { ok: true, probes: b.probes }; } catch (e) { return { ok: false, error: String(e.message ?? e).slice(0, 160), probes: p.probes?.bakedProbes.length ?? 0 }; } };
+        const out = { lim, d41: await tryBake(41, 128, 128), d42: await tryBake(42, 128, 128), o42: await tryBake(42, 128, 256), o43: await tryBake(43, 128, 256) };
+        await p.setProbeLayout('shipped'); await p.step(2); out.after = p.probes.bakedProbes.length;
+        return out; })()`);
+      check('probe sets at the array-layer limit: 41 + environment at one size bake, 42 throw a clear error; 42 in an atlas of their own bake, 43 throw (W61)',
+        limit.d41.ok && limit.d41.probes === 41 && !limit.d42.ok && /array layers/.test(limit.d42.error) && limit.o42.ok && !limit.o43.ok && /array layers/.test(limit.o43.error) && limit.after === 3,
+        `maxTextureArrayLayers ${limit.lim}; 41 x 128 (env 128): ${limit.d41.ok ? 'ok' : limit.d41.error}; 42 x 128 (env 128): ${limit.d42.ok ? 'baked' : `"${limit.d42.error}"`}, page kept its ${limit.d42.probes}; `
+        + `42 x 128 (env 256): ${limit.o42.ok ? 'ok' : limit.o42.error}; 43 x 128 (env 256): ${limit.o43.ok ? 'baked' : 'throws'}; shipped re-baked after: ${limit.after}`);
+    }
+    const bad = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    check(`probe layouts ${scene}: no validation errors or exceptions`, bad.length === 0, bad.slice(0, 2).join(' | '));
+    p.close();
+    pages.splice(pages.indexOf(p), 1);
+  }
+}
+
+/**
+ * W61 measurement (`--only probe-layouts-measure`): per scene, layout and pose on examples/ssr at
+ * 960x540, denoise off, hit colour 'current':
+ *  - error of the RT-off `final` against `?rt=1` over the px RT traced to a hit and that the RT frame
+ *    shows lit (luma > 10 / 255: a traced hit on a metal or mirror is black, D3513). The traced hits are
+ *    shaded by one fixed set (the scene's shipped volumes, all at 256 px: one atlas, so D4702 can't drop
+ *    any) for every layout, so the reference moves only with the lit image both frames share;
+ *  - seams: the same error split into px in a blend band (>= 2 volumes, or within 2 px of a change of
+ *    dominant volume) and the rest; the gradient excess of RT-off over RT (mean |grad luma| difference)
+ *    in the band; and the probe term's own gradient (view probeSpecular, glossy px) in the band / out of it;
+ *  - volumes blended per px (mean, p99, max, histogram) over geometry;
+ * plus bake ms (2 bounces, wall clock, 3 bakes) and GPU ms at 1920x1080, RT off, loop stopped (three's
+ * passes, 30 frames, 3 repeats; the probe-free frame for the lookup's share; the core passes).
+ * Sponza also against the path tracer on the showcase compare page ('probes' = the probe term alone,
+ * 'ours-denoised' = SSR + probes with RT off, both vs 64 spp + OIDN over the glossy px).
+ * JSON to out/w61-probe-layouts.json (merged per scene; W61_SCENES=rooms,offscreen and
+ * W61_PARTS=error,timing,pt pick), contact sheets to out/w61-<scene>-<pose>-layouts.jpg.
+ */
+const PROBE_LAYOUT_MEASURE = {
+  rooms: ['default', 'table', 'doorway'],
+  offscreen: ['default', 'mirror'],
+  showcaseSponza: ['courtyard', 'low', 'aisle'],
+};
+const PROBE_LAYOUT_VARIANTS = [
+  ['shipped'], ['few'], ['medium'], ['many'], ['manyCell'], ['mixed'], ['many', 0.05], ['many', 0.1], ['many', 0.5], ['medium', 0.1],
+];
+const LAYOUT_MEASURE = `async (poses, variants) => {
+  const p = window.__p;
+  const px = async (u) => { const i = new Image(); i.src = u; await i.decode(); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+  const shotOf = async (view, n = 3) => { p.setView(view); await p.step(n); return p.shot(); };
+  p.setHitColor('current'); p.setDenoise(false);
+  const ref = await p.setTraceProbes(p.kit.probes.map((v) => ({ ...v, resolution: 256 })), { resolution: 256 });
+  const W = 960, H = 540, L = (d, k) => 0.2126 * d[k] + 0.7152 * d[k + 1] + 0.0722 * d[k + 2];
+  const grad = (d) => { const g = new Float32Array(W * H); for (let y = 0; y < H - 1; y++) for (let x = 0; x < W - 1; x++) { const k = (y * W + x) * 4; g[y * W + x] = Math.hypot(L(d, k + 4) - L(d, k), L(d, k + W * 4) - L(d, k)); } return g; };
+  const out = { reference: ref, rows: [] }, sheets = {};
+  for (const [name, blend] of variants) {
+    const baked = await p.setProbeLayout(name, blend ?? 0.25);
+    const bakes = [baked.ms];
+    for (let i = 0; i < 2; i++) bakes.push((await p.setProbeLayout(name, blend ?? 0.25)).ms);
+    bakes.sort((a, b) => a - b);
+    const row = { layout: name, blend: baked.blend, spacing: baked.spacing, description: baked.description, probes: baked.probes, sizes: baked.sizes, bytes: baked.bytes, bakeMs: bakes[1], bakes, poses: {} };
+    for (const pose of poses) {
+      p.setPose(pose);
+      p.setRT(true);
+      const S = await px(await shotOf('rtSource'));
+      const Ru = await shotOf('final'), R = await px(Ru);
+      p.setRT(false);
+      const Fu = await shotOf('final'), F = await px(Fu);
+      const D = await px(await shotOf('probeData'));
+      const PSu = await shotOf('probeSpecular'), PS = await px(PSu);
+      // masks: traced hits (rtSource blue / cyan), lit in the RT frame; geometry; band
+      const traced = new Uint8Array(W * H), band = new Uint8Array(W * H);
+      let tracedPx = 0, darkPx = 0;
+      for (let i = 0; i < W * H; i++) {
+        const k = i * 4, isHit = S[k + 2] > 200 && S[k] < 80 && (S[k + 1] < 140 || S[k + 1] > 200);
+        if (!isHit) continue;
+        tracedPx++;
+        if (L(R, k) > 10) traced[i] = 1; else darkPx++;
+      }
+      const hist = [0, 0, 0, 0, 0, 0, 0]; let geo = 0, csum = 0, cmax = 0; const counts = [];
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const i = y * W + x, k = i * 4;
+        if (D[k] === 0) continue;
+        geo++; const n = D[k + 1]; csum += n; cmax = Math.max(cmax, n); hist[Math.min(6, n)]++; counts.push(n);
+        let edge = n >= 2;
+        for (let dy = -2; dy <= 2 && !edge; dy++) for (let dx = -2; dx <= 2 && !edge; dx++) {
+          const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+          const kk = (yy * W + xx) * 4; if (D[kk] !== 0 && D[kk] !== D[k]) edge = true;
+        }
+        band[i] = edge ? 1 : 0;
+      }
+      counts.sort((a, b) => a - b);
+      const gF = grad(F), gR = grad(R), gP = grad(PS);
+      const acc = () => ({ n: 0, d: 0, g: 0 });
+      const inB = acc(), outB = acc(), pIn = { n: 0, g: 0 }, pOut = { n: 0, g: 0 };
+      for (let i = 0; i < W * H; i++) {
+        const k = i * 4;
+        if (traced[i]) {
+          const a = band[i] ? inB : outB;
+          a.n++; a.d += (Math.abs(F[k] - R[k]) + Math.abs(F[k + 1] - R[k + 1]) + Math.abs(F[k + 2] - R[k + 2])) / 3; a.g += gF[i] - gR[i];
+        }
+        if (D[k] !== 0 && D[k + 2] < 114) { const b = band[i] ? pIn : pOut; b.n++; b.g += gP[i]; }
+      }
+      const n = inB.n + outB.n;
+      row.poses[pose] = {
+        tracedPx, darkPx, maskPx: n, mad: n ? (inB.d + outB.d) / n : null,
+        bandShare: n ? inB.n / n : null, bandMad: inB.n ? inB.d / inB.n : null, restMad: outB.n ? outB.d / outB.n : null,
+        bandGradExcess: inB.n ? inB.g / inB.n : null, restGradExcess: outB.n ? outB.g / outB.n : null,
+        probeGradBand: pIn.n ? pIn.g / pIn.n : null, probeGradRest: pOut.n ? pOut.g / pOut.n : null,
+        volumesPerPx: { mean: geo ? csum / geo : 0, p99: counts[Math.floor(counts.length * 0.99)] ?? 0, max: cmax, hist },
+      };
+      if (blend === undefined && pose === poses[0]) {
+        const I = await shotOf('probeIndex'), C = await shotOf('probeCount');
+        (sheets[pose] ??= { ref: Ru, rows: [] }).rows.push({ label: name + ' - ' + baked.description + ' - ' + (baked.bytes / 1e6).toFixed(1) + ' MB', urls: [Fu, PSu, I, C] });
+      }
+    }
+    out.rows.push(row);
+  }
+  // contact sheet: the RT reference, then one row per layout: RT-off final, probe term, dominant probe, volumes per px
+  out.sheets = {};
+  for (const [pose, sh] of Object.entries(sheets)) {
+    const cw = 480, ch = 270, cols = 4, lh = 18, c = new OffscreenCanvas(cw * cols, (ch + lh) * (sh.rows.length + 1)), g = c.getContext('2d');
+    g.fillStyle = '#111'; g.fillRect(0, 0, c.width, c.height); g.font = '13px sans-serif'; g.fillStyle = '#ddd';
+    const draw = async (u, x, y) => { const i = new Image(); i.src = u; await i.decode(); g.drawImage(i, x, y, cw, ch); };
+    g.fillText('reference: ?rt=1 (hits lit by the shipped set at 256 px) | columns: RT-off final, probeSpecular (probe term), probeIndex, probeCount', 6, 13);
+    await draw(sh.ref, 0, lh);
+    for (let r = 0; r < sh.rows.length; r++) {
+      const y = (ch + lh) * (r + 1);
+      g.fillStyle = '#ddd'; g.fillText(sh.rows[r].label, 6, y + 13);
+      for (let k = 0; k < cols; k++) await draw(sh.rows[r].urls[k], k * cw, y + lh);
+    }
+    const blob = await c.convertToBlob({ type: 'image/jpeg', quality: 0.82 });
+    (window.__w61sheets ??= {})[pose] = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+    out.sheets[pose] = true;
+  }
+  await p.setTraceProbes(null);
+  return out;
+}`;
+/** GPU ms at the page's size, RT off: three's passes (median of 30, 3 repeats), the probe-free frame, the core passes. */
+const LAYOUT_TIMING = `async (variants, pose) => {
+  const p = window.__p; p.setDenoise(false); p.setRT(false); p.setPose(pose); p.setView('final');
+  const rows = [];
+  const rep = async () => { const v = []; for (let i = 0; i < 3; i++) v.push((await p.renderTime(30)).ms); v.sort((a, b) => a - b); return v; };
+  for (const [name, blend] of variants) {
+    await p.setProbeLayout(name, blend ?? 0.25);
+    await p.step(4);
+    const render = await rep();
+    p.setProbesEnabled(false); await p.step(4); const free = await rep(); p.setProbesEnabled(true); await p.step(4);
+    const core = await p.time(30);
+    rows.push({ layout: name, blend: blend ?? null, render, probeFree: free, lookup: render[1] - free[1], core: Object.values(core.ms).reduce((a, b) => a + b, 0) });
+  }
+  return rows;
+}`;
+async function probeLayoutMeasure(pages) {
+  fs.mkdirSync(OUT, { recursive: true });
+  const file = path.join(OUT, 'w61-probe-layouts.json');
+  const all = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+  const want = process.env.W61_SCENES?.split(',') ?? Object.keys(PROBE_LAYOUT_MEASURE);
+  const parts = process.env.W61_PARTS?.split(',') ?? ['error', 'timing', 'pt'];
+  const save = () => fs.writeFileSync(file, JSON.stringify(all, null, 1));
+  for (const scene of want) {
+    const poses = PROBE_LAYOUT_MEASURE[scene];
+    all[scene] ??= {};
+    if (parts.includes('error')) {
+      const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&probeLayout=shipped&scene=${scene}`);
+      pages.push(p);
+      const t0 = Date.now();
+      const r = await p.T(`(${LAYOUT_MEASURE})(${JSON.stringify(poses)}, ${JSON.stringify(PROBE_LAYOUT_VARIANTS)})`);
+      // one CDP reply per sheet (several MB in one reply never arrived, see probeLayoutChecks)
+      for (const pose of Object.keys(r.sheets)) { const u = await p.T(`window.__w61sheets[${JSON.stringify(pose)}]`); fs.writeFileSync(path.join(OUT, `w61-${scene}-${pose}-layouts.jpg`), Buffer.from(u.split(',')[1], 'base64')); }
+      delete r.sheets;
+      all[scene].error = r; save();
+      for (const row of r.rows) {
+        console.log(`  ${scene} ${row.layout}${row.blend != null ? ` b ${row.blend}` : ''}: ${row.probes} probes, ${(row.bytes / 1e6).toFixed(1)} MB, bake ${row.bakeMs.toFixed(0)} ms | ` + poses.map((q) => {
+          const v = row.poses[q];
+          return `${q} mad ${v.mad?.toFixed(2)} (${v.maskPx} px; band ${(100 * v.bandShare).toFixed(0)}% ${v.bandMad?.toFixed(2)} / rest ${v.restMad?.toFixed(2)}; grad+ ${v.bandGradExcess?.toFixed(2)}; vol/px ${v.volumesPerPx.mean.toFixed(2)} max ${v.volumesPerPx.max})`;
+        }).join(' | '));
+      }
+      console.log(`  (${((Date.now() - t0) / 1000).toFixed(0)} s)`);
+      p.close(); pages.splice(pages.indexOf(p), 1);
+    }
+    if (parts.includes('timing')) {
+      const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&w=1920&h=1080&probeLayout=shipped&scene=${scene}`);
+      pages.push(p);
+      const r = await p.T(`(${LAYOUT_TIMING})(${JSON.stringify(PROBE_LAYOUT_VARIANTS.slice(0, 6))}, ${JSON.stringify(poses[0])})`);
+      all[scene].timing = r; save();
+      for (const t of r) console.log(`  ${scene} 1080p ${t.layout}: three's passes ${t.render.map((x) => x.toFixed(2)).join(' / ')} ms, probe-free ${t.probeFree.map((x) => x.toFixed(2)).join(' / ')}, lookup ${t.lookup.toFixed(2)}, core ${t.core.toFixed(2)}`);
+      p.close(); pages.splice(pages.indexOf(p), 1);
+    }
+    if (parts.includes('pt') && scene === 'showcaseSponza') {
+      all[scene].pt = {};
+      for (const pose of ['courtyard', 'low']) {
+        const p = await openPage(`http://127.0.0.1:${PORT}/showcase/compare.html?manual&scene=sponza&pose=${pose}&left=probes&right=pathtraced`);
+        pages.push(p);
+        if (!(await p.T('window.__p.entries()')).length) { console.log('  (no showcase assets: path tracer skipped)'); p.close(); break; }
+        await p.T('window.__p.freeze(true)');
+        const rows = [];
+        for (const [name, blend] of PROBE_LAYOUT_VARIANTS.slice(0, 6)) {
+          await p.T(`(window.__p.setParam('probeLayout', ${JSON.stringify(name === 'shipped' ? null : name)}), window.__p.setParam('probeBlend', ${JSON.stringify(String(blend ?? 0.25))}), window.__p.drop('probes'), window.__p.drop('ours-denoised'), true)`);
+          const m = await p.T("window.__p.measure({ samples: 64, warmup: 24, frames: 8, methods: ['probes', 'ours-denoised'], orbitFrames: 0 })");
+          rows.push({ layout: name, glossyPixels: m.glossyPixels, referenceSamples: m.referenceSamples, rows: m.rows.map(({ method, mad, bias, stdMean, info }) => ({ method, mad, bias, stdMean, probes: info?.probes, probeLayout: info?.probeLayout })) });
+          console.log(`  sponza vs path traced ${pose} ${name}: ${m.glossyPixels} glossy px, ${m.rows.map((x) => `${x.method} MAD ${x.mad.toFixed(2)} bias ${x.bias.toFixed(2)} (${x.info?.probes} probes)`).join(', ')}`);
+          if (name === 'shipped') savePng(`w61-sponza-${pose}-pathtraced.png`, await p.T("window.__p.shotOf('pathtraced')"));
+        }
+        all[scene].pt[pose] = rows; save();
+        p.close(); pages.splice(pages.indexOf(p), 1);
+      }
+    }
+  }
+}
+
 async function offscreenFillChecks(pages) {
   const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=offscreen`);
   pages.push(p);
@@ -1758,7 +2052,7 @@ async function pixi3dChecks(pages) {
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull ? 3_600_000 : 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -2061,6 +2355,8 @@ async function main() {
       }
     }
     if (runs('ssr-rt')) await ssrRtChecks(pages);
+    if (runs('probe-layouts')) await probeLayoutChecks(pages); // W61
+    if (only === 'probe-layouts-measure') await probeLayoutMeasure(pages); // W61: the measurement (minutes), JSON to out/w61-probe-layouts.json
     if (only === 'offscreen-sizes') await offscreenSizeMeasure(pages); // W60 (D4700): offscreen per-probe sizes, JSON to out/w60-offscreen.json
     if (only === 'rt-hit-atlases') { await rtHitAtlasChecks(pages); await rtHitAtlasChecks(pages, 'pmndrs'); } // W47 (D4702): RT hits over a mixed-size set alone (also part of ssr-rt / ssr-rt-bvh)
     if (runs('babylon')) await babylonChecks(pages);

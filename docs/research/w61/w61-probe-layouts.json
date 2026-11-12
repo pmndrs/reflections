@@ -1,0 +1,3358 @@
+{
+ "rooms": {
+  "error": {
+   "reference": {
+    "probes": 3,
+    "sizes": [
+     256
+    ]
+   },
+   "rows": [
+    {
+     "layout": "shipped",
+     "blend": null,
+     "spacing": null,
+     "description": "the scene's own 3 probes",
+     "probes": 3,
+     "sizes": [
+      256
+     ],
+     "bytes": 16773120,
+     "bakeMs": 13.899999991059303,
+     "bakes": [
+      11.699999988079071,
+      13.899999991059303,
+      14.299999997019768
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 46870,
+       "darkPx": 307,
+       "maskPx": 46563,
+       "mad": 13.357186321041862,
+       "bandShare": 0.009449562957713206,
+       "bandMad": 8.270454545454545,
+       "restMad": 13.405712262139762,
+       "bandGradExcess": 2.20368179903916,
+       "restGradExcess": -0.558333305492708,
+       "probeGradBand": 5.291158745447373,
+       "probeGradRest": 2.2322743887579315,
+       "volumesPerPx": {
+        "mean": 1.048966049382716,
+        "p99": 2,
+        "max": 2,
+        "hist": [
+         0,
+         493016,
+         25384,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      },
+      "table": {
+       "tracedPx": 47549,
+       "darkPx": 0,
+       "maskPx": 47549,
+       "mad": 6.697105442105351,
+       "bandShare": 0,
+       "bandMad": null,
+       "restMad": 6.697105442105351,
+       "bandGradExcess": null,
+       "restGradExcess": -0.8488727666803856,
+       "probeGradBand": null,
+       "probeGradRest": 0.7793118991267952,
+       "volumesPerPx": {
+        "mean": 1,
+        "p99": 1,
+        "max": 1,
+        "hist": [
+         0,
+         518400,
+         0,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      },
+      "doorway": {
+       "tracedPx": 76958,
+       "darkPx": 3315,
+       "maskPx": 73643,
+       "mad": 26.40272214150276,
+       "bandShare": 0.01757125592384884,
+       "bandMad": 18.951571354971662,
+       "restMad": 26.535989900805188,
+       "bandGradExcess": -4.644507995182634,
+       "restGradExcess": -1.1204134853686754,
+       "probeGradBand": 12.166562983460741,
+       "probeGradRest": 2.5359216517548018,
+       "volumesPerPx": {
+        "mean": 1.2214081790123457,
+        "p99": 3,
+        "max": 3,
+        "hist": [
+         0,
+         408845,
+         104332,
+         5223,
+         0,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "few",
+     "blend": null,
+     "spacing": null,
+     "description": "2 x 512 px, hand placed",
+     "probes": 2,
+     "sizes": [
+      128,
+      512
+     ],
+     "bytes": 34599936,
+     "bakeMs": 24.799999997019768,
+     "bakes": [
+      23.5,
+      24.799999997019768,
+      25.599999994039536
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 46860,
+       "darkPx": 307,
+       "maskPx": 46553,
+       "mad": 13.313592392899977,
+       "bandShare": 0.006487229609262561,
+       "bandMad": 9.601545253863137,
+       "restMad": 13.337830533394003,
+       "bandGradExcess": 2.1143550604631174,
+       "restGradExcess": -0.5358278166742497,
+       "probeGradBand": 11.818632018916746,
+       "probeGradRest": 2.2382912309631813,
+       "volumesPerPx": {
+        "mean": 1.040594135802469,
+        "p99": 2,
+        "max": 2,
+        "hist": [
+         0,
+         497356,
+         21044,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      },
+      "table": {
+       "tracedPx": 47707,
+       "darkPx": 0,
+       "maskPx": 47707,
+       "mad": 6.685734448473613,
+       "bandShare": 0,
+       "bandMad": null,
+       "restMad": 6.685734448473613,
+       "bandGradExcess": null,
+       "restGradExcess": -0.7167925516680465,
+       "probeGradBand": null,
+       "probeGradRest": 0.7734746987143223,
+       "volumesPerPx": {
+        "mean": 1,
+        "p99": 1,
+        "max": 1,
+        "hist": [
+         0,
+         518400,
+         0,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      },
+      "doorway": {
+       "tracedPx": 77156,
+       "darkPx": 3305,
+       "maskPx": 73851,
+       "mad": 26.39874883210867,
+       "bandShare": 0.009207729076112713,
+       "bandMad": 21.784803921568628,
+       "restMad": 26.441627602921795,
+       "bandGradExcess": -5.897855152540347,
+       "restGradExcess": -1.2166876451840016,
+       "probeGradBand": 19.846390185465836,
+       "probeGradRest": 2.604273271178792,
+       "volumesPerPx": {
+        "mean": 1.2081770833333334,
+        "p99": 2,
+        "max": 2,
+        "hist": [
+         0,
+         410481,
+         107919,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "medium",
+     "blend": 0.25,
+     "spacing": 4,
+     "description": "8 x 256 px grid",
+     "probes": 8,
+     "sizes": [
+      128,
+      256
+     ],
+     "bytes": 34593792,
+     "bakeMs": 27,
+     "bakes": [
+      26.099999994039536,
+      27,
+      30.099999994039536
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 47707,
+       "darkPx": 309,
+       "maskPx": 47398,
+       "mad": 15.88434111143916,
+       "bandShare": 0.38383476096037805,
+       "bandMad": 12.48399567599262,
+       "restMad": 18.00255663984453,
+       "bandGradExcess": -2.11922300709712,
+       "restGradExcess": -0.8335051790863579,
+       "probeGradBand": 3.088904347057933,
+       "probeGradRest": 1.809911398718694,
+       "volumesPerPx": {
+        "mean": 1.3972569444444445,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         359620,
+         134207,
+         1988,
+         22585,
+         0,
+         0
+        ]
+       }
+      },
+      "table": {
+       "tracedPx": 48047,
+       "darkPx": 0,
+       "maskPx": 48047,
+       "mad": 8.663537785918031,
+       "bandShare": 0.5862592877807147,
+       "bandMad": 9.653010508378518,
+       "restMad": 7.26148196589353,
+       "bandGradExcess": -2.0353049426003977,
+       "restGradExcess": -0.8169131298331201,
+       "probeGradBand": 1.305966784569299,
+       "probeGradRest": 0.48048039096604095,
+       "volumesPerPx": {
+        "mean": 1.4695389660493827,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         321764,
+         170148,
+         6203,
+         20285,
+         0,
+         0
+        ]
+       }
+      },
+      "doorway": {
+       "tracedPx": 76842,
+       "darkPx": 3324,
+       "maskPx": 73518,
+       "mad": 29.79135268460308,
+       "bandShare": 0.6354362197012976,
+       "bandMad": 41.55103890173221,
+       "restMad": 9.2941695893339,
+       "bandGradExcess": -0.8562996525867002,
+       "restGradExcess": -2.392388897086853,
+       "probeGradBand": 4.407099745286292,
+       "probeGradRest": 0.8711208686888052,
+       "volumesPerPx": {
+        "mean": 1.769639274691358,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         246301,
+         193338,
+         30640,
+         48121,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "many",
+     "blend": 0.25,
+     "spacing": 2,
+     "description": "32 x 128 px grid",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 41.20000000298023,
+     "bakes": [
+      40.900000005960464,
+      41.20000000298023,
+      43.70000000298023
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 47125,
+       "darkPx": 344,
+       "maskPx": 46781,
+       "mad": 13.266660966346674,
+       "bandShare": 0.4151685513349437,
+       "bandMad": 11.256547557752429,
+       "restMad": 14.693629153112175,
+       "bandGradExcess": -1.6124242489306866,
+       "restGradExcess": -1.1697094279420952,
+       "probeGradBand": 2.8143299966611197,
+       "probeGradRest": 1.921751835122409,
+       "volumesPerPx": {
+        "mean": 1.5568287037037036,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         301439,
+         170302,
+         21619,
+         25040,
+         0,
+         0
+        ]
+       }
+      },
+      "table": {
+       "tracedPx": 47485,
+       "darkPx": 0,
+       "maskPx": 47485,
+       "mad": 8.047446562072285,
+       "bandShare": 0.4054332947246499,
+       "bandMad": 9.186820416926386,
+       "restMad": 7.27051086789699,
+       "bandGradExcess": -0.9751405525019562,
+       "restGradExcess": -1.2233869844855245,
+       "probeGradBand": 1.2742966646091003,
+       "probeGradRest": 0.6666633838873864,
+       "volumesPerPx": {
+        "mean": 1.7091068672839507,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         315362,
+         113643,
+         14227,
+         75168,
+         0,
+         0
+        ]
+       }
+      },
+      "doorway": {
+       "tracedPx": 77137,
+       "darkPx": 3313,
+       "maskPx": 73824,
+       "mad": 25.55209687906372,
+       "bandShare": 0.6076614651061986,
+       "bandMad": 36.366956457125895,
+       "restMad": 8.801834461170152,
+       "bandGradExcess": -0.3375279418915793,
+       "restGradExcess": -2.9108020003658406,
+       "probeGradBand": 3.727763610456783,
+       "probeGradRest": 0.9973826976406641,
+       "volumesPerPx": {
+        "mean": 2.230848765432099,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         155836,
+         184567,
+         80486,
+         97511,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "manyCell",
+     "blend": 0.25,
+     "spacing": 2,
+     "description": "32 x 128 px grid, each projected onto its own cell",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 47.79999999701977,
+     "bakes": [
+      46.79999999701977,
+      47.79999999701977,
+      48.5
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 46661,
+       "darkPx": 354,
+       "maskPx": 46307,
+       "mad": 14.42552241921669,
+       "bandShare": 0.41572548426803724,
+       "bandMad": 13.78013263380254,
+       "restMad": 14.884732899664941,
+       "bandGradExcess": -0.34469946490309566,
+       "restGradExcess": -0.4884248970708155,
+       "probeGradBand": 5.959423466521068,
+       "probeGradRest": 3.124504805230849,
+       "volumesPerPx": {
+        "mean": 1.5568287037037036,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         301439,
+         170302,
+         21619,
+         25040,
+         0,
+         0
+        ]
+       }
+      },
+      "table": {
+       "tracedPx": 47868,
+       "darkPx": 0,
+       "maskPx": 47868,
+       "mad": 7.940593576780602,
+       "bandShare": 0.40546920698587785,
+       "bandMad": 8.257526577017476,
+       "restMad": 7.724445693805181,
+       "bandGradExcess": -0.2617912894518446,
+       "restGradExcess": -1.2960297602007829,
+       "probeGradBand": 2.736936842112714,
+       "probeGradRest": 1.2005104398033624,
+       "volumesPerPx": {
+        "mean": 1.7091068672839507,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         315362,
+         113643,
+         14227,
+         75168,
+         0,
+         0
+        ]
+       }
+      },
+      "doorway": {
+       "tracedPx": 77407,
+       "darkPx": 3428,
+       "maskPx": 73979,
+       "mad": 26.1605906180584,
+       "bandShare": 0.6063342299841847,
+       "bandMad": 36.841054336841,
+       "restMad": 9.710263365724776,
+       "bandGradExcess": -0.07489100406940274,
+       "restGradExcess": -2.773370830990179,
+       "probeGradBand": 5.160219374236073,
+       "probeGradRest": 1.3341853702540927,
+       "volumesPerPx": {
+        "mean": 2.230848765432099,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         155836,
+         184567,
+         80486,
+         97511,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "mixed",
+     "blend": null,
+     "spacing": null,
+     "description": "a 256 px floor slab per room (r 0.12), 24 x 128 px grid",
+     "probes": 26,
+     "sizes": [
+      128,
+      256
+     ],
+     "bytes": 34575360,
+     "bakeMs": 37.900000005960464,
+     "bakes": [
+      36.70000000298023,
+      37.900000005960464,
+      47.79999999701977
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 46925,
+       "darkPx": 1232,
+       "maskPx": 45693,
+       "mad": 14.428905959337136,
+       "bandShare": 0.12446107718906615,
+       "bandMad": 22.7876443350331,
+       "restMad": 13.240680564581774,
+       "bandGradExcess": 0.1777807851841944,
+       "restGradExcess": -1.6680535762701978,
+       "probeGradBand": 13.219237909383168,
+       "probeGradRest": 1.2030264982571732,
+       "volumesPerPx": {
+        "mean": 1.3712172067901234,
+        "p99": 4,
+        "max": 5,
+        "hist": [
+         0,
+         361643,
+         136603,
+         4839,
+         15102,
+         213,
+         0
+        ]
+       }
+      },
+      "table": {
+       "tracedPx": 47356,
+       "darkPx": 553,
+       "maskPx": 46803,
+       "mad": 10.21433811222913,
+       "bandShare": 0.1585582120804222,
+       "bandMad": 9.266765485334417,
+       "restMad": 10.392895231323784,
+       "bandGradExcess": -2.3823985351841173,
+       "restGradExcess": -1.5067408647946134,
+       "probeGradBand": 4.3530043915586,
+       "probeGradRest": 0.6558739878696668,
+       "volumesPerPx": {
+        "mean": 1.2279841820987654,
+        "p99": 2,
+        "max": 3,
+        "hist": [
+         0,
+         401710,
+         115193,
+         1497,
+         0,
+         0,
+         0
+        ]
+       }
+      },
+      "doorway": {
+       "tracedPx": 77240,
+       "darkPx": 3313,
+       "maskPx": 73927,
+       "mad": 24.297333856371903,
+       "bandShare": 0.45255454705317405,
+       "bandMad": 42.78348676869106,
+       "restMad": 9.015459629529227,
+       "bandGradExcess": 0.2317925816118384,
+       "restGradExcess": -3.1146488437057975,
+       "probeGradBand": 6.359076057015065,
+       "probeGradRest": 1.470596309619588,
+       "volumesPerPx": {
+        "mean": 1.7994251543209876,
+        "p99": 4,
+        "max": 6,
+        "hist": [
+         0,
+         228183,
+         211104,
+         34309,
+         44660,
+         0,
+         144
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "many",
+     "blend": 0.05,
+     "spacing": 2,
+     "description": "32 x 128 px grid",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 41.900000005960464,
+     "bakes": [
+      38,
+      41.900000005960464,
+      43.099999994039536
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 47110,
+       "darkPx": 377,
+       "maskPx": 46733,
+       "mad": 13.680361486173076,
+       "bandShare": 0.15023644961804292,
+       "bandMad": 12.90020414945643,
+       "restMad": 13.81829170024156,
+       "bandGradExcess": -1.0590359221763455,
+       "restGradExcess": -1.1647256912434243,
+       "probeGradBand": 6.774878274614908,
+       "probeGradRest": 1.7376433621079592,
+       "volumesPerPx": {
+        "mean": 1.1199768518518518,
+        "p99": 2,
+        "max": 4,
+        "hist": [
+         0,
+         458447,
+         58560,
+         543,
+         850,
+         0,
+         0
+        ]
+       }
+      },
+      "table": {
+       "tracedPx": 46846,
+       "darkPx": 0,
+       "maskPx": 46846,
+       "mad": 9.666004923935287,
+       "bandShare": 0.12839943645135124,
+       "bandMad": 11.175782765308956,
+       "restMad": 9.44359269509292,
+       "bandGradExcess": -0.7818260417980198,
+       "restGradExcess": -1.3893662446313138,
+       "probeGradBand": 2.5590797478816807,
+       "probeGradRest": 0.7790718682295886,
+       "volumesPerPx": {
+        "mean": 1.0756828703703705,
+        "p99": 2,
+        "max": 4,
+        "hist": [
+         0,
+         480205,
+         37498,
+         355,
+         342,
+         0,
+         0
+        ]
+       }
+      },
+      "doorway": {
+       "tracedPx": 77322,
+       "darkPx": 3320,
+       "maskPx": 74002,
+       "mad": 26.33514859958699,
+       "bandShare": 0.05830923488554363,
+       "bandMad": 16.194515256855958,
+       "restMad": 26.963053845527902,
+       "bandGradExcess": -2.7800865062382956,
+       "restGradExcess": -1.1697783502180377,
+       "probeGradBand": 7.432290142782513,
+       "probeGradRest": 2.0186737753563877,
+       "volumesPerPx": {
+        "mean": 1.0929070216049384,
+        "p99": 2,
+        "max": 4,
+        "hist": [
+         0,
+         472503,
+         44130,
+         1268,
+         499,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "many",
+     "blend": 0.1,
+     "spacing": 2,
+     "description": "32 x 128 px grid",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 47.8999999910593,
+     "bakes": [
+      41.29999999701977,
+      47.8999999910593,
+      49.20000000298023
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 47107,
+       "darkPx": 376,
+       "maskPx": 46731,
+       "mad": 13.609167362136404,
+       "bandShare": 0.20404014465772186,
+       "bandMad": 12.147491697255745,
+       "restMad": 13.983860271713699,
+       "bandGradExcess": -0.9773387782630234,
+       "restGradExcess": -1.0548884475259475,
+       "probeGradBand": 5.177254258298314,
+       "probeGradRest": 1.7606235060539916,
+       "volumesPerPx": {
+        "mean": 1.2347164351851851,
+        "p99": 3,
+        "max": 4,
+        "hist": [
+         0,
+         405878,
+         106985,
+         1919,
+         3618,
+         0,
+         0
+        ]
+       }
+      },
+      "table": {
+       "tracedPx": 47723,
+       "darkPx": 0,
+       "maskPx": 47723,
+       "mad": 9.55227737848279,
+       "bandShare": 0.2328856107118161,
+       "bandMad": 11.302621318457216,
+       "restMad": 9.020896500860463,
+       "bandGradExcess": -0.6055294122052173,
+       "restGradExcess": -1.1499580575063608,
+       "probeGradBand": 1.9791849880969443,
+       "probeGradRest": 0.7298237115737672,
+       "volumesPerPx": {
+        "mean": 1.2278896604938272,
+        "p99": 2,
+        "max": 4,
+        "hist": [
+         0,
+         405344,
+         109683,
+         1664,
+         1709,
+         0,
+         0
+        ]
+       }
+      },
+      "doorway": {
+       "tracedPx": 77046,
+       "darkPx": 3315,
+       "maskPx": 73731,
+       "mad": 26.388556599892127,
+       "bandShare": 0.14265370061439558,
+       "bandMad": 24.433732648792702,
+       "restMad": 26.713819414782478,
+       "bandGradExcess": -1.5537506025825985,
+       "restGradExcess": -1.177816326525355,
+       "probeGradBand": 5.237778493334281,
+       "probeGradRest": 1.9376381466760653,
+       "volumesPerPx": {
+        "mean": 1.4408584104938271,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         330824,
+         159946,
+         14295,
+         13335,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "many",
+     "blend": 0.5,
+     "spacing": 2,
+     "description": "32 x 128 px grid",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 47.400000005960464,
+     "bakes": [
+      46.5,
+      47.400000005960464,
+      47.5
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 47096,
+       "darkPx": 327,
+       "maskPx": 46769,
+       "mad": 12.8570206760888,
+       "bandShare": 0.6838931771044923,
+       "bandMad": 10.514376530665299,
+       "restMad": 17.925302128427184,
+       "bandGradExcess": -1.501288531350133,
+       "restGradExcess": -1.0981818332276494,
+       "probeGradBand": 2.0443862119897878,
+       "probeGradRest": 2.3046731612178712,
+       "volumesPerPx": {
+        "mean": 2.261772762345679,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         156694,
+         193387,
+         44241,
+         124078,
+         0,
+         0
+        ]
+       }
+      },
+      "table": {
+       "tracedPx": 47799,
+       "darkPx": 0,
+       "maskPx": 47799,
+       "mad": 8.921232661771132,
+       "bandShare": 0.6925667901002113,
+       "bandMad": 9.70823264056709,
+       "restMad": 7.148327095383829,
+       "bandGradExcess": -1.2424624274951994,
+       "restGradExcess": -0.3008066046164492,
+       "probeGradBand": 1.0257237836384467,
+       "probeGradRest": 0.5635913556824889,
+       "volumesPerPx": {
+        "mean": 2.138589891975309,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         195513,
+         164265,
+         49886,
+         108736,
+         0,
+         0
+        ]
+       }
+      },
+      "doorway": {
+       "tracedPx": 77040,
+       "darkPx": 3320,
+       "maskPx": 73720,
+       "mad": 25.183374027853052,
+       "bandShare": 0.7876966901790559,
+       "bandMad": 29.85030452278025,
+       "restMad": 7.867931761548822,
+       "bandGradExcess": -0.8420156812292334,
+       "restGradExcess": -3.2809608297860313,
+       "probeGradBand": 3.102722623098077,
+       "probeGradRest": 1.1240705103689947,
+       "volumesPerPx": {
+        "mean": 2.59288387345679,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         107000,
+         138343,
+         131763,
+         141294,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "medium",
+     "blend": 0.1,
+     "spacing": 4,
+     "description": "8 x 256 px grid",
+     "probes": 8,
+     "sizes": [
+      128,
+      256
+     ],
+     "bytes": 34593792,
+     "bakeMs": 27.399999991059303,
+     "bakes": [
+      26.900000005960464,
+      27.399999991059303,
+      28.700000002980232
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 46861,
+       "darkPx": 309,
+       "maskPx": 46552,
+       "mad": 16.398307269290054,
+       "bandShare": 0.20815432204846193,
+       "bandMad": 13.795390436876506,
+       "restMad": 17.082542093935686,
+       "bandGradExcess": -1.9155495544571153,
+       "restGradExcess": -1.1998293797340849,
+       "probeGradBand": 5.874796864236786,
+       "probeGradRest": 1.7736540387866035,
+       "volumesPerPx": {
+        "mean": 1.1634510030864198,
+        "p99": 3,
+        "max": 4,
+        "hist": [
+         0,
+         444042,
+         68853,
+         635,
+         4870,
+         0,
+         0
+        ]
+       }
+      },
+      "table": {
+       "tracedPx": 47703,
+       "darkPx": 0,
+       "maskPx": 47703,
+       "mad": 8.753013437310054,
+       "bandShare": 0.225164035804876,
+       "bandMad": 9.761785060360616,
+       "restMad": 8.45986869397403,
+       "bandGradExcess": -1.7480138397550846,
+       "restGradExcess": -1.5125963702868013,
+       "probeGradBand": 2.9374258487697995,
+       "probeGradRest": 0.6036318154496246,
+       "volumesPerPx": {
+        "mean": 1.1572993827160494,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         453790,
+         55416,
+         1454,
+         7740,
+         0,
+         0
+        ]
+       }
+      },
+      "doorway": {
+       "tracedPx": 76864,
+       "darkPx": 3317,
+       "maskPx": 73547,
+       "mad": 31.207300547042692,
+       "bandShare": 0.4418671053883911,
+       "bandMad": 53.2961925862108,
+       "restMad": 13.719790169472347,
+       "bandGradExcess": 0.15130102191896957,
+       "restGradExcess": -2.8493143946339003,
+       "probeGradBand": 5.823961203599021,
+       "probeGradRest": 0.9511602597612703,
+       "volumesPerPx": {
+        "mean": 1.4579340277777777,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         309362,
+         191933,
+         5855,
+         11250,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    }
+   ]
+  },
+  "timing": [
+   {
+    "layout": "shipped",
+    "blend": null,
+    "render": [
+     5.397460000000001,
+     5.41017,
+     5.416752000000001
+    ],
+    "probeFree": [
+     5.0979220000000005,
+     5.099129,
+     5.099171
+    ],
+    "lookup": 0.31104100000000034,
+    "core": 0.8659
+   },
+   {
+    "layout": "few",
+    "blend": null,
+    "render": [
+     5.407249,
+     5.407503,
+     5.410918
+    ],
+    "probeFree": [
+     5.093297,
+     5.105421,
+     5.107424
+    ],
+    "lookup": 0.3020820000000004,
+    "core": 0.8549
+   },
+   {
+    "layout": "medium",
+    "blend": null,
+    "render": [
+     5.908365,
+     5.910659,
+     5.928245
+    ],
+    "probeFree": [
+     5.083088999999999,
+     5.094131,
+     5.1010860000000005
+    ],
+    "lookup": 0.8165279999999999,
+    "core": 0.8788
+   },
+   {
+    "layout": "many",
+    "blend": null,
+    "render": [
+     14.874897000000002,
+     15.284311,
+     15.366681999999997
+    ],
+    "probeFree": [
+     5.0838,
+     5.088088,
+     5.09992
+    ],
+    "lookup": 10.196223,
+    "core": 1.1322999999999999
+   },
+   {
+    "layout": "manyCell",
+    "blend": null,
+    "render": [
+     14.797982999999999,
+     15.053102999999998,
+     15.485599
+    ],
+    "probeFree": [
+     5.092964,
+     5.093508,
+     5.104006
+    ],
+    "lookup": 9.959594999999998,
+    "core": 1.1254
+   },
+   {
+    "layout": "mixed",
+    "blend": null,
+    "render": [
+     10.190259999999999,
+     10.327800000000002,
+     10.547840000000003
+    ],
+    "probeFree": [
+     5.539792,
+     5.65758,
+     5.9160330000000005
+    ],
+    "lookup": 4.670220000000001,
+    "core": 1.2764
+   }
+  ]
+ },
+ "offscreen": {
+  "error": {
+   "reference": {
+    "probes": 3,
+    "sizes": [
+     256
+    ]
+   },
+   "rows": [
+    {
+     "layout": "shipped",
+     "blend": null,
+     "spacing": null,
+     "description": "the scene's own 3 probes",
+     "probes": 3,
+     "sizes": [
+      256,
+      512
+     ],
+     "bytes": 41938944,
+     "bakeMs": 27.5,
+     "bakes": [
+      25.5,
+      27.5,
+      28.099999994039536
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 167478,
+       "darkPx": 6673,
+       "maskPx": 160805,
+       "mad": 10.316296135068242,
+       "bandShare": 0.0005099343925872952,
+       "bandMad": 8.016260162601624,
+       "restMad": 10.31746960090538,
+       "bandGradExcess": 5.285244837039855,
+       "restGradExcess": -1.2637951041777828,
+       "probeGradBand": 27.016357799986014,
+       "probeGradRest": 2.373885742298198,
+       "volumesPerPx": {
+        "mean": 1.0701311728395062,
+        "p99": 2,
+        "max": 3,
+        "hist": [
+         0,
+         485626,
+         29192,
+         3582,
+         0,
+         0,
+         0
+        ]
+       }
+      },
+      "mirror": {
+       "tracedPx": 52086,
+       "darkPx": 9553,
+       "maskPx": 42533,
+       "mad": 15.982468514643227,
+       "bandShare": 0.0018573813274398703,
+       "bandMad": 7.919831223628685,
+       "restMad": 15.997471773370087,
+       "bandGradExcess": 7.220138729373111,
+       "restGradExcess": -0.038003449741431196,
+       "probeGradBand": 28.50233501763889,
+       "probeGradRest": 1.755217998066373,
+       "volumesPerPx": {
+        "mean": 1.110275848765432,
+        "p99": 3,
+        "max": 3,
+        "hist": [
+         0,
+         467115,
+         45403,
+         5882,
+         0,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "few",
+     "blend": null,
+     "spacing": null,
+     "description": "2 x 512 px, hand placed",
+     "probes": 2,
+     "sizes": [
+      128,
+      512
+     ],
+     "bytes": 34599936,
+     "bakeMs": 29.19999998807907,
+     "bakes": [
+      24.100000008940697,
+      29.19999998807907,
+      29.700000002980232
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 167318,
+       "darkPx": 6477,
+       "maskPx": 160841,
+       "mad": 10.616754020013301,
+       "bandShare": 0.0006466013019068521,
+       "bandMad": 8.128205128205124,
+       "restMad": 10.618364160085271,
+       "bandGradExcess": 2.170331534356452,
+       "restGradExcess": -1.283248706030918,
+       "probeGradBand": 12.512006854486865,
+       "probeGradRest": 2.393203510894008,
+       "volumesPerPx": {
+        "mean": 1.0509722222222222,
+        "p99": 2,
+        "max": 2,
+        "hist": [
+         0,
+         491976,
+         26424,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      },
+      "mirror": {
+       "tracedPx": 51618,
+       "darkPx": 9253,
+       "maskPx": 42365,
+       "mad": 16.73888823321122,
+       "bandShare": 0.0018647468429127817,
+       "bandMad": 9.586497890295362,
+       "restMad": 16.7522505478565,
+       "bandGradExcess": 6.306948173649704,
+       "restGradExcess": 0.22118748635940247,
+       "probeGradBand": 14.01256434407797,
+       "probeGradRest": 1.7469499825828594,
+       "volumesPerPx": {
+        "mean": 1.082806712962963,
+        "p99": 2,
+        "max": 2,
+        "hist": [
+         0,
+         475473,
+         42927,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "medium",
+     "blend": 0.25,
+     "spacing": 3.5,
+     "description": "8 x 256 px grid",
+     "probes": 8,
+     "sizes": [
+      128,
+      256
+     ],
+     "bytes": 34593792,
+     "bakeMs": 26,
+     "bakes": [
+      24.5,
+      26,
+      27.899999991059303
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 167759,
+       "darkPx": 7194,
+       "maskPx": 160565,
+       "mad": 14.586167595678125,
+       "bandShare": 0.28179864852240527,
+       "bandMad": 32.78005908310705,
+       "restMad": 7.447481457072733,
+       "bandGradExcess": -0.6075308303314696,
+       "restGradExcess": -1.3202491231592126,
+       "probeGradBand": 4.942076135702652,
+       "probeGradRest": 1.9692897890292067,
+       "volumesPerPx": {
+        "mean": 1.3401601080246914,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         378201,
+         112301,
+         19656,
+         8242,
+         0,
+         0
+        ]
+       }
+      },
+      "mirror": {
+       "tracedPx": 51960,
+       "darkPx": 9570,
+       "maskPx": 42390,
+       "mad": 15.415019265550097,
+       "bandShare": 0.2564991743335692,
+       "bandMad": 21.488917502069594,
+       "restMad": 13.319594716079129,
+       "bandGradExcess": -0.15416858226655653,
+       "restGradExcess": 0.3863093693938266,
+       "probeGradBand": 2.7392547743100835,
+       "probeGradRest": 1.8174682721371556,
+       "volumesPerPx": {
+        "mean": 1.2492554012345678,
+        "p99": 2,
+        "max": 2,
+        "hist": [
+         0,
+         389186,
+         129214,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "many",
+     "blend": 0.25,
+     "spacing": 1.75,
+     "description": "32 x 128 px grid",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 39.5,
+     "bakes": [
+      36.29999999701977,
+      39.5,
+      39.5
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 167493,
+       "darkPx": 7243,
+       "maskPx": 160250,
+       "mad": 15.575036921475963,
+       "bandShare": 0.3189641185647426,
+       "bandMad": 24.79302474208057,
+       "restMad": 11.257779284560703,
+       "bandGradExcess": -0.6523549491552352,
+       "restGradExcess": -1.0133490574760795,
+       "probeGradBand": 3.316833569571453,
+       "probeGradRest": 1.9366462466214955,
+       "volumesPerPx": {
+        "mean": 1.4424074074074074,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         342564,
+         139016,
+         20132,
+         16688,
+         0,
+         0
+        ]
+       }
+      },
+      "mirror": {
+       "tracedPx": 51844,
+       "darkPx": 9320,
+       "maskPx": 42524,
+       "mad": 19.108503433354876,
+       "bandShare": 0.24430909603988335,
+       "bandMad": 17.049539577116967,
+       "restMad": 19.774150718323156,
+       "bandGradExcess": 1.804706667904813,
+       "restGradExcess": 0.5003931590969907,
+       "probeGradBand": 2.0319899128279726,
+       "probeGradRest": 2.015829281226494,
+       "volumesPerPx": {
+        "mean": 1.379045138888889,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         350350,
+         150851,
+         5951,
+         11248,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "manyCell",
+     "blend": 0.25,
+     "spacing": 1.75,
+     "description": "32 x 128 px grid, each projected onto its own cell",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 36.70000000298023,
+     "bakes": [
+      36,
+      36.70000000298023,
+      37.099999994039536
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 167672,
+       "darkPx": 7319,
+       "maskPx": 160353,
+       "mad": 63.06712482252629,
+       "bandShare": 0.31893385218860887,
+       "bandMad": 77.32402591477667,
+       "restMad": 56.390815333007204,
+       "bandGradExcess": -3.758957142516547,
+       "restGradExcess": -1.4606288666970846,
+       "probeGradBand": 4.133193269354893,
+       "probeGradRest": 3.0003562253600635,
+       "volumesPerPx": {
+        "mean": 1.4424074074074074,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         342564,
+         139016,
+         20132,
+         16688,
+         0,
+         0
+        ]
+       }
+      },
+      "mirror": {
+       "tracedPx": 52040,
+       "darkPx": 9499,
+       "maskPx": 42541,
+       "mad": 55.60861286758631,
+       "bandShare": 0.2475729296443431,
+       "bandMad": 40.0846942650965,
+       "restMad": 60.71648598831557,
+       "bandGradExcess": 1.4956192653661133,
+       "restGradExcess": 0.3481190098968247,
+       "probeGradBand": 3.7068395676598964,
+       "probeGradRest": 2.4646962093369473,
+       "volumesPerPx": {
+        "mean": 1.379045138888889,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         350350,
+         150851,
+         5951,
+         11248,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "mixed",
+     "blend": null,
+     "spacing": null,
+     "description": "the kit (room, lidded floor, wall mirror) with floor + mirror 512, room 128",
+     "probes": 3,
+     "sizes": [
+      128,
+      512
+     ],
+     "bytes": 35647488,
+     "bakeMs": 22,
+     "bakes": [
+      21.30000001192093,
+      22,
+      22.400000005960464
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 167799,
+       "darkPx": 6614,
+       "maskPx": 161185,
+       "mad": 11.127003133044177,
+       "bandShare": 0.0005273443558643794,
+       "bandMad": 22.529411764705884,
+       "restMad": 11.120986964616545,
+       "bandGradExcess": 15.194534270903644,
+       "restGradExcess": -1.3185278398061921,
+       "probeGradBand": 30.716326460968286,
+       "probeGradRest": 2.3788269363853796,
+       "volumesPerPx": {
+        "mean": 1.0701311728395062,
+        "p99": 2,
+        "max": 3,
+        "hist": [
+         0,
+         485626,
+         29192,
+         3582,
+         0,
+         0,
+         0
+        ]
+       }
+      },
+      "mirror": {
+       "tracedPx": 52132,
+       "darkPx": 9570,
+       "maskPx": 42562,
+       "mad": 17.41261375561914,
+       "bandShare": 0.0021380574221136223,
+       "bandMad": 19.296703296703296,
+       "restMad": 17.408576832819143,
+       "bandGradExcess": 20.490173691576654,
+       "restGradExcess": 0.20922970516384679,
+       "probeGradBand": 32.093141910273395,
+       "probeGradRest": 1.7664428446049236,
+       "volumesPerPx": {
+        "mean": 1.110275848765432,
+        "p99": 3,
+        "max": 3,
+        "hist": [
+         0,
+         467115,
+         45403,
+         5882,
+         0,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "many",
+     "blend": 0.05,
+     "spacing": 1.75,
+     "description": "32 x 128 px grid",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 38.599999994039536,
+     "bakes": [
+      37.79999999701977,
+      38.599999994039536,
+      40.900000005960464
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 167683,
+       "darkPx": 7475,
+       "maskPx": 160208,
+       "mad": 14.303151736075046,
+       "bandShare": 0.11537501248377109,
+       "bandMad": 27.277735699344365,
+       "restMad": 12.610973911732874,
+       "bandGradExcess": -1.3041950749474005,
+       "restGradExcess": -1.2687357224616862,
+       "probeGradBand": 4.52307779857967,
+       "probeGradRest": 1.9936897716280102,
+       "volumesPerPx": {
+        "mean": 1.094579475308642,
+        "p99": 2,
+        "max": 4,
+        "hist": [
+         0,
+         472610,
+         43719,
+         902,
+         1169,
+         0,
+         0
+        ]
+       }
+      },
+      "mirror": {
+       "tracedPx": 52154,
+       "darkPx": 9620,
+       "maskPx": 42534,
+       "mad": 19.18110217708148,
+       "bandShare": 0.04584567640005643,
+       "bandMad": 20.648205128205166,
+       "restMad": 19.110610092646944,
+       "bandGradExcess": 3.462424426350074,
+       "restGradExcess": 0.7186403050772712,
+       "probeGradBand": 5.225310528270973,
+       "probeGradRest": 1.751707383777792,
+       "volumesPerPx": {
+        "mean": 1.071105324074074,
+        "p99": 2,
+        "max": 4,
+        "hist": [
+         0,
+         481910,
+         36259,
+         91,
+         140,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "many",
+     "blend": 0.1,
+     "spacing": 1.75,
+     "description": "32 x 128 px grid",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 41.900000005960464,
+     "bakes": [
+      39.70000000298023,
+      41.900000005960464,
+      42.79999999701977
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 167298,
+       "darkPx": 7237,
+       "maskPx": 160061,
+       "mad": 14.226238746476364,
+       "bandShare": 0.16839829814883076,
+       "bandMad": 26.168966881847926,
+       "restMad": 11.807851327626828,
+       "bandGradExcess": -1.79095176698312,
+       "restGradExcess": -1.0244011301179676,
+       "probeGradBand": 3.424473037663998,
+       "probeGradRest": 1.9864078870122839,
+       "volumesPerPx": {
+        "mean": 1.2043344907407407,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         428751,
+         79725,
+         3570,
+         6354,
+         0,
+         0
+        ]
+       }
+      },
+      "mirror": {
+       "tracedPx": 51802,
+       "darkPx": 9278,
+       "maskPx": 42524,
+       "mad": 19.067546170005304,
+       "bandShare": 0.08160097827109397,
+       "bandMad": 20.387127761767392,
+       "restMad": 18.95029958518904,
+       "bandGradExcess": 2.808302603996968,
+       "restGradExcess": 0.566509159663498,
+       "probeGradBand": 2.8954193815581935,
+       "probeGradRest": 1.856022306752463,
+       "volumesPerPx": {
+        "mean": 1.1602488425925925,
+        "p99": 3,
+        "max": 4,
+        "hist": [
+         0,
+         445557,
+         67549,
+         358,
+         4936,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "many",
+     "blend": 0.5,
+     "spacing": 1.75,
+     "description": "32 x 128 px grid",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 40,
+     "bakes": [
+      38.5,
+      40,
+      41.29999999701977
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 167717,
+       "darkPx": 7563,
+       "maskPx": 160154,
+       "mad": 18.221647081351303,
+       "bandShare": 0.5513193551206963,
+       "bandMad": 23.145740841411982,
+       "restMad": 12.17113381020101,
+       "bandGradExcess": -0.33977476800939166,
+       "restGradExcess": -1.059688167757107,
+       "probeGradBand": 3.2884117888769158,
+       "probeGradRest": 1.998599668568963,
+       "volumesPerPx": {
+        "mean": 1.8625154320987654,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         219909,
+         194469,
+         59407,
+         44615,
+         0,
+         0
+        ]
+       }
+      },
+      "mirror": {
+       "tracedPx": 52355,
+       "darkPx": 9539,
+       "maskPx": 42816,
+       "mad": 18.94150161933262,
+       "bandShare": 0.5516629297458894,
+       "bandMad": 19.84565340107293,
+       "restMad": 17.828974786413983,
+       "bandGradExcess": 0.6613370559595456,
+       "restGradExcess": 0.2957055383897692,
+       "probeGradBand": 1.7449759912113825,
+       "probeGradRest": 2.572283764370817,
+       "volumesPerPx": {
+        "mean": 1.8067920524691359,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         201084,
+         258836,
+         16035,
+         42445,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "medium",
+     "blend": 0.1,
+     "spacing": 3.5,
+     "description": "8 x 256 px grid",
+     "probes": 8,
+     "sizes": [
+      128,
+      256
+     ],
+     "bytes": 34593792,
+     "bakeMs": 24.299999997019768,
+     "bakes": [
+      23.700000002980232,
+      24.299999997019768,
+      27.799999997019768
+     ],
+     "poses": {
+      "default": {
+       "tracedPx": 167854,
+       "darkPx": 6990,
+       "maskPx": 160864,
+       "mad": 11.515652973940378,
+       "bandShare": 0.14946165705191963,
+       "bandMad": 32.73783083087208,
+       "restMad": 7.786365640751694,
+       "bandGradExcess": -1.7883965794508516,
+       "restGradExcess": -1.4685484193572027,
+       "probeGradBand": 4.235751465722145,
+       "probeGradRest": 2.4079314377826404,
+       "volumesPerPx": {
+        "mean": 1.169020061728395,
+        "p99": 3,
+        "max": 4,
+        "hist": [
+         0,
+         441373,
+         69731,
+         3999,
+         3297,
+         0,
+         0
+        ]
+       }
+      },
+      "mirror": {
+       "tracedPx": 52124,
+       "darkPx": 9518,
+       "maskPx": 42606,
+       "mad": 15.621446118700046,
+       "bandShare": 0.10148805332582266,
+       "bandMad": 15.985044711686571,
+       "restMad": 15.580377200773246,
+       "bandGradExcess": 0.252160758686413,
+       "restGradExcess": 0.23703561670177875,
+       "probeGradBand": 2.789778887469121,
+       "probeGradRest": 1.9843874035744156,
+       "volumesPerPx": {
+        "mean": 1.10015625,
+        "p99": 2,
+        "max": 2,
+        "hist": [
+         0,
+         466479,
+         51921,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    }
+   ]
+  },
+  "timing": [
+   {
+    "layout": "shipped",
+    "blend": null,
+    "render": [
+     6.776109,
+     6.947287,
+     7.1172249999999995
+    ],
+    "probeFree": [
+     6.998518,
+     7.216182,
+     7.669301
+    ],
+    "lookup": -0.26889499999999966,
+    "core": 1.582
+   },
+   {
+    "layout": "few",
+    "blend": null,
+    "render": [
+     8.056752,
+     8.284790000000001,
+     8.365081
+    ],
+    "probeFree": [
+     8.183791,
+     8.305871,
+     8.419083
+    ],
+    "lookup": -0.021080999999998795,
+    "core": 1.6345
+   },
+   {
+    "layout": "medium",
+    "blend": null,
+    "render": [
+     8.960238,
+     9.004237,
+     9.005696
+    ],
+    "probeFree": [
+     7.900213,
+     8.000754,
+     8.005003
+    ],
+    "lookup": 1.0034829999999992,
+    "core": 1.596
+   },
+   {
+    "layout": "many",
+    "blend": null,
+    "render": [
+     16.661535999999998,
+     16.730202,
+     16.973826
+    ],
+    "probeFree": [
+     7.047808,
+     7.305764999999999,
+     7.572637
+    ],
+    "lookup": 9.424437,
+    "core": 2.0763999999999996
+   },
+   {
+    "layout": "manyCell",
+    "blend": null,
+    "render": [
+     17.585231,
+     17.732605,
+     17.950682999999998
+    ],
+    "probeFree": [
+     8.115167,
+     8.519286000000001,
+     8.889073
+    ],
+    "lookup": 9.213318999999998,
+    "core": 2.4211
+   },
+   {
+    "layout": "mixed",
+    "blend": null,
+    "render": [
+     9.693519,
+     9.931429999999999,
+     9.966849
+    ],
+    "probeFree": [
+     9.170110000000001,
+     9.315940000000001,
+     9.400981999999999
+    ],
+    "lookup": 0.6154899999999977,
+    "core": 1.7644
+   }
+  ]
+ },
+ "showcaseSponza": {
+  "error": {
+   "reference": {
+    "probes": 7,
+    "sizes": [
+     256
+    ]
+   },
+   "rows": [
+    {
+     "layout": "shipped",
+     "blend": null,
+     "spacing": null,
+     "description": "the scene's own 7 probes",
+     "probes": 7,
+     "sizes": [
+      256
+     ],
+     "bytes": 33546240,
+     "bakeMs": 28.400000005960464,
+     "bakes": [
+      27.400000005960464,
+      28.400000005960464,
+      32.29999999701977
+     ],
+     "poses": {
+      "courtyard": {
+       "tracedPx": 39289,
+       "darkPx": 4327,
+       "maskPx": 34962,
+       "mad": 7.463894132677533,
+       "bandShare": 0.015302328242091413,
+       "bandMad": 5.699065420560745,
+       "restMad": 7.491319797445955,
+       "bandGradExcess": -0.5024017145004228,
+       "restGradExcess": 0.4280350306885609,
+       "probeGradBand": 22.357303831766874,
+       "probeGradRest": 7.359935621890925,
+       "volumesPerPx": {
+        "mean": 1,
+        "p99": 1,
+        "max": 1,
+        "hist": [
+         0,
+         510404,
+         0,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      },
+      "low": {
+       "tracedPx": 59323,
+       "darkPx": 16875,
+       "maskPx": 42448,
+       "mad": 15.075260711144738,
+       "bandShare": 0.030531473803241612,
+       "bandMad": 47.93055555555554,
+       "restMad": 14.040548859512826,
+       "bandGradExcess": 0.9814138246447216,
+       "restGradExcess": 1.6490796164430457,
+       "probeGradBand": 17.747057815886272,
+       "probeGradRest": 10.27974799371935,
+       "volumesPerPx": {
+        "mean": 1,
+        "p99": 1,
+        "max": 1,
+        "hist": [
+         0,
+         510840,
+         0,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      },
+      "aisle": {
+       "tracedPx": 21384,
+       "darkPx": 2442,
+       "maskPx": 18942,
+       "mad": 6.0853658536583195,
+       "bandShare": 0.01610178439446732,
+       "bandMad": 30.242622950819655,
+       "restMad": 5.690025218650851,
+       "bandGradExcess": 14.831540489441059,
+       "restGradExcess": 0.973099674641411,
+       "probeGradBand": 10.083917033155751,
+       "probeGradRest": 5.519966312340148,
+       "volumesPerPx": {
+        "mean": 1,
+        "p99": 1,
+        "max": 1,
+        "hist": [
+         0,
+         514463,
+         0,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "few",
+     "blend": null,
+     "spacing": null,
+     "description": "2 x 512 px, hand placed",
+     "probes": 2,
+     "sizes": [
+      128,
+      512
+     ],
+     "bytes": 34599936,
+     "bakeMs": 27.80000001192093,
+     "bakes": [
+      27.5,
+      27.80000001192093,
+      28
+     ],
+     "poses": {
+      "courtyard": {
+       "tracedPx": 39248,
+       "darkPx": 4824,
+       "maskPx": 34424,
+       "mad": 5.340653807421156,
+       "bandShare": 0.8866488496397862,
+       "bandMad": 4.894294825590258,
+       "restMad": 8.832137365453624,
+       "bandGradExcess": -0.3538076695450586,
+       "restGradExcess": -0.19705557268683815,
+       "probeGradBand": 8.708560688968163,
+       "probeGradRest": 11.207039116582996,
+       "volumesPerPx": {
+        "mean": 1.8654791106652768,
+        "p99": 2,
+        "max": 2,
+        "hist": [
+         0,
+         68660,
+         441744,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      },
+      "low": {
+       "tracedPx": 59751,
+       "darkPx": 17592,
+       "maskPx": 42159,
+       "mad": 8.266166971069651,
+       "bandShare": 0.976778386584122,
+       "bandMad": 7.996114618746773,
+       "restMad": 19.62546816479398,
+       "bandGradExcess": 0.005778399531004906,
+       "restGradExcess": 2.753970764889415,
+       "probeGradBand": 11.080346445863599,
+       "probeGradRest": 17.262037000209265,
+       "volumesPerPx": {
+        "mean": 1.937285647169368,
+        "p99": 2,
+        "max": 2,
+        "hist": [
+         0,
+         32037,
+         478803,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      },
+      "aisle": {
+       "tracedPx": 21282,
+       "darkPx": 2331,
+       "maskPx": 18951,
+       "mad": 3.6246636061422093,
+       "bandShare": 0.17513587673473696,
+       "bandMad": 6.221753540222944,
+       "restMad": 3.0732471852610708,
+       "bandGradExcess": -0.33036127763498113,
+       "restGradExcess": 0.2987186472134976,
+       "probeGradBand": 13.456544637454314,
+       "probeGradRest": 3.2026265994403325,
+       "volumesPerPx": {
+        "mean": 1.3442793748044077,
+        "p99": 2,
+        "max": 2,
+        "hist": [
+         0,
+         337344,
+         177119,
+         0,
+         0,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "medium",
+     "blend": 0.25,
+     "spacing": 3.1249999999999996,
+     "description": "8 x 256 px grid",
+     "probes": 8,
+     "sizes": [
+      128,
+      256
+     ],
+     "bytes": 34593792,
+     "bakeMs": 34.29999999701977,
+     "bakes": [
+      33.900000005960464,
+      34.29999999701977,
+      34.5
+     ],
+     "poses": {
+      "courtyard": {
+       "tracedPx": 39724,
+       "darkPx": 4744,
+       "maskPx": 34980,
+       "mad": 6.145797598627738,
+       "bandShare": 0.3843624928530589,
+       "bandMad": 6.85560927234405,
+       "restMad": 5.702639114619573,
+       "bandGradExcess": 0.04135040452526505,
+       "restGradExcess": 0.41709128055617295,
+       "probeGradBand": 12.018284512977715,
+       "probeGradRest": 5.963215600125299,
+       "volumesPerPx": {
+        "mean": 1.8001985839762473,
+        "p99": 3,
+        "max": 5,
+        "hist": [
+         0,
+         162711,
+         299649,
+         50294,
+         2824,
+         1180,
+         0
+        ]
+       }
+      },
+      "low": {
+       "tracedPx": 60213,
+       "darkPx": 17421,
+       "maskPx": 42792,
+       "mad": 9.285434972269131,
+       "bandShare": 0.3904468124883156,
+       "bandMad": 10.30191126007505,
+       "restMad": 8.634335224659056,
+       "bandGradExcess": -0.24820065473547254,
+       "restGradExcess": 1.0805027239232834,
+       "probeGradBand": 19.48698196671014,
+       "probeGradRest": 8.280973314681367,
+       "volumesPerPx": {
+        "mean": 1.682866512345679,
+        "p99": 4,
+        "max": 5,
+        "hist": [
+         0,
+         215083,
+         269759,
+         20460,
+         9073,
+         4025,
+         0
+        ]
+       }
+      },
+      "aisle": {
+       "tracedPx": 21354,
+       "darkPx": 3196,
+       "maskPx": 18158,
+       "mad": 3.5612585820758174,
+       "bandShare": 0.47720013217314683,
+       "bandMad": 4.420311598384288,
+       "restMad": 2.7771340285824118,
+       "bandGradExcess": -0.09755924974422552,
+       "restGradExcess": 0.1823568070469936,
+       "probeGradBand": 5.538362843434822,
+       "probeGradRest": 1.5050038176580258,
+       "volumesPerPx": {
+        "mean": 1.434639274691358,
+        "p99": 3,
+        "max": 5,
+        "hist": [
+         0,
+         310121,
+         194439,
+         11091,
+         2300,
+         449,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "many",
+     "blend": 0.25,
+     "spacing": 2.6218750000000015,
+     "description": "32 x 128 px grid",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 63.19999998807907,
+     "bakes": [
+      59.400000005960464,
+      63.19999998807907,
+      70.09999999403954
+     ],
+     "poses": {
+      "courtyard": {
+       "tracedPx": 39207,
+       "darkPx": 4661,
+       "maskPx": 34546,
+       "mad": 6.291726972732024,
+       "bandShare": 0.6596422161755341,
+       "bandMad": 6.551825522204694,
+       "restMad": 5.7876339513522685,
+       "bandGradExcess": 0.42590115874831946,
+       "restGradExcess": -0.29770919918285427,
+       "probeGradBand": 8.779545587964316,
+       "probeGradRest": 4.876596871109779,
+       "volumesPerPx": {
+        "mean": 2.251675189390274,
+        "p99": 5,
+        "max": 6,
+        "hist": [
+         0,
+         121834,
+         190231,
+         165977,
+         30906,
+         6765,
+         945
+        ]
+       }
+      },
+      "low": {
+       "tracedPx": 59776,
+       "darkPx": 17622,
+       "maskPx": 42154,
+       "mad": 9.049295440527676,
+       "bandShare": 0.46925558665844286,
+       "bandMad": 10.183897005544107,
+       "restMad": 8.04614192702524,
+       "bandGradExcess": 0.2549719733984006,
+       "restGradExcess": 0.8409828744791736,
+       "probeGradBand": 15.020904826569435,
+       "probeGradRest": 7.8131693189551354,
+       "volumesPerPx": {
+        "mean": 2.041610725308642,
+        "p99": 5,
+        "max": 6,
+        "hist": [
+         0,
+         189157,
+         191648,
+         71532,
+         59550,
+         5956,
+         557
+        ]
+       }
+      },
+      "aisle": {
+       "tracedPx": 21211,
+       "darkPx": 3204,
+       "maskPx": 18007,
+       "mad": 3.7051887229040226,
+       "bandShare": 0.41228411173432555,
+       "bandMad": 5.175826149425271,
+       "restMad": 2.673533024662149,
+       "bandGradExcess": -0.29682467171764515,
+       "restGradExcess": -0.06259607139657675,
+       "probeGradBand": 5.980842297694097,
+       "probeGradRest": 1.2305225429792048,
+       "volumesPerPx": {
+        "mean": 1.7963869598765432,
+        "p99": 4,
+        "max": 5,
+        "hist": [
+         0,
+         224306,
+         191355,
+         87178,
+         15108,
+         453,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "manyCell",
+     "blend": 0.25,
+     "spacing": 2.6218750000000015,
+     "description": "32 x 128 px grid, each projected onto its own cell",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 65.29999999701977,
+     "bakes": [
+      63.70000000298023,
+      65.29999999701977,
+      67.8999999910593
+     ],
+     "poses": {
+      "courtyard": {
+       "tracedPx": 39222,
+       "darkPx": 4751,
+       "maskPx": 34471,
+       "mad": 6.321168518464782,
+       "bandShare": 0.661135447187491,
+       "bandMad": 6.537852859441266,
+       "restMad": 5.8984105242130855,
+       "bandGradExcess": 0.3082965025725068,
+       "restGradExcess": -0.32584796929545395,
+       "probeGradBand": 9.451461026680928,
+       "probeGradRest": 4.845500007163406,
+       "volumesPerPx": {
+        "mean": 2.251675189390274,
+        "p99": 5,
+        "max": 6,
+        "hist": [
+         0,
+         121834,
+         190231,
+         165977,
+         30906,
+         6765,
+         945
+        ]
+       }
+      },
+      "low": {
+       "tracedPx": 59392,
+       "darkPx": 17451,
+       "maskPx": 41941,
+       "mad": 9.994333309490319,
+       "bandShare": 0.4670847142414344,
+       "bandMad": 11.282780330100332,
+       "restMad": 8.865047052331796,
+       "bandGradExcess": 0.3355115360824744,
+       "restGradExcess": 1.0148303845359299,
+       "probeGradBand": 15.49255539445517,
+       "probeGradRest": 7.6849621427020685,
+       "volumesPerPx": {
+        "mean": 2.041610725308642,
+        "p99": 5,
+        "max": 6,
+        "hist": [
+         0,
+         189157,
+         191648,
+         71532,
+         59550,
+         5956,
+         557
+        ]
+       }
+      },
+      "aisle": {
+       "tracedPx": 21242,
+       "darkPx": 3218,
+       "maskPx": 18024,
+       "mad": 3.6275336588252616,
+       "bandShare": 0.4097869507323569,
+       "bandMad": 5.012681649968418,
+       "restMad": 2.665820642977982,
+       "bandGradExcess": -0.243314169238468,
+       "restGradExcess": -0.11901661395719497,
+       "probeGradBand": 5.657961543869234,
+       "probeGradRest": 1.2182386106527612,
+       "volumesPerPx": {
+        "mean": 1.7963869598765432,
+        "p99": 4,
+        "max": 5,
+        "hist": [
+         0,
+         224306,
+         191355,
+         87178,
+         15108,
+         453,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "mixed",
+     "blend": null,
+     "spacing": null,
+     "description": "courtyard floor slab 512, aisle floor slabs 256, 8 x 128 px grid",
+     "probes": 11,
+     "sizes": [
+      128,
+      256,
+      512
+     ],
+     "bytes": 34590720,
+     "bakeMs": 45.20000000298023,
+     "bakes": [
+      43.29999999701977,
+      45.20000000298023,
+      53.5
+     ],
+     "poses": {
+      "courtyard": {
+       "tracedPx": 39688,
+       "darkPx": 4849,
+       "maskPx": 34839,
+       "mad": 4.989944219600573,
+       "bandShare": 0.23938689399810556,
+       "bandMad": 6.238169464428468,
+       "restMad": 4.597091714152644,
+       "bandGradExcess": -0.6204518274687749,
+       "restGradExcess": -0.2478422281590142,
+       "probeGradBand": 17.87057314322968,
+       "probeGradRest": 5.8184836629493875,
+       "volumesPerPx": {
+        "mean": 1.7780969229161263,
+        "p99": 4,
+        "max": 6,
+        "hist": [
+         0,
+         186410,
+         265743,
+         58459,
+         4841,
+         1199,
+         6
+        ]
+       }
+      },
+      "low": {
+       "tracedPx": 59920,
+       "darkPx": 17677,
+       "maskPx": 42243,
+       "mad": 8.259632759668289,
+       "bandShare": 0.2415074686930379,
+       "bandMad": 9.517578252630177,
+       "restMad": 7.859097198381274,
+       "bandGradExcess": -0.2755549595507044,
+       "restGradExcess": 0.6059662435124555,
+       "probeGradBand": 23.3497070087875,
+       "probeGradRest": 9.545448388486061,
+       "volumesPerPx": {
+        "mean": 1.6805266203703704,
+        "p99": 4,
+        "max": 6,
+        "hist": [
+         0,
+         240760,
+         224997,
+         34417,
+         13961,
+         4254,
+         11
+        ]
+       }
+      },
+      "aisle": {
+       "tracedPx": 21371,
+       "darkPx": 3213,
+       "maskPx": 18158,
+       "mad": 3.382990050299326,
+       "bandShare": 0.09808348937107611,
+       "bandMad": 7.461538461538474,
+       "restMad": 2.9394475992755167,
+       "bandGradExcess": -0.35379685420105794,
+       "restGradExcess": -0.1902383483817575,
+       "probeGradBand": 13.112385093213982,
+       "probeGradRest": 2.4215412046527724,
+       "volumesPerPx": {
+        "mean": 1.394508101851852,
+        "p99": 4,
+        "max": 6,
+        "hist": [
+         0,
+         337788,
+         163657,
+         10626,
+         5760,
+         521,
+         48
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "many",
+     "blend": 0.05,
+     "spacing": 2.6218750000000015,
+     "description": "32 x 128 px grid",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 65.09999999403954,
+     "bakes": [
+      58.20000000298023,
+      65.09999999403954,
+      72.29999999701977
+     ],
+     "poses": {
+      "courtyard": {
+       "tracedPx": 39548,
+       "darkPx": 4354,
+       "maskPx": 35194,
+       "mad": 8.42780966452619,
+       "bandShare": 0.17088140023867704,
+       "bandMad": 6.703192550715063,
+       "restMad": 8.783253369888087,
+       "bandGradExcess": 1.2680448126561983,
+       "restGradExcess": 0.5674842359990295,
+       "probeGradBand": 10.794786676722692,
+       "probeGradRest": 7.71330205832657,
+       "volumesPerPx": {
+        "mean": 1.0719566908864278,
+        "p99": 2,
+        "max": 3,
+        "hist": [
+         0,
+         479694,
+         36751,
+         213,
+         0,
+         0,
+         0
+        ]
+       }
+      },
+      "low": {
+       "tracedPx": 59034,
+       "darkPx": 16801,
+       "maskPx": 42233,
+       "mad": 13.553682349505388,
+       "bandShare": 0.10574669097625079,
+       "bandMad": 17.854381250933006,
+       "restMad": 13.045118754468033,
+       "bandGradExcess": 3.074569998213298,
+       "restGradExcess": 1.9221710061392094,
+       "probeGradBand": 17.422807172135578,
+       "probeGradRest": 10.231149004044203,
+       "volumesPerPx": {
+        "mean": 1.0503993055555556,
+        "p99": 2,
+        "max": 4,
+        "hist": [
+         0,
+         492683,
+         25394,
+         236,
+         87,
+         0,
+         0
+        ]
+       }
+      },
+      "aisle": {
+       "tracedPx": 21572,
+       "darkPx": 2966,
+       "maskPx": 18606,
+       "mad": 5.624475975491661,
+       "bandShare": 0.08465011286681716,
+       "bandMad": 6.760000000000013,
+       "restMad": 5.519464505900877,
+       "bandGradExcess": 2.023834067483743,
+       "restGradExcess": 0.6012879230371477,
+       "probeGradBand": 9.670394405592154,
+       "probeGradRest": 6.626776964897355,
+       "volumesPerPx": {
+        "mean": 1.0899305555555556,
+        "p99": 2,
+        "max": 4,
+        "hist": [
+         0,
+         474527,
+         41331,
+         2337,
+         205,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "many",
+     "blend": 0.1,
+     "spacing": 2.6218750000000015,
+     "description": "32 x 128 px grid",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 63.19999998807907,
+     "bakes": [
+      61,
+      63.19999998807907,
+      74.20000000298023
+     ],
+     "poses": {
+      "courtyard": {
+       "tracedPx": 39580,
+       "darkPx": 4433,
+       "maskPx": 35147,
+       "mad": 7.076772792367323,
+       "bandShare": 0.2995988277804649,
+       "bandMad": 5.373504273504333,
+       "restMad": 7.805351315486602,
+       "bandGradExcess": 0.8488501889890737,
+       "restGradExcess": 0.26975751246344626,
+       "probeGradBand": 8.741345287762945,
+       "probeGradRest": 8.218883336572398,
+       "volumesPerPx": {
+        "mean": 1.1702480170635121,
+        "p99": 2,
+        "max": 4,
+        "hist": [
+         0,
+         432295,
+         81281,
+         2567,
+         515,
+         0,
+         0
+        ]
+       }
+      },
+      "low": {
+       "tracedPx": 59530,
+       "darkPx": 17007,
+       "maskPx": 42523,
+       "mad": 11.113083899693404,
+       "bandShare": 0.18599346236154551,
+       "bandMad": 13.449024318287211,
+       "restMad": 10.579341692186082,
+       "bandGradExcess": 0.39489162759843616,
+       "restGradExcess": 1.2974409850544117,
+       "probeGradBand": 14.954548477712398,
+       "probeGradRest": 10.504731049695987,
+       "volumesPerPx": {
+        "mean": 1.2005266203703704,
+        "p99": 4,
+        "max": 4,
+        "hist": [
+         0,
+         436192,
+         67243,
+         8185,
+         6780,
+         0,
+         0
+        ]
+       }
+      },
+      "aisle": {
+       "tracedPx": 21322,
+       "darkPx": 2986,
+       "maskPx": 18336,
+       "mad": 4.401232547993045,
+       "bandShare": 0.1956806282722513,
+       "bandMad": 5.803790412486063,
+       "restMad": 4.060008136696534,
+       "bandGradExcess": 0.21725568340607446,
+       "restGradExcess": 0.2506943726848992,
+       "probeGradBand": 11.20114521282988,
+       "probeGradRest": 4.073378041212113,
+       "volumesPerPx": {
+        "mean": 1.330792824074074,
+        "p99": 3,
+        "max": 4,
+        "hist": [
+         0,
+         363698,
+         139427,
+         13769,
+         1506,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "many",
+     "blend": 0.5,
+     "spacing": 2.6218750000000015,
+     "description": "32 x 128 px grid",
+     "probes": 32,
+     "sizes": [
+      128
+     ],
+     "bytes": 34569216,
+     "bakeMs": 76.79999999701977,
+     "bakes": [
+      66.19999998807907,
+      76.79999999701977,
+      87.40000000596046
+     ],
+     "poses": {
+      "courtyard": {
+       "tracedPx": 39563,
+       "darkPx": 5078,
+       "maskPx": 34485,
+       "mad": 5.995282973273441,
+       "bandShare": 0.9681020733652312,
+       "bandMad": 6.063910938046067,
+       "restMad": 3.9124242424242412,
+       "bandGradExcess": 0.1932202330422785,
+       "restGradExcess": -0.4634796950356527,
+       "probeGradBand": 7.139014699554023,
+       "probeGradRest": 7.256654841995477,
+       "volumesPerPx": {
+        "mean": 3.2098351327183554,
+        "p99": 6,
+        "max": 6,
+        "hist": [
+         0,
+         45371,
+         59660,
+         234846,
+         116042,
+         39444,
+         21295
+        ]
+       }
+      },
+      "low": {
+       "tracedPx": 59834,
+       "darkPx": 18225,
+       "maskPx": 41609,
+       "mad": 9.46623727238467,
+       "bandShare": 0.9994472349732029,
+       "bandMad": 9.469300565895264,
+       "restMad": 3.9275362318840585,
+       "bandGradExcess": 0.5823313898775837,
+       "restGradExcess": 0.9112993229342543,
+       "probeGradBand": 8.807415522296036,
+       "probeGradRest": 16.503600185866965,
+       "volumesPerPx": {
+        "mean": 3.0527854938271606,
+        "p99": 6,
+        "max": 6,
+        "hist": [
+         0,
+         17276,
+         150263,
+         176007,
+         147489,
+         17405,
+         9960
+        ]
+       }
+      },
+      "aisle": {
+       "tracedPx": 21419,
+       "darkPx": 3263,
+       "maskPx": 18156,
+       "mad": 3.3075016523463976,
+       "bandShare": 0.7530843798193435,
+       "bandMad": 3.574953070528369,
+       "restMad": 2.4917837757454397,
+       "bandGradExcess": -0.06808939981308024,
+       "restGradExcess": 0.048739133664776,
+       "probeGradBand": 3.4557548861050043,
+       "probeGradRest": 2.0105601062958756,
+       "volumesPerPx": {
+        "mean": 2.247168209876543,
+        "p99": 6,
+        "max": 6,
+        "hist": [
+         0,
+         144530,
+         171715,
+         147720,
+         44020,
+         4758,
+         5657
+        ]
+       }
+      }
+     }
+    },
+    {
+     "layout": "medium",
+     "blend": 0.1,
+     "spacing": 3.1249999999999996,
+     "description": "8 x 256 px grid",
+     "probes": 8,
+     "sizes": [
+      128,
+      256
+     ],
+     "bytes": 34593792,
+     "bakeMs": 38.099999994039536,
+     "bakes": [
+      36.29999999701977,
+      38.099999994039536,
+      46.400000005960464
+     ],
+     "poses": {
+      "courtyard": {
+       "tracedPx": 39454,
+       "darkPx": 4412,
+       "maskPx": 35042,
+       "mad": 6.8054905541921675,
+       "bandShare": 0.07217053821128931,
+       "bandMad": 6.888757084486617,
+       "restMad": 6.799013727842257,
+       "bandGradExcess": 0.3539184025240589,
+       "restGradExcess": 0.22268149193391598,
+       "probeGradBand": 12.52902464357376,
+       "probeGradRest": 8.507030297086674,
+       "volumesPerPx": {
+        "mean": 1.0565983687468306,
+        "p99": 2,
+        "max": 4,
+        "hist": [
+         0,
+         487428,
+         29220,
+         8,
+         2,
+         0,
+         0
+        ]
+       }
+      },
+      "low": {
+       "tracedPx": 60136,
+       "darkPx": 17082,
+       "maskPx": 43054,
+       "mad": 10.246597296418429,
+       "bandShare": 0.12314767501277465,
+       "bandMad": 14.608763988432116,
+       "restMad": 9.633961997598325,
+       "bandGradExcess": -0.39635793190352514,
+       "restGradExcess": 1.1732412761262652,
+       "probeGradBand": 16.21988851976516,
+       "probeGradRest": 11.3524670014679,
+       "volumesPerPx": {
+        "mean": 1.10492862654321,
+        "p99": 2,
+        "max": 4,
+        "hist": [
+         0,
+         464782,
+         53080,
+         299,
+         239,
+         0,
+         0
+        ]
+       }
+      },
+      "aisle": {
+       "tracedPx": 21207,
+       "darkPx": 2987,
+       "maskPx": 18220,
+       "mad": 4.352396633735851,
+       "bandShare": 0.1390230515916575,
+       "bandMad": 6.277141729174914,
+       "restMad": 4.041605575742153,
+       "bandGradExcess": 0.019323046587038442,
+       "restGradExcess": 0.3936619675252082,
+       "probeGradBand": 10.094605480258908,
+       "probeGradRest": 4.372019759893797,
+       "volumesPerPx": {
+        "mean": 1.2209510030864197,
+        "p99": 2,
+        "max": 4,
+        "hist": [
+         0,
+         405102,
+         112431,
+         491,
+         376,
+         0,
+         0
+        ]
+       }
+      }
+     }
+    }
+   ]
+  },
+  "timing": [
+   {
+    "layout": "shipped",
+    "blend": null,
+    "render": [
+     9.398150000000001,
+     9.399564999999999,
+     9.439314
+    ],
+    "probeFree": [
+     8.839824,
+     8.917947999999999,
+     9.132238000000001
+    ],
+    "lookup": 0.48161699999999996,
+    "core": 1.065
+   },
+   {
+    "layout": "few",
+    "blend": null,
+    "render": [
+     10.026682000000001,
+     10.298093,
+     10.648755000000001
+    ],
+    "probeFree": [
+     10.33126,
+     10.711213,
+     11.115245999999999
+    ],
+    "lookup": -0.41312000000000104,
+    "core": 1.1975
+   },
+   {
+    "layout": "medium",
+    "blend": null,
+    "render": [
+     12.524268,
+     12.806222000000002,
+     12.874385
+    ],
+    "probeFree": [
+     11.369368999999999,
+     11.449243,
+     11.61103
+    ],
+    "lookup": 1.3569790000000026,
+    "core": 1.1739000000000002
+   },
+   {
+    "layout": "many",
+    "blend": null,
+    "render": [
+     24.20609,
+     24.238713,
+     24.410542999999997
+    ],
+    "probeFree": [
+     11.094414,
+     11.527073000000001,
+     11.861402
+    ],
+    "lookup": 12.71164,
+    "core": 1.5346000000000002
+   },
+   {
+    "layout": "manyCell",
+    "blend": null,
+    "render": [
+     28.231862,
+     28.3644,
+     29.380885
+    ],
+    "probeFree": [
+     11.97915,
+     12.365936000000001,
+     12.573058
+    ],
+    "lookup": 15.998463999999998,
+    "core": 1.4311
+   },
+   {
+    "layout": "mixed",
+    "blend": null,
+    "render": [
+     11.05629,
+     11.082831,
+     11.101414
+    ],
+    "probeFree": [
+     9.491604,
+     9.529147,
+     9.560022
+    ],
+    "lookup": 1.5536840000000005,
+    "core": 1.1259
+   }
+  ],
+  "pt": {
+   "courtyard": [
+    {
+     "layout": "shipped",
+     "glossyPixels": 119966,
+     "referenceSamples": 64,
+     "rows": [
+      {
+       "method": "probes",
+       "mad": 32.38610106196838,
+       "bias": 32.386101061967395,
+       "stdMean": 4.3584109836494185e-7,
+       "probes": 7,
+       "probeLayout": null
+      },
+      {
+       "method": "ours-denoised",
+       "mad": 29.511342449806882,
+       "bias": 29.511338281957308,
+       "stdMean": 0.04895268882820402,
+       "probes": 7,
+       "probeLayout": null
+      }
+     ]
+    },
+    {
+     "layout": "few",
+     "glossyPixels": 119966,
+     "referenceSamples": 64,
+     "rows": [
+      {
+       "method": "probes",
+       "mad": 24.344253093932554,
+       "bias": 24.344253093932128,
+       "stdMean": 3.8234806310166676e-7,
+       "probes": 2,
+       "probeLayout": "few"
+      },
+      {
+       "method": "ours-denoised",
+       "mad": 23.63453534056944,
+       "bias": 23.634528394155982,
+       "stdMean": 0.05430617030414035,
+       "probes": 2,
+       "probeLayout": "few"
+      }
+     ]
+    },
+    {
+     "layout": "medium",
+     "glossyPixels": 119966,
+     "referenceSamples": 64,
+     "rows": [
+      {
+       "method": "probes",
+       "mad": 28.45245597363696,
+       "bias": 28.452455973636802,
+       "stdMean": 4.2016529360418755e-7,
+       "probes": 8,
+       "probeLayout": "medium"
+      },
+      {
+       "method": "ours-denoised",
+       "mad": 24.43180463631436,
+       "bias": 24.431802552389613,
+       "stdMean": 0.06244751609037282,
+       "probes": 8,
+       "probeLayout": "medium"
+      }
+     ]
+    },
+    {
+     "layout": "many",
+     "glossyPixels": 119966,
+     "referenceSamples": 64,
+     "rows": [
+      {
+       "method": "probes",
+       "mad": 27.57743582904094,
+       "bias": 27.57743582904082,
+       "stdMean": 4.2104850184576466e-7,
+       "probes": 32,
+       "probeLayout": "many"
+      },
+      {
+       "method": "ours-denoised",
+       "mad": 22.574887884901138,
+       "bias": 22.574885800976727,
+       "stdMean": 0.05328284236120427,
+       "probes": 32,
+       "probeLayout": "many"
+      }
+     ]
+    },
+    {
+     "layout": "manyCell",
+     "glossyPixels": 119966,
+     "referenceSamples": 64,
+     "rows": [
+      {
+       "method": "probes",
+       "mad": 27.63232082423369,
+       "bias": 27.632320824234103,
+       "stdMean": 4.204619805924726e-7,
+       "probes": 32,
+       "probeLayout": "manyCell"
+      },
+      {
+       "method": "ours-denoised",
+       "mad": 22.65813404075675,
+       "bias": 22.658133346114894,
+       "stdMean": 0.05344813704370705,
+       "probes": 32,
+       "probeLayout": "manyCell"
+      }
+     ]
+    },
+    {
+     "layout": "mixed",
+     "glossyPixels": 119966,
+     "referenceSamples": 64,
+     "rows": [
+      {
+       "method": "probes",
+       "mad": 19.89921311038113,
+       "bias": 19.8992131103812,
+       "stdMean": 3.6105341051194386e-7,
+       "probes": 11,
+       "probeLayout": "mixed"
+      },
+      {
+       "method": "ours-denoised",
+       "mad": 17.433678778431275,
+       "bias": 17.433671832019108,
+       "stdMean": 0.043704364365109306,
+       "probes": 11,
+       "probeLayout": "mixed"
+      }
+     ]
+    }
+   ],
+   "low": [
+    {
+     "layout": "shipped",
+     "glossyPixels": 224132,
+     "referenceSamples": 64,
+     "rows": [
+      {
+       "method": "probes",
+       "mad": 40.72528242286103,
+       "bias": 40.725282422856964,
+       "stdMean": 4.0074847711542213e-7,
+       "probes": 7,
+       "probeLayout": null
+      },
+      {
+       "method": "ours-denoised",
+       "mad": 36.39480585101808,
+       "bias": 36.394796184094616,
+       "stdMean": 0.08695568691363235,
+       "probes": 7,
+       "probeLayout": null
+      }
+     ]
+    },
+    {
+     "layout": "few",
+     "glossyPixels": 224132,
+     "referenceSamples": 64,
+     "rows": [
+      {
+       "method": "probes",
+       "mad": 33.404130899055744,
+       "bias": 33.40413089905285,
+       "stdMean": 3.474969702074653e-7,
+       "probes": 2,
+       "probeLayout": "few"
+      },
+      {
+       "method": "ours-denoised",
+       "mad": 31.77481145783145,
+       "bias": 31.774793983009598,
+       "stdMean": 0.10257388429145134,
+       "probes": 2,
+       "probeLayout": "few"
+      }
+     ]
+    },
+    {
+     "layout": "medium",
+     "glossyPixels": 224132,
+     "referenceSamples": 64,
+     "rows": [
+      {
+       "method": "probes",
+       "mad": 37.733503768614355,
+       "bias": 37.73350376861272,
+       "stdMean": 4.013572875098763e-7,
+       "probes": 8,
+       "probeLayout": "medium"
+      },
+      {
+       "method": "ours-denoised",
+       "mad": 33.82845953128923,
+       "bias": 33.82844726173282,
+       "stdMean": 0.10202681110768595,
+       "probes": 8,
+       "probeLayout": "medium"
+      }
+     ]
+    },
+    {
+     "layout": "many",
+     "glossyPixels": 224132,
+     "referenceSamples": 64,
+     "rows": [
+      {
+       "method": "probes",
+       "mad": 38.41215444470323,
+       "bias": 38.4121544447023,
+       "stdMean": 4.167189046169593e-7,
+       "probes": 32,
+       "probeLayout": "many"
+      },
+      {
+       "method": "ours-denoised",
+       "mad": 31.14567959208635,
+       "bias": 31.14567066877164,
+       "stdMean": 0.0748211227423801,
+       "probes": 32,
+       "probeLayout": "many"
+      }
+     ]
+    },
+    {
+     "layout": "manyCell",
+     "glossyPixels": 224132,
+     "referenceSamples": 64,
+     "rows": [
+      {
+       "method": "probes",
+       "mad": 38.53419562281966,
+       "bias": 38.53419562281753,
+       "stdMean": 4.1717028641214347e-7,
+       "probes": 32,
+       "probeLayout": "manyCell"
+      },
+      {
+       "method": "ours-denoised",
+       "mad": 31.35504617071258,
+       "bias": 31.355037991004597,
+       "stdMean": 0.07548569167335895,
+       "probes": 32,
+       "probeLayout": "manyCell"
+      }
+     ]
+    },
+    {
+     "layout": "mixed",
+     "glossyPixels": 224132,
+     "referenceSamples": 64,
+     "rows": [
+      {
+       "method": "probes",
+       "mad": 28.92713371287244,
+       "bias": 28.927133712871797,
+       "stdMean": 3.238144618825727e-7,
+       "probes": 11,
+       "probeLayout": "mixed"
+      },
+      {
+       "method": "ours-denoised",
+       "mad": 23.505301005657714,
+       "bias": 23.505276094741745,
+       "stdMean": 0.07280236305130428,
+       "probes": 11,
+       "probeLayout": "mixed"
+      }
+     ]
+    }
+   ]
+  }
+ }
+}
