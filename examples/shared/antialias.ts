@@ -94,6 +94,9 @@ export interface DisplayAAOptions {
   settings?: { sharpness?: number; maxAccumulation?: number };
   displayWidth: number;
   displayHeight: number;
+  /** The upscaler's own GPU timer (default true). W51: off on the bench / compare methods, where several renderers' timers
+   *  on one GPU ran Metal out of query sample buffers and the upscaler then stopped presenting new frames. */
+  gpuTiming?: boolean;
   /** The page's tone mapping + output encoding (applied after the upscaler for tone-mapped views). */
   tone: (c: N) => N;
 }
@@ -162,7 +165,7 @@ export class DisplayAA {
     this.velocityQuad = new THREE.QuadMesh(vm);
     this.reactiveQuad = new THREE.QuadMesh(this.reactiveMaterial);
 
-    this.upscaler = new Upscaler({ renderer, gpuTiming: true });
+    this.upscaler = new Upscaler({ renderer, gpuTiming: o.gpuTiming ?? true });
     Object.assign(this.upscaler.settings, o.settings ?? {});
     this.configure();
 
