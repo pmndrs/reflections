@@ -1255,6 +1255,47 @@ async function ssrRtBvhChecks(pages) {
     ms[bvh] = { trace: r.ms['rt trace'], misses: (await t.T('window.__p.traceStats()')).misses };
   }
   console.log(`  (info) rt trace GPU ms at 1920x1080, offscreen 'mirror', ${ms.pmndrs.misses} misses: @pmndrs/bvh ${ms.pmndrs.trace?.toFixed(3)} ms, three-mesh-bvh ${ms['three-mesh-bvh'].trace?.toFixed(3)} ms`);
+  if (args.includes('--rt-bvh-timing')) await rtBvhTiming(pages);
+}
+
+/**
+ * W48: 'rt trace' GPU ms at 1080p per walk (three-mesh-bvh, @pmndrs/bvh, @pmndrs/bvh with
+ * `rayMasks: false`), loop stopped, median of 20 frames per run, `--rt-bvh-rounds` runs (default 3)
+ * in rotating order, median of the runs. Two loads per run: the default miss list, then every pixel
+ * below confidence 1.01 traced (the walk's cost on a full screen of rays). Opt-in (`--rt-bvh-timing`).
+ */
+async function rtBvhTiming(pages) {
+  const rounds = args.includes('--rt-bvh-rounds') ? Number(args[args.indexOf('--rt-bvh-rounds') + 1]) : 3;
+  const variants = [['three-mesh-bvh', ''], ['@pmndrs/bvh', '&bvh=pmndrs'], ['@pmndrs/bvh rayMasks off', '&bvh=pmndrs&bvhRayMasks=0']];
+  const scenes = [['offscreen', 'mirror'], ['mirrorWall', ''], ['contact', ''], ['moving', ''], ['boxRoom', ''],
+    ...(fs.existsSync(path.join(ROOT, 'examples/assets/Sponza')) ? [['sponza', '']] : [])];
+  const url = (param, scene, pose) => `http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1${param}&scene=${scene}${pose ? `&pose=${pose}` : ''}`;
+  const page = await openPage(url(variants[0][1], ...scenes[0]));
+  pages.push(page);
+  const med = (a) => { const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
+  const out = {};
+  for (const [scene, pose] of scenes) {
+    const ms = Object.fromEntries(variants.map(([v]) => [v, { def: [], all: [] }]));
+    let misses = { def: 0, all: 0 };
+    for (let r = 0; r < rounds; r++) {
+      for (let k = 0; k < variants.length; k++) {
+        const [v, param] = variants[(k + r) % variants.length];
+        await page.navigate(url(param, scene, pose));
+        ms[v].def.push((await page.T('window.__p.time(20)')).ms['rt trace'] ?? NaN);
+        await page.T('window.__p.step(1)');
+        misses.def = (await page.T('window.__p.traceStats()')).misses;
+        await page.T('window.__p.setSettings({ missConfidenceThreshold: 1.01 })');
+        ms[v].all.push((await page.T('window.__p.time(20)')).ms['rt trace'] ?? NaN);
+        await page.T('window.__p.step(1)');
+        misses.all = (await page.T('window.__p.traceStats()')).misses;
+      }
+    }
+    out[scene] = { misses, ms: Object.fromEntries(variants.map(([v]) => [v, { def: med(ms[v].def), all: med(ms[v].all), runs: ms[v] }])) };
+    console.log(`  (info) rt trace GPU ms at 1920x1080, ${scene}${pose ? ` '${pose}'` : ''}, median of ${rounds} runs (default ${misses.def} misses / all traced ${misses.all}): ${variants.map(([v]) => `${v} ${out[scene].ms[v].def.toFixed(3)} / ${out[scene].ms[v].all.toFixed(3)}`).join(', ')}`);
+  }
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, 'rt-bvh-timing.json'), JSON.stringify(out, null, 2));
+  page.close();
 }
 
 /**
