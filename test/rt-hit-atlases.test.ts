@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Texture } from 'three/webgpu';
 import { createProbeLayout, probeHitShading, probeLookupWgsl } from '@pmndrs/reflections-core';
 
 // RT hit shading over a probe set with probes of several sizes (W47, D4702): core `probeHitShading`
@@ -66,8 +67,8 @@ describe('three: RT hit shading binds every atlas of a mixed-size set (D4702)', 
     set.texture = textures[0];
     return set;
   };
-  const gpuOf = new Map<THREE.Texture, GPUTexture>();
-  const gpu = (t: THREE.Texture) => {
+  const gpuOf = new Map<Texture, GPUTexture>();
+  const gpu = (t: Texture) => {
     let g = gpuOf.get(t);
     if (!g) gpuOf.set(t, (g = { createView: (d: GPUTextureViewDescriptor) => ({ of: t.id, d }) } as unknown as GPUTexture));
     return g;
