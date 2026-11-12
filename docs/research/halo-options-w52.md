@@ -150,6 +150,21 @@ No new target. The traced pass already writes `TracedReflections.source` (core),
 - This frame's codes are complete once the traced pass has run.
 - Option 2 reads last frame's codes. Intersect reads them through the input `hitSource` (the traced pass's texture, before it clears it). The traced pass reads its own copy of them.
 
+## Bench schema entries (W51 had not merged when W52 finished)
+
+W51's step 1 (`25a58a7`) reads settings by URL key: `s.<field>` for `ssr.settings`, `t.<field>` for `ssr.traceSettings`. For the bench:
+
+- Add `hitLobeFilterMixed: 'n'` and `hitShadeOcclusion: 's'` to its `SSSR_FIELDS`.
+- Add `hitShadeVisibility: 's'` to its `TRACE_FIELDS`. Optionally also add `hitShadeOcclusion: 's'` and `hitLobeFilterMixed: 'n'`, which override the tracer's value for the traced pass only.
+
+| id | group | type | default | trade-off | cost (carConcept, 1920x1080) |
+|---|---|---|---|---|---|
+| `t.hitShadeVisibility` | Ray tracing / hit shading | enum 'offscreen' \| 'all' | 'offscreen' | 'all': on-screen re-shaded traced hits take the visibility ray. Reflected wheel 43 -> 41 (PT 26). A mirror seen in a mirror goes black where the facing mirror blocks R (0 -> 46 % on facingMirrors). Needs RT and `t.hitShadows`. | rt trace +0.30 ms |
+| `s.hitLobeFilterMixed` | Screen-space / hit shading (next to `s.hitLobeFilter`) | number 0..1, step 0.05 | 1 | Lower takes the skirt halo down at 960x540 (lip 80 -> 56 at 0, PT 48), but darkens the skirt and the door's lower edge (skirt 50 -> 23, PT 35). At 1080p it overshoots, since there is no halo there. 0.5 is the mild setting. Below 1 the tracer rebuilds once (one more sampled texture in intersect). | intersect +0.03 ms, rt trace +0.04 ms |
+| `s.hitShadeOcclusion` | Screen-space / hit shading | enum 'off' \| 'screen' | 'off' | 'screen': re-shaded hits whose lobe is blocked on screen go dark. Reflected wheel 43 -> 37 (PT 26); everything else within 1. Works without RT. carConcept hero Measure +0.19 (untuned). | intersect +0.04 ms |
+
+The compare page and the showcase also take the short flags `?shadeVis=all`, `?lobeMix=<0..1>` and `?shadeOcc=screen`. W51's `ours.ts` rewrite will conflict with W52's three added lines there. Keep W51's version and drop W52's lines once the `s.` / `t.` keys cover these settings.
+
 ## Shots
 
 - `halo-960.jpg`, `halo-1080.jpg`: the skirt and the lower door (x 430-690, y 270-400 in 960x540 coordinates), each a 16-frame mean. Rows:
