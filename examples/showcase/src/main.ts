@@ -21,7 +21,11 @@
 // on the G-buffer, ../../shared/ao.ts) for Lagarde's specular occlusion on the probe / environment part; also a
 // checkbox, and the 'ao' / 'specularOcclusion' views.
 //
-// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
+// Roughness from normal variance (W46, D3570): on by default (SPEC_AA_DEFAULT; ?specAA=0 turns it off) raises every glTF material's
+// roughness by its normal map's variance at the sampled mip (Toksvig, vMF form; ./specAA.ts), in three's lit term, the
+// G-buffer and traced hits alike; ?specAA=<k> scales the added variance. Also a checkbox under "Materials".
+//
+// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=0|1|<k> ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
 import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';
@@ -35,6 +39,7 @@ import { createReflectionDenoiser, denoiserAvailable } from '../../shared/denois
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
 import { SHOWCASE, type FloorKind, type ShowcaseEntry, type ShowcaseScene } from './scenes';
+import { SPEC_AA_DEFAULT, setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } from './specAA';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -116,6 +121,8 @@ async function main() {
     helpers: false,
     /** W39: Lagarde's specular occlusion from GTAO on the composite's probe part (D66, D4510). */
     specOcc: q.get('specOcc') === '1',
+    /** W46: roughness from normal-map variance on every glTF material with a normal map (D3570); 0 = off, else its strength. */
+    specAA: specAAFromQuery(q, SPEC_AA_DEFAULT),
   };
   let ssao: ScreenSpaceAO | null = null;
   let kit: ShowcaseScene | null = null;
@@ -251,7 +258,7 @@ async function main() {
     kit.scene.traverseVisible((o) => { if ((o as THREE.Mesh).isMesh && !o.userData.noTrace) meshes.push(o as THREE.Mesh); });
     const t0 = performance.now();
     const forKit = kit;
-    const p = await MeshBVHTraceProvider.fromObjects(device, meshes);
+    const p = await MeshBVHTraceProvider.fromObjects(device, meshes, { material: specAAHitMaterial });
     building = false;
     if (kit !== forKit) { p.destroy(); return; }
     provider = p;
@@ -262,6 +269,17 @@ async function main() {
     state.rt = on;
     if (on) await ensureBVH();
     applySources();
+  }
+
+  /** W46 (D3570): roughness from normal variance on (strength > 0) or off; re-bakes, so the probes see the same materials. */
+  function setSpecAA(strength: number) {
+    state.specAA = strength;
+    if (strength > 0) specAAStrength.value = strength;
+    if (!kit) return;
+    setSpecularAA(kit.scene, strength > 0);
+    provider?.updateMaterials();
+    bake();
+    ssr.gbuffer.resetHistory(); ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
   }
 
   // ---- probes ----------------------------------------------------------------------------------------
@@ -324,6 +342,7 @@ async function main() {
     controls.object = kit.camera;
     setPose(Object.keys(kit.views)[0]);
     state.exposure = kit.exposure;
+    if (state.specAA > 0) { specAAStrength.value = state.specAA; setSpecularAA(kit.scene, true); }
     delete ssr.settings.depthBufferThickness; delete ssr.settings.thicknessRoughnessFactor;
     if (kit.thickness) Object.assign(ssr.settings, kit.thickness);
     renderer.toneMappingExposure = state.exposure;
@@ -454,6 +473,10 @@ async function main() {
   function setSpecOcc(on: boolean) { state.specOcc = on; soBox.checked = on; buildDisplay(); hybrid.resetHistory(); aa.reset(); }
   check('Show probe volumes', state.helpers, (v) => setHelpers(v));
 
+  h2('Materials');
+  const specAABox = check('Roughness from normal variance', state.specAA > 0, (v) => setSpecAA(v ? (state.specAA || 1) : 0));
+  specAABox.parentElement!.title = 'Toksvig: raise each normal-mapped material\'s roughness by the normal map\'s variance at the sampled mip (W46)';
+
   h2('Floor');
   const kindSel = select({ mirror: 'Mirror (metal)', lacquer: 'Black lacquer' }, 'mirror', (v) => { kit?.floor.setKind?.(v as FloorKind); ssr.resetHistory(); aa.reset(); });
   const kindRow = row('Material', kindSel);
@@ -573,6 +596,8 @@ async function main() {
       setReshade: (m: HitShadingMode) => { setReshade(m); reshadeSel.value = m; },
       /** W39: Lagarde's specular occlusion from GTAO on the composite's probe part (D66, D4510). */
       setSpecOcc: (on: boolean) => setSpecOcc(on),
+      /** W46: roughness from normal variance, 0 = off, else its strength (1 = the formula); re-bakes. */
+      setSpecAA(strength: number) { setSpecAA(strength); specAABox.checked = strength > 0; },
       aa,
       /** W36: 'upscaler' (default) | 'taa' (W40's resolve) | 'off'. */
       setAA: (m: AAMode) => setAA(m),

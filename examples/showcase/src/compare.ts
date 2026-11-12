@@ -25,6 +25,8 @@
 // ?ptMax= ?ptRaw=1 ?ptDenoise=0 ?ptClearcoat=0 (path tracer), ?floorRoughness= (every method's floor, before the bake)
 // W45: ?lobeFilter=<k> (ours: hitLobeFilter, D3550), ?keyLight=<scale> and ?paintRoughness=<r> (every method: scale the lights; set
 // clear-coated paint to roughness r without its normal map)
+// W46: roughness from normal variance on every raster method's glTF materials (ours, three's SSR, probes; never the path
+// tracer, the reference), D3570: on by default as on the showcase page, ?specAA=0 off, ?specAA=<k> scales it; the glossy mask stays the authored roughness's (?maskSpecAA=1: the adjusted); ?specAAHits=0 leaves traced hits at the authored roughness
 import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { availableAssets } from '../../shared';

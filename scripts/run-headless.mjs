@@ -1391,6 +1391,25 @@ async function showcaseChecks(pages) {
     const upErrs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
     check('showcase carConcept: ?upscale=performance renders (G-buffer at half size, upscaled)', ui.gpuErrors === 0 && upErrs.length === 0 && ui.renderSize[0] === 640 && ui.renderSize[1] === 360 && upLum > 8,
       `render ${ui.renderSize.join('x')} -> ${ui.size.join('x')}, mean ${upLum.toFixed(0)}/255${upErrs.length ? '; ' + upErrs[0] : ''}`);
+    // W46 (D3570): roughness from normal variance (?specAA, on by default) reaches the G-buffer the composite reads
+    // (the paint's flake map: door 0.25 -> ~0.35 at 1280x720 hero), and turning it off restores the authored value
+    const beforeAA = results.logs.length;
+    const aa = await p.T(`(async () => {
+      const P = window.__p; await P.load('carConcept'); P.setPose('hero'); P.stop();
+      const rt = P.ssr.gbuffer.renderTarget, i = rt.textures.indexOf(P.ssr.gbuffer.textures.normalRoughness);
+      const door = async () => {
+        await P.step(2);
+        const d = await P.renderer.readRenderTargetPixelsAsync(rt, 560, 345, 161, 44, i);
+        const f = (v) => (d instanceof Uint16Array ? P.THREE.DataUtils.fromHalfFloat(v) : v);
+        let s = 0, n = 0; for (let k = 3; k < d.length; k += 4) { const v = f(d[k]); if (v > 0) { s += v; n++; } }
+        return s / n;
+      };
+      P.setSpecAA(0); const off = await door(); P.setSpecAA(1); const on = await door(); P.setSpecAA(0); const back = await door(); P.setSpecAA(1);
+      return { off, on, back, errors: P.gpuErrors.length };
+    })()`);
+    const aaErrs = results.logs.slice(beforeAA).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    check('showcase carConcept: roughness from normal variance (specAA) reaches the G-buffer and turns off cleanly', aa.errors === 0 && aaErrs.length === 0 && Math.abs(aa.off - 0.25) < 0.01 && aa.on > 0.3 && Math.abs(aa.back - aa.off) < 1e-3,
+      `door G-buffer roughness off ${aa.off.toFixed(3)}, on ${aa.on.toFixed(3)}, off again ${aa.back.toFixed(3)}${aaErrs.length ? '; ' + aaErrs[0] : ''}`);
   }
 }
 

@@ -11,7 +11,8 @@ import {
 } from '@pmndrs/reflections/three';
 import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
 import { ScreenSpaceAO } from '../../../shared/ao';
-import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, applySceneParams, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
+import { setSpecularAA, specAAHitMaterial } from '../specAA';
+import { type CompareMethod, type MethodContext, type MethodId, destroyWebGPU, applySceneParams, applySpecAA, freshEnvironment, newCanvas, sceneInfo, syncCamera } from './method';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -46,6 +47,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   const kit = await ctx.entry.build(W / H);
   await freshEnvironment(kit, ctx.entry);
   applySceneParams(kit, params);
+  const specAA = applySpecAA(kit, params);
   const camera = kit.camera;
   delete ssr.settings.depthBufferThickness; delete ssr.settings.thicknessRoughnessFactor;
   if (kit.thickness) Object.assign(ssr.settings, kit.thickness);
@@ -92,7 +94,8 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     const meshes: THREE.Mesh[] = [];
     kit.scene.updateMatrixWorld(true);
     kit.scene.traverseVisible((o) => { if ((o as THREE.Mesh).isMesh && !o.userData.noTrace) meshes.push(o as THREE.Mesh); });
-    provider = await MeshBVHTraceProvider.fromObjects(device, meshes);
+    // W46: ?specAAHits=0 keeps the traced hits' authored roughness with ?specAA on
+    provider = await MeshBVHTraceProvider.fromObjects(device, meshes, params.get('specAAHits') === '0' ? {} : { material: specAAHitMaterial });
     ssr.setTraceProvider(provider);
     ssr.rayTracing = true;
   }
@@ -149,14 +152,21 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
         renderer.setRenderTarget(null);
       }
     },
-    renderMask(cam) { draw(cam); maskPipeline.render(); },
+    renderMask(cam) {
+      // W46: the glossy mask from the authored roughness, so Measure compares ?specAA off and on over
+      // the same pixels (?maskSpecAA=1: from the adjusted roughness)
+      const authored = specAA.strength > 0 && params.get('maskSpecAA') !== '1';
+      if (authored) setSpecularAA(kit.scene, false);
+      draw(cam); maskPipeline.render();
+      if (authored) setSpecularAA(kit.scene, true);
+    },
     idle: () => device.queue.onSubmittedWorkDone(),
     reset() { ssr.resetHistory(); hybrid.resetHistory(); ssr.gbuffer.resetHistory(); },
     setExposure(e) { renderer.toneMappingExposure = e; },
     status: () => (denoiser ? 'denoiser ffx-reflections' : wantDenoise ? 'no denoiser found' : '') + (provider ? ` | BVH ${provider.triangles.toLocaleString()} tris` : ''),
     info: () => ({
       samplesPerQuad: ssr.settings.samplesPerQuad ?? 1, hitColor: hit, hitShading: reshade, denoiser: denoiser ? { ...denoiserOptions } : null,
-      thickness: kit.thickness ?? 'default', rayTracing: !!provider, probes: kit.probes.length,
+      thickness: kit.thickness ?? 'default', rayTracing: !!provider, probes: kit.probes.length, specAA,
       varianceGuidedTracing: 'off (the seam passes no variance back to the tracer)',
     }),
     gpuErrors: () => errors,
