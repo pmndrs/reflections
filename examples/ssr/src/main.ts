@@ -619,6 +619,7 @@ async function main() {
       hitShadingError: (extra?: N, variants?: N[]) => hitShadingError(extra, variants),
       rtAnyHitOracle: (n?: number, rays?: RayKind) => rtAnyHitOracle(n, rays),
       rtShadowEffect: () => rtShadowEffect(),
+      rtHitRadiance: (extra?: N) => rtHitRadiance(extra),
       stop: stopLoop, start: startLoop,
       get probes() { return probes; },
       /**
@@ -1337,6 +1338,24 @@ async function main() {
    * reuse as configured): the same rays (pinned frame index) with `hitShadows` off, on, off again
    * (noise floor). Fractions of those pixels > 1% darker / brighter, and mean luminance off -> on.
    */
+  /**
+   * W47 (D4702): the traced pass's output on fixed rays (SSSR frame index pinned, on-screen reuse
+   * off, so every hit is shaded by the hit shading), for comparing probe sets in the page: the
+   * `source` codes (core RT_SOURCE, 1 = traced hit) and the tracer's `radiance` (rgba, linear).
+   */
+  async function rtHitRadiance(extra: N = {}) {
+    const rt = ssr.traced!, core = ssr.tracer!;
+    const keep = ssr.traceSettings;
+    const keepFrame = (ssr.settings as N).frameIndex;
+    (ssr.settings as N).frameIndex = 7;
+    ssr.traceSettings = { ...keep, ...extra, reuseOnScreenHits: false };
+    frame(); await idle();
+    const [source, radiance] = await Promise.all([readTexture(device, rt.source), readTexture(device, core.outputs.radiance)]);
+    ssr.traceSettings = keep;
+    if (keepFrame === undefined) delete (ssr.settings as N).frameIndex; else (ssr.settings as N).frameIndex = keepFrame;
+    return { width: W, height: H, source, radiance, kind: ssr.hitShadingSource };
+  }
+
   async function rtShadowEffect() {
     const rt = ssr.traced!, core = ssr.tracer!;
     const keep = ssr.traceSettings;

@@ -261,6 +261,12 @@ export interface ProbeHitShadingResources {
   sampler: GPUSampler;
   /** The volume table (core `packProbeTable` rows; a ProbeSet's `table`). */
   table: GPUBuffer;
+  /**
+   * A set with several atlases (one per probe size, D4700): atlases 1.. in order, viewed like
+   * `atlas` (a ProbeSet's `atlasViews.slice(1)`); one per extra atlas the shading was compiled for
+   * (`atlases - 1`). Omit for a one-atlas set.
+   */
+  atlases?: readonly GPUTextureView[];
 }
 
 export interface ProbeHitShading extends HitShading {
@@ -272,7 +278,8 @@ export interface ProbeHitShading extends HitShading {
 }
 
 // The probe lookup module sits at bindings 0..2 of group 3 (atlas, sampler, table: a ProbeSet's
-// own layout), the HitEnv uniform at 3.
+// own layout), the HitEnv uniform at 3, a multi-size set's atlases 1.. at 4.. (D4702: the lookup's
+// `atlasBinding`; a ProbeSet's own group has them at 3..).
 const PROBE_SHADE = /* wgsl */ `
 ${UNIFORM_WGSL}
 @group(3) @binding(3) var<uniform> hitEnv: HitEnv;
@@ -298,35 +305,43 @@ const isProbeSet = (s: ProbeHitShadingSource): s is ProbeSet => typeof (s as Pro
  * Hit shading from reflection probes at the hit point (D901, SPEC section 4): emissive + albedo x
  * (the probe lookup at P along N at roughness 1 x intensity + the directional / hemisphere lights of
  * {@link environmentHitShading}). Group 3 holds the lookup's atlas, sampler and table (bindings
- * 0..2) and the lighting uniform (3); one storage buffer (the table).
+ * 0..2) and the lighting uniform (3); one storage buffer (the table). A set with several atlases
+ * (probes of several sizes, D4700: a ProbeSet with mixed `slotSizes`, or lookup options with
+ * `atlases`) binds atlases 1.. at 4.. (`resources.atlases`); a one-atlas set compiles as before.
  *
  *   const shading = probeHitShading(device, set);   // or (device, { layout, mirrorX, count })
  *   const rt = createTracedReflections(device, { ..., hitShading: shading });
- *   rt.dispatch(cmd, { ..., hitShadingBindGroup: shading.createBindGroup({ atlas: set.atlasView, sampler: set.sampler, table: set.table }) });
+ *   rt.dispatch(cmd, { ..., hitShadingBindGroup: shading.createBindGroup({ atlas: set.atlasView, sampler: set.sampler, table: set.table, atlases: set.atlasViews.slice(1) }) });
  */
 export function probeHitShading(device: GPUDevice, source: ProbeHitShadingSource): ProbeHitShading {
   const layoutDesc = source.layout;
   const C = 0x4;
+  // atlases 1.. of a multi-size set (D4700) after the uniform (D4702)
+  const atlases = isProbeSet(source) ? source.atlasViews.length : Math.floor(source.atlases ?? 1);
+  const texture = (binding: number): GPUBindGroupLayoutEntry => ({ binding, visibility: C, texture: { sampleType: 'float', viewDimension: layoutDesc.viewDimension } });
   const layout = device.createBindGroupLayout({
-    label: `rt hit shading (probes, ${layoutDesc.id})`,
+    label: `rt hit shading (probes, ${layoutDesc.id}${atlases > 1 ? `, ${atlases} atlases` : ''})`,
     entries: [
-      { binding: 0, visibility: C, texture: { sampleType: 'float', viewDimension: layoutDesc.viewDimension } },
+      texture(0),
       { binding: 1, visibility: C, sampler: { type: 'filtering' } },
       { binding: 2, visibility: C, buffer: { type: 'read-only-storage' } },
       { binding: 3, visibility: C, buffer: { type: 'uniform' } },
+      ...Array.from({ length: atlases - 1 }, (_, k) => texture(4 + k)),
     ],
   });
   const { uniform, setLighting } = hitLightingUniform(device, 'rt hit probes');
-  const lookup = isProbeSet(source) ? source.wgsl({ group: 3 }) : probeLookupWgsl({ ...source, group: 3, binding: 0 });
+  const lookup = isProbeSet(source) ? source.wgsl({ group: 3, atlasBinding: 4 }) : probeLookupWgsl({ ...source, group: 3, binding: 0, atlasBinding: 4 });
   return {
     wgsl: lookup + PROBE_SHADE,
     layout,
     storageBufferCount: 1,
     layoutId: layoutDesc.id,
-    createBindGroup({ atlas, sampler, table }) {
+    createBindGroup({ atlas, sampler, table, atlases: extra = [] }) {
+      if (extra.length !== atlases - 1) throw new Error(`probeHitShading: compiled for ${atlases} atlases, got ${1 + extra.length} (resources.atlases holds atlases 1..)`);
       return device.createBindGroup({
         label: 'rt hit probes', layout,
-        entries: [{ binding: 0, resource: atlas }, { binding: 1, resource: sampler }, { binding: 2, resource: { buffer: table } }, { binding: 3, resource: { buffer: uniform } }],
+        entries: [{ binding: 0, resource: atlas }, { binding: 1, resource: sampler }, { binding: 2, resource: { buffer: table } }, { binding: 3, resource: { buffer: uniform } },
+          ...extra.map((v, k) => ({ binding: 4 + k, resource: v }))],
       });
     },
     setLighting,

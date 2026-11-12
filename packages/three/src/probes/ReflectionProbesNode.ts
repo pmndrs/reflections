@@ -274,13 +274,13 @@ function atlasNode(probes: ReflectionProbes, k = 0): N {
   return node;
 }
 
-/** The atlas count and, with several, each baked volume's atlas: what a lookup compiles in (D4700). */
-function atlasSignature(probes: ReflectionProbes): string {
+/** The atlas count and, with several, each baked volume's atlas: what a lookup compiles in (D4700). @internal also the RT hit shading's key (D4702) */
+export function atlasSignature(probes: ReflectionProbes): string {
   return probes.textures.length > 1 ? `${probes.textures.length}:${probes.bakedAtlases.join(',')}` : '1';
 }
 
-/** The lookup's atlas options (D4700): none for one atlas, else the count and each volume's atlas. */
-function atlasOptions(probes: ReflectionProbes) {
+/** The lookup's atlas options (D4700): none for one atlas, else the count and each volume's atlas. @internal also the RT hit shading's (D4702) */
+export function atlasOptions(probes: ReflectionProbes) {
   const n = probes.textures.length;
   return n > 1 ? { atlases: n, volumeAtlases: probes.bakedAtlases } : {};
 }
