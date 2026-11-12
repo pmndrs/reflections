@@ -1506,6 +1506,53 @@ async function probeLayoutMeasure(pages) {
   }
 }
 
+/**
+ * W63 (`--only probe-lookup-cost`): the probe lookup's GPU cost at 1920x1080 on examples/ssr, RT off,
+ * loop stopped, per lookup variant (`?lookupExp=`, core's bench-only PROBE_LOOKUP_EXPERIMENT; '' = the
+ * shipped lookup) and grid size (n x 128 px cells over the scene's regions, ../examples/shared/probeLayouts.ts).
+ * Per row: three's passes (median of 30, 3 repeats), the same with the materials' lookups off (composite only)
+ * and with every lookup off (probe-free). W63_SCENES, W63_VARIANTS ('|'-separated), W63_COUNTS pick.
+ * JSON to out/w63-probe-lookup-cost.json (merged by scene / variant).
+ */
+const LOOKUP_COST = `async (counts, pose) => {
+  const p = window.__p; p.setDenoise(false); p.setRT(false); if (pose) p.setPose(pose); p.setView('final');
+  const rep = async () => { const v = []; for (let i = 0; i < 3; i++) v.push((await p.renderTime(30)).ms); v.sort((a, b) => a - b); return v; };
+  const rows = [];
+  for (const n of counts) {
+    const vols = n === 'shipped' ? null : p.probeGrid(n);
+    await p.setProbeVolumes(vols, vols ? { resolution: 128 } : {});
+    await p.step(4);
+    const all = await rep();
+    p.setProbeParts(false, true); await p.step(4); const compositeOnly = await rep();
+    p.setProbeParts(false, false); await p.step(4); const free = await rep();
+    p.setProbeParts(true, true); await p.step(4);
+    const core = await p.time(30);
+    rows.push({ n, probes: p.probes?.bakedProbes?.length ?? null, all, compositeOnly, free, material: all[1] - compositeOnly[1], composite: compositeOnly[1] - free[1], lookup: all[1] - free[1], core: Object.values(core.ms).reduce((a, b) => a + b, 0) });
+  }
+  return rows;
+}`;
+async function probeLookupCost(pages) {
+  fs.mkdirSync(OUT, { recursive: true });
+  const file = path.join(OUT, 'w63-probe-lookup-cost.json');
+  const all = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+  const scenes = process.env.W63_SCENES?.split(',') ?? ['rooms', 'showcaseSponza'];
+  const variants = process.env.W63_VARIANTS?.split('|') ?? [''];
+  const counts = process.env.W63_COUNTS?.split(',').map((c) => (c === 'shipped' ? c : Number(c))) ?? [4, 8, 16, 32];
+  const poses = { rooms: 'default', offscreen: 'default', showcaseSponza: 'courtyard' };
+  for (const scene of scenes) for (const v of variants) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&w=1920&h=1080&probeLayout=shipped&texLimit=adapter&scene=${scene}${v ? `&lookupExp=${v}` : ''}`);
+    pages.push(p);
+    const before = results.logs.length;
+    const r = await p.T(`(${LOOKUP_COST})(${JSON.stringify(counts)}, ${JSON.stringify(poses[scene] ?? null)})`);
+    (all[scene] ??= {})[v || 'base'] = r;
+    fs.writeFileSync(file, JSON.stringify(all, null, 1));
+    for (const t of r) console.log(`  ${scene} [${v || 'base'}] n ${t.n} (${t.probes}): all ${t.all[1].toFixed(2)} ms, composite-only ${t.compositeOnly[1].toFixed(2)}, free ${t.free[1].toFixed(2)} | lookup ${t.lookup.toFixed(2)} = material ${t.material.toFixed(2)} + composite ${t.composite.toFixed(2)} | core ${t.core.toFixed(2)}`);
+    const bad = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    if (bad.length) console.log(`  !! ${bad.slice(0, 3).join(' | ')}`);
+    p.close(); pages.splice(pages.indexOf(p), 1);
+  }
+}
+
 async function offscreenFillChecks(pages) {
   const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=offscreen`);
   pages.push(p);
@@ -2124,7 +2171,7 @@ async function pixi3dChecks(pages) {
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' ? 3_600_000 : 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-lookup-cost' ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -2429,6 +2476,7 @@ async function main() {
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (runs('probe-layouts')) await probeLayoutChecks(pages); // W61
     if (only === 'probe-layouts-measure') await probeLayoutMeasure(pages); // W61: the measurement (minutes), JSON to out/w61-probe-layouts.json
+    if (only === 'probe-lookup-cost') await probeLookupCost(pages); // W63: the lookup's cost per variant and volume count, JSON to out/w63-probe-lookup-cost.json
     if (only === 'offscreen-sizes') await offscreenSizeMeasure(pages); // W60 (D4700): offscreen per-probe sizes, JSON to out/w60-offscreen.json
     if (only === 'rt-hit-atlases') { await rtHitAtlasChecks(pages); await rtHitAtlasChecks(pages, 'pmndrs'); } // W47 (D4702): RT hits over a mixed-size set alone (also part of ssr-rt / ssr-rt-bvh)
     if (only === 'rt-materials') await rtMaterialsAlone(pages); // W49 (D1701 / D1702): per-triangle hit materials on both providers alone (also part of ssr-rt / ssr-rt-bvh)

@@ -218,8 +218,12 @@ function atlasCount(o: Pick<ProbeLookupOptions, 'atlases' | 'volumeAtlases' | 'c
   return n;
 }
 
+/** W63 bench only (not exported from the package): lookup variants for the cost profile. */
+export const PROBE_LOOKUP_EXPERIMENT: { mode: string } = { mode: '' };
+
 const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: string, samp: string) => {
-  const unroll = o.count;
+  const X = PROBE_LOOKUP_EXPERIMENT.mode.split(',');
+  const unroll = X.includes('loop') ? undefined : o.count;
   const atlases = atlasCount(o);
   const multi = atlases > 1;
   const sample = o.layout.sampleFunction;
@@ -242,12 +246,22 @@ const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: stri
   // it, else picked by a branch on the table's atlas index. One atlas: the code as it always was.
   const comp = ['x', 'y', 'z', 'w'];
   const pick = (k: number | undefined, sampleArgs: string) => {
+    if (X.includes('nosample')) return '      var c = vec3f(0.5) + 0.001 * corrected + vec3f(0.001 * vlod);\n';
     if (!multi) return `      var c = ${sample}(${tex}, ${samp}, ${sampleArgs}).rgb;\n`;
     if (k !== undefined) return `      var c = ${sample}(${atlasName(tex, k)}, ${samp}, ${sampleArgs}).rgb;\n`;
     const branches = Array.from({ length: atlases }, (_, a) => `${a === 0 ? '      ' : ' else '}${a < atlases - 1 ? `if (va == ${a}u) ` : ''}{ c = ${sample}(${atlasName(tex, a)}, ${samp}, ${sampleArgs}).rgb; }`);
     return `      var c = vec3f(0.0);\n${branches.join('')}\n`;
   };
-  const volume = (k: number | undefined) => /* wgsl */ `    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
+  const volume = (k: number | undefined) => X.includes('boxonly') ? /* wgsl */ `    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
+    let r0 = ${row('b')};
+    let r1 = ${row('b + 1u')};
+    let lp = P - r0.xyz;
+    let d = r1.xyz - abs(lp);
+    let inside = min(d.x, min(d.y, d.z));
+    let weight = clamp(inside / max(r0.w, 1e-6), 0.0, 1.0) * remaining;
+    radiance += vec3f(weight);
+    remaining -= weight;
+` : /* wgsl */ `${X.includes('skip') ? (unroll === undefined ? '    if (remaining <= 0.0) { break; }\n' : '') : ''}    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
     let r0 = ${row('b')};
     let r1 = ${row('b + 1u')};
     let lp = P - r0.xyz;
@@ -299,7 +313,7 @@ ${pick(k, `slot, ${texDir('corrected')}, vlod`)}      if (refitOn) {
   if (${o.dominantDirection === true}) { dir = pr_dominantDirection(N, R, roughness); }
   var radiance = vec3f(0.0);
   var remaining = enabled;
-${unroll === undefined ? `  for (var i = 0u; i < count; i++) {\n${volume(undefined)}  }\n` : Array.from({ length: unroll }, (_, k) => `  {\n    let i = ${k}u;\n${volume(o.volumeAtlases?.[k])}  }\n`).join('')}  let coverage = enabled - remaining;
+${unroll === undefined ? `  for (var i = 0u; i < count; i++) {\n${volume(undefined)}  }\n` : Array.from({ length: unroll }, (_, k) => `  ${X.includes('skip') ? 'if (remaining > 0.0) ' : ''}{\n    let i = ${k}u;\n${volume(o.volumeAtlases?.[k])}  }\n`).join('')}  let coverage = enabled - remaining;
   if (!withEnv) { return vec4f(radiance / max(coverage, 1e-6), coverage); }
   if (envSlot >= 0.0) {
     let slot = u32(envSlot);

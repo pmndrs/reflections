@@ -28,6 +28,7 @@
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `ssr`).
 import * as THREE from 'three/webgpu';
 import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
+import { PROBE_LOOKUP_EXPERIMENT } from '@pmndrs/reflections-core/probes/lookup';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   HybridReflections, MeshBVHTraceProvider, ReflectionProbe, defaultHitMaterial, ReflectionProbes, type BakeOptions, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
@@ -35,7 +36,7 @@ import {
 } from '@pmndrs/reflections/three';
 import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
 import {
-  ASSET_SCENES, SCENES, TEST_SCENES, PROBE_LAYOUT_BUDGET, PROBE_LAYOUT_NAMES, availableAssets, hasProbeLayouts, probeAtlasBytes, probeLayout, type KitScene, type ProbeLayout, type ProbeLayoutName, type ProbeVolume,
+  ASSET_SCENES, SCENES, TEST_SCENES, PROBE_LAYOUT_BUDGET, PROBE_LAYOUT_NAMES, availableAssets, hasProbeLayouts, probeAtlasBytes, probeGrid, probeLayout, type KitScene, type ProbeLayout, type ProbeLayoutName, type ProbeVolume,
 } from '../../shared';
 import { HEAT_LEGEND, ProbeVolumesOverlay, gbufferWorldPosition, heatColor, probeColor, probeWeights } from '../../shared/probeDebug';
 import { SHOWCASE } from '../../showcase/src/scenes';
@@ -94,6 +95,8 @@ const layoutMode = q.has('probeLayout');
 const texLimit = (adapter: GPUAdapter | null): Record<string, number> =>
   adapter && (q.get('texLimit') ?? (layoutMode ? 'adapter' : 'default')) === 'adapter' ? { maxSampledTexturesPerShaderStage: Math.min(adapter.limits.maxSampledTexturesPerShaderStage, 48) } : {};
 const timingOn = q.has('gpuTime') || layoutMode;
+/** W63 bench only: `?lookupExp=skip,loop,...` compiles a probe lookup variant (core's PROBE_LOOKUP_EXPERIMENT). */
+if (q.has('lookupExp')) PROBE_LOOKUP_EXPERIMENT.mode = q.get('lookupExp')!;
 
 const VIEWS = ['final', 'raw', 'split', 'noSSR', 'ssr', 'confidence', 'ssrWeight', 'hitFade', 'probeConsistency', 'hitDistance', 'rays', 'misses', 'specular', 'signal', 'probeSpecular', 'coverage', 'source', 'rtSource', 'grid', 'ao', 'specularOcclusion',
   // W61 probe views: the dominant probe (its palette colour over the lit image), the volumes blended per px (heat),
@@ -316,7 +319,7 @@ async function main() {
     ssao?.dispose();
     const ao = ssao = new ScreenSpaceAO(ssr.gbuffer, kit!.camera);
     Object.assign(hybrid.options, {
-      probes: useProbes && probesEnabled ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity,
+      probes: useProbes && probesEnabled && compositeProbes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity,
       ao: specOcc ? (u: N) => ao.sample(u) : null,
     });
     hybrid.rebuild();
@@ -399,6 +402,8 @@ async function main() {
   let probes: ReflectionProbes | null = null;
   /** W38: `__p.setProbesEnabled(false)` lights with `scene.environment` only (the probe-free reference). */
   let probesEnabled = true;
+  /** W63: the composite's own probe lookups on / off (`__p.setProbeParts`), to split the lookup's cost. */
+  let compositeProbes = true;
   type ExampleProvider = TraceProvider & { destroy(): void };
   let provider: ExampleProvider | null = null;
   let refitProvider: () => void = () => {};
@@ -844,6 +849,8 @@ async function main() {
       /** W61: the layout `name` as planned for the loaded scene (volumes, planned bytes), without baking. */
       probeLayout: (name: ProbeLayoutName, blend?: number) => (kit ? probeLayout(kit.id, name, kit.probes, { blend: blend ?? layoutBlend }) : null),
       layoutNames: () => [...PROBE_LAYOUT_NAMES], layoutBudget: PROBE_LAYOUT_BUDGET,
+      /** W63: an `n`-cell 128 px grid over the loaded scene's regions (null without layouts). */
+      probeGrid: (n: number, opts: { resolution?: number; blend?: number } = {}) => (kit ? probeGrid(kit.id, n, opts) : null),
       get lastBake() { return lastBake; },
       /** W61: the volume overlay on / off. */
       setShowVolumes(on: boolean) { showVolumes = on; volBox.checked = on; refreshOverlay(); },
@@ -882,6 +889,15 @@ async function main() {
         kit.scene.environmentNode = on && probes ? (reflectionProbes(probes) as N) : null;
         kit.scene.traverse((o) => { const m = (o as THREE.Mesh).material; if (m) for (const x of ([] as THREE.Material[]).concat(m)) x.needsUpdate = true; });
         probesEnabled = on;
+        buildDisplay();
+        ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
+      },
+      /** W63: the probe lookups of the lit materials and of the composite on / off separately (cost split). */
+      setProbeParts(material: boolean, composite: boolean) {
+        if (!kit) return;
+        kit.scene.environmentNode = material && probes ? (reflectionProbes(probes) as N) : null;
+        kit.scene.traverse((o) => { const m = (o as THREE.Mesh).material; if (m) for (const x of ([] as THREE.Material[]).concat(m)) x.needsUpdate = true; });
+        compositeProbes = composite;
         buildDisplay();
         ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
       },
