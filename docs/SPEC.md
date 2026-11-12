@@ -152,6 +152,7 @@ It works as follows:
 - 256 (default): polished floors and metal below roughness ~0.2 (Lagarde 2014's mirror-grade minimum, D62).
 - 128: probes that only glossy or rough surfaces see, many probes in one scene, mobile.
 - Larger is not always better: offscreen's floor at 1024 read worse than at 512 (17.59 vs 17.53).
+- At most four sizes per set (`PROBE_MAX_ATLASES`, D4700). Each size is one atlas and one more sampled-texture binding in every lookup shader (WebGPU guarantees 16 per stage, shared with the G-buffer, SSR and denoiser inputs). The table header has one lane per atlas in two vec4 rows. Four power-of-two sizes, 128 to 1024, cover the useful range: below 128 only rough surfaces read well, and a 2048 probe is about 268 MB. Raising the cap needs more header rows and more of the binding budget. A set that uses one size compiles to the old single-atlas shader byte for byte.
 
 Memory per probe (rgba16float, 6 faces, every mip down to 8 px; verified by `probeBytes`): 1.05 MB at 128, 4.19 MB at 256, 16.8 MB at 512, 67 MB at 1024. Bake time grows roughly with the texels captured (offscreen, 3 probes + environment, 2 bounces: all 256 9.8 ms, floor 512 13.9, floor + mirror 512 18.4, all 512 24.8). The lookup cost doesn't depend on the sizes (offscreen render GPU 1.39-1.45 ms for every mix). Many small probes against a few large ones at equal memory is still open (HANDOFF backlog, "Probe count vs resolution").
 

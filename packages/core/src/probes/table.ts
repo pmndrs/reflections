@@ -30,7 +30,16 @@
 export const PROBE_HEADER_ROWS = 4;
 export const PROBE_ROWS_PER_VOLUME = 5;
 export const PROBE_IRRADIANCE_ROWS = 3;
-/** Atlases one probe table addresses (one per resolution class, D4700): header rows 2 and 3 hold four. */
+/**
+ * Atlases one probe table addresses: one per probe face size, so a set mixes at most four sizes
+ * (D4700; maintainer-approved 2026-11-12). Why four:
+ * - each size is one more sampled-texture binding in every shader that looks probes up, and WebGPU
+ *   guarantees only 16 per stage, shared with the G-buffer, SSR and denoiser inputs;
+ * - header rows 2 and 3 hold each atlas's last mip and first irradiance slot, one vec4 lane per atlas;
+ * - four power-of-two sizes (128 / 256 / 512 / 1024) span the useful range: below 128 only rough
+ *   surfaces read well, and a 2048 probe is ~268 MB.
+ * Raising it needs more header rows and more of the binding budget.
+ */
 export const PROBE_MAX_ATLASES = 4;
 
 export type Vec3 = readonly [number, number, number];
