@@ -1,6 +1,6 @@
 # Draft issue for mrdoob/three.js
 
-> Status: **draft, not filed.** Found by W46 (DIVERGES D3572); minimal repro confirmed on r187, headless Chrome, WebGPU, macOS (Apple M-series), 2026-11-12. The repro page is in `docs/upstream/three-stock-material-node-cache-key.html`.
+> Status: **filed as [mrdoob/three.js#35485](https://github.com/mrdoob/three.js/issues/35485)** (2026-11-12). Found by W46 (DIVERGES D3572); minimal repro confirmed on r187, headless Chrome, WebGPU, macOS (Apple M-series), 2026-11-12, and again by the maintainer in a fiddle (stock material wrong, `MeshBasicNodeMaterial` correct). The repro page is in `docs/upstream/three-stock-material-node-cache-key.html`.
 
 ---
 
