@@ -72,6 +72,8 @@ Each setting is a fresh instance with 90 warm-up frames. Region values are the m
 | `hitDistW=4` | 52.9 / 25.1 | 19.1 / 15.4 | 42.1 / 27.8 | 109.7 / 13.9 | 1.33 / 1.02 | 0.38 / 0.44 |
 | `hitSource=all&hitDistW=4` | 46.3 / 22.6 | 17.5 / 13.8 | 41.5 / 27.7 | 109.7 / 13.9 | 1.39 / 1.03 | 0.53 / 0.51 |
 
+After merging W51, which made `@pmndrs/bvh` the examples' ray-tracing default (these runs used three-mesh-bvh), a rerun at 960x540 gave: off lip 80.1, band 26.7; `hits` 58.8 / 22.5; `all` 52.1 / 21.7. That is within 0.5 of the table.
+
 The `hitDistW=4` rows come from a run before the main merge and the denoiser's single-source shortcut. The other rows were identical in both runs (within 0.01).
 
 **1920x1080**
