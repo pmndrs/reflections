@@ -133,7 +133,7 @@ For the fine-tune pass once the phases are built and running. Nothing here block
 **Showcase (W11): what looks wrong to the eye** (`examples/showcase`; W17 checked W11's first five)
 - Car concept: 'off' keeps the clearcoat rims (clearcoat IBL not modelled, D603-D606). (W17: the floor gap was the loose bounding box, fixed.)
 - Glossy SSR without the denoiser speckles car paint black: validated hits on the dark sill / tyres, most only inside the scene's 0.046 + 2.3 r thickness (W17 row: 3.3% -> 1.1% of paint px at 0.015). A thinner test swaps them for the probe, which is bright where the truth (under the car) is dark; the RT fallback would answer them. The probe for the stage scenes is a compromise: one far-projected box, no contact parallax.
-- Thickness is in view-space units (metres at the AMD sample's Sponza); scenes far from room scale set it per scene. A depth- or scene-relative default is untried.
+- Thickness is in view-space units (metres at the AMD sample's Sponza); scenes far from room scale set it per scene. A depth- or scene-relative default is untried. DiligentFX tests `distance / viewZ` against 0.025; a `thickness += k·|viewZ|` term with default 0 keeps FFX bit for bit (`docs/research/ssr-external-sources.md` #2).
 - Sponza: only the ground-floor `Floors` material is polished; the galleries stay rough. Alpha-tested foliage is opaque in the BVH (not seen yet, likely).
 - ~~Outside every probe the 'off' baseline isn't black on mirrors~~: fixed by W12 (D1501, the composite uses the atlas's environment slot). The showcase's floor-covering boxes can stay.
 - ~~examples/ssr rooms floor reads 'environment'~~: fixed by W12 (D1500, kit volumes reach 0.6 m below the floor; rooms 67 environment px left).
@@ -163,6 +163,15 @@ For the fine-tune pass once the phases are built and running. Nothing here block
 - ~~carConcept paint vs the PT (W45, D3552)~~: W46 built roughness from normal variance in the examples (D3570, `?specAA`, default on): door / skirt 155 / 42 -> 194 / 53 vs the PT's 197 / 60.
 - specAA (W46, D3570): no geometric (normal-derivative, Kaplanyan 2016) term, so curved glossy edges still alias; Sponza + RT is 1.3 MAD worse with it (polished floor blurs at distance) inside Sponza's own shade bias vs the PT, re-measure once that bias is gone; traced hits use the coarsest-mip value per mesh (D3571).
 - The FFX reflection denoiser loses 26-46 % of a heavy-tailed glossy signal's energy (W45, D3550; carConcept skirt, 64-frame linear means raw vs denoised): report to the denoiser repo; `hitLobeFilter` only lowers the variance it gets. `hitLobeFilter` 1 double-blurs the lobe (x1.41 alpha); the exact split (VNDF at alpha sqrt(1 - f), prefilter the rest) is D3550's revisit.
+
+**From the external SSR sources (2026-11-12, DiligentFX / JBU / Stochastic SSR; `docs/research/ssr-external-sources.md`, numbers are its ranking)**
+- #1 Change which pixel of a 2×2 quad traces (per frame, or Diligent's 4×4 pattern) instead of FFX's fixed top-left (`sssr/shaders.ts:199-205`): breaks the static copy grid under TAA / upscaler; maybe the "contact drifts in blocks" line above. S, classify only; DIVERGES row.
+- #3 Shrink `hitLobeFilter`'s spread at grazing angles (SSSR15: `coneTan *= lerp(sat(NdotV*2), 1, sqrt(r))`; `sssr/shaders.ts:726`, `trace/shaders.ts:317`): less over-blur on grazing floors. S.
+- #4 `hitColor:'history'` (D1002): edge fade = min(now, at the previous position), and drop confidence where the previous texel is off screen instead of using the current specular-free colour (Diligent `SSR_Intersection.fx:231`): no edge pops while panning. S.
+- #5 + #6 Cone-footprint colour pyramid for the screen part of hit colour (mip from roughness × hit distance), then couple `mirrorBias` to it as one knob (truncate + matching blur; SSSR15 shipped 0.7). This is D3550's revisit and answers D49. M then S, core.
+- #8 Half-res glossy RT misses (one per 2×2 to the miss list, mirrors full rate) with a depth / normal / roughness-weighted fill: ~4× fewer BVH rays on glossy misses; SPEC open question 4 for the RT layer. S-M, core trace. Measure on offscreen and carConcept with `?rt=1`.
+- #9 Half-res trace + denoise with a joint bilateral upsample of the residual: only if the denoiser stays > ~1 ms after the tile-list work (Performance). L, touches the seam and denoiser tuning; mirrors must stay full res.
+- #7 Ratio-estimator spatial reuse (BRDF/pdf neighbour weights): on the decisions page (crosses D50 / rule 9). Either way, tell the denoiser repo its luminance `radianceWeight` is the likely D3550 energy-loss mechanism (with the "report to the denoiser repo" line above).
 
 **pixi adapter (W18, W19: on pixi-3d)**
 - Raw glossy SSR on the pixi3d arcade floor (r 0.06) is salt-and-pepper without the denoiser; with `FfxReflectionDenoiser` it's clean but soft. A pixi user without the Denoiser repo sees the raw signal.
