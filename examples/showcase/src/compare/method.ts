@@ -6,6 +6,7 @@ import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { assetUrl } from '../../../shared';
 import type { ShowcaseEntry, ShowcaseScene } from '../scenes';
 import type { CameraView } from '../../../shared';
+import { SPEC_AA_DEFAULT, setSpecularAA, specAAFromQuery, specAAStrength } from '../specAA';
 
 export type MethodId = 'ours-raw' | 'ours-denoised' | 'ours-rt' | 'probes' | 'three-raw' | 'three-denoise' | 'three-ffx' | 'pathtraced';
 
@@ -139,4 +140,17 @@ export function applySceneParams(kit: ShowcaseScene, params: URLSearchParams) {
       }
     });
   }
+}
+
+/**
+ * W46 (D3570): ?specAA=1 (or <strength>) turns roughness from normal variance on for a raster method's
+ * scene (ours, three's SSR, probes), before the bake; the path tracer never calls this (it is the
+ * reference and supersamples the normal maps itself). Returns the strength (0 = off) and the number of
+ * materials changed.
+ */
+export function applySpecAA(kit: ShowcaseScene, params: URLSearchParams) {
+  const strength = specAAFromQuery(params, SPEC_AA_DEFAULT);
+  if (strength <= 0) return { strength: 0, materials: 0 };
+  specAAStrength.value = strength;
+  return { strength, materials: setSpecularAA(kit.scene, true) };
 }
