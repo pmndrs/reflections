@@ -109,6 +109,7 @@ For the fine-tune pass once the phases are built and running. Nothing here block
 - Probe captures after a layout and environment change: fixed by a second capture pass; revisit the cost.
 
 **Quality experiments**
+- Shadow-ray traversal order (D2601): @pmndrs/bvh main f535415 compiles `anyHitOrder: 'far' | 'larger' | 'near'` into the walk (`traceModuleWgsl`). bvh measured 'larger' at 1.39-1.73x three-mesh-bvh on any-hit rays from outside geometry, but 0.78x on merged-tree surface rays. Time it on our hit shadow rays (`traceAny`, W25 / D903; 'moving' and Sponza at 1080p) before switching; the hits never change, only the cost. The same rebuild makes the CPU refit 2.8-3.6x faster (matters once we wire `setPoseCpu`, D1703).
 - Sponza vs the path tracer (maintainer, 2026-11-12): this package is not a path tracer or GI; Sponza's shade bias is raster lighting (no GI), not reflections. Judge reflection changes there on reflection-dominated pixels or as deltas against reflections off, so the lighting gap doesn't hide or fake them; W46's Sponza + RT +1.3 is accepted on that basis.
 - Without RT, the re-shade (W44) has no occlusion: reflected wheels, rims and the underside read lighter than the PT. Maintainer: backlog (2026-11-12).
 - Examples' GTAO (D4510) has no temporal filter or blur: its grain reaches rough surfaces undenoised when `?specOcc=1`; three's denoise node or the TRAA-friendly temporal mode would smooth it. 1080p cost not measured cleanly.
