@@ -26,6 +26,8 @@
 // ?ptMax= ?ptRaw=1 ?ptDenoise=0 ?ptClearcoat=0 (path tracer), ?floorRoughness= (every method's floor, before the bake)
 // W45: ?lobeFilter=<k> (ours: hitLobeFilter, D3550), ?keyLight=<scale> and ?paintRoughness=<r> (every method: scale the lights; set
 // clear-coated paint to roughness r without its normal map)
+// W52: ?shadeVis=all (ours-rt: visibility ray for on-screen re-shaded hits, D3640), ?lobeMix=<0..1> (lobe filter scale where
+// traced and screen-space hits mix, D3641), ?shadeOcc=screen (re-shade occlusion by a depth-buffer march, D3642)
 // W46: roughness from normal variance on every raster method's glTF materials (ours, three's SSR, probes; never the path
 // tracer, the reference), D3570: on by default as on the showcase page, ?specAA=0 off, ?specAA=<k> scales it; the glossy mask stays the authored roughness's (?maskSpecAA=1: the adjusted); ?specAAHits=0 leaves traced hits at the authored roughness
 import * as THREE from 'three/webgpu';

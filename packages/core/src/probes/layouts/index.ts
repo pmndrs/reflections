@@ -116,6 +116,33 @@ export function dedupeChunks(chunks: readonly ProbeWgslChunk[]): ProbeWgslChunk[
   return [...seen.values()];
 }
 
+// A chunk in assembled WGSL text (D4901): `// #chunk <key>` ... `// #end <key>` around its code, so a
+// module put together by concatenation (a pass's radiance fallback + its hit shading, both with the
+// probe lookup's includes) can keep one copy of each key with `dedupeWgslChunks`.
+const CHUNK_RE = /^\/\/ #chunk (\S+)\n[\s\S]*?\n\/\/ #end \1\n/gm;
+
+/** A chunk's code with the markers {@link dedupeWgslChunks} looks for. */
+export function markedChunkWgsl(c: ProbeWgslChunk): string {
+  return `// #chunk ${c.key}\n${c.wgsl}\n// #end ${c.key}\n`;
+}
+
+/**
+ * WGSL text with each marked chunk ({@link markedChunkWgsl}) kept at its first occurrence only, through
+ * {@link dedupeChunks} (so two different chunks under one key throw). Unmarked text is left as is.
+ * Passes that build a module from several seams' WGSL run their code through it (D4901).
+ */
+export function dedupeWgslChunks(code: string): string {
+  const pieces: ProbeWgslChunk[] = [];
+  let last = 0;
+  for (const m of code.matchAll(CHUNK_RE)) {
+    pieces.push({ key: `\u0000text${pieces.length}`, wgsl: code.slice(last, m.index) }, { key: m[1], wgsl: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (pieces.length === 0) return code;
+  pieces.push({ key: `\u0000text${pieces.length}`, wgsl: code.slice(last) });
+  return dedupeChunks(pieces).map((c) => c.wgsl).join('');
+}
+
 /** Gutter of an octa probe as a fraction of its side (each side), for `maxLod`. */
 export const octaGutter = (size: number, maxLod: number) => (0.5 * 2 ** maxLod) / size;
 

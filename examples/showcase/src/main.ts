@@ -27,7 +27,7 @@
 //
 // W51: ?lobeFilter=<k> (`settings.hitLobeFilter`, D3550; default the package's 1; also a slider), ?bvh=three-mesh-bvh (the RT
 // stopgap; @pmndrs/bvh is the default), and every other knob on ./bench.html (the tuning bench; docs/SETTINGS.md).
-// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=0|1|<k> ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
+// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=0|1|<k> ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?shadeVis=all ?lobeMix=<0..1> ?shadeOcc=screen ?lobeFilter=<k> (W52) ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
 import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';
@@ -236,6 +236,11 @@ async function main() {
     aa.reset();
   }
   ssr.settings.hitShading = state.reshade;
+  // W52 halo options (D3640-D3642), URL only (the bench, examples/showcase/bench.html, has the knobs):
+  // ?shadeVis=all ?lobeMix=<0..1> ?shadeOcc=screen; ?lobeFilter=<k> the lobe filter itself (D3550)
+  if (q.has('shadeVis')) ssr.traceSettings.hitShadeVisibility = q.get('shadeVis') as 'offscreen' | 'all';
+  if (q.has('lobeMix')) ssr.settings.hitLobeFilterMixed = Number(q.get('lobeMix'));
+  if (q.has('shadeOcc')) ssr.settings.hitShadeOcclusion = q.get('shadeOcc') as 'off' | 'screen';
   if (q.has('lobeFilter')) ssr.settings.hitLobeFilter = Number(q.get('lobeFilter'));
   function applySources() {
     // SSR off + RT on: no screen-space march, so every traced pixel is a miss and goes to the ray tracer

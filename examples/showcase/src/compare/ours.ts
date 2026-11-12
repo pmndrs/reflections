@@ -38,11 +38,13 @@ const SSSR_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   roughnessThreshold: 'n', maxTraversalIntersections: 'n', minTraversalOccupancy: 'n', depthBufferThickness: 'n', thicknessRoughnessFactor: 'n',
   thicknessLengthFactor: 'n', mostDetailedMip: 'n', temporalVarianceGuidedTracing: 'b', varianceThreshold: 'n', iblFactor: 'n', temporalStabilityFactor: 'n',
   missConfidenceThreshold: 'n', missRoughnessThreshold: 'n', fallbackRoughness: 's', mirrorBias: 'n', frameIndex: 'n',
+  hitLobeFilterMixed: 'n', hitShadeOcclusion: 's', // W52 (D3641, D3642)
 };
 /** `ScreenSpaceReflectionsPass.traceSettings` fields the bench sets as `t.<field>`. */
 const TRACE_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   maxTracedRaysPerFrame: 'n', maxRaysPerTile: 'n', maxRayLength: 'n', rayLengthRoughnessFalloff: 'n', normalOffset: 'n', reuseOnScreenHits: 'b',
-  hitShadows: 'b', hitSpecular: 'b', hitLobeFilter: 'n', onScreenDepthTolerance: 'n', iblFactor: 'n',
+  hitShadows: 'b', hitSpecular: 'b', onScreenDepthTolerance: 'n', iblFactor: 'n',
+  hitShadeVisibility: 's', // W52 (D3640)
 };
 /** @pmndrs/upscaler runtime settings the bench sets as `aa.<field>` (plus `sharpness` / `accum`, the showcase's keys). */
 const UPSCALER_FIELDS: Record<string, 'n' | 'b'> = { rcasDenoise: 'b', exposure: 'n', autoExposure: 'b', lockThinFeatures: 'b', detectShadingChanges: 'b' };
@@ -112,6 +114,14 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   ssr.settings.hitShading = (params.get('reshade') ?? 'reshade') as 'reshade' | 'off';
   // W45 (D3550): ?lobeFilter=<k> filtered importance sampling at hits (default: the package's)
   if (params.has('lobeFilter')) ssr.settings.hitLobeFilter = Number(params.get('lobeFilter'));
+  // W52 halo options (D3640-D3642): ?shadeVis=all the visibility ray for on-screen re-shaded traced hits,
+  // ?lobeMix=<0..1> the lobe filter's scale where traced and screen-space hits mix, ?shadeOcc=screen the
+  // re-shade's depth-buffer occlusion march (screen-space hits, and on-screen traced hits without the ray)
+  if (params.has('shadeVis')) ssr.traceSettings.hitShadeVisibility = params.get('shadeVis') as 'offscreen' | 'all';
+  if (params.has('lobeMix')) ssr.settings.hitLobeFilterMixed = Number(params.get('lobeMix'));
+  if (params.has('shadeOcc')) ssr.settings.hitShadeOcclusion = params.get('shadeOcc') as 'off' | 'screen';
+  // ?rtLobeFilter=<k>: the traced pass's own hitLobeFilter (default: the tracer's), to split the lobe filter's effect by pass
+  if (params.has('rtLobeFilter')) ssr.traceSettings.hitLobeFilter = Number(params.get('rtLobeFilter'));
   const motionScale = Number(params.get('motionScale') ?? 1);
   // the page's settings before any bench override: `set(key, null)` returns a field to this
   const baseSettings = { ...ssr.settings };
@@ -299,6 +309,8 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     hit: (v) => setHit((v ?? 'final') as 'final' | 'lit' | 'current'),
     reshade: (v) => { ssr.settings.hitShading = (v ?? 'reshade') as 'reshade' | 'off'; },
     lobeFilter: (v) => { if (v === null) delete ssr.settings.hitLobeFilter; else ssr.settings.hitLobeFilter = Number(v); },
+    // W52: the traced pass's own lobe filter (the compare page's ?rtLobeFilter=); unset = the tracer's
+    rtLobeFilter: (v) => { if (v === null) delete ssr.traceSettings.hitLobeFilter; else ssr.traceSettings.hitLobeFilter = Number(v); },
     ssr: (v) => { ssrOn = v !== '0'; applySSROn(); },
     rt: (v) => { if (provider) ssr.rayTracing = v !== '0'; },
     denoise: (v) => { hybrid.denoise = !!denoiser && v !== '0'; },
@@ -380,7 +392,8 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     status: () => (denoiser ? 'denoiser ffx-reflections' : wantDenoise ? 'no denoiser found' : '') + (providerInfo ? ` | ${providerInfo.kind} ${providerInfo.triangles.toLocaleString()} tris` : '') +
       (aa && aa.mode !== 'off' ? ` | AA ${aa.mode}${aa.ratio > 1 ? ` x${aa.ratio.toFixed(2)}` : ''}` : ''),
     info: () => ({
-      samplesPerQuad: ssr.settings.samplesPerQuad ?? 1, hitColor: hit, hitShading: ssr.settings.hitShading, denoiser: denoiser ? { ...denoiserOpts } : null,
+      samplesPerQuad: ssr.settings.samplesPerQuad ?? 1, hitColor: hit, hitShading: ssr.settings.hitShading,
+      hitShadeVisibility: ssr.traceSettings.hitShadeVisibility ?? 'offscreen', hitLobeFilterMixed: ssr.settings.hitLobeFilterMixed ?? 1, hitShadeOcclusion: ssr.settings.hitShadeOcclusion ?? 'off', denoiser: denoiser ? { ...denoiserOpts } : null,
       thickness: kit.thickness ?? 'default', rayTracing: ssr.rayTracing, provider: providerInfo, probes: probes.bakedProbes.length, probeLayout: layout?.name ?? null, specAA,
       aa: aa ? { mode: aa.mode, ratio: aa.ratio, renderSize: [RW, RH] } : 'off', bakeMs,
       varianceGuidedTracing: 'off (the seam passes no variance back to the tracer)',

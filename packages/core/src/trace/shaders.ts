@@ -5,10 +5,10 @@
 // length cap (100 exp(-5 roughness)) follow that sample's hybrid intersect (sources.md section 3).
 // Copyright (C) 2024 Advanced Micro Devices, Inc., MIT, for those two formulas; see NOTICE.
 import { HIT_WGSL } from './provider';
-import { shadeLobeWgslFor } from './hitShading';
+import { SCREEN_VISIBILITY_WGSL, shadeLobeWgslFor } from './hitShading';
 
 /** Byte size of the uniform block (struct RtParams). */
-export const RT_PARAMS_SIZE = 256;
+export const RT_PARAMS_SIZE = 272;
 
 /** u32 words before the per-tile counters in the state buffer. */
 export const RT_STATE_HEADER = 16;
@@ -66,6 +66,10 @@ struct RtParams {
   hitSpecular: u32,
   reshadeOnScreen: u32,
   hitLobeFilter: f32,
+  hitShadeVisibilityAll: u32,
+  hitShadeOcclusion: u32,
+  hitLobeFilterMixed: f32,
+  glossyAlpha: f32,
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
@@ -125,6 +129,7 @@ ${RT_PARAMS_WGSL}
 @group(0) @binding(11) var o_source: texture_storage_2d<r32float, write>;
 @group(0) @binding(12) var t_history: texture_2d<f32>;
 @group(0) @binding(13) var t_motion: texture_2d<f32>;
+@group(0) @binding(14) var t_prev_source: texture_2d<f32>;
 
 ${HIT_WGSL}
 ${parts.fallbackWgsl}
@@ -136,15 +141,37 @@ ${parts.shadingNormalWgsl}
 // The shadow query hit shading calls (D903): false if geometry lies between the hit point and
 // P + L x tMax. The origin is offset along the normal by normalOffset x the view distance, as the
 // reflection ray's own origin (D8). With hitShadows off, every light is visible.
-// W44 (D3542): false while re-shading an on-screen hit, whose lobe takes no visibility ray (as the
+// W44 (D3542): while re-shading an on-screen hit the lobe takes no visibility ray by default (as the
 // screen-space re-shade, which has none): a blocked lobe goes black (D3513, no second bounce), which
 // turned a mirror seen in a mirror black and the black car paint over a mirror floor darker.
-var<private> rtLobeVisibility: bool = true;
+// W52: hitShadeVisibility 'all' gives it the ray (RT_VIS_BVH, D3640); hitShadeOcclusion
+// 'screen' the depth-buffer march instead (RT_VIS_SCREEN, D3642).
+const RT_VIS_NONE: u32 = 0u;
+const RT_VIS_SCREEN: u32 = 1u;
+const RT_VIS_BVH: u32 = 2u;
+var<private> rtLobeVisibility: u32 = RT_VIS_BVH;
 fn traceLightVisible(hitP: vec3f, N: vec3f, L: vec3f, tMax: f32) -> bool {
-  if (P.hitShadows == 0u || !rtLobeVisibility) { return true; }
+  if (rtLobeVisibility == RT_VIS_SCREEN) { return hitScreenVisible(hitP, N, L); }
+  if (P.hitShadows == 0u || rtLobeVisibility == RT_VIS_NONE) { return true; }
   let origin = hitP + N * (P.normalOffset * length(hitP - P.cameraPosition));
   return !traceAny(origin, L, tMax);
 }
+
+// The depth-buffer march's view of this pass (SCREEN_VISIBILITY_WGSL).
+fn hsoProject(p: vec3f) -> vec3f {
+  let clip = P.viewProjection * vec4f(p, 1.0);
+  let ndc = clip.xy / clip.w;
+  return vec3f(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5, clip.w);
+}
+fn hsoSceneDistance(c: vec2i) -> f32 {
+  let p = clamp(c, vec2i(0), vec2i(P.renderSize) - 1);
+  let z = textureLoad(t_depth, p, 0).x;
+  if (isBackground(z)) { return 3.4e38; }
+  return length(worldFromDepth((vec2f(p) + 0.5) * P.inverseRenderSize, z) - P.cameraPosition);
+}
+fn hsoCamera() -> vec3f { return P.cameraPosition; }
+fn hsoSize() -> vec2u { return P.renderSize; }
+${SCREEN_VISIBILITY_WGSL}
 
 // The pass's hitSpecular setting (W41, D3510); a function, since hit shading names its point P.
 fn rtHitSpecularOn() -> bool { return P.hitSpecular != 0u; }
@@ -257,6 +284,23 @@ fn onScreenRadiance(hitP: vec3f, hitN: vec3f, out_color: ptr<function, vec3f>) -
   return true;
 }
 
+// Lobe filter where hits mix (W52, D3641), the traced side of the SSSR tracer's: a traced hit with a
+// screen-space hit among 3x3 samples 5 px apart in last frame's source (RT_SOURCE 0 on a glossy,
+// non-background pixel: intersect's own result, which a confident hit is, since the rest went to
+// the miss list) looks up with hitLobeFilter x hitLobeFilterMixed.
+fn rtLobeMixScale(c: vec2u) -> f32 {
+  if (P.hitLobeFilterMixed >= 1.0) { return 1.0; }
+  for (var j = -1; j <= 1; j++) {
+    for (var i = -1; i <= 1; i++) {
+      let p = vec2u(clamp(vec2i(c) + vec2i(i, j) * 5, vec2i(0), vec2i(P.renderSize) - 1));
+      if (u32(textureLoad(t_prev_source, p, 0).x + 0.5) != ${RT_SOURCE.none}u) { continue; }
+      let a = textureLoad(t_roughness, p, 0).x;
+      if (a < P.glossyAlpha && !isBackground(textureLoad(t_depth, p, 0).x)) { return P.hitLobeFilterMixed; }
+    }
+  }
+  return 1.0;
+}
+
 @compute @workgroup_size(64)
 fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u) {
   let index = (wg.y * nwg.x + wg.x) * 64u + gi; // 2-D indirect groups (D601)
@@ -313,17 +357,20 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
   }
   var L = vec3f(0.0);
   var source = ${RT_SOURCE.tracedHit}u;
-  let spread = P.hitLobeFilter * alpha; // D3550: the ray stands for its lobe
+  let spread = P.hitLobeFilter * rtLobeMixScale(coords) * alpha; // D3550: the ray stands for its lobe
   hitLobeSpread = spread * spread;
   if (P.reuseOnScreen != 0u && onScreenRadiance(hitP, hitN, &L)) {
     source = ${RT_SOURCE.onScreenHit}u;
     atomicAdd(&state[${RT_STATE.onScreen}], 1u);
     // W44 (D3540): the screen's diffuse plus the hit material's specular along the ray, as the
     // screen-space re-shade does for its own hits (no visibility ray, D3542).
+    // W52: with hitShadeVisibility 'all' it takes D3513's ray (D3640), with hitShadeOcclusion
+    // 'screen' (and 'offscreen') the depth-buffer march (D3642).
     if (P.reshadeOnScreen != 0u) {
-      rtLobeVisibility = false;
+      rtLobeVisibility = select(select(RT_VIS_NONE, RT_VIS_SCREEN, P.hitShadeOcclusion != 0u), RT_VIS_BVH, P.hitShadeVisibilityAll != 0u);
+      hsoPixel = coords;
       L = hitShadeSurface(hit, hitP, hitN, dir, vec3f(0.0), L);
-      rtLobeVisibility = true;
+      rtLobeVisibility = RT_VIS_BVH;
     }
   } else {
     L = shadeTracedHit(hit, hitP, hitN, dir);
