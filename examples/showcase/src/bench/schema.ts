@@ -117,7 +117,7 @@ export const SETTINGS: Setting[] = [
     pageDefault: 'agx', apply: 'rebuild', appliesTo: ALL, api: 'renderOutput(..., toneMapping)', tradeoff: 'Display transform, every method alike. Measure\'s numbers are in this display space.',
   }),
   sel('size', 'scene', 'Render size', [['960x540', '960 x 540'], ['1280x720', '1280 x 720'], ['1920x1080', '1920 x 1080'], ['1280x1280', '1280 x 1280 (the showcase shots)']], null, {
-    pageDefault: '960x540', apply: 'rebuild', appliesTo: 'page', tradeoff: 'Each method\'s canvas (`?w=&h=`). W50: at 960x540 the car has 2.4x fewer px across than the showcase\'s 1280x1280 shots, most of the "detail loss" seen there.',
+    pageDefault: '960x540', apply: 'rebuild', appliesTo: 'page', tradeoff: 'Each method\'s canvas (`?w=&h=`). W52 (D3643): the skirt halo is mostly a 960x540 effect (lip 48 vs PT 46 at 1920x1080). W50: at 960x540 the car has 2.4x fewer px across than the showcase\'s 1280x1280 shots, most of the "detail loss" seen there.',
   }),
   sel('floor', 'scene', 'Floor material', [['mirror', 'Mirror (metal)'], ['lacquer', 'Black lacquer']], null, { pageDefault: 'mirror', appliesTo: ALL, tradeoff: 'The stages\' floor disc (not Sponza). The path tracer rebuilds.' }),
   num('floorRoughness', 'scene', 'Floor roughness', 0, 0.6, 0.01, null, { defaultNote: 'per scene (stages 0.03)', appliesTo: ALL, tradeoff: 'Floor roughness, every method; ours re-bakes its probes. The path tracer rebuilds.' }),
@@ -163,6 +163,16 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W45 (D3550): a hit\'s specular looked up wider by k x the pixel\'s alpha (filtered importance sampling): same mean, less variance, so the denoiser stops clipping rare softbox samples (RT door 111 -> 155). 0 = the hit\'s own roughness (W44); 1 default; 1.5 wider. W50, carConcept + RT: lip 53 at 0 vs 80 at 1 (PT 48), door 110 either way. Double-blurs the lobe (x1.41 alpha at 1).',
     cost: 'part of the re-shade\'s +0.003..0.017 ms (one lookup at another lod)',
   }),
+  num('s.hitLobeFilterMixed', 'sssr', 'Lobe filter where hits mix', 0, 1, 0.05, 1, {
+    appliesTo: OURS_SSR, api: 'settings.hitLobeFilterMixed (+ traceSettings)',
+    tradeoff: 'W52 (D3641): the lobe filter x this where traced and screen-space hits mix (last frame\'s source around the pixel). W50\'s halo: lip 80 -> 56 at 0, but the skirt 50 -> 23 (PT 35), and it overshoots at 1080p (D3643: the halo is mostly a 960x540 effect). Below 1 the tracer is rebuilt once (one more sampled texture).',
+    cost: '+0.07 ms (W52)',
+  }),
+  sel('s.hitShadeOcclusion', 'sssr', 'Re-shade occlusion', [['off', 'off'], ['screen', 'screen (8-sample depth march along R)']], 'off', {
+    appliesTo: OURS_SSR, api: 'settings.hitShadeOcclusion (+ traceSettings)',
+    tradeoff: 'W52 (D3642): a re-shaded hit marches the depth buffer along R and darkens where blocked (the re-shade had no occlusion, W44). Wheel 43 -> 37 (PT 26); works without RT. Untuned.',
+    cost: 'intersect +0.04 ms (W52)',
+  }),
   num('s.mirrorBias', 'sssr', 'Mirror bias', 0, 1, 0.01, 0, {
     appliesTo: OURS_SSR, api: 'settings.mirrorBias',
     tradeoff: 'D49: truncates the GGX lobe toward the mirror direction: less noise, a sharper (biased) reflection. W32 / W39: no gain with the denoiser on a still or orbiting camera; W40: 0.7 halves rest shimmer on the carConcept floor (0.31 -> 0.14/255).',
@@ -204,12 +214,13 @@ export const SETTINGS: Setting[] = [
   bool('t.reuseOnScreenHits', 'rt', 'Reuse on-screen hits', true, { appliesTo: RT, api: 'traceSettings.reuseOnScreenHits', tradeoff: 'D55: a traced hit the camera sees takes the screen colour (re-shaded with the re-shade on, D3542) instead of the probe-lit hit shading.' }),
   bool('t.hitShadows', 'rt', 'Hit shadow rays', true, { appliesTo: RT, api: 'traceSettings.hitShadows', tradeoff: 'D903: one shadow ray per directional light from each traced off-screen hit; off lights every hit unoccluded.', cost: '<= 0.03 ms on 3 of 4 scenes (D903); \'moving\' 1080p +0.169 ms three-mesh-bvh, +0.081 @pmndrs/bvh (D2601)' }),
   bool('t.hitSpecular', 'rt', 'Hit specular lobe', true, { appliesTo: RT, api: 'traceSettings.hitSpecular', tradeoff: 'D3510: traced hits shade their specular lobe and coat (with D3513\'s one visibility ray); off = diffuse + emissive only.' }),
-  num('t.hitLobeFilter', 'rt', 'Hit lobe filter (traced)', 0, 2, 0.05, null, { defaultNote: 'the tracer\'s (Hit lobe filter above)', appliesTo: RT, api: 'traceSettings.hitLobeFilter', tradeoff: 'Overrides the lobe filter at traced hits only: separates the W45 effect on RT hits from the screen-space ones.' }),
+  num('rtLobeFilter', 'rt', 'Hit lobe filter (traced)', 0, 2, 0.05, null, { defaultNote: 'the tracer\'s (Hit lobe filter)', appliesTo: RT, api: 'traceSettings.hitLobeFilter', tradeoff: 'Overrides the lobe filter at traced hits only (the compare page\'s ?rtLobeFilter=): separates the W45 effect on RT hits from the screen-space ones.' }),
   num('t.onScreenDepthTolerance', 'rt', 'On-screen depth tolerance', 0, 0.1, 0.005, 0.02, { appliesTo: RT, api: 'traceSettings.onScreenDepthTolerance', tradeoff: 'Relative view-distance tolerance for "the camera sees this hit": looser reuses more screen colour (cheaper shading, can pick a neighbour).' }),
   num('t.iblFactor', 'rt', 'IBL factor (traced)', 0, 2, 0.05, 1, { appliesTo: RT, api: 'traceSettings.iblFactor', tradeoff: 'Scales the traced misses\' fallback.' }),
-  bool('t.visibilityRay', 'rt', 'Visibility ray on re-shaded on-screen hits', false, {
-    appliesTo: RT, api: 'planned (D3542)', planned: 'Planned (W52): D3542 says on-screen re-shaded hits skip D3513\'s visibility ray; the setting does not exist yet.',
-    tradeoff: 'With the ray, facingMirrors\' mirror-in-mirror went black in stripes; carConcept\'s skirt with RT 12 (PT 69, without 35) (D3542). For mirror-in-mirror apps once it exists.',
+  sel('t.hitShadeVisibility', 'rt', 'Visibility ray on re-shaded hits', [['offscreen', 'offscreen (on-screen re-shaded hits take none, D3542)'], ['all', 'all (on-screen re-shaded hits too)']], 'offscreen', {
+    appliesTo: RT, api: 'traceSettings.hitShadeVisibility',
+    tradeoff: 'W52 (D3640): D3513\'s visibility ray along R for on-screen re-shaded traced hits too. Wheel 43 -> 41 vs PT 26 (carConcept); mirrors seen in mirrors go black where blocked (facingMirrors, D3542). Needs Hit shadow rays on.',
+    cost: 'rt trace +0.30 ms (W52)',
   }),
 
   // ---- hybrid ----------------------------------------------------------------------------------------------

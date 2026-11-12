@@ -329,6 +329,7 @@ async function main() {
       if (v !== undefined) return decodeValue(s, v);
     }
     if (s.id === 'exposure') return sceneExposure;
+    if (s.id === 'size') return `${W}x${H}`;
     return effectiveDefault(s);
   }
   const appliesToId = (s: Setting, id: MethodId) => s.appliesTo !== 'page' && s.appliesTo.includes(id);
@@ -553,6 +554,7 @@ async function main() {
       else if (s.id === 'spq') settings.push(`samplesPerQuad: ${v}`);
       else if (s.id === 'reshade') settings.push(`hitShading: ${lit(v)}`);
       else if (s.id === 'lobeFilter') settings.push(`hitLobeFilter: ${v}`);
+      else if (s.id === 'rtLobeFilter') trace.push(`hitLobeFilter: ${v}`);
       else if (s.id === 'hit') { settings.push(`hitColor: '${v === 'current' ? 'current' : 'history'}'`); if (v === 'final') after.push('ssr.historySource = lastFrameFinal.texture; // render the final image into it after each frame'); }
       else if (s.id === 'ssr' && v === false) settings.push('maxTraversalIntersections: 0 // SSR off');
       else if (s.id === 'tsf') dn.push(`temporalStabilityFactor: ${v}`);
@@ -654,7 +656,14 @@ async function main() {
   const sceneSel = el('select'); sceneSel.append(...entries.map((e) => new Option(e.title, e.id)));
   sceneSel.onchange = () => setSetting('scene', sceneSel.value);
   const poseSel = el('select'); poseSel.onchange = () => setSetting('pose', poseSel.value);
-  panel.append(el('label', { className: 'inline' }, 'Scene', sceneSel), el('label', { className: 'inline' }, 'Camera', poseSel));
+  // render size up top (W52, D3643: carConcept's skirt halo is mostly a 960x540 effect); applies on Rebuild (a reload)
+  const sizeSel = el('select', { title: 'Each method\'s canvas. W52: the skirt halo is mostly a 960x540 effect (lip 48 vs PT 46 at 1920x1080). Applies on Rebuild (reloads the page).' });
+  const sizeChoices = settingById.get('size')!.choices!;
+  sizeSel.append(...sizeChoices.map(([v, l]) => new Option(l, v)));
+  if (!sizeChoices.some(([v]) => v === `${W}x${H}`)) sizeSel.append(new Option(`${W} x ${H}`, `${W}x${H}`));
+  sizeSel.value = `${W}x${H}`;
+  sizeSel.onchange = () => setSetting('size', sizeSel.value);
+  panel.append(el('label', { className: 'inline' }, 'Scene', sceneSel), el('label', { className: 'inline' }, 'Camera', poseSel), el('label', { className: 'inline' }, 'Render size', sizeSel));
   const freezeBox = el('input', { type: 'checkbox', checked: frozen });
   freezeBox.onchange = () => { frozen = freezeBox.checked; if (frozen) q.set('freeze', ''); else q.delete('freeze'); urlSync(); };
   panel.append(el('label', { className: 'inline' }, el('span', {}, freezeBox, ' Freeze camera (the path tracer converges)')));
