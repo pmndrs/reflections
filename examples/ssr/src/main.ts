@@ -30,12 +30,12 @@ import * as THREE from 'three/webgpu';
 import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, type BakeOptions, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, defaultHitMaterial, ReflectionProbes, type BakeOptions, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
   createPmndrsBvhTraceProviderFromObjects, type ThreePmndrsBvhTraceProvider,
 } from '@pmndrs/reflections/three';
 import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
 import {
-  ASSET_SCENES, SCENES, PROBE_LAYOUT_BUDGET, PROBE_LAYOUT_NAMES, availableAssets, hasProbeLayouts, probeAtlasBytes, probeLayout, type KitScene, type ProbeLayout, type ProbeLayoutName, type ProbeVolume,
+  ASSET_SCENES, SCENES, TEST_SCENES, PROBE_LAYOUT_BUDGET, PROBE_LAYOUT_NAMES, availableAssets, hasProbeLayouts, probeAtlasBytes, probeLayout, type KitScene, type ProbeLayout, type ProbeLayoutName, type ProbeVolume,
 } from '../../shared';
 import { HEAT_LEGEND, ProbeVolumesOverlay, gbufferWorldPosition, heatColor, probeColor, probeWeights } from '../../shared/probeDebug';
 import { SHOWCASE } from '../../showcase/src/scenes';
@@ -538,7 +538,7 @@ async function main() {
   }
 
   async function load(id: string) {
-    const factory = SCENES[id] ?? Object.values(ASSET_SCENES).find((a) => a.id === id)?.factory ?? (id === 'showcaseSponza' ? showcaseSponza : undefined);
+    const factory = SCENES[id] ?? TEST_SCENES[id] ?? Object.values(ASSET_SCENES).find((a) => a.id === id)?.factory ?? (id === 'showcaseSponza' ? showcaseSponza : undefined);
     if (!factory) throw new Error(`unknown scene ${id}`);
     kit?.dispose?.();
     probes?.dispose?.();
@@ -748,6 +748,8 @@ async function main() {
     __p: {
       THREE, renderer, ssr, controls, get kit() { return kit; }, gpuErrors, get variant() { return ssr.variant; },
       scenes: () => Object.keys(SCENES),
+      /** Ids of the downloaded asset scenes `load()` takes (W49's material survey). */
+      assets: async () => { const dirs = new Set((await availableAssets()).map((a) => a.dir)); return Object.entries(ASSET_SCENES).filter(([dir]) => dirs.has(dir)).map(([, a]) => a.id); },
       load: (id: string) => load(id),
       setPose, setView: (v: View) => setView(v),
       setSSR(on: boolean) { composite!.amount.value = on ? 1 : 0; },
@@ -790,6 +792,7 @@ async function main() {
       tileCapCheck: () => tileCapCheck(),
       rtOracle: (n?: number, rays?: RayKind, which?: BvhKind) => rtOracle(n, rays, which),
       rtCompare: (n?: number, rays?: RayKind) => rtCompare(n, rays),
+      rtMaterialCheck: (n?: number, rays?: RayKind) => rtMaterialCheck(n, rays),
       hitShadingError: (extra?: N, variants?: N[]) => hitShadingError(extra, variants),
       rtAnyHitOracle: (n?: number, rays?: RayKind) => rtAnyHitOracle(n, rays),
       rtShadowEffect: () => rtShadowEffect(),
@@ -1717,6 +1720,96 @@ ${p.code({ group: 1, firstBinding: 0 })}
       if (t > 0) { positive++; if (u[i * 4 + 2] === 0) nearOk++; if (u[i * 4 + 3] === 1) farOk++; }
     }
     return { provider: bvhInfo?.kind ?? null, rays: n, kind, hits, agree, positive, nearOk, farOk };
+  }
+
+  /**
+   * W49 (D1701 / D1702): the provider's hit material (`traceHitMaterial`) against the three material
+   * that draws the hit triangle (three's `face.materialIndex` into the mesh's material array), on
+   * the same rays as rtOracle, where three and the walk hit within 1e-3 of each other. Expected:
+   * `defaultHitMaterial` of that material (the page builds both providers with the default). Per
+   * three material: such hits, how many carry its albedo and emissive (within the stopgap's rgb8 /
+   * rgb9e5 rounding), and how many carry the mesh's first material instead (what a provider without
+   * per-triangle materials reports). Also: meshes with a material array in the scene.
+   */
+  async function rtMaterialCheck(n = 4096, kind: RayKind = 'camera') {
+    if (!provider || !bvhInfo) throw new Error('rtMaterialCheck needs ?rt=1');
+    const meshes = traceMeshes(kit!.scene);
+    const { origins, dirs } = makeRays(n, kind);
+    const code = `${HIT_WGSL}
+@group(0) @binding(0) var<storage, read> rayO: array<vec4f>;
+@group(0) @binding(1) var<storage, read> rayD: array<vec4f>;
+@group(0) @binding(2) var<storage, read_write> outM: array<vec4f>;
+${provider.code({ group: 1, firstBinding: 0 })}
+@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {
+  if (id.x >= arrayLength(&rayO)) { return; }
+  let h = traceFirstHit(rayO[id.x].xyz, rayD[id.x].xyz, 1000.0);
+  var m = HitMaterial(vec3f(0.0), vec3f(0.0));
+  if (h.t >= 0.0) { m = traceHitMaterial(h); }
+  outM[id.x * 2u] = vec4f(h.t, m.albedo);
+  outM[id.x * 2u + 1u] = vec4f(m.emissive, 0.0);
+}`;
+    const f = await runRayKernel(provider, code, origins, dirs, n * 32);
+    const sides = new Map<THREE.Material, THREE.Side>();
+    for (const m of meshes) for (const mat of ([] as THREE.Material[]).concat(m.material)) { sides.set(mat, mat.side); mat.side = THREE.DoubleSide; }
+    const expected = new Map<THREE.Material, ReturnType<typeof defaultHitMaterial>>();
+    const want = (mat: THREE.Material) => {
+      if (!expected.has(mat)) expected.set(mat, defaultHitMaterial(new THREE.Mesh(undefined, mat)));
+      return expected.get(mat)!;
+    };
+    const close = (got: ArrayLike<number>, e: readonly number[], tol: number) => [0, 1, 2].every((c) => Math.abs(got[c] - e[c]) <= tol + 0.01 * Math.max(...e));
+    const per = new Map<THREE.Material, { material: string; multi: boolean; hits: number; own: number; first: number }>();
+    const rc = new THREE.Raycaster();
+    rc.far = 1000;
+    let compared = 0, mismatch = 0;
+    const d = new THREE.Vector3();
+    for (let i = 0; i < n; i++) {
+      d.set(dirs[i * 4], dirs[i * 4 + 1], dirs[i * 4 + 2]);
+      rc.set(new THREE.Vector3(origins[i * 4], origins[i * 4 + 1], origins[i * 4 + 2]), d);
+      const hit = rc.intersectObjects(meshes, false)[0];
+      const tg = f[i * 8];
+      if (!hit || tg < 0 || relErr(tg, hit.distance) >= 1e-3) { if (!!hit !== tg >= 0) mismatch++; continue; }
+      compared++;
+      const mesh = hit.object as THREE.Mesh;
+      const list = ([] as THREE.Material[]).concat(mesh.material);
+      const mat = Array.isArray(mesh.material) ? mesh.material[hit.face!.materialIndex] : mesh.material;
+      if (!mat) continue;
+      if (!per.has(mat)) per.set(mat, { material: mat.name || mat.type, multi: list.length > 1, hits: 0, own: 0, first: 0 });
+      const row = per.get(mat)!;
+      row.hits++;
+      const albedo = f.subarray(i * 8 + 1, i * 8 + 4), emissive = f.subarray(i * 8 + 4, i * 8 + 7);
+      const matches = (m: THREE.Material) => { const e = want(m); return close(albedo, e.albedo, 3 / 255) && close(emissive, e.emissive, 0.004); };
+      if (matches(mat)) row.own++;
+      if (matches(list[0])) row.first++;
+    }
+    for (const [mat, sd] of sides) mat.side = sd;
+    let arrays = 0, groups = 0;
+    for (const m of meshes) if (Array.isArray(m.material)) { arrays++; groups += m.geometry.groups.length; }
+    return { provider: bvhInfo.kind, rays: n, kind, compared, mismatch, meshes: meshes.length, multiMaterialMeshes: arrays, groups, materials: [...per.values()] };
+  }
+
+  /** Run `code` (bindings: rays at group 0 slots 0-1, `bytes` of output at 2; `p` at group 1) over the rays, read the output back. */
+  async function runRayKernel(p: TraceProvider, code: string, origins: Float32Array<ArrayBuffer>, dirs: Float32Array<ArrayBuffer>, bytes: number) {
+    const n = origins.length / 4;
+    const mk = (a: Float32Array<ArrayBuffer>) => { const b = device.createBuffer({ size: a.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST }); device.queue.writeBuffer(b, 0, a); return b; };
+    const bo = mk(origins), bd = mk(dirs);
+    const bt = device.createBuffer({ size: bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    const bl0 = device.createBindGroupLayout({ entries: [0, 1, 2].map((binding) => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type: binding === 2 ? 'storage' as const : 'read-only-storage' as const } })) });
+    const bl1 = device.createBindGroupLayout({ entries: p.entries.map((e, binding) => ({ ...e, binding } as GPUBindGroupLayoutEntry)) });
+    const pipe = device.createComputePipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bl0, bl1] }), compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(pipe);
+    pass.setBindGroup(0, device.createBindGroup({ layout: bl0, entries: [bo, bd, bt].map((buffer, binding) => ({ binding, resource: { buffer } })) }));
+    pass.setBindGroup(1, device.createBindGroup({ layout: bl1, entries: p.resources().map((resource, binding) => ({ binding, resource })) }));
+    pass.dispatchWorkgroups(Math.ceil(n / 64));
+    pass.end();
+    const rb = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    enc.copyBufferToBuffer(bt, 0, rb, 0, bytes);
+    device.queue.submit([enc.finish()]);
+    await rb.mapAsync(GPUMapMode.READ);
+    const out = new Float32Array(rb.getMappedRange().slice(0));
+    rb.unmap(); [bo, bd, bt, rb].forEach((b) => b.destroy());
+    return out;
   }
 
   const relErr = (a: number, b: number) => Math.abs(a - b) / Math.max(b, 1e-2);

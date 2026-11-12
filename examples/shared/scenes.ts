@@ -297,3 +297,31 @@ export function moving(opts: SceneOptions = {}): KitScene {
   update(0);
   return { ...base, id: 'moving', title: 'Moving objects (motion vectors)', update };
 }
+
+/**
+ * W49 (D1701 / D1702): one geometry with two very different materials in its groups, a red
+ * dielectric and a green emissive, on two boxes that share the geometry with the materials swapped,
+ * beside a single-material sphere, on a mirror floor. A regression scene for the trace providers'
+ * per-triangle materials (`__p.rtMaterialCheck` on examples/ssr); not in `SCENES`.
+ */
+export function multiMaterial(opts: SceneOptions = {}): KitScene {
+  const scene = newScene();
+  useSky(scene, new THREE.Vector3(3, 6, 6));
+  floor(scene, mirror(0), 16).material.name = 'mirror floor';
+  const geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+  // BoxGeometry's groups are +x, -x, +y, -y, +z, -z: on the left box the front and +x faces take
+  // material 0, the top and -x material 1
+  [0, 1, 1, 0, 0, 1].forEach((materialIndex, i) => { geometry.groups[i].materialIndex = materialIndex; });
+  const red = std(0xd1495b, 0.5), green = glow(0x3cff6a, 2), blue = std(0x2a6fdb, 0.4);
+  red.name = 'red'; green.name = 'green emissive'; blue.name = 'blue (one material)';
+  add(scene, new THREE.Mesh(geometry, [red, green]), [-1.1, 0.62, 0], 0.6);
+  add(scene, new THREE.Mesh(geometry, [green, red]), [1.1, 0.62, 0], -0.6);
+  add(scene, new THREE.Mesh(new THREE.SphereGeometry(0.4, 48, 24), blue), [0, 0.4, -1.2]);
+  studioLights(scene, [3, 6, 6], 2.2);
+  const views = { default: { pos: [0, 1.7, 4.6] as Vec3, target: [0, 0.6, 0] as Vec3 } };
+  return {
+    id: 'multiMaterial', title: 'One geometry, two materials in its groups (per-triangle hit materials)', scene, camera: makeCamera(views.default, opts.aspect),
+    target: new THREE.Vector3(...views.default.target), views,
+    probes: [floorProbe({ position: [0, 2, 0], influenceSize: [16, 4.2, 16], projectionSize: [16, 4.2, 16] })],
+  };
+}

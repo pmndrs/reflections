@@ -15,6 +15,7 @@
 //   pnpm check -- --only ssr-bench --ssr-bench   # the phase 3 gate bench: ours vs three's SSRNode (minutes); JSON to out/ssr-bench.json
 //                                    # (--ssr-scenes rooms,mirrorWall to narrow it)
 //   pnpm check -- --only ssr-rt --rt-shadow-timing   # D903: GPU ms of hit shadow rays, kit scenes, 960x540 + 1080p (also ssr-rt-bvh)
+//   pnpm check -- --only rt-materials [--rt-material-assets]   # W49: per-triangle hit materials, both providers (+ the asset survey)
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
 import { spawn, spawnSync } from 'node:child_process';
@@ -924,6 +925,65 @@ async function rtShadowTiming(label, bvhParam) {
   page.close();
 }
 
+/**
+ * W49 (D1701 / D1702): per-triangle materials at traced hits. examples/ssr's `multiMaterial` scene:
+ * one box geometry whose groups take two materials (red, green emissive), on two boxes with the
+ * array swapped, and a one-material sphere. Every material must come back at its own triangles
+ * (`traceHitMaterial` vs three's `face.materialIndex`), camera rays and rays spread through the scene.
+ * With `oracle`, also rtOracle on the scene (triangle, instance and material ids vs THREE.Raycaster).
+ */
+async function rtMaterialChecks(p, label, oracle) {
+  const b = results.logs.length;
+  await p.T("window.__p.load('multiMaterial')");
+  await p.T('window.__p.step(2)');
+  const fmt = (r) => r.materials.map((m) => `${m.material}${m.multi ? '' : ' (alone)'} ${m.own}/${m.hits}${m.multi ? ` (first material ${m.first})` : ''}`).join(', ');
+  for (const kind of ['camera', 'scene']) {
+    const r = await p.T(`window.__p.rtMaterialCheck(4096, '${kind}')`);
+    const e = results.logs.slice(b).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    const multi = r.materials.filter((m) => m.multi);
+    check(`rt ${label}: each material of a multi-material mesh at its own triangles, ${kind} rays (D1701)`,
+      e.length === 0 && multi.length === 2 && r.materials.every((m) => m.hits > 0 && m.own >= m.hits * 0.995),
+      e.length ? e.slice(0, 2).join(' | ') : `of ${r.compared} hits (${r.multiMaterialMeshes} multi-material meshes, ${r.groups} groups): ${fmt(r)}`);
+  }
+  if (oracle) {
+    const o = await p.T("window.__p.rtOracle(4096, 'camera')");
+    check(`rt ${label}: multiMaterial vs THREE.Raycaster, camera rays (triangle, instance, material ids)`, oracle(o),
+      `${o.agree}/${o.rays} agree; of ${o.compared} hits: triangle ${o.triangle}, instance ${o.instance}, material ${o.material}`);
+  }
+  await p.T("window.__p.setView('final')");
+  savePng(`ssr-rt-multi-material-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.png`, await p.T('window.__p.shot()'));
+  await p.T("window.__p.setView('grid')");
+}
+
+/**
+ * W49: does any real asset have a multi-material mesh, and do its hits carry the right material?
+ * Opt-in (`--rt-material-assets`): loads every downloaded asset scene on the page's provider.
+ */
+async function rtMaterialAssetSurvey(p, label) {
+  const ids = (await p.T('window.__p.assets ? window.__p.assets() : []')) ?? [];
+  for (const id of ids) {
+    await p.T(`window.__p.load(${JSON.stringify(id)})`);
+    await p.T('window.__p.step(1)');
+    const r = await p.T("window.__p.rtMaterialCheck(4096, 'camera')");
+    const wrong = r.materials.reduce((n, m) => n + m.hits - m.own, 0);
+    console.log(`  (info) rt ${label} materials, ${id}: ${r.meshes} meshes, ${r.multiMaterialMeshes} with a material array (${r.groups} groups); ${r.compared} camera hits on ${r.materials.length} materials, ${wrong} with another material's colour`);
+  }
+}
+
+/** `--only rt-materials`: {@link rtMaterialChecks} on three-mesh-bvh and @pmndrs/bvh (auto, tinybvh), each on its own page. */
+async function rtMaterialsAlone(pages) {
+  console.log('examples/ssr (?rt=1, multiMaterial):');
+  const oracleOk = (o) => o.agree / o.rays > 0.995 && [o.triangle, o.instance, o.material].every((k) => k >= o.compared * 0.995);
+  for (const [bvhParam, builder] of [['', null], ['&bvh=pmndrs', 'auto'], ['&bvh=pmndrs', 'tinybvh']]) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1${bvhParam}${builder ? `&bvhBuilder=${builder}` : ''}&probeRes=128&scene=multiMaterial`);
+    pages.push(p);
+    const bvh = await p.T('window.__p.bvh');
+    const label = builder ? `@pmndrs/bvh (${bvh.builder})` : 'three-mesh-bvh port';
+    await rtMaterialChecks(p, label, builder ? oracleOk : null);
+    if (args.includes('--rt-material-assets')) await rtMaterialAssetSurvey(p, label);
+  }
+}
+
 async function ssrRtChecks(pages) {
   console.log('examples/ssr (?rt=1):');
   // probes at 128 px: the size W25 / W28 measured the hit-shading checks at (the page follows the
@@ -981,6 +1041,8 @@ async function ssrRtChecks(pages) {
     await rtHitShadingLines(p, id);
     if (id === 'contact') await rtShadingNormalChecks(p, 'three-mesh-bvh port');
   }
+  await rtMaterialChecks(p, 'three-mesh-bvh port'); // W49 (D1701 / D1702)
+  if (args.includes('--rt-material-assets')) await rtMaterialAssetSurvey(p, 'three-mesh-bvh');
   if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '');
   await missFillChecks(pages);
   await offscreenFillChecks(pages);
@@ -1571,7 +1633,7 @@ async function ssrRtBvhChecks(pages) {
       check(`rt @pmndrs/bvh (${bvh.builder}) agrees with THREE.Raycaster, ${kind} rays`, oracleOk(o),
         `${fmtOracle(o)}; BVH ${bvh.meshes} meshes, ${bvh.triangles} tris, ${bvh.buildMs.toFixed(0)} ms${bvh.fallbackReason ? ` (${bvh.fallbackReason})` : ''}`);
     }
-    if (builder !== 'auto') continue;
+    if (builder !== 'auto') { await rtMaterialChecks(p, `@pmndrs/bvh (${bvh.builder})`, oracleOk); continue; } // W49
     await rtAnyHitChecks(p, `@pmndrs/bvh (${bvh.builder})`);
     await p.T("window.__p.setPose('mirror')");
     await p.T('window.__p.setRT(false)');
@@ -1621,6 +1683,8 @@ async function ssrRtBvhChecks(pages) {
       if (['mirrorWall', 'contact', 'moving'].includes(id)) { await p.T('window.__p.step(2)'); await rtHitShadingLines(p, `${id} (@pmndrs/bvh)`); }
       if (id === 'contact') await rtShadingNormalChecks(p, '@pmndrs/bvh');
     }
+    await rtMaterialChecks(p, `@pmndrs/bvh (${bvh.builder})`, oracleOk); // W49 (D1701 / D1702)
+    if (args.includes('--rt-material-assets')) await rtMaterialAssetSurvey(p, '@pmndrs/bvh');
   }
   if (args.includes('--rt-shadow-timing')) await rtShadowTiming('@pmndrs/bvh', '&bvh=pmndrs');
   await rtHitAtlasChecks(pages, 'pmndrs'); // W47 (D4702)
@@ -2359,6 +2423,7 @@ async function main() {
     if (only === 'probe-layouts-measure') await probeLayoutMeasure(pages); // W61: the measurement (minutes), JSON to out/w61-probe-layouts.json
     if (only === 'offscreen-sizes') await offscreenSizeMeasure(pages); // W60 (D4700): offscreen per-probe sizes, JSON to out/w60-offscreen.json
     if (only === 'rt-hit-atlases') { await rtHitAtlasChecks(pages); await rtHitAtlasChecks(pages, 'pmndrs'); } // W47 (D4702): RT hits over a mixed-size set alone (also part of ssr-rt / ssr-rt-bvh)
+    if (only === 'rt-materials') await rtMaterialsAlone(pages); // W49 (D1701 / D1702): per-triangle hit materials on both providers alone (also part of ssr-rt / ssr-rt-bvh)
     if (runs('babylon')) await babylonChecks(pages);
     if (runs('ssr-rt-bvh')) await ssrRtBvhChecks(pages);
     if (runs('pixi3d')) await pixi3dChecks(pages);
