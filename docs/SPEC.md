@@ -144,6 +144,16 @@ It works as follows:
 - `bake({ environment: false })`
 - `seamFix`
 - `layout` / `bakedLayout` (`'auto' | 'cube-array' | 'cube2d'`) and the r187 cube-array shim (W20)
+- `ReflectionProbe.resolution` (W60, D4700): a probe's own face size over the set's `bake({ resolution })` (256). Each size gets its own atlas in the set (`textures`; the set default's first, holding the environment; at most 4 sizes), and each volume's lookup reads its own atlas. Core `ProbeSet` takes the same as `slotSizes`.
+
+**Choosing probe sizes (W60).** The sharpest surface that samples a probe, and the detail it has to show, set its size; distance matters because a texel covers more of the wall the further the receiver's reflection travels to it.
+
+- 512: a mirror-grade receiver (roughness below ~0.05) that shows fine detail: a thin emissive, text, a mirror facing the room. offscreen: the floor (r 0.02, under a 14 cm ring) and the wall mirror at 512, the room at 256, match all-512 at 62 % of its memory (17.34 / 13.27 vs 17.36 / 13.20 /255 vs `?rt=1`; all-256 17.78 / 13.42).
+- 256 (default): polished floors and metal below roughness ~0.2 (Lagarde 2014's mirror-grade minimum, D62).
+- 128: probes that only glossy or rough surfaces see, many probes in one scene, mobile.
+- Larger is not always better: offscreen's floor at 1024 read worse than at 512 (17.59 vs 17.53).
+
+Memory per probe (rgba16float, 6 faces, every mip down to 8 px; verified by `probeBytes`): 1.05 MB at 128, 4.19 MB at 256, 16.8 MB at 512, 67 MB at 1024. Bake time grows roughly with the texels captured (offscreen, 3 probes + environment, 2 bounces: all 256 9.8 ms, floor 512 13.9, floor + mirror 512 18.4, all 512 24.8). The lookup cost doesn't depend on the sizes (offscreen render GPU 1.39-1.45 ms for every mix). Many small probes against a few large ones at equal memory is still open (HANDOFF backlog, "Probe count vs resolution").
 
 **Where it goes:**
 
