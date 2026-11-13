@@ -10,7 +10,7 @@ Branch `worktree-agent-a9fe942389106ffc7`, from main 62f7162; main 22adc27 (W79,
   - `hitColorFilter` 'cone' (`DEFAULT_HIT_COLOR_FILTER`);
   - `mirrorBiasCompensate` true (`DEFAULT_MIRROR_BIAS_COMPENSATE`);
   - `mirrorBias` 0.5 when both are on (`DEFAULT_COMPENSATED_MIRROR_BIAS`), else 0.
-- An explicit value always wins. Every one stays a setting.
+- An explicit value always wins and keeps its pre-W76 meaning (review 1): `mirrorBias` and `mirrorBiasCompensate` resolve as a pair. Both unset: compensation at 0.5. `mirrorBias` set alone: compensation off (D49's truncation, as before W76). A bias of 0 is never compensated (it would zero the filters). Every one stays a setting.
 - **The switch back: `hitColorFilter: 'off'`.** With it, compensation has no filter to hand the bias to and `mirrorBias` falls back to 0, which is the pre-W76 tracer bit for bit (below). `mirrorBiasCompensate: false` keeps the cone alone (W72's "cone" option).
 - The RT pass takes its lobe split (and the cone scale) from what the tracer ran (`outputs.settings`, D5103) unless its own settings give one; the three adapter no longer passes the raw settings.
 - Adapters: three, pixi and babylon all dispatch core, so they all get it. Checked on a real GPU: three (every section below), pixi3d arcade and babylon (new checks: the tracer ran `cone`, `mirrorBias` 0.5, compensation on, active, no GPU errors).
@@ -45,7 +45,7 @@ Line spread (`metrics.lineSpread`, e15, PT 512 spp; width ratio vs the PT, denoi
 
 ### 2. 'relative' thickness 0.02 when ray tracing is on
 
-- In core's resolution, keyed on `missesTraced` (the three adapter sets it while its traced pass runs; a direct core user sets it on the dispatch): unset `thicknessDepthMode` -> 'relative', and an unset `thicknessDepthFactor` -> 0.02 when the mode resolves to 'relative' (`RT_THICKNESS_DEPTH_FACTOR`). So `thicknessDepthMode: 'add'` or `thicknessDepthFactor: 0` alone restores the old thickness with RT; an explicit factor keeps 'relative' as the mode with RT.
+- In core's resolution, keyed on `missesTraced` (the three adapter sets it while its traced pass runs; a direct core user sets it on the dispatch), the two thickness fields as a pair (review 2): both unset -> 'relative' 0.02 (`RT_THICKNESS_DEPTH_FACTOR`); a factor set alone keeps 'add' (its pre-W76 meaning); `thicknessDepthMode: 'relative'` alone -> 0.02; `thicknessDepthMode: 'add'` alone -> factor 0. So `thicknessDepthMode: 'add'` or `thicknessDepthFactor: 0` alone restores the old thickness with RT.
 - docs/SETTINGS.md has a generated section, **"What changes when ray tracing is on"**: the schema's new `rtDefault` / `rtWhy` fields (thickness factor and mode), plus `RT_BEHAVIOUR` for what the RT path does differently without a setting (missesTraced, D3542's on-screen re-shade without the visibility ray, specular occlusion skipping traced misses, `hitLobeFilterMixed` acting only with RT, ratio reuse leaving traced pixels, the traced lobe split). No other RT-specific default existed: W52's and W53's options are all off by default with or without RT.
 - The bench shows the effective value (relative / 0.02 on ours + RT) and the Default column says "with RT on: ...".
 
@@ -57,6 +57,9 @@ Line spread (`metrics.lineSpread`, e15, PT 512 spp; width ratio vs the PT, denoi
 
 - `?s.<field>=<value>` on examples/ssr and the showcase (examples/shared/ssrQuery.ts) sets the pass's settings from the first frame (D5104).
 - sssr-core: comparisons warm the cone (its intersect variant builds asynchronously; a tracer runs 'off' until it resolves, so a fresh tracer and a warm one disagreed).
+- **The cone's pipelines are cached per device** (review 3, `conePipeCache` in sssr.ts): a tracer rebuilt after the variant was built once runs the cone from its first frame. Before, every rebuild (resize, full / half, environment or probe change, a `hitLobeFilterMixed` flip, the first 'ratio' frame) ran the old path until its own compile resolved: a pop, visible with the history kept. `--only cone-cache` asserts the first frame after full -> half -> full and probes <-> environment runs the cone. A WGSL never built before (e.g. the environment-lit variant the first time) still compiles asynchronously.
+- W78's `HybridReflections.sampleDirectionFor` takes `brdfAlphaScale` from `mirrorBiasSplit(tracer.outputs.settings)`, the resolved settings the tracer ran.
+- examples/ssr's mirror-bias slider and status line show the resolved default and keep the compensation the tracer ran; `?res=mixed` / `?halfResMin=` warn that they were removed; a disabled pixi / babylon pass also turns the cone off (no pyramid).
 
 ## Default off = main
 
@@ -71,7 +74,7 @@ Data: data/ident-*.log, data/ident-finals.txt. Two harness traps on the way (doc
 
 ## Checks
 
-Final, after both merges (port 5448, denoiser#29): typecheck clean, test 75; `pnpm check` sssr-core 42, ssr 33, hybrid 19 (incl. half-res), ssr-rt 29, ssr-rt-bvh 39, showcase 8, regressions 54, bench 9, ssr-exp-metrics 3, pixi3d 12, babylon 9, preset 7: all pass ([data/checks-final.txt](data/checks-final.txt)). New W76 lines: [data/checks-w76-lines.txt](data/checks-w76-lines.txt).
+Final, after the review fixes and the W78 merge (port 5448, denoiser#29): typecheck clean, test 82; `pnpm check` sssr-core 45, ssr 34, hybrid 20 (incl. half-res and cone-cache), ssr-rt 29, ssr-rt-bvh 39, showcase 8, regressions 54, bench 9, ssr-exp-metrics 3, pixi3d 12, babylon 9, preset 7: all pass. Identity (switch off) vs main bbd2bb4: all 17 captures equal (hashes and finals) ([data/checks-final.txt](data/checks-final.txt)). New W76 lines: [data/checks-w76-lines.txt](data/checks-w76-lines.txt).
 
 ### Checks whose expectations changed
 
@@ -80,7 +83,7 @@ Each failed at the new defaults first, then was changed (scripts/run-headless.mj
 - **sssr-core**: subgroup / workgroup parity and the X1 identities compared a tracer still on 'off' (the cone builds asynchronously) with one on 'cone'; the page now warms the cone before comparing (`warm()`). New: the W76 default cases (absent = explicit cone + compensation 0.5; 'off' alone = the pre-W76 explicit path; `missesTraced` = 'relative' 0.02; `missesTraced` + mode 'add' or factor 0 = RT off's thickness) and that the defaults act. `hitLobeFilterGrazing` / `historyEdgeConfidence` identities replaced by `hitColorConeGrazing`.
 - **ssr, W72 hitColorFilter check**: it encoded "unset = 'off'"; now unset = explicit cone + compensation 0.5 = 'cone', 'off' = 'off' + compensation (ignored). The glossy raw-radiance mean bound: the cone alone stays within 10 % of off (1.003); the compensated default reads +13 % (the narrower sample validates more hits, and raw radiance is confidence x hit over a black fallback), bound 0.9-1.25. The rt=1 case: unset = explicit default, stable.
 - **ssr, rayReuse and mirrorBias (D49) checks**: run with `hitColorFilter: 'off'` (they test the copy path and D49's truncation; the async cone changed the hash mid-check, and with compensation the bias narrows instead of truncating).
-- **ssr-rt / ssr-rt-bvh**: D901's hit shading vs on-screen colour (contact, @pmndrs/bvh 1.08 -> 1.10 against a 10 % bound) and D4702's mixed-size atlas check (each probe set rebuilds the tracer, whose cone comes up a few frames later) run on the pre-W76 rays: they test hit shading and atlases, calibrated on that ray set.
+- **ssr-rt / ssr-rt-bvh**: D901's hit shading vs on-screen colour (contact, @pmndrs/bvh 1.08 -> 1.10 against a 10 % bound) and D4702's mixed-size atlas check (each probe set rebuilds the tracer, whose cone comes up a few frames later) run on the pre-W76 rays: they test hit shading and atlases, calibrated on that ray set. Review 4: the D901 ratio at the package defaults is now measured and logged too: mirrorWall 1.033 / 1.030, **contact 1.088 / 1.097**, moving 0.991 / 0.989 (three-mesh-bvh / @pmndrs/bvh). Contact sits just inside the +-10 % bound at the defaults (1.097 with @pmndrs/bvh; one earlier run read 1.100, on the bound): the narrower compensated sample and the relative thickness trace other pixels than the bound was calibrated on.
 - **hybrid, half-res**: the 'mixed' check went with `halfResMinRoughness`; shots wait for the cone after a resolution switch (the pass recreates its tracer on the next trace, and the old tracer's flag passed the wait: full -> half -> full max 133/255 until fixed, 0 after).
 - **ssr-exp-x1**: no `historyEdgeConfidence` edge-pan check; with RT the X1 defaults compared are W76's ('relative' 0.02).
 - **New adapter checks**: pixi3d arcade and babylon run the cone at 0.5 with compensation without any settings, and 'off' still switches it off (pixi).
@@ -125,9 +128,13 @@ With RT on (examples/ssr, ?rt=1, new vs `?s.hitColorFilter=off&s.thicknessDepthF
 
 **Sharpness**: line spread r 0.15 comes back (x0.98 AA on, x0.95 AA off; lost before); r 0.05 x1.28 -> 1.23 (AA off 1.23 -> 1.19); the grazing floor is softer (denoised gradient x0.81 -> x0.54 at 5 deg, x0.78 -> x0.54 at 15), the known cost of the cone (1b). Thin strip (`lineSpreadThin`): + RT r 0.05 x1.34 -> x1.26, but **+ RT r 0.15 goes from x0.70 (peak 0.95) to lost (peak 0.06)**: split ([data/linespread-thin-split.jsonl](data/linespread-thin-split.jsonl)): it is the cone + compensation, not the thickness (RT r 0.15: new lost, thickness 'add' k 0 lost, cone off x0.72 peak 1.11, both off x0.72), so the narrower sample plus the cone spreads a thin floating emitter's traced reflection below detection where before it came out too narrow and too bright; denoised (RT off) r 0.15 x2.40 -> x2.02 and the r 0.3 slab (70x peak) is gone.
 
+### After the review fixes (mirrorWall, contact, carConcept again)
+
+[data/baseline-review.json](data/baseline-review.json), [data/baseline-review-compare.md](data/baseline-review-compare.md): mirrorWall drift 0.307 -> 0.308, orbit std 0.462 -> 0.467 (+1.1 %); carConcept drift 0.265 -> 0.272, orbit 0.391 -> 0.393. **contact: rest drift 0.785 / 0.775 / 0.821 (three loads) vs W70's 0.732 / 0.721 / 0.711**, +0.05-0.09 (7-12 %), at or past the floor (0.05 abs); orbit std 9.71 -> 9.44 (-3 %), per-frame rest flicker 4.50 = 4.50, d2 12.2 -> 11.7. The first W76 baseline read 0.776 / 0.765 / 0.733, and the in-page A/B with RT (run 8) put new and old inside contact's own 0.14 spread, so it is borderline rather than shown; flagged here as the one flicker number to watch (contact under the upscaler, reflection region).
+
 ## Left
 
-- **A new tracer runs 'off' for its first frames.** The cone's intersect variant and the downsampler's kernels build with `createComputePipelineAsync` per tracer (W72), so after a page load, a resize or a tracer rebuild (probe set change, `hitLobeFilterMixed` crossing 1) the frames until it resolves run the pre-W76 path (and a compensated bias as 0), then switch: a one-time pop. Checks wait for it now. Fine-tune: cache the cone pipelines per device across tracers, or warm them when the tracer is created.
+- **The first cone frames after a page load** still run the pre-W76 path until the variant's first compile resolves (one pop per page and per WGSL variant); rebuilds after that are covered by the per-device cache (review 3). Warming the variant when the tracer is created would remove that too.
 - Thin floating emitter with RT at r 0.15 (`lineSpreadThin` + RT): lost at the new defaults (x0.72, peak 1.1 before: too narrow and too bright, outside the gate either way). The cone + compensation does it, not the relative thickness. The strip on a wall (`lineSpread`) comes back instead, which is what the default was chosen for.
 - Timings are rough (shared GPU): re-time the pyramid pass, the intersect and the RT-thickness ray counts on a quiet machine.
 - The grazing shrink at 0.25 is the most the line-spread gate allows (x0.97 / 0.95); the maintainer may still want the grazing floor over the thin line.

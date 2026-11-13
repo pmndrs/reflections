@@ -1,6 +1,6 @@
-sssr-core: 42 pass, 0 fail, all checks passed
-ssr: 33 pass, 0 fail, all checks passed
-hybrid: 19 pass, 0 fail, all checks passed
+sssr-core: 45 pass, 0 fail, all checks passed
+ssr: 34 pass, 0 fail, all checks passed
+hybrid: 20 pass, 0 fail, all checks passed
 ssr-rt: 29 pass, 0 fail, all checks passed
 ssr-rt-bvh: 39 pass, 0 fail, all checks passed
 showcase: 8 pass, 0 fail, all checks passed
