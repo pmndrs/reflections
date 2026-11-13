@@ -64,3 +64,35 @@ The plan's gate (saves >= 0.5 ms at 1080p) is met by step 1. Step 2 at 0.05 cost
 - A first Measure passed `denoise: '0'` (a string) to the bench: its "raw" rows were denoised; discarded, re-run with `false`.
 - `examples/assets` in the worktree is a symlink to the main checkout's assets (untracked; not staged).
 - The vite server logs a missing `@pixi/3d` (pixi3d pages); the pages used here are unaffected.
+
+# Phase 2 (X0's metrics; main a234de9 merged)
+
+All numbers 960x540 unless marked; page metrics on the reflection region (G-buffer roughness < 0.447), today's defaults (upscaler AA at ratio 1, FFX denoiser), one page per scene with the mode switched in-page (`__p.setResolution`; deterministic after a reset, W70). Noise floor (W70): drift <= 0.03, orbit std <= ~2 %. Files: [pagemetrics-ssr.jsonl](pagemetrics-ssr.jsonl), [pagemetrics-upscale.jsonl](pagemetrics-upscale.jsonl), [benchmetrics-car.jsonl](benchmetrics-car.jsonl), [measure2-car960.jsonl](measure2-car960.jsonl), [linespread.jsonl](linespread.jsonl), [timing2-1080p.jsonl](timing2-1080p.jsonl). W73's `rayReuse` branch does not merge cleanly (core Params words, the pass): no ratio row.
+
+## The cons table
+
+| con | test | full | half | verdict |
+|---|---|---|---|---|
+| Mirrors lose resolution | ssr page vs full (luma MAD, floor gradient ratio) | — | mirrorWall 1.36, x0.91; facingMirrors 1.24, x0.95 | visible (jagged reflected edges). Step 2 at 0.01 (mirrors at full res): 0.69 / 0.61, but see flicker below |
+| | orbit std / rest drift, mirrorWall | 0.46 / 0.31 | 0.48 / 0.33 | within ~5 % |
+| | same, mixed 0.01 | | 0.88 / 0.15 (d2 0.75 -> 2.30) | the full-res mirror path has no denoiser: drift halves, orbit flicker doubles. **Fails** |
+| Paint goes blocky / texture copy | carConcept bench metrics (ours-rt): quad ratio door / car | 0.29 / 0.25 | -0.14 / -0.08 | no 2x2 grid (the upsample's bilinear spatial weight); Measure door 14.1 -> 15.5, car 15.0 -> 17.7. Worse, not blocky |
+| | orbit std reflection / band | 0.36 / 0.86 | 0.42 / 1.19 | +15 % / +38 %: real |
+| Thin silhouettes | carConcept band (W41's sill band) MAD denoised | 30.5 | 58.3 | **fails** (raw 14.0 -> 16.4) |
+| | lineSpreadThin r 0.05 (AA off) denoised / +RT width ratio, +RT peak | x4.42 / x1.37, 0.88 | x4.02 / x1.21, 0.32 | thickness slab the same (X1 #2's case); RT keeps the width but loses 2/3 of the peak |
+| Cheaper route | GPU ms 1080p, AA off, rt, loop stopped, median of 8 x 20 alternating (quieter run than phase 1) | carConcept 14.0, contact 11.2, mirrorWall 8.2 | 10.6 / 9.0 / 6.6 | **saves 1.6-3.4 ms** (rt trace 2.53 -> 0.89, denoise 1.94 -> 0.51, core 3.17 -> 1.25; upsample +0.37-0.49, sample +0.15). Gate (>= 0.5 ms) met. No tile-list route (D1400) to compare |
+| Stacking with the upscale | ssr page, `?upscale=1.5`: contact orbit std / drift | 8.53 / 0.90 | 9.85 / 1.02 | +15 % / +13 % (vs +5 % / -7 % at ratio 1): compounds on the glossy floor; mirrorWall +2 % / +10 % |
+| | `?upscale=2` | 9.41 / 1.11 | 9.67 / 1.17 | +3 % |
+| | carConcept Measure denoised frame / band / lip | up 1.5: 8.3 / 31.1 / 40.5 | 9.8 / 64.8 / 51.9 | adds up (half alone 9.1 / 58.3 / 50.5); up 2: 9.4 / 60.3 / 50.7 vs 10.9 / 83.2 / 59.7 |
+| Denoiser 2x wider on screen | line spread r 0.05, AA off: width ratio, peak / PT's | x1.23, 0.63 | x1.08, **0.14** | the width stays in the gate, a thin emitter's peak drops 78 %. r >= 0.15 lost in both (W70). Raw: r 0.15 x1.48 -> x1.22, r 0.3 x1.15 -> x1.02 |
+| | carConcept band: is it the 2x footprint? | full at `upscale=2` (the whole pipeline at 480x270): band 60.3, lip 50.7 | 58.3, 50.5 | **yes**: half res = the full pipeline at half render size. Not the upsample |
+| Total cost | trace + denoise + upsample + composite | see cheaper route | | net saving at 1080p; 1440p not run |
+
+**Band and the 2x spread.** FFX's denoiser exposes no radius or kernel scale (`FfxReflectionDenoiserOptions`: temporal stability, roughness gate, hit source, hit-distance weight; the 8x8 average and 9x9 neighbourhood are WGSL constants), so the footprint can't be halved without a denoiser-repo branch (fine-tune backlog). What the options do at half res (carConcept denoised band / lip / frame): `hitSource=hits` 39.4 / 36.9 / 8.6 (full + hitSource 23.0 / 28.7 / 7.6), `quadCopy: 'sameSurface'` 50.0 / 38.6 / 8.7. Keeping sources apart recovers about two thirds of half's band loss; half + hitSource is about full's default.
+
+**Step 2 threshold.** At 0.05 carConcept's 0.03 floor lands on the undenoised full-res path (phase 1: better MAD, 28 ms). At 0.01 (FFX's mirror test) carConcept is identical to half (no px below; 11.6 ms with the mirror tracer's fixed cost), mirrorWall / facingMirrors get full-res mirrors (MAD vs full 0.69 / 0.61) for full res's cost (8.4 vs 8.2 ms) and twice the orbit flicker. Denoising that path means a second full-res denoiser (full res's denoise cost again); not tried.
+
+## Verdict (proposed for the decisions page)
+
+- **`reflectionResolution: 'half'`: option, not default.** It saves 1.6-3.4 ms at 1080p (25-35 % of the reflection frame on carConcept) and keeps rest drift and orbit flicker within ~5 % on the ssr scenes at ratio 1. It costs at silhouettes and thin emitters: carConcept band 30.5 -> 58.3, the line's peak -78 %, carConcept orbit +15 %; stacking with `?upscale=1.5` adds +15 % orbit on contact. Recommend it as a performance preset, paired with `hitSource: 'hits'` (band 39.4) and not combined with an upscale ratio > 1.
+- **`halfResMinRoughness` (step 2): keep at 0 (off); drop unless the mirror path gets a denoiser.** 0.01 is the only sensible threshold (0.05 catches smooth glossy floors); there it restores mirror sharpness but doubles orbit flicker on mirrors and costs as much as full res.

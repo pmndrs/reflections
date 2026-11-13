@@ -154,12 +154,12 @@ export const SETTINGS: Setting[] = [
   sel('s.reflectionResolution', 'sssr', 'Reflection resolution', [['full', 'full'], ['half', 'half (trace + denoise at half res, joint bilateral upsample)']], 'full', {
     apply: 'rebuild', appliesTo: OURS_SSR, api: 'settings.reflectionResolution',
     tradeoff: 'W75 (X5, D5080): \'half\' point-samples the G-buffer at one pixel per 2x2 quad, traces (SSR + RT) and denoises there, and upsamples the residual (denoised - probe) with a joint bilateral filter (plane distance, normal, roughness). Fewer rays and a quarter of the denoiser\'s pixels; mirrors and thin edges lose resolution (step 1: everything at half res). carConcept w50 MAD vs PT denoised: band 30.6 -> 58.3, lip 41.5 -> 50.5 (raw +0.4..+2.4).',
-    cost: 'carConcept 1080p (rt): rt trace 3.26 -> 1.10, denoise 2.89 -> 0.63, upsample +0.45, half-res sample +0.17; frame sum 23.1 -> 13.7 ms (W75, shared GPU, relative)',
+    cost: '1080p, AA off, rt (W75 phase 2): carConcept frame sum 14.0 -> 10.6 ms (rt trace 2.53 -> 0.89, denoise 1.94 -> 0.51, upsample +0.37, half-res sample +0.16); contact 11.2 -> 9.0; mirrorWall 8.2 -> 6.6',
   }),
   num('s.halfResMinRoughness', 'sssr', 'Half res: full-res path below roughness', 0, 1, 0.01, 0, {
     apply: 'rebuild', appliesTo: OURS_SSR, api: 'settings.halfResMinRoughness',
     tradeoff: 'W75 (X5 step 2, D5084): with half-res reflections, pixels below this perceptual roughness (mirrors, near-mirrors) are traced by a second full-res tracer (every pixel its own ray, its own RT pass, no denoiser) and composited at full res. 0 = every pixel at half res (step 1). At 0.05 carConcept\'s 0.03 floor goes to the full-res path.',
-    cost: 'a second full-res tracer + RT pass: carConcept 1080p mirror intersect 1.39, mirror rt trace 5.31 ms (spq 4); sum 28.0 vs full 23.1 ms (W75)',
+    cost: 'a second full-res tracer + RT pass: at 0.01, 1080p sum carConcept 11.6 (half 10.6, full 14.0), mirrorWall 8.4 (full 8.2); at 0.05 carConcept 28.0 vs full 23.1 (W75)',
   }),
   num('s.maxTraversalIntersections', 'sssr', 'Max march steps', 0, 256, 1, 128, { appliesTo: OURS_SSR, api: 'settings.maxTraversalIntersections', tradeoff: 'Hi-Z march steps per ray: fewer is cheaper and sends long rays to the miss list (probe or RT); 0 = SSR off.' }),
   num('s.minTraversalOccupancy', 'sssr', 'Min occupancy', 0, 64, 1, 4, { appliesTo: OURS_SSR, api: 'settings.minTraversalOccupancy', tradeoff: 'Glossy rays stop once this few lanes of their subgroup still march (FFX): higher ends long tails earlier (cheaper, more misses). Mirrors ignore it.' }),
