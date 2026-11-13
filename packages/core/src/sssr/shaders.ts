@@ -109,15 +109,19 @@ struct Params {
   thicknessDepthFactor: f32,
   hitLobeFilterGrazing: f32,
   x1Flags: u32, // bit 0 historyEdgeConfidence, bit 1 thicknessDepthMode 'relative'
+  // words 145-149: reserved for the other SSR-sources streams (X2)
   _pad145: u32,
   _pad146: u32,
   _pad147: u32,
   _pad148: u32,
   _pad149: u32,
-  _pad150: u32,
-  _pad151: u32,
-  _pad152: u32,
-  _pad153: u32,
+  // W73 (X3, words 150-153; D5040): ratio-estimator ray reuse. Flags bit 0 = 'ratio', bit 1 = misses are
+  // traced after this dispatch, bit 2 = mix hits and misses, bit 3 = tap pattern fixed per pixel; taps;
+  // radius in px (before the roughness scale); the record stamp of this dispatch.
+  rayReuseFlags: u32,
+  rayReuseTaps: u32,
+  rayReuseRadius: f32,
+  rayReuseStamp: u32,
   tracedHalfRate: u32,            // 154 (W74, X4): glossy misses of every other quad go to the fill list
   tracedHalfRateMinAlpha: f32,    // 155: ... from this alpha up (mirrors and near-mirrors stay full rate)
   missFillCapacity: u32,          // 156: fill entries at most (they follow the miss list's missListCapacity entries)
@@ -472,8 +476,16 @@ fn main() {
  * re-shade (W44, D3540); see `screenSpaceHitShadingWgsl` in ./sssr.ts. `hitSource`: bind last
  * frame's per-pixel hit source at binding 18 (W52, D3641).
  */
-export function intersectWgsl(variant: Variant, inverted: boolean, fallbackWgsl: string, missList: boolean, hitShadingWgsl: string, hitSource = false): string {
+export function intersectWgsl(variant: Variant, inverted: boolean, fallbackWgsl: string, missList: boolean, hitShadingWgsl: string, hitSource = false, rayReuse = false): string {
   const sg = variant === 'subgroups';
+  // W73 (rayReuse 'ratio', D5040): the variant that also stores each ray's record for the resolve. With
+  // rayReuse false the generated WGSL is today's, character for character.
+  const reuseDecl = rayReuse ? `\n@group(0) @binding(19) var<storage, read_write> rayRecords: array<vec4u>;\n${RAY_RECORD_STORE_WGSL}` : '';
+  const reuseMirror = rayReuse ? '\n    reuse_value = mix(environment_lookup, hit_radiance, confidence);' : '';
+  const reuseInit = rayReuse ? '\n  var reuse_value = hit_radiance * confidence;' : '';
+  const finishTail = rayReuse ? `let miss = confidence < P.missConfidenceThreshold && !isBackground(hit.z) && (*r).roughness <= P.missRoughnessThreshold;
+  storeRayRecord((*r).coords, reuse_value, confidence, normalize(world_space_reflected_direction), world_ray_length, ${missList ? 'miss' : 'false'});
+  return miss;` : 'return confidence < P.missConfidenceThreshold && !isBackground(hit.z) && (*r).roughness <= P.missRoughnessThreshold;';
   return /* wgsl */ `
 ${sg ? 'enable subgroups;\ndiagnostic(off, subgroup_uniformity);' : ''}
 ${PARAMS_WGSL}
@@ -495,7 +507,7 @@ ${missList ? `@group(0) @binding(11) var<storage, read_write> missList: array<ve
 @group(0) @binding(15) var t_albedo: texture_2d<f32>;
 @group(0) @binding(16) var t_metalness: texture_2d<f32>;
 @group(0) @binding(17) var t_clearcoat: texture_2d<f32>;
-${hitSource ? '@group(0) @binding(18) var t_hit_source: texture_2d<f32>;' : ''}
+${hitSource ? '@group(0) @binding(18) var t_hit_source: texture_2d<f32>;' : ''}${reuseDecl}
 ${fallbackWgsl}
 ${hitShadingWgsl}
 
@@ -900,17 +912,17 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
       hit_radiance = loadHitColor(hit.xy);
     }
   }
-  let hit_distance = select(0.0, world_ray_length, confidence > 0.0);
+  let hit_distance = select(0.0, world_ray_length, confidence > 0.0);${reuseInit}
   // fallbackRoughness 'surface' (default, D1806): each pixel's own rough-pixel lookup, quad copies
   // included. 'mirror' (FFX): the sampled direction at roughness 0, left for the denoiser to blur.
   if (P.fallbackRoughnessSurface != 0u) {
     storeRadianceSurface((*r).packed, (*r).coords, world_space_origin, world_space_reflected_direction, world_ray_length, hit_radiance, hit_distance, confidence);
   } else {
-    let environment_lookup = sampleRadianceFallback(world_space_origin, world_space_reflected_direction, 0.0);
+    let environment_lookup = sampleRadianceFallback(world_space_origin, world_space_reflected_direction, 0.0);${reuseMirror}
     storeRadiance((*r).packed, (*r).coords, vec4f(mix(environment_lookup, hit_radiance, confidence), world_ray_length), hit_distance, confidence);
   }
   // Hybrid sample: low confidence, not marched into the background, and not too rough to trace.
-  return confidence < P.missConfidenceThreshold && !isBackground(hit.z) && (*r).roughness <= P.missRoughnessThreshold;
+  ${finishTail}
 }
 
 fn missEntry(r: ptr<function, Ray>) -> vec2u {
@@ -1023,6 +1035,236 @@ ${sg ? `
     let idx = base + g_Scan[gi] - bit;
     if (idx < P.missListCapacity) { missList[idx] = missEntry(&r); } else { atomicAdd(&missCounter[2], 1u); }
   }` : ''}`}
+}
+`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Ratio-estimator ray reuse (W73, X3 phase A; DIVERGES D5040-D5049). Not part of FFX SSSR, which
+// copies one ray's result over its 2x2 quad and leaves the rest to its denoiser. After DiligentFX's
+// SSR_SpatialReconstruction.fx and Stachowiak & Uludag, "Stochastic Screen-Space Reflections"
+// (SIGGRAPH 2015): each glossy pixel reuses a few traced neighbours' rays, each weighted by this
+// pixel's BRDF x cos along the direction from this pixel to the neighbour's hit over the pdf the
+// neighbour sampled it with, normalised by the weights' sum.
+//
+// Ray record (one vec4u per pixel, written by intersect's 'ratio' variant for every traced ray):
+//   x, y  pack2x16float(value.rg), pack2x16float(value.b, confidence); value = confidence x hit
+//         radiance with fallbackRoughness 'surface' (the resolve adds this pixel's own fallback for
+//         1 - confidence), or the ray's whole radiance mix(fallback, hit, confidence) with 'mirror'
+//   z     pack2x16snorm(octEncode(world direction))
+//   w     f16 bits of the world ray length (a hit when confidence > 0) | stamp (15 bits) << 16 | miss-listed << 31
+
+const RAY_RECORD_STORE_WGSL = /* wgsl */ `
+fn storeRayRecord(c: vec2u, value: vec3f, confidence: f32, dir: vec3f, t: f32, miss: bool) {
+  let v = clamp(value, vec3f(0.0), vec3f(65000.0));
+  let i = c.y * P.renderSize.x + c.x;
+  let hi = ((P.rayReuseStamp & 0x7fffu) << 16u) | select(0u, 0x80000000u, miss);
+  rayRecords[i] = vec4u(pack2x16float(v.rg), pack2x16float(vec2f(v.b, clamp(confidence, 0.0, 1.0))),
+    pack2x16snorm(octEncode(dir)), (pack2x16float(vec2f(min(t, 65000.0), 0.0)) & 0xffffu) | hi);
+}
+`;
+
+/**
+ * The resolve: one 8x8 group per denoiser tile (indirect args at byte 12), writes radiance, hit
+ * distance and confidence of the glossy non-mirror pixels it can resolve; the others keep
+ * intersect's quad copy. Binds the radiance fallback's @group(1) for the 'surface' fallback.
+ */
+export function rayReuseResolveWgsl(inverted: boolean, fallbackWgsl: string): string {
+  return /* wgsl */ `
+${PARAMS_WGSL}
+${commonWgsl(inverted)}
+@group(0) @binding(1) var t_depth_hierarchy: texture_2d<f32>;
+@group(0) @binding(2) var t_normal: texture_2d<f32>;
+@group(0) @binding(3) var t_roughness: texture_2d<f32>;
+@group(0) @binding(4) var<storage, read> rayRecords: array<vec4u>;
+@group(0) @binding(5) var<storage, read> tileList: array<u32>;
+@group(0) @binding(6) var<storage, read> rayCounter: array<u32, 4>;
+@group(0) @binding(7) var o_radiance: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(8) var o_hit: texture_storage_2d<r32float, write>;
+@group(0) @binding(9) var o_confidence: texture_storage_2d<r32float, write>;
+${fallbackWgsl}
+
+const M_PI: f32 = 3.14159265358979;
+const GOLDEN_ANGLE: f32 = 2.39996323;
+
+fn octDecode(e: vec2f) -> vec3f {
+  var n = vec3f(e, 1.0 - abs(e.x) - abs(e.y));
+  let t = max(-n.z, 0.0);
+  n = vec3f(n.xy + select(vec2f(t), vec2f(-t), n.xy >= vec2f(0.0)), n.z);
+  return normalize(n);
+}
+fn pcg(v: u32) -> u32 {
+  let s = v * 747796405u + 2891336453u;
+  let w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+  return (w >> 22u) ^ w;
+}
+fn loadWorldSpaceNormal(p: vec2i) -> vec3f {
+  return normalize(P.normalsUnpackMul * textureLoad(t_normal, p, 0).xyz + P.normalsUnpackAdd);
+}
+fn worldPosition(p: vec2i, z: f32) -> vec3f {
+  let v = screenSpaceToViewSpace(vec3f((vec2f(p) + 0.5) * P.inverseRenderSize, z));
+  return (P.invView * vec4f(v, 1.0)).xyz;
+}
+fn isSurface(z: f32) -> bool { return ${inverted ? 'z > FAR_PLANE' : 'z < FAR_PLANE'}; }
+
+struct RayRecord { value: vec3f, confidence: f32, dir: vec3f, t: f32, valid: bool, miss: bool };
+fn loadRecord(p: vec2i) -> RayRecord {
+  let e = rayRecords[u32(p.y) * P.renderSize.x + u32(p.x)];
+  var r: RayRecord;
+  r.valid = ((e.w >> 16u) & 0x7fffu) == (P.rayReuseStamp & 0x7fffu);
+  let a = unpack2x16float(e.x);
+  let b = unpack2x16float(e.y);
+  r.value = vec3f(a, b.x);
+  r.confidence = b.y;
+  r.dir = octDecode(unpack2x16snorm(e.z));
+  r.t = unpack2x16float(e.w & 0xffffu).x;
+  r.miss = (e.w >> 31u) != 0u;
+  return r;
+}
+// The pixel of q's quad that classify gives the quad's ray (isBaseRay): even-even for spq 1, the
+// diagonal pair for spq 2, every pixel for spq 4.
+fn tracedPixel(q: vec2i) -> vec2i {
+  switch (P.samplesPerQuad) {
+    case 1u: { return q & vec2i(~1); }
+    case 2u: { return select(q ^ vec2i(1, 0), q, (q.x & 1) == (q.y & 1)); }
+    default: { return q; }
+  }
+}
+// GGX (alpha = linear roughness, as the tracer samples it), separable Smith.
+fn ggxD(a2: f32, NdotH: f32) -> f32 { let d = NdotH * NdotH * (a2 - 1.0) + 1.0; return a2 / (M_PI * d * d); }
+fn smithG1(a2: f32, NdotX: f32) -> f32 { return 2.0 * NdotX / (NdotX + sqrt(a2 + (1.0 - a2) * NdotX * NdotX)); }
+// Heitz 2018's visible-normal pdf of the reflected L (FFX's sampleGGXVNDF): G1(V) D(h) / (4 N.V).
+fn vndfPdf(N: vec3f, V: vec3f, L: vec3f, a: f32) -> f32 {
+  let NdotV = max(dot(N, V), 1e-4);
+  let h = normalize(V + L);
+  let a2 = a * a;
+  return smithG1(a2, NdotV) * ggxD(a2, max(dot(N, h), 0.0)) / (4.0 * NdotV);
+}
+// This pixel's specular BRDF x cos without Fresnel (the split sum's DFG comes after the denoiser): D G2 / (4 N.V).
+fn brdfCos(N: vec3f, V: vec3f, L: vec3f, a: f32) -> f32 {
+  let NdotV = max(dot(N, V), 1e-4);
+  let NdotL = max(dot(N, L), 0.0);
+  let h = normalize(V + L);
+  let a2 = a * a;
+  return ggxD(a2, max(dot(N, h), 0.0)) * smithG1(a2, NdotV) * smithG1(a2, NdotL) / (4.0 * NdotV);
+}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u) {
+  let tile = wg.y * nwg.x + wg.x; // 2-D indirect groups (D601)
+  if (tile >= rayCounter[3]) { return; }
+  let origin = tileList[tile];
+  let c = vec2u(origin & 0xffffu, origin >> 16u) + lid.xy;
+  if (any(c >= P.renderSize)) { return; }
+  let p = vec2i(c);
+  let alpha = textureLoad(t_roughness, p, 0).x;
+  // mirrors trace every pixel; rough pixels took the fallback in classify
+  if (!isGlossyReflection(alpha) || isMirrorReflection(alpha)) { return; }
+  let z = textureLoad(t_depth_hierarchy, p, 0).x;
+  if (!isSurface(z)) { return; }
+  let traced_misses = (P.rayReuseFlags & 2u) != 0u;
+  let mix_sources = (P.rayReuseFlags & 4u) != 0u;
+  let own = loadRecord(p);
+  // clamped: at spq 2 the right column of an odd width has its partner at x = W (D5046)
+  let last = vec2i(P.renderSize) - 1;
+  let base_px = min(tracedPixel(p), last);
+  let base = loadRecord(base_px);
+  // A ray-traced pass overwrites the miss list's pixels and their quad copies: leave them to it (D5043).
+  if (traced_misses) {
+    if (own.valid && own.miss) { return; }
+    if (!own.valid && base.valid && base.miss) { return; }
+  }
+  // The pixel's hit source (D3660, D5047): its own ray's, else the ray the copy would give it. Only
+  // rays of the same source are reused (a hit's confidence stays one ray's thickness confidence, which
+  // the three composite's depth-aware blend reads, D2400); unknown (no own or quad ray) takes any.
+  let known_source = !mix_sources && (own.valid || base.valid);
+  let own_hit = select(base.confidence > 0.0, own.confidence > 0.0, own.valid);
+  let X = worldPosition(p, z);
+  let N = loadWorldSpaceNormal(p);
+  let cam = P.invView[3].xyz;
+  let view_distance = length(cam - X);
+  let V = (cam - X) / max(view_distance, 1e-6);
+  var sum_w = 0.0;
+  var sum_value = vec3f(0.0);
+  var sum_confidence = 0.0;
+  var sum_hit_w = 0.0;
+  var sum_t = 0.0;
+  var sum_length = 0.0;
+  // The pixel's own ray: w = brdfCos / pdf = G1(L).
+  if (own.valid && dot(N, own.dir) > 0.0) {
+    let w = brdfCos(N, V, own.dir, alpha) / max(vndfPdf(N, V, own.dir, alpha), 1e-12);
+    sum_w += w; sum_value += w * own.value; sum_confidence += w * own.confidence;
+    sum_length += w * own.t;
+    if (own.confidence > 0.0) { sum_hit_w += w * own.confidence; sum_t += w * own.confidence * own.t; }
+  }
+  // Neighbours: the quad's own ray first, then rayReuseTaps on a golden-angle disk of radius
+  // rayReuseRadius x sat(5 r) (Diligent's 4 sat(5 r), r perceptual), rotated per pixel and frame,
+  // each snapped to the traced pixel of its quad.
+  let radius = P.rayReuseRadius * saturate(5.0 * sqrt(alpha));
+  // 'frame': re-rotated every frame (the error moves); 'pixel' (flag bit 3): fixed per pixel (D5046)
+  let frame_seed = select(P.frameIndex * 2654435769u, 0u, (P.rayReuseFlags & 8u) != 0u);
+  let rotation = f32(pcg(c.x + c.y * 65521u + frame_seed) >> 8u) * (2.0 * M_PI / 16777216.0);
+  // Below 1.5 px (perceptual r < 0.075 at radius 4) only the own quad: the taps would land on the next
+  // quads and widen a near-mirror's reflection (W73 phase 2, line spread at r 0.05: x1.29 -> x1.55).
+  let taps = select(0u, min(P.rayReuseTaps, 8u), radius >= 1.5);
+  var seen: array<vec2i, 9>;
+  var n_seen = 0u;
+  for (var i = 0u; i <= taps; i++) {
+    var q = base_px;
+    if (i > 0u) {
+      let k = f32(i - 1u);
+      let r = radius * sqrt((k + 0.5) / f32(taps));
+      let th = k * GOLDEN_ANGLE + rotation;
+      q = min(tracedPixel(clamp(p + vec2i(round(r * vec2f(cos(th), sin(th)))), vec2i(0), last)), last);
+    }
+    if (all(q == p)) { continue; }
+    var dup = false;
+    for (var j = 0u; j < n_seen; j++) { if (all(seen[j] == q)) { dup = true; } }
+    if (dup) { continue; }
+    seen[n_seen] = q;
+    n_seen++;
+    let rec = loadRecord(q);
+    if (!rec.valid || (traced_misses && rec.miss)) { continue; }
+    if (known_source && (rec.confidence > 0.0) != own_hit) { continue; }
+    let aq = textureLoad(t_roughness, q, 0).x;
+    // mirrors (delta pdf) and rough px (no ray: a stale record after the stamp wraps) are not reused
+    if (isMirrorReflection(aq) || !isGlossyReflection(aq)) { continue; }
+    let zq = textureLoad(t_depth_hierarchy, q, 0).x;
+    if (!isSurface(zq)) { continue; }
+    // the same surface: normals within ~25 degrees, within 2 % of the view distance of this pixel's plane (D5042)
+    let Nq = loadWorldSpaceNormal(q);
+    if (dot(N, Nq) < 0.9) { continue; }
+    let Xq = worldPosition(q, zq);
+    if (abs(dot(N, Xq - X)) > 0.02 * view_distance) { continue; }
+    // SSSR 2015: the direction from this pixel to the neighbour's hit (misses: the ray's direction)
+    var L = rec.dir;
+    var t = rec.t; // a miss: the neighbour's own ray length
+    if (rec.confidence > 0.0) {
+      let H = Xq + rec.dir * rec.t;
+      t = length(H - X);
+      L = (H - X) / max(t, 1e-6);
+    }
+    if (dot(N, L) <= 0.0) { continue; }
+    let pdf = vndfPdf(Nq, normalize(cam - Xq), rec.dir, aq);
+    if (!(pdf > 0.0)) { continue; }
+    let w = brdfCos(N, V, L, alpha) / pdf;
+    if (!(w > 0.0) || w > 3.0e38) { continue; }
+    sum_w += w; sum_value += w * rec.value; sum_confidence += w * rec.confidence;
+    sum_length += w * t;
+    if (rec.confidence > 0.0) { sum_hit_w += w * rec.confidence; sum_t += w * rec.confidence * t; }
+  }
+  if (!(sum_w > 0.0)) { return; } // nothing usable: keep the quad copy
+  let confidence = clamp(sum_confidence / sum_w, 0.0, 1.0);
+  var radiance = sum_value / sum_w;
+  if (P.fallbackRoughnessSurface != 0u && confidence < 1.0) {
+    // this pixel's own rough-pixel lookup for the rest (as intersect's storeRadianceSurface)
+    radiance += (1.0 - confidence) * sampleRadianceFallback(X, reflect(-V, N), sqrt(alpha));
+  }
+  let hit_distance = select(0.0, sum_t / sum_hit_w, sum_hit_w > 0.0);
+  // w = world ray length (FFX's layout): re-derived to the hits, the rays' own length for misses (D5045)
+  textureStore(o_radiance, c, vec4f(radiance, sum_length / sum_w));
+  textureStore(o_hit, c, vec4f(hit_distance));
+  textureStore(o_confidence, c, vec4f(confidence));
 }
 `;
 }

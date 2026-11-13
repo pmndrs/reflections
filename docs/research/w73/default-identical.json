@@ -1,0 +1,6 @@
+{
+  "what": "W73: FNV-1a hashes of the SSSR tracer's radiance / hitDistance / confidence at frameIndex 7, minTraversalOccupancy 0, temporalVarianceGuidedTracing off (examples/ssr ?manual&denoise=0, docs/research/w73/scripts/hash.js), before the change (main 0abd154) and after, unset and with an explicit rayReuse 'copy' (rayReuseTaps 4, rayReuseRadius 7). Identical bytes = max 0/255.",
+  "rt=0": {"mirrorWall":{"radiance":"d7a2011a","hit":"a96317b9","conf":"d021a6a1"},"roughnessRamp":{"radiance":"00264809","hit":"780bdef4","conf":"699764ef"},"rooms":{"radiance":"9df2210f","hit":"a3358842","conf":"7eedb1ae"},"facingMirrors":{"radiance":"075039ee","hit":"33b5de93","conf":"7ab9d2b3"},"contact":{"radiance":"a1dea43a","hit":"56010e87","conf":"40c337e4"}},
+  "rt=1": {"mirrorWall":{"radiance":"919a55b2","hit":"e70c7605","conf":"5404d649"},"roughnessRamp":{"radiance":"46c98a61","hit":"d0ec12fc","conf":"452da8cc"},"rooms":{"radiance":"4bd13d02","hit":"f3b7b9e7","conf":"369f8ada"},"facingMirrors":{"radiance":"8fa2f872","hit":"cc40c295","conf":"2a56d692"},"contact":{"radiance":"b5b271c1","hit":"c20d81d2","conf":"e8bdecc8"}},
+  "verdict": "identical before / after / explicit copy, both rt modes (the intersect WGSL with rayReuse off is the same text as before; the ratio pipelines are built only on the first 'ratio' frame)"
+}

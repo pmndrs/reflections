@@ -161,6 +161,27 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W75 (X5 step 2, D5084): with half-res reflections, pixels below this perceptual roughness (mirrors, near-mirrors) are traced by a second full-res tracer (every pixel its own ray, its own RT pass, no denoiser) and composited at full res. 0 = every pixel at half res (step 1). At 0.05 carConcept\'s 0.03 floor goes to the full-res path.',
     cost: 'a second full-res tracer + RT pass: at 0.01, 1080p sum carConcept 11.6 (half 10.6, full 14.0), mirrorWall 8.4 (full 8.2); at 0.05 carConcept 28.0 vs full 23.1 (W75)',
   }),
+  sel('s.rayReuse', 'sssr', 'Ray reuse', [['copy', 'copy (FFX quad copy)'], ['ratio', 'ratio estimator (BRDF / pdf-weighted neighbours)']], 'copy', {
+    appliesTo: OURS_SSR, api: 'settings.rayReuse',
+    tradeoff: 'W73 (X3, D5040): what a glossy px without its own ray gets. \'copy\' pastes its quad\'s ray (FFX). \'ratio\' resolves every glossy px from its own ray, its quad\'s and s.rayReuseTaps neighbours within s.rayReuseRadius, weighted by its own BRDF along the direction to each neighbour\'s hit over that ray\'s pdf (SSSR 2015, DiligentFX); same surface only. The target: ratio at spq 1 about as quiet as copy at spq 4. Experiment; the FFX denoiser still runs after it.',
+    cost: 'one extra pass + 16 B/px record buffer (not timed yet: shared GPU)',
+  }),
+  sel('s.rayReuseTaps', 'sssr', 'Ray reuse taps', [['4', '4'], ['8', '8']], 8, {
+    appliesTo: OURS_SSR, api: 'settings.rayReuseTaps',
+    tradeoff: 'W73: neighbour taps of the ratio resolve besides the px\'s own quad. Only with s.rayReuse ratio.',
+  }),
+  num('s.rayReuseRadius', 'sssr', 'Ray reuse radius', 0, 16, 0.5, 4, {
+    appliesTo: OURS_SSR, api: 'settings.rayReuseRadius',
+    tradeoff: 'W73: tap radius in px at perceptual roughness >= 0.2, x sat(5 r) below (DiligentFX\'s 4 sat(5 r)). Wider is quieter and blurs more (the line-spread gate). Only with s.rayReuse ratio.',
+  }),
+  sel('s.rayReusePattern', 'sssr', 'Ray reuse tap pattern', [['frame', 'rotated per frame'], ['pixel', 'fixed per pixel']], 'frame', {
+    appliesTo: OURS_SSR, api: 'settings.rayReusePattern',
+    tradeoff: 'W73 (D5046): the ratio taps re-rotated per pixel and frame (the resolve\'s error moves every frame) or fixed per pixel (it stays put, for the denoiser\'s temporal pass). Only with s.rayReuse ratio.',
+  }),
+  bool('s.rayReuseMixSources', 'sssr', 'Ray reuse: mix hits and misses', false, {
+    appliesTo: OURS_SSR, api: 'settings.rayReuseMixSources',
+    tradeoff: 'W73 (D5047): off (default), the ratio resolve reuses only rays of the px\'s own hit source (screen hit vs miss, D3660). On, it also averages the hit / miss pattern, but the confidence then is a share of hits and the depth-aware blend (h.depthAware, D2400) hands the hits the whole weight: carConcept door raw 1.04 -> 1.38 linear (SSR only). Use with h.depthAware 0.',
+  }),
   sel('s.quadBaseRotation', 'sssr', 'Quad base rotation', [['fixed', 'fixed (FFX: top-left)'], ['frame', 'frame (corner cycles per frame)'], ['pattern', 'pattern (4x4 Latin square, per frame)']], 'fixed', {
     appliesTo: OURS_SSR, api: 'settings.quadBaseRotation',
     tradeoff: 'W71 (X1 #1, D5000): which px of a 2x2 quad traces when samplesPerQuad < 4. \'fixed\' keeps the copy\'s 2x2 grid in place (it can show under TAA / the upscaler and drift in blocks at rest); \'frame\' / \'pattern\' move it every frame, so the history averages it out. Composes with Quad copy \'sameSurface\'.',
@@ -268,11 +289,11 @@ export const SETTINGS: Setting[] = [
     cost: 'rt trace +0.30 ms (W52)',
   }),
   sel('t.tracedMissRate', 'rt', 'Traced miss rate (glossy)', [['full', 'full (every miss traced)'], ['half', 'half (every other quad + bilateral fill)']], 'full', {
-    appliesTo: RT, api: 'traceSettings.tracedMissRate (+ settings.tracedMissRate)',
+    appliesTo: RT, api: 'traceSettings.tracedMissRate (or settings.tracedMissRate; traceSettings wins)',
     tradeoff: 'W74 (X4, D5060): \'half\' traces the glossy misses of every other 2x2 quad (a checkerboard flipping each frame); the others take their traced neighbours\' result through core bilateralFill (plane distance, normal power, roughness, same source), or the probe where none fits. Half the glossy BVH rays; mirrors and near-mirrors stay full rate.',
   }),
   num('t.tracedHalfRateMinRoughness', 'rt', 'Half rate from roughness', 0, 1, 0.01, 0.05, {
-    appliesTo: RT, api: 'traceSettings.tracedHalfRateMinRoughness (DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS)',
+    appliesTo: RT, api: 'traceSettings.tracedHalfRateMinRoughness (or settings.; DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS)',
     tradeoff: 'W74: perceptual roughness from which \'half\' applies; smoother misses are all traced (mirror-like floors and paint keep their sharp reflections).',
   }),
   num('t.fillPlaneTolerance', 'rt', 'Fill: plane tolerance', 0, 0.1, 0.001, 0.01, { appliesTo: RT, api: 'traceSettings.fillPlaneTolerance (BilateralFillWeights.planeTolerance)', tradeoff: 'W74: a neighbour farther than this x the view distance from the pixel\'s tangent plane takes no weight (silhouettes, steps). 0 = off.' }),

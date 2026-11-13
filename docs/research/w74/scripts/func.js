@@ -7,6 +7,7 @@ for (const id of scenes) {
   for (const rate of ['full', 'half']) {
     P.setTraceSettings({ tracedMissRate: rate, ...(rate === 'half' && typeof FILL !== 'undefined' ? FILL : {}) });
     P.hybrid.resetHistory(); P.ssr.resetHistory();
+    await P.ssr.traced?.prepareHalfRate(); // W74 review fix 4: the fill compiles asynchronously
     await P.step(6);
     const st = await P.traceStats();
     out.push({ id, rate, misses: st.misses, traced: st.traced, skipped: st.halfRateSkipped, filled: st.filled, fallbacks: st.fillFallbacks, overflow: st.fillOverflow });
