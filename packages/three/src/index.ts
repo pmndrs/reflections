@@ -48,3 +48,6 @@ export {
 // Hybrid resolve (phase 5): SSR -> RT -> probes -> environment, denoised through the denoise seam
 // (any denoiser-core-shaped TemporalDenoiser<SpecularInputs>, e.g. denoiser/ffx's FfxReflectionDenoiser).
 export { HybridReflections, HYBRID_SOURCE, type HybridReflectionsOptions } from './sssr/HybridReflections';
+// Named presets (W77): core's bundles ('default', 'performance') applied to a running pass + resolve.
+export { applyReflectionsPreset } from './sssr/presets';
+export { REFLECTION_PRESETS, REFLECTION_PRESET_NAMES, reflectionsPreset, denoiserHitSourceOptions, type ReflectionsPreset, type ReflectionsPresetName, type DenoiserHitSourceMode } from '@pmndrs/reflections-core';

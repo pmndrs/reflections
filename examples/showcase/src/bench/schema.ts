@@ -13,10 +13,13 @@
 //
 // This module is plain data: no three, no DOM (vitest imports it for the doc).
 import type { MethodId } from '../compare/method';
+// W77: the package's named presets (plain data; core's presets.ts imports nothing at runtime)
+import { REFLECTION_PRESET_NAMES, reflectionsPreset, type ReflectionsPresetName } from '../../../../packages/core/src/presets';
 
-export type GroupId = 'aa' | 'scene' | 'sssr' | 'rt' | 'hybrid' | 'denoiser' | 'probes' | 'materials' | 'three' | 'pathtracer';
+export type GroupId = 'preset' | 'aa' | 'scene' | 'sssr' | 'rt' | 'hybrid' | 'denoiser' | 'probes' | 'materials' | 'three' | 'pathtracer';
 
 export const GROUPS: { id: GroupId; title: string; blurb: string }[] = [
+  { id: 'preset', title: 'Preset', blurb: 'A named bundle of the settings below (core `REFLECTION_PRESETS`, W77): see "Presets" above for what each one sets, costs and trades. Keys you set explicitly win over the preset.' },
   { id: 'aa', title: 'Anti-aliasing / upscaler', blurb: 'Display AA after the composite (examples/shared/antialias.ts, W36): @pmndrs/upscaler at ratio 1 acts as TAA and smooths the last fireflies. Same choice on ours and on three\'s SSR; the path tracer needs none.' },
   { id: 'scene', title: 'Scene', blurb: 'What every method renders: scene, camera, floor, tone mapping, exposure, size.' },
   { id: 'sssr', title: 'Screen-space (SSSR)', blurb: '`ScreenSpaceReflectionsPass.settings` (core `ScreenSpaceReflectionsSettings`), read every frame.' },
@@ -76,6 +79,11 @@ const sel = (id: string, group: GroupId, label: string, choices: readonly (reado
   ({ id, group, label, type: 'select', choices, default: def, apply: 'live', ...o });
 
 export const SETTINGS: Setting[] = [
+  // ---- preset (W77): first, since it sets keys of the groups below ------------------------------------------
+  sel('preset', 'preset', 'Preset', REFLECTION_PRESET_NAMES.map((n) => [n, n] as const), 'default', {
+    apply: 'rebuild', appliesTo: OURS_SSR, api: "ScreenSpaceReflectionsPass({ preset }) + HybridReflections({ preset }); applyReflectionsPreset() at runtime",
+    tradeoff: 'Sets the URL keys the preset names (performance: s.reflectionResolution half, hitSource hits) wherever the URL doesn\'t set them; the controls of those keys keep showing their own value. Clearing a key returns it to the preset\'s value.',
+  }),
   // ---- anti-aliasing (top: the maintainer's ask, W51) -----------------------------------------------------
   sel('aa', 'aa', 'AA mode', [['upscaler', 'Upscaler (@pmndrs/upscaler, TAA at ratio 1)'], ['taa', 'TAA (W40 resolve)'], ['off', 'Off']], null, {
     pageDefault: 'upscaler', appliesTo: RASTER, api: 'examples DisplayAA (mode)',
@@ -437,6 +445,19 @@ export const NOT_EXPOSED: { name: string; why: string }[] = [
 ];
 
 export const settingById = new Map(SETTINGS.map((s) => [s.id, s]));
+
+/**
+ * W77: the bench URL keys preset `name` sets (tracer settings as `s.<field>`, the denoiser's hit source as
+ * `hitSource`), as URL strings. Empty for an unknown name or null.
+ */
+export function presetUrlKeys(name: string | null): Record<string, string> {
+  if (!name || !(REFLECTION_PRESET_NAMES as string[]).includes(name)) return {};
+  const p = reflectionsPreset(name as ReflectionsPresetName);
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(p.tracer)) if (v !== undefined) out[`s.${k}`] = typeof v === 'boolean' ? (v ? '1' : '0') : String(v);
+  if (p.denoiser.hitSource !== undefined) out.hitSource = p.denoiser.hitSource === 'off' ? '0' : p.denoiser.hitSource;
+  return out;
+}
 
 /** A value as the URL carries it (booleans 1 / 0). */
 export const encodeValue = (s: Setting, v: Value): string => (s.type === 'bool' ? (v ? '1' : '0') : String(v));

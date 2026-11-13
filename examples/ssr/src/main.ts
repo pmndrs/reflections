@@ -31,7 +31,7 @@ import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { PROBE_LOOKUP_EXPERIMENT } from '@pmndrs/reflections-core/probes/lookup';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, defaultHitMaterial, ReflectionProbes, type BakeOptions, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, applyReflectionsPreset, defaultHitMaterial, type DenoiserHitSourceMode, type ReflectionsPresetName, ReflectionProbes, type BakeOptions, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
   createPmndrsBvhTraceProviderFromObjects, type ThreePmndrsBvhTraceProvider,
 } from '@pmndrs/reflections/three';
 import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
@@ -73,6 +73,8 @@ type HitColorMode = 'current' | 'lit' | 'final';
 type RayKind = 'camera' | 'scene';
 const HIT_MODES: HitColorMode[] = ['current', 'lit', 'final'];
 const useRT = q.get('rt') === '1';
+/** W77: ?preset=performance|default (core REFLECTION_PRESETS, through the three adapter's `preset` options). */
+const presetName = (q.get('preset') as ReflectionsPresetName | null) ?? null;
 /** Which BVH the ray-traced fallback uses: core's @pmndrs/bvh (default since W51, the maintainer's call on D1705) or three-mesh-bvh (`?bvh=three-mesh-bvh`, the stopgap). */
 type BvhKind = 'three-mesh-bvh' | 'pmndrs';
 const bvhKind: BvhKind = q.get('bvh') === 'three-mesh-bvh' ? 'three-mesh-bvh' : 'pmndrs';
@@ -212,11 +214,16 @@ async function main() {
     // W75 (X5, D5080): ?res=half traces, denoises at half res and upsamples
     // (?res=mixed: mirrors below ?halfResMin= (default 0.05) on a full-res path, step 2)
     ...(q.get('res') === 'half' || q.get('res') === 'mixed' ? { settings: { reflectionResolution: 'half' as const, halfResMinRoughness: q.get('res') === 'mixed' ? Number(q.get('halfResMin') ?? 0.05) : 0 } } : {}),
+    ...(q.get('res') === 'full' ? { settings: { reflectionResolution: 'full' as const } } : {}),
+    // W77: ?preset=performance|default (core REFLECTION_PRESETS); ?res= and ?hitSource= given explicitly win
+    ...(presetName ? { preset: presetName } : {}),
   });
   const device = ssr.device;
   // hybrid resolve + denoise seam (phase 5)
   let denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, q.has('timing')) : null;
-  const hybrid = new HybridReflections(ssr, { denoiser });
+  const hybrid = new HybridReflections(ssr, { denoiser, ...(presetName ? { preset: presetName } : {}) });
+  // W77: ?hitSource=off|hits|all (W53: what the denoiser keeps apart); explicit, so it wins over ?preset=
+  if (q.has('hitSource')) hybrid.setDenoiserHitSource((q.get('hitSource') === '1' ? 'all' : q.get('hitSource')) as DenoiserHitSourceMode);
   // FFX's options are constructor-only, so the denoiser follows the tracer's roughness threshold by
   // being rebuilt when it changes (D1402); checked once per frame, so a slider drag rebuilds at most per frame.
   let denoiserGate = 0.447;
@@ -792,6 +799,17 @@ async function main() {
         hybrid.rebuild(); buildDisplay();
         ssr.resetHistory(); hybrid.resetHistory();
       },
+      /**
+       * W77: apply a named preset at runtime (three `applyReflectionsPreset`; `overrides` win), rebuilding
+       * the composites. Returns the applied preset.
+       */
+      setPreset(name: ReflectionsPresetName, overrides: Parameters<typeof applyReflectionsPreset>[2] = {}) {
+        const r = applyReflectionsPreset({ ssr, hybrid }, name, overrides);
+        buildDisplay(); aa.reset();
+        return r;
+      },
+      /** W77 (W53): what the denoiser keeps apart: 'off' | 'hits' | 'all'. */
+      setHitSource(mode: DenoiserHitSourceMode) { hybrid.setDenoiserHitSource(mode); aa.reset(); },
       setSSR(on: boolean) { composite!.amount.value = on ? 1 : 0; },
       /** W22: the composite's depth-aware blend (D2400) on / off (FFX's confidence blend). */
       setDepthAware(on: boolean) { hybrid.depthAware.value = on ? 1 : 0; depthBox.checked = on; },

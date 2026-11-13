@@ -1,0 +1,77 @@
+// Named settings bundles (W77, the maintainer's decision 4 of the SSR-sources results). Plain data, no
+// engine: an adapter applies a preset's tracer part to its pass settings and its denoiser part to its
+// hybrid resolve, and anything the app sets explicitly wins over the preset.
+//
+//   const p = reflectionsPreset('performance', { tracer: { samplesPerQuad: 2 } });
+//   // p.tracer: { reflectionResolution: 'half', samplesPerQuad: 2 }, p.denoiser: { hitSource: 'hits' }
+//
+// The three adapter takes `preset` in `ScreenSpaceReflectionsPass` / `HybridReflections` options and
+// `applyReflectionsPreset()` at runtime. docs/SETTINGS.md ("Presets") gives each preset's cost and
+// trade-offs; docs/research/w77/ has the measurements behind 'performance'.
+import type { ScreenSpaceReflectionsSettings } from './sssr/sssr';
+
+/**
+ * Where the tracer, the ray-traced pass and the denoiser run (W75, X5, D5080): the G-buffer's size, or
+ * half of it in each axis (a frame point-sampled at one pixel per 2x2 quad, upsampled after the denoise).
+ */
+export type ReflectionResolution = 'full' | 'half';
+
+/**
+ * What the hybrid hands its denoiser as a per-pixel hit source (W53, D3660), and how the denoiser
+ * uses it: 'off' (none), 'hits' (screen-space and traced hits kept apart, a miss blends with either),
+ * 'all' (hits and misses kept apart). FFX's options: {@link denoiserHitSourceOptions}.
+ */
+export type DenoiserHitSourceMode = 'off' | 'hits' | 'all';
+
+/** The tracer part of a preset: core tracer settings plus the adapter-level resolution. */
+export type ReflectionsPresetTracer = Partial<ScreenSpaceReflectionsSettings> & { reflectionResolution?: ReflectionResolution };
+/** The denoiser part of a preset. */
+export interface ReflectionsPresetDenoiser { hitSource?: DenoiserHitSourceMode }
+
+export interface ReflectionsPreset {
+  /** Tracer settings (an adapter's pass settings). */
+  tracer: ReflectionsPresetTracer;
+  /** The hybrid resolve's denoiser input. */
+  denoiser: ReflectionsPresetDenoiser;
+}
+
+export type ReflectionsPresetName = 'default' | 'performance';
+
+/**
+ * The named presets. 'default' spells out the package defaults of every key another preset sets, so
+ * applying it undoes one. 'performance' (W77):
+ * - `reflectionResolution: 'half'`: trace (SSR and RT) and denoise at half size, joint bilateral
+ *   upsample. 1080p: -1.6 to -3.4 ms of the frame (W75), the most of any setting.
+ * - `hitSource: 'hits'`: the half-res denoiser covers twice the screen area, so bright screen-space hits
+ *   spread over dark traced ones at silhouettes (carConcept's sill band, MAD vs the path tracer 30.6 at
+ *   full -> 58.3 at half); keeping the two hit sources apart brings it to 39.4. Needs a denoiser that
+ *   takes a hit source (FFX: `separateHitSources` + `missesMatchAnySource`); a no-op without ray tracing.
+ */
+export const REFLECTION_PRESETS: Readonly<Record<ReflectionsPresetName, Readonly<ReflectionsPreset>>> = Object.freeze({
+  default: Object.freeze({ tracer: Object.freeze({ reflectionResolution: 'full' as const }), denoiser: Object.freeze({ hitSource: 'off' as const }) }),
+  performance: Object.freeze({ tracer: Object.freeze({ reflectionResolution: 'half' as const }), denoiser: Object.freeze({ hitSource: 'hits' as const }) }),
+});
+
+export const REFLECTION_PRESET_NAMES = Object.keys(REFLECTION_PRESETS) as ReflectionsPresetName[];
+
+/** Drop the keys whose value is undefined (an explicit `undefined` does not erase a preset's value). */
+const defined = <T extends object>(o: T | undefined): Partial<T> =>
+  Object.fromEntries(Object.entries(o ?? {}).filter(([, v]) => v !== undefined)) as Partial<T>;
+
+/**
+ * A preset by name with `overrides` on top (explicit settings win, key by key; `undefined` values are
+ * ignored). Returns fresh objects. Throws on an unknown name.
+ */
+export function reflectionsPreset(name: ReflectionsPresetName, overrides: { tracer?: ReflectionsPresetTracer; denoiser?: ReflectionsPresetDenoiser } = {}): ReflectionsPreset {
+  const p = REFLECTION_PRESETS[name];
+  if (!p) throw new Error(`reflectionsPreset: unknown preset '${String(name)}' (${REFLECTION_PRESET_NAMES.join(', ')})`);
+  return { tracer: { ...p.tracer, ...defined(overrides.tracer) }, denoiser: { ...p.denoiser, ...defined(overrides.denoiser) } };
+}
+
+/**
+ * The FFX reflection denoiser's options (`FfxReflectionDenoiserOptions`, denoiser/ffx) for a hit-source
+ * mode. Other denoisers name their own; the seam only hands over the per-pixel source.
+ */
+export function denoiserHitSourceOptions(mode: DenoiserHitSourceMode): { separateHitSources: boolean; missesMatchAnySource: boolean } {
+  return { separateHitSources: mode !== 'off', missesMatchAnySource: mode === 'hits' };
+}
