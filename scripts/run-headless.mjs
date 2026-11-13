@@ -605,6 +605,42 @@ async function halfResChecks(pages) {
     judge(`half-res ${id} 'mixed' (halfResMinRoughness 0.01 at runtime, composite built for half): mirror path on, reflection carried`, rm,
       errs.length === 0 && mode.mode === 'mixed' && mode.mirror, `; traceMode ${mode.mode}`);
   }
+  // W75 (coordinator): half-res + W73's rayReuse 'ratio' + W74's tracedMissRate 'half' together, never run before
+  {
+    const before = results.logs.length;
+    await half.T("window.__p.load('contact')");
+    await half.T("(Object.assign(window.__p.ssr.settings, { rayReuse: 'ratio', halfResMinRoughness: 0 }), window.__p.ssr.traceSettings.tracedMissRate = 'half', true)");
+    // the fill's pipelines compile asynchronously (W74 review): 'full' until they are ready
+    await half.T('(async () => { for (let i = 0; i < 100 && !(window.__p.ssr.traced && window.__p.ssr.traced.halfRateReady); i++) await window.__p.step(2); return true; })()');
+    await half.T('window.__p.step(30)');
+    const fin = await half.T(`(async () => {
+      const P = window.__p, dev = P.ssr.device, r = P.renderer;
+      const read = async (tex) => {
+        const bpp = tex.format === 'rgba16float' ? 8 : 4, w = tex.width, h = tex.height, bpr = Math.ceil(w * bpp / 256) * 256;
+        const buf = dev.createBuffer({ size: bpr * h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+        const enc = dev.createCommandEncoder(); enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow: bpr }, [w, h]); dev.queue.submit([enc.finish()]);
+        await buf.mapAsync(GPUMapMode.READ); const dv = new DataView(buf.getMappedRange().slice(0)); buf.unmap(); buf.destroy();
+        let bad = 0, n = 0, nz = 0;
+        for (let y = 0; y < h; y++) for (let x = 0; x < w * (bpp === 8 ? 4 : 1); x++) {
+          const o = y * bpr + x * (bpp === 8 ? 2 : 4);
+          let v; if (bpp === 8) { const u = dv.getUint16(o, true), e = (u >> 10) & 31; v = e === 31 ? NaN : 1; if (u & 0x7fff) nz++; } else { v = dv.getFloat32(o, true); if (v !== 0) nz++; }
+          n++; if (!Number.isFinite(v)) bad++;
+        }
+        return { n, bad, nz };
+      };
+      const g = (t) => r.backend.get(t).texture;
+      const up = P.hybrid.upsampled;
+      return { radiance: await read(g(P.ssr.radiance)), confidence: await read(g(P.ssr.confidence)), residual: await read(g(up.residual)), upConf: await read(g(up.confidence)), stats: await P.ssr.readTraceStats() };
+    })()`);
+    const shot = await half.T('window.__p.shot()');
+    savePng('half-res-ratio-halfrate-contact.png', shot);
+    await half.T("(delete window.__p.ssr.settings.rayReuse, delete window.__p.ssr.traceSettings.tracedMissRate, true)");
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    const bad = ['radiance', 'confidence', 'residual', 'upConf'].reduce((a, k) => a + fin[k].bad, 0);
+    check("half-res + rayReuse 'ratio' + tracedMissRate 'half' (contact, rt): all finite, the fill ran, no validation errors",
+      errs.length === 0 && bad === 0 && fin.residual.nz > 0 && (fin.stats?.halfRateSkipped ?? 0) > 0 && (fin.stats?.traced ?? 0) > 0,
+      errs.length ? errs.slice(0, 2).join(' | ') : `non-finite ${bad}; traced ${fin.stats?.traced}, half-rate skipped ${fin.stats?.halfRateSkipped}, filled ${fin.stats?.filled}; residual non-zero ${fin.residual.nz} of ${fin.residual.n}`);
+  }
   // odd size and the runtime switch on one page (setResolution rebuilds the page's composites)
   const before = results.logs.length;
   await odd.T("window.__p.load('contact')");
