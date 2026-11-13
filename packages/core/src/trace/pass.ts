@@ -108,6 +108,11 @@ export interface TracedReflectionsSettings {
    * the pass keeps a copy of last frame's `source` (r32float, render size). Default 1 (no change).
    */
   hitLobeFilterMixed?: number;
+  /**
+   * W71 (X1 #3, D5002), as the SSSR tracer's `hitLobeFilterGrazing` (pass the tracer's): the lobe
+   * filter's spread at a traced hit shrinks at grazing angles of the reflecting pixel. 0..1, default 0.
+   */
+  hitLobeFilterGrazing?: number;
   /** The SSSR tracer's `roughnessThreshold` (perceptual; pass the tracer's), read by `hitLobeFilterMixed` only. Default 0.447. */
   roughnessThreshold?: number;
   /** Relative view-distance tolerance for that test. Default 0.02. */
@@ -314,6 +319,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     u[64] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
     f[65] = Math.min(1, Math.max(0, s.hitLobeFilterMixed ?? 1));
     f[66] = (s.roughnessThreshold ?? 0.447) ** 2;
+    f[67] = Math.min(1, Math.max(0, s.hitLobeFilterGrazing ?? 0)); // W71 (X1 #3)
     device.queue.writeBuffer(params, 0, data);
   }
 

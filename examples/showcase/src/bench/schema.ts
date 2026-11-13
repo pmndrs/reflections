@@ -192,6 +192,11 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W52 (D3641): the lobe filter x this where traced and screen-space hits mix (last frame\'s source around the pixel). W50\'s halo: lip 80 -> 56 at 0, but the skirt 50 -> 23 (PT 35), and it overshoots at 1080p (D3643: the halo is mostly a 960x540 effect). Below 1 the tracer is rebuilt once (one more sampled texture).',
     cost: '+0.07 ms (W52)',
   }),
+  num('s.hitLobeFilterGrazing', 'sssr', 'Lobe filter grazing shrink', 0, 1, 0.05, 0, {
+    appliesTo: OURS_SSR, api: 'settings.hitLobeFilterGrazing (+ traceSettings)',
+    tradeoff: 'W71 (X1 #3, D5002): the hit lobe filter\'s spread x mix(1, mix(sat(2 NdotV), 1, sqrt(roughness)), this) (SSSR 2015 slide 85 at 1): less widening on floors seen at a grazing angle, where the lobe filter over-blurs. Screen-space and traced hits. 0 = off.',
+    cost: 'one normal load + a few ALU per re-shaded hit (not timed yet)',
+  }),
   sel('s.hitShadeOcclusion', 'sssr', 'Re-shade occlusion', [['off', 'off'], ['screen', 'screen (8-sample depth march along R)']], 'off', {
     appliesTo: OURS_SSR, api: 'settings.hitShadeOcclusion (+ traceSettings)',
     tradeoff: 'W52 (D3642): a re-shaded hit marches the depth buffer along R and darkens where blocked (the re-shade had no occlusion, W44). Wheel 43 -> 37 (PT 26); works without RT. Untuned.',

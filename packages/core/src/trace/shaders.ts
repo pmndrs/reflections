@@ -8,7 +8,7 @@ import { HIT_WGSL } from './provider';
 import { SCREEN_VISIBILITY_WGSL, shadeLobeWgslFor } from './hitShading';
 
 /** Byte size of the uniform block (struct RtParams). */
-export const RT_PARAMS_SIZE = 272;
+export const RT_PARAMS_SIZE = 320;
 
 /** u32 words before the per-tile counters in the state buffer. */
 export const RT_STATE_HEADER = 16;
@@ -70,6 +70,11 @@ struct RtParams {
   hitShadeOcclusion: u32,
   hitLobeFilterMixed: f32,
   glossyAlpha: f32,
+  hitLobeFilterGrazing: f32, // W71 (X1 #3, word 67; D5002)
+  // words 68-79: reserved for the other SSR-sources streams, RT_PARAMS_SIZE 320
+  _pad68: vec4u,
+  _pad72: vec4u,
+  _pad76: vec4u,
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
@@ -357,7 +362,12 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
   }
   var L = vec3f(0.0);
   var source = ${RT_SOURCE.tracedHit}u;
-  let spread = P.hitLobeFilter * rtLobeMixScale(coords) * alpha; // D3550: the ray stands for its lobe
+  var spread = P.hitLobeFilter * rtLobeMixScale(coords) * alpha; // D3550: the ray stands for its lobe
+  // W71 (X1 #3, D5002): shrink it at grazing angles, as the SSSR tracer's lobeFilterGrazingScale
+  if (P.hitLobeFilterGrazing > 0.0) {
+    let n_dot_v = dot(N, normalize(P.cameraPosition - surface));
+    spread *= mix(1.0, mix(saturate(2.0 * n_dot_v), 1.0, sqrt(sqrt(max(alpha, 0.0)))), P.hitLobeFilterGrazing);
+  }
   hitLobeSpread = spread * spread;
   if (P.reuseOnScreen != 0u && onScreenRadiance(hitP, hitN, &L)) {
     source = ${RT_SOURCE.onScreenHit}u;

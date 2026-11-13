@@ -574,6 +574,13 @@ ${hitSource ? `  if (P.hasHitSource == 0u || P.hitLobeFilterMixed >= 1.0) { retu
   return 1.0;` : '  return 1.0;'}
 }
 
+// W71 (X1 #3, D5002): the lobe filter's spread shrinks at grazing angles, SSSR 2015 slide 85's cone
+// coneTan *= lerp(saturate(NdotV * 2), 1, sqrt(roughness)) (roughness perceptual: sqrt(sqrt(alpha))),
+// blended in by hitLobeFilterGrazing (0 = off, 1 = the slide's).
+fn lobeFilterGrazingScale(n_dot_v: f32, alpha: f32) -> f32 {
+  return mix(1.0, mix(saturate(2.0 * n_dot_v), 1.0, sqrt(sqrt(max(alpha, 0.0)))), P.hitLobeFilterGrazing);
+}
+
 const X1_THICKNESS_RELATIVE: u32 = 2u;
 
 fn reshadeHit(hit_uv: vec2f, world_hit: vec3f, ray_direction: vec3f) -> vec3f {
@@ -838,7 +845,11 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
   if (confidence > 0.0) {
     if (P.hitShadingMode == HIT_SHADING_RESHADE) {
-      let spread = P.hitLobeFilter * lobeFilterMixScale((*r).coords) * (*r).roughness; // D3550: the ray stands for its lobe
+      var spread = P.hitLobeFilter * lobeFilterMixScale((*r).coords) * (*r).roughness; // D3550: the ray stands for its lobe
+      if (P.hitLobeFilterGrazing > 0.0) {
+        let n_vs = (P.viewMatrix * vec4f(loadWorldSpaceNormal(vec2i((*r).coords)), 0.0)).xyz;
+        spread *= lobeFilterGrazingScale(dot(n_vs, -normalize((*r).view_space_ray)), (*r).roughness);
+      }
       hitLobeSpread = spread * spread;
       hsoPixel = (*r).coords;
       hit_radiance = reshadeHit(hit.xy, world_space_hit, normalize(world_space_reflected_direction));

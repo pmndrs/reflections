@@ -235,6 +235,9 @@ async function sssrCoreChecks(pages) {
   check('sssr cube-environment fallback: same rays and hits', se.rays === st.rays && Math.abs(se.mirrorHitFraction - st.mirrorHitFraction) < 1e-3,
     `rays ${se.rays}, hit ${(se.mirrorHitFraction * 100).toFixed(1)}%`);
   savePng('sssr-core-env.png', await env.T('window.__p.shot()'));
+  const graz = await env.T('window.__p.identity({}, { hitLobeFilterGrazing: 1 })'); // W71 (X1 #3)
+  check('sssr X1 hitLobeFilterGrazing 1 changes re-shaded hits only (cube environment: same lists)', graz.radianceDiffPixels > 0 && graz.listsSame && graz.hitDiffPixels === 0,
+    `radiance ${graz.radianceDiffPixels} px differ, hit distance ${graz.hitDiffPixels}, lists same ${graz.listsSame}`);
   // fallbackRoughness (D1806): 'surface' takes misses' fallback at the pixel's roughness (the rough-path
   // lookup), 'mirror' is FFX's roughness 0. Mirrors and confidence-1 pixels must not change.
   const fr = await env.T('window.__p.fallbackRoughness()');
@@ -265,7 +268,7 @@ async function sssrCoreChecks(pages) {
  * images bit for bit as the setting absent; the rotated quad bases keep the variants' parity.
  */
 async function x1CoreChecks(s, hasSubgroups) {
-  const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add' };
+  const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitLobeFilterGrazing: 0 };
   for (const [name, def] of [...Object.entries(X1_DEFAULTS), ['all four', X1_DEFAULTS]]) {
     const r = await s.T(`window.__p.identity({}, ${JSON.stringify(typeof def === 'object' ? def : { [name]: def })})`);
     check(`sssr X1 ${name}: default ${JSON.stringify(def)} = absent, bit for bit`, r.listsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,

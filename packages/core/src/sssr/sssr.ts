@@ -263,6 +263,13 @@ export interface ScreenSpaceReflectionsSettings {
   thicknessDepthFactor?: number;
   /** See {@link thicknessDepthFactor}. Default 'add'. */
   thicknessDepthMode?: 'add' | 'relative';
+  /**
+   * W71 (X1 #3, D5002): shrink the lobe filter's spread (`hitLobeFilter`) at grazing angles by
+   * `mix(1, mix(saturate(2 NdotV), 1, sqrt(perceptual roughness)), this)` (SSSR 2015 slide 85 at 1):
+   * a grazing view sees a narrower footprint of the lobe. 0..1, default 0 (no change). The three
+   * adapter passes it to the ray-traced pass unless `traceSettings` sets its own.
+   */
+  hitLobeFilterGrazing?: number;
 }
 
 const QUAD_BASE_ROTATION: Record<string, number> = { fixed: 0, frame: 1, pattern: 2 };
@@ -597,6 +604,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     // W71 (X1): words 141-144
     u[141] = QUAD_BASE_ROTATION[s.quadBaseRotation ?? 'fixed'] ?? 0;
     f[142] = Math.max(0, s.thicknessDepthFactor ?? 0);
+    f[143] = Math.min(1, Math.max(0, s.hitLobeFilterGrazing ?? 0));
     u[144] = ((s.thicknessDepthMode ?? 'add') === 'relative' ? 2 : 0);
     device.queue.writeBuffer(params, 0, data);
   }
