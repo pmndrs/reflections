@@ -167,3 +167,23 @@ The hit-colour pyramid pass: +0.24 / +0.26 ms (two runs of 5 and 9 rounds). Inte
 | `hitColorConeScale` | **keep 1** | 2 widens r 0.05 to x1.33. |
 | `mirrorBias` without compensation (D49) | unchanged (0) | Truncation at 0.5 brings r 0.15 back at x0.55: too sharp, grazing x1.8 noisy. |
 | pyramid levels | **8** (was 6) | Fewer fireflies where cones exceed 32 px, gate unchanged. |
+
+## Review (main 8595b36 merged)
+
+- **Merge.** SSSR words 145-149 W72 (141-144 W71, 150-157 W73-W75 kept); RT 76 W72 (lobe share), 77-78 W72 (on-screen cone), 67-75 W71/W74 kept. `intersectWgsl`'s 8th parameter is the pyramid (W73's `rayReuse` stays 7th); the pyramid is at bindings 20-21 (19 is W73's records).
+- **Async, no rebuilds.** The option `hitColorPyramid` is gone: the tracer builds its cone variants (plain and ratio) with createComputePipelineAsync on the first 'cone' frame, warms the downsampler's kernels the same way (`warmDownsampler`), runs as 'off' until ready (`outputs.hitColorFilterActive`), and checks the +1 sampled texture then (over the limit: one warning, stays 'off'). three and pixi need no rebuild; babylon works through core. While the cone isn't running, a compensated setting runs at mirrorBias 0, never D49's truncation.
+- **Fix 1 (D5023).** The ratio resolve's target lobe and pdf use the sample alpha under compensation.
+- **Fix 2 (D5024).** On-screen reused traced hits read the pyramid; what stays sharp is listed in D5024.
+- **Fix 3.** `MAX_COMPENSATED_BIAS` 0.99 (no NaN at f 1); bench slider 0.99.
+- **Checks.** `--only hit-color-filter`: 7 lines (bit-for-bit defaults, glossy mean cone / off 1.003, cone + ratio vs ratio, history + 'off' shading, ?rt=1, 97x61, pixi toggle). Default-identical vs main 8595b36: examples/ssr 9 scenes raw + denoised, with and without ?rt=1, and showcase carConcept: every hash equal (`parity-main-8595b36.txt`). Sections sssr-core, ssr, hybrid, half-res, ssr-rt, showcase, regressions, ssr-exp-metrics pass; hybrid's "half-res + ratio + half-rate" line failed once right after a branch switch (fill not ready: skipped 0, filled 0) and passed twice on re-run, and passes on main: the W75 halfRateReady race, not W72.
+
+Line spread re-run (`linespread-review.jsonl`, denoised / + RT width vs PT):
+
+| config | AA on r 0.05 | AA on r 0.15 | AA off r 0.05 | AA off r 0.15 |
+|---|---|---|---|---|
+| default | x1.24 / x1.29 | lost (2 %) / lost | x1.23 / x1.23 | lost (7 %) / lost |
+| cone | x1.23 / x1.28 | lost (4 %) / lost | x1.20 / x1.20 | lost / lost |
+| comp 0.3 | x1.22 / x1.27 | x0.98 / x0.96 | x1.21 / x1.21 | x0.94 / x0.94 |
+| comp 0.5 | x1.19 / x1.24 | **x1.00 / x0.98** | x1.19 / x1.19 | **x0.96 / x0.95** |
+
+Within 0.02 of phase 2. r 0.3 / 0.5 stay lost everywhere. Final verdict unchanged: cone + compensation at f 0.5 is the candidate default; cone alone stays an option.

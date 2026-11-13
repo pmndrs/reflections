@@ -1,0 +1,10 @@
+# ssr denoise=0&aa=off&hit=current
+{"mirrorWall":{"radiance":"d7a2011a","shot":"5b4fdd30"},"offscreen":{"radiance":"330e8326","shot":"b16fa84f"},"contact":{"radiance":"a1dea43a","shot":"0dd6491f"},"roughnessRamp":{"radiance":"00264809","shot":"d1d35219"},"boxRoom":{"radiance":"4130bf05","shot":"664ebc01"},"moving":{"radiance":"45a9be91","shot":"25f91094"},"explainer":{"radiance":"5adfb59e","shot":"44cab5ea"},"rooms":{"radiance":"9df2210f","shot":"c4fd556e"},"facingMirrors":{"radiance":"075039ee","shot":"cf182843"}}
+# ssr aa=off
+{"mirrorWall":{"radiance":"d7a2011a","shot":"c3bb7a73"},"offscreen":{"radiance":"330e8326","shot":"15a566a7"},"contact":{"radiance":"a1dea43a","shot":"a1aa8241"},"roughnessRamp":{"radiance":"00264809","shot":"727971c4"},"boxRoom":{"radiance":"4130bf05","shot":"de57a0ff"},"moving":{"radiance":"45a9be91","shot":"a713edaa"},"explainer":{"radiance":"5adfb59e","shot":"cc0a1b32"},"rooms":{"radiance":"9df2210f","shot":"8894f1fb"},"facingMirrors":{"radiance":"075039ee","shot":"5161c15d"}}
+# ssr rt=1&denoise=0&aa=off&hit=current
+{"mirrorWall":{"radiance":"919a55b2","shot":"054125b4"},"offscreen":{"radiance":"fec3bc7b","shot":"5d04e1c8"},"contact":{"radiance":"b5b271c1","shot":"6fc0ca0d"},"roughnessRamp":{"radiance":"46c98a61","shot":"260b1baf"},"boxRoom":{"radiance":"feb4eede","shot":"a47a2a7c"},"moving":{"radiance":"8978c97e","shot":"57fcd9d1"},"explainer":{"radiance":"c67c8217","shot":"c49f76be"},"rooms":{"radiance":"4bd13d02","shot":"e04bcac9"},"facingMirrors":{"radiance":"8fa2f872","shot":"492761f9"}}
+# ssr rt=1&aa=off
+{"mirrorWall":{"radiance":"919a55b2","shot":"1263bb4b"},"offscreen":{"radiance":"fec3bc7b","shot":"64aaeca3"},"contact":{"radiance":"b5b271c1","shot":"019799ae"},"roughnessRamp":{"radiance":"46c98a61","shot":"12b35742"},"boxRoom":{"radiance":"feb4eede","shot":"578234ef"},"moving":{"radiance":"8978c97e","shot":"ca5cdf57"},"explainer":{"radiance":"c67c8217","shot":"c2c02bd4"},"rooms":{"radiance":"4bd13d02","shot":"32fa049e"},"facingMirrors":{"radiance":"8fa2f872","shot":"f45009d9"}}
+# showcase carConcept rt=1
+{"carConcept":["625b06f4","0e824e95"],"errors":0}
