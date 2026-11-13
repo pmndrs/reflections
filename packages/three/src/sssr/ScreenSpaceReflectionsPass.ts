@@ -153,6 +153,8 @@ export class ScreenSpaceReflectionsPass {
   private sourceDirty = false;
   /** The core tracer binds last frame's hit source (W52, D3641): only while `settings.hitLobeFilterMixed` < 1 with `trace`. */
   private coreHitSource = false;
+  /** The core tracer has the hit-colour pyramid (W72, D5020): only while `settings.hitColorFilter` is 'cone'. */
+  private coreHitColorPyramid = false;
   private traceOptions: ScreenSpaceTraceOptions | null;
 
   constructor(renderer: THREE.WebGPURenderer, options: ScreenSpaceReflectionsPassOptions = {}) {
@@ -247,7 +249,9 @@ export class ScreenSpaceReflectionsPass {
       // traced misses take black like the tracer's fallback: the composite adds probes /
       // environment for 1 - confidence, exactly the term three's lit image already has
       this.rt.dispatch(cmd, { tracer: core, inputs, hitShadingBindGroup }, { ...this.traceSettings, hitColor: useHistory ? 'history' : 'current', hitShading, hitLobeFilter: this.traceSettings.hitLobeFilter ?? this.settings.hitLobeFilter, hitShadeOcclusion: this.traceSettings.hitShadeOcclusion ?? this.settings.hitShadeOcclusion,
-        hitLobeFilterMixed: this.traceSettings.hitLobeFilterMixed ?? this.settings.hitLobeFilterMixed, roughnessThreshold: this.settings.roughnessThreshold, fallbackColor: [0, 0, 0] });
+        hitLobeFilterMixed: this.traceSettings.hitLobeFilterMixed ?? this.settings.hitLobeFilterMixed, roughnessThreshold: this.settings.roughnessThreshold, fallbackColor: [0, 0, 0],
+        // W72 (D5021): the traced lobe filter follows the tracer's lobe split
+        mirrorBias: this.settings.mirrorBias, mirrorBiasCompensate: this.settings.mirrorBiasCompensate, hitColorFilter: this.settings.hitColorFilter });
       cmd.copyTextureToTexture({ texture: this.rt.source }, { texture: this.gpu(this.source) }, size);
       this.sourceDirty = true;
     } else if (this.sourceDirty) {
@@ -354,7 +358,9 @@ export class ScreenSpaceReflectionsPass {
     }
     // W52 (D3641): the lobe filter where hits mix binds one more texture in intersect: rebuild on a flip
     const wantHitSource = !!trace && (this.settings.hitLobeFilterMixed ?? 1) < 1;
-    if (this.core && wantHitSource !== this.coreHitSource) { this.rt?.destroy(); this.rt = null; this.core.destroy(); this.core = null; }
+    // W72 (D5020): so does the hit-colour pyramid of hitColorFilter 'cone'
+    const wantHitColorPyramid = this.settings.hitColorFilter === 'cone';
+    if (this.core && (wantHitSource !== this.coreHitSource || wantHitColorPyramid !== this.coreHitColorPyramid)) { this.rt?.destroy(); this.rt = null; this.core.destroy(); this.core = null; }
     const c = this.core;
     if (c && c.width === w && c.height === h && c.depthInverted === inverted) {
       if (trace && !this.rt) this.createTraced(w, h);
@@ -367,9 +373,10 @@ export class ScreenSpaceReflectionsPass {
     this.core = createScreenSpaceReflections(device, {
       width: w, height: h, depthInverted: inverted, variant: sub ? 'subgroups' : 'workgroup',
       missList: (this.options.missList ?? false) || !!this.options.trace || !!trace, timestamps: this.options.timestamps ?? false,
-      hitSpecularShading: this.hitShading.shading, hitSource: wantHitSource,
+      hitSpecularShading: this.hitShading.shading, hitSource: wantHitSource, hitColorPyramid: wantHitColorPyramid,
     });
     this.coreHitSource = wantHitSource;
+    this.coreHitColorPyramid = wantHitColorPyramid;
     if (trace) this.createTraced(w, h);
     for (const t of [this.radiance, this.hitDistance, this.confidence, this.source]) (t as unknown as { setSize(w: number, h: number): void }).setSize(w, h);
   }

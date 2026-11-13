@@ -45,6 +45,7 @@ const SSSR_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   missConfidenceThreshold: 'n', missRoughnessThreshold: 'n', fallbackRoughness: 's', mirrorBias: 'n', frameIndex: 'n',
   hitLobeFilterMixed: 'n', hitShadeOcclusion: 's', // W52 (D3641, D3642)
   quadCopy: 's', // W58 (D3740)
+  hitColorFilter: 's', hitColorConeScale: 'n', mirrorBiasCompensate: 'b', // W72 (D5020-D5022)
 };
 /** `ScreenSpaceReflectionsPass.traceSettings` fields the bench sets as `t.<field>`. */
 const TRACE_FIELDS: Record<string, 'n' | 'b' | 's'> = {

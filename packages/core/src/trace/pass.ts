@@ -9,7 +9,7 @@
 //   rt.dispatch(cmd, { tracer: ssr, inputs });     // same encoder, after the tracer
 //
 // Bind groups: 0 the pass, 1 the radiance fallback (misses), 2 the provider, 3 the hit shading.
-import { constantRadianceFallback, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs } from '../sssr/sssr';
+import { constantRadianceFallback, mirrorBiasSplit, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs } from '../sssr/sssr';
 import { dedupeWgslChunks } from '../probes/layouts';
 import { mat4Invert, mat4Mul } from '../sssr/math';
 import { PassTimer } from '../sssr/timer';
@@ -108,6 +108,15 @@ export interface TracedReflectionsSettings {
    * the pass keeps a copy of last frame's `source` (r32float, render size). Default 1 (no change).
    */
   hitLobeFilterMixed?: number;
+  /**
+   * W72 (X2 #6, D5021): the SSSR tracer's `mirrorBias`, `mirrorBiasCompensate` and `hitColorFilter`
+   * (pass the tracer's). With compensation the traced directions come from the narrowed lobe
+   * (alpha x sqrt(1 - mirrorBias)), so the lobe filter here widens by hitLobeFilter x sqrt(mirrorBias)
+   * of the pixel's alpha (`mirrorBiasSplit`). Defaults 0 / false / 'off' (no change).
+   */
+  mirrorBias?: number;
+  mirrorBiasCompensate?: boolean;
+  hitColorFilter?: 'off' | 'cone';
   /** The SSSR tracer's `roughnessThreshold` (perceptual; pass the tracer's), read by `hitLobeFilterMixed` only. Default 0.447. */
   roughnessThreshold?: number;
   /** Relative view-distance tolerance for that test. Default 0.02. */
@@ -314,6 +323,8 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     u[64] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
     f[65] = Math.min(1, Math.max(0, s.hitLobeFilterMixed ?? 1));
     f[66] = (s.roughnessThreshold ?? 0.447) ** 2;
+    // 67-75: other streams' words. W72 (X2 #6, D5021): 76
+    f[76] = mirrorBiasSplit(s).filter;
     device.queue.writeBuffer(params, 0, data);
   }
 

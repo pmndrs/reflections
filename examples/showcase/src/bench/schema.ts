@@ -189,6 +189,20 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'D49: truncates the GGX lobe toward the mirror direction: less noise, a sharper (biased) reflection. W32 / W39: no gain with the denoiser on a still or orbiting camera; W40: 0.7 halves rest shimmer on the carConcept floor (0.31 -> 0.14/255).',
     cost: 'free (one multiply in the sample)',
   }),
+  sel('s.hitColorFilter', 'sssr', 'Hit colour filter', [['off', 'off (the hit texel, FFX)'], ['cone', 'cone (pre-filtered pyramid by the lobe cone at the hit)']], 'off', {
+    appliesTo: OURS_SSR, api: 'settings.hitColorFilter (+ option hitColorPyramid; three / pixi rebuild the tracer)',
+    tradeoff: 'W72 (X2 #5, D5020): a screen-space hit reads its screen colour (the re-shade\'s diffuse) from a 6-level pyramid at log2 of the lobe cone\'s width in px where the ray hits: long rays blur, contacts stay sharp (SSSR 2015). On its own it is a second blur on top of the sampled lobe (as Hit lobe filter 1); with Compensate mirror bias it takes the share the bias removes. Experiment: gated on the line spread (X0).',
+    cost: 'one downsample of the scene colour per frame (+ a trilinear tap per hit); not timed yet (shared GPU)',
+  }),
+  num('s.hitColorConeScale', 'sssr', 'Hit colour cone scale', 0, 4, 0.05, 1, {
+    appliesTo: OURS_SSR, api: 'settings.hitColorConeScale',
+    tradeoff: 'W72 (D5020): scales the cone of Hit colour filter (1 = the reflected GGX lobe\'s full width at half maximum, 2.57 alpha). Only with the cone on.',
+  }),
+  bool('s.mirrorBiasCompensate', 'sssr', 'Compensate mirror bias', false, {
+    appliesTo: OURS_SSR, api: 'settings.mirrorBiasCompensate (+ traceSettings, mirrorBiasSplit)',
+    tradeoff: 'W72 (X2 #6, D5021-D5022; needs Hit colour filter cone): Mirror bias f narrows the sampled lobe to alpha sqrt(1 - f) instead of truncating it, and the cone and the lobe filter (SSR and RT) supply alpha sqrt(f): less noise at the same total width (blur adds in squares). SSSR 2015 shipped f 0.7. Experiment.',
+    cost: 'free (scales in the sample and the lobe filter)',
+  }),
   sel('s.fallbackRoughness', 'sssr', 'Miss fallback roughness', [['surface', 'surface (the pixel\'s roughness)'], ['mirror', 'mirror (FFX: the ray\'s direction, sharp)']], 'surface', {
     appliesTo: OURS_SSR, api: 'settings.fallbackRoughness (+ traceSettings.fallbackRoughness)',
     tradeoff: 'D1806: where a ray misses, the probe at the pixel\'s own roughness (blurred, low noise) or at roughness 0 along the ray (FFX; the denoiser has to blur it).',

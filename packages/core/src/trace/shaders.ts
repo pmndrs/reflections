@@ -8,7 +8,7 @@ import { HIT_WGSL } from './provider';
 import { SCREEN_VISIBILITY_WGSL, shadeLobeWgslFor } from './hitShading';
 
 /** Byte size of the uniform block (struct RtParams). */
-export const RT_PARAMS_SIZE = 272;
+export const RT_PARAMS_SIZE = 320; // 80 words; 67-79 shared out by stream (W72 owns 76-79)
 
 /** u32 words before the per-tile counters in the state buffer. */
 export const RT_STATE_HEADER = 16;
@@ -70,6 +70,10 @@ struct RtParams {
   hitShadeOcclusion: u32,
   hitLobeFilterMixed: f32,
   glossyAlpha: f32,
+  pad67: u32, pad68: u32, pad69: u32, pad70: u32, pad71: u32, pad72: u32, pad73: u32, pad74: u32, pad75: u32,
+  // W72 (X2 #6, D5021): word 76; 77-79 spare
+  lobeFilterShare: f32,
+  pad77: u32, pad78: u32, pad79: u32,
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
@@ -357,7 +361,8 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
   }
   var L = vec3f(0.0);
   var source = ${RT_SOURCE.tracedHit}u;
-  let spread = P.hitLobeFilter * rtLobeMixScale(coords) * alpha; // D3550: the ray stands for its lobe
+  // D3550: the ray stands for its lobe; W72 (D5021): x the share the sample leaves to filters (1, or sqrt(mirrorBias) with mirrorBiasCompensate)
+  let spread = P.hitLobeFilter * rtLobeMixScale(coords) * alpha * P.lobeFilterShare;
   hitLobeSpread = spread * spread;
   if (P.reuseOnScreen != 0u && onScreenRadiance(hitP, hitN, &L)) {
     source = ${RT_SOURCE.onScreenHit}u;
