@@ -19,8 +19,10 @@
 //   if (r.weightSum < weights.minWeightSum) { /* no usable neighbour: keep / take the probe */ }
 //
 // Footprint: 2 = cells originCell + {0, 1}^2 (a bilinear 2x2), 3 = originCell + {-1, 0, 1}^2,
-// 4 = originCell + {-1 .. 2}^2. Taps with `spatial` 0, an invalid surface (background, off screen)
-// or a source outside `sourceMask` take weight 0.
+// 4 = originCell + {-1 .. 2}^2. For 3 pass the cell holding the pixel; for 2 and 4 (even widths)
+// pass the lower cell of the bilinear pair, floor(pixel position in cell units - 0.5), or the
+// footprint leans toward +x / +y (X4 with 2x2 quads: (pixel - 1) >> 1). Taps with `spatial` 0, an
+// invalid surface (background, off screen) or a source outside `sourceMask` take weight 0.
 
 /** The bilateral weights (WGSL `BilateralWeights`). Every tolerance 0 turns its term off. */
 export interface BilateralFillWeights {

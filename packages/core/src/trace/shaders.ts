@@ -519,7 +519,10 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
       var out = vec4u(0u);
       if (p.valid) {
         // one coverage class (W74 review): no partial confidence from mixing hits and misses, t from hits only
-        let r = bilateralFillMajority(p, P.cameraPosition, c, c >> vec2u(1u), P.fillFootprint, w);
+        // footprint 3: the pixel's own quad at the centre; 2 and 4 (even): the bilinear 2x2 of quads around the
+        // pixel's position in quad units, (c + 0.5) / 2 - 0.5, so its lower cell is (c - 1) >> 1 (W74 review fix 2)
+        let origin = select((c - 1) >> vec2u(1u), c >> vec2u(1u), P.fillFootprint == 3u);
+        let r = bilateralFillMajority(p, P.cameraPosition, c, origin, P.fillFootprint, w);
         if (r.weightSum > 0.0 && r.weightSum >= w.minWeightSum) {
           let conf = min(u32(round(saturate(r.confidence) * 16777215.0)), 0xffffffu); // (x + 0.5 rounds to 2^24 in f32 at 1)
           out = vec4u(pack2x16float(r.radiance.xy), pack2x16float(r.radiance.zw), bitcast<u32>(r.hitDistance), FILL_FILLED | ((r.source & 7u) << 24u) | conf);
