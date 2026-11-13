@@ -20,7 +20,7 @@
 import * as THREE from 'three/webgpu';
 import { float, uniform, uv, vec3, vec4 } from 'three/tsl';
 import {
-  createReflectionDenoiseSeam, createReflectionUpsample, denoiserHitSourceOptions, PassTimer, REFLECTION_PRESETS,
+  createReflectionDenoiseSeam, createReflectionUpsample, denoiserHitSourceModeOf, denoiserHitSourceOptions, isReflectionsPresetName, PassTimer, REFLECTION_PRESET_NAMES, REFLECTION_PRESETS,
   type DenoiserHitSourceMode, type FrameInputs, type ReflectionsPresetName, type ReflectionDenoiseSeam, type ReflectionUpsample, type ReflectionUpsampleSettings, type SpecularInputs, type TemporalDenoiser,
 } from '@pmndrs/reflections-core';
 import { getGPUTexture } from '../frame/FrameGBuffer';
@@ -44,10 +44,11 @@ export interface HybridReflectionsOptions extends Omit<ScreenSpaceCompositeOptio
   /** Initial value of `HybridReflections.denoiserHitSource`. Default false (or the preset's). */
   denoiserHitSource?: boolean;
   /**
-   * W77: the denoiser part of a named preset (core `REFLECTION_PRESETS`; 'performance' keeps
-   * screen-space and traced hits apart, `hitSource: 'hits'`). Applied with
-   * {@link HybridReflections.setDenoiserHitSource} to the denoiser given here (and to one attached
-   * later), unless `denoiserHitSource` is given, which wins. Pass the same preset to the pass.
+   * W77: the denoiser part of a named preset (core `REFLECTION_PRESETS`; none of today's presets has
+   * one: 'performance' is half resolution only). Applied with {@link HybridReflections.setDenoiserHitSource}
+   * unless the app configured the hit source itself: `denoiserHitSource` given here, or hit-source
+   * options already on the denoiser (FFX's constructor), which win. Pass the same preset to the pass.
+   * An unknown name warns once and is ignored.
    */
   preset?: ReflectionsPresetName;
 }
@@ -109,9 +110,18 @@ export class HybridReflections {
    */
   get upsampled(): Upsampled | null { return this.up; }
   private seam: ReflectionDenoiseSeam | null = null;
-  /** W77: the hit-source mode `setDenoiserHitSource` set last (also applied to a denoiser attached later); null: never set. */
+  /** W77: the hit-source mode `setDenoiserHitSource` set last (also applied to a denoiser attached later); null: the app's own. */
   private hitSourceMode: DenoiserHitSourceMode | null = null;
-  private warnedHitSource = false;
+  /** W77: the app's own hit source (the base a preset returns to): `denoiserHitSource` as constructed, and the attached denoiser's own mode. */
+  private readonly baseDenoiserHitSource: boolean;
+  private denoiserBaseMode: DenoiserHitSourceMode = 'off';
+  /** W77: a preset's hit source still to apply when a denoiser is attached (dropped once the app's own setting wins). */
+  private presetMode: DenoiserHitSourceMode | undefined;
+  /**
+   * W77: set when a hit-source mode other than 'off' could not reach the denoiser (it has no
+   * `setOptions`): the per-pixel source is still handed over, but the denoiser may ignore it. Warned once.
+   */
+  hitSourceUnsupported = false;
   private readonly quad: THREE.QuadMesh;
   private readonly signalMaterial = new THREE.NodeMaterial();
   private ran = false;
@@ -151,10 +161,11 @@ export class HybridReflections {
     this.signalTarget = new THREE.RenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: false });
     this.signalTarget.texture.name = 'hybrid specular signal';
     this.quad = new THREE.QuadMesh(this.signalMaterial);
-    this.denoiserHitSource = options.denoiserHitSource ?? false;
-    // W77: the preset's denoiser part, unless denoiserHitSource is explicit
-    const presetMode = options.preset ? REFLECTION_PRESETS[options.preset]?.denoiser.hitSource : undefined;
-    if (presetMode && options.denoiserHitSource === undefined) this.hitSourceMode = presetMode;
+    this.denoiserHitSource = this.baseDenoiserHitSource = options.denoiserHitSource ?? false;
+    // W77: the preset's denoiser part, unless the app set denoiserHitSource (checked again against the denoiser's own options in setDenoiser)
+    if (options.preset !== undefined && !isReflectionsPresetName(options.preset)) {
+      console.warn(`HybridReflections: unknown preset '${String(options.preset)}' (${REFLECTION_PRESET_NAMES.join(', ')}); ignored`);
+    } else if (options.preset && options.denoiserHitSource === undefined) this.presetMode = REFLECTION_PRESETS[options.preset].denoiser.hitSource;
     this.setDenoiser(options.denoiser ?? null);
   }
 
@@ -167,12 +178,27 @@ export class HybridReflections {
    */
   setDenoiserHitSource(mode: DenoiserHitSourceMode) {
     this.hitSourceMode = mode;
+    this.presetMode = undefined;
     this.denoiserHitSource = mode !== 'off';
     this.applyHitSourceMode();
     this.resetHistory();
   }
 
-  /** The mode `setDenoiserHitSource` (or the preset) set, or null when neither did. */
+  /**
+   * W77: back to the app's own hit source: `denoiserHitSource` as constructed, and the attached denoiser's
+   * own options as it was built with (what `applyReflectionsPreset` does for a preset without one).
+   */
+  restoreDenoiserHitSource() {
+    if (this.hitSourceMode === null) return;
+    this.hitSourceMode = null;
+    this.presetMode = undefined;
+    this.denoiserHitSource = this.baseDenoiserHitSource;
+    const d = this.seam?.denoiser as { setOptions?: (o: object) => void } | undefined;
+    if (d && typeof d.setOptions === 'function') d.setOptions(denoiserHitSourceOptions(this.denoiserBaseMode));
+    this.resetHistory();
+  }
+
+  /** The mode `setDenoiserHitSource` (or a preset) set, or null for the app's own. */
   get denoiserHitSourceMode(): DenoiserHitSourceMode | null { return this.hitSourceMode; }
 
   private applyHitSourceMode() {
@@ -180,9 +206,9 @@ export class HybridReflections {
     if (mode === null || !d) return;
     this.denoiserHitSource = mode !== 'off';
     if (typeof d.setOptions === 'function') d.setOptions(denoiserHitSourceOptions(mode));
-    else if (mode !== 'off' && !this.warnedHitSource) {
-      this.warnedHitSource = true;
-      console.warn(`HybridReflections: hit source '${mode}' needs a denoiser that takes it (FFX: setOptions, or pass denoiserHitSourceOptions('${mode}') to its constructor); this one has no setOptions`);
+    else if (mode !== 'off') {
+      if (!this.hitSourceUnsupported) console.warn(`HybridReflections: hit source '${mode}' needs a denoiser that takes it (FFX: setOptions, or pass denoiserHitSourceOptions('${mode}') to its constructor); this one has no setOptions`);
+      this.hitSourceUnsupported = true;
     }
   }
 
@@ -197,6 +223,13 @@ export class HybridReflections {
     this.seam = denoiser ? createReflectionDenoiseSeam(this.ssr.device, {
       denoiser, motion: this.options.denoiserMotion, roughness: this.options.denoiserRoughness,
     }) : null;
+    // W77: the denoiser's own hit-source options (FFX's public `options`) are the app's base; options the
+    // app built it with win over a preset's
+    this.denoiserBaseMode = denoiserHitSourceModeOf((denoiser as { options?: { separateHitSources?: boolean; missesMatchAnySource?: boolean } } | null)?.options);
+    if (this.presetMode !== undefined && denoiser) {
+      if (this.denoiserBaseMode === 'off') this.hitSourceMode = this.presetMode;
+      this.presetMode = undefined;
+    }
     this.applyHitSourceMode();
     this.rebuild();
   }

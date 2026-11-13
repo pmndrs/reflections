@@ -36,7 +36,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, bvhTraceSceneFromObjects,
   createPmndrsBvhTraceProviderFromObjects, installCubeArraySupport, reflectionProbes, sampleReflectionProbes,
-  applyReflectionsPreset, reflectionsPreset, type ReflectionsPresetName,
+  applyReflectionsPreset, denoiserHitSourceModeOf, isReflectionsPresetName, reflectionsPreset, type ReflectionsPresetName,
 } from '@pmndrs/reflections/three';
 import { availableAssets, probeAtlasBytes } from '../../shared';
 import { createReflectionDenoiser, denoiserAvailable, hitSourceDenoiserOptions, hitSourceFromQuery, setDenoiserHitSource, type DenoiserHitSourceSettings } from '../../shared/denoiser';
@@ -86,6 +86,7 @@ async function main() {
 
   // W75 (X5, D5080): ?res=half traces, denoises at half res and upsamples
   // W77: ?preset=performance|default (core REFLECTION_PRESETS); ?res= / ?hitSource= given explicitly win
+  // an unknown ?preset= is passed on: the pass and the hybrid warn once and ignore it
   const presetName = (q.get('preset') as ReflectionsPresetName | null) ?? null;
   const ssr = new ScreenSpaceReflectionsPass(renderer, {
     missList: true, timestamps: true, gbufferOptions: { width: RW, height: RH }, ...(presetName ? { preset: presetName } : {}),
@@ -100,7 +101,8 @@ async function main() {
   // W53 (D3660): ?hitSource=hits|all / ?hitDistW=<k>, off by default
   const hs = hitSourceFromQuery(q);
   const syncHitSource = (mode: 'off' | 'hits' | 'all') => { hs.hitSource = mode !== 'off'; hs.missesMatchAnySource = mode === 'hits'; };
-  if (presetName && !q.has('hitSource')) syncHitSource(reflectionsPreset(presetName).denoiser.hitSource ?? 'off'); // W77
+  const presetHitSource = isReflectionsPresetName(presetName) ? reflectionsPreset(presetName).denoiser.hitSource : undefined;
+  if (presetHitSource && !q.has('hitSource')) syncHitSource(presetHitSource); // W77 (no preset has one today)
   const denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, timestampsOn, hitSourceDenoiserOptions(hs)) : null;
   const hybrid = new HybridReflections(ssr, { denoiser, denoiserHitSource: hs.hitSource });
   hybrid.denoise = q.get('denoise') !== '0' && !!denoiser;
@@ -580,7 +582,8 @@ async function main() {
       /** W77: apply a named preset at runtime (three `applyReflectionsPreset`; `overrides` win), rebuilding the composites. */
       setPreset(name: ReflectionsPresetName, overrides: Parameters<typeof applyReflectionsPreset>[2] = {}) {
         const r = applyReflectionsPreset({ ssr, hybrid }, name, overrides);
-        syncHitSource(r.denoiser.hitSource ?? 'off'); hitSourceSel.value = hitSourceMode();
+        // the UI follows what the hybrid and its denoiser now run (the preset's hit source, or the page's own)
+        syncHitSource(hybrid.denoiserHitSource ? denoiserHitSourceModeOf((denoiser as N)?.options) : 'off'); hitSourceSel.value = hitSourceMode();
         hybrid.rebuild(); buildDisplay(); aa.reset();
         return r;
       },
