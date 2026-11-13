@@ -1177,8 +1177,9 @@ async function halfRateChecks(p) {
   // W74 review fix 6: content. A still frame (frameIndex fixed, no occupancy exit, AA off) at full and at half rate:
   // only the filled px differ. Per px a fill vs that px's own full-rate ray is sample noise (~1x the mean), so the
   // check reads means: the signed radiance bias over the changed px and the 8x8 block means (docs/research/w74/scripts/content.js).
-  // W74 contact: bias -0.18 (fallback and miss-class px are black in three's radiance; the composite adds their probe),
-  // blocks 0.14, confidence 0.64 vs 0.75 (the confidence-0 bug of 4e7e6dd would read ~0).
+  // W74 contact (stochastic fill): bias -0.08 over the changed px, almost all of it the 583 fallback px (black in three's
+  // radiance; the composite adds their probe); successful fills alone +0.7 % (docs/research/w74/scripts/bias.js),
+  // blocks 0.14, confidence 0.665 vs 0.706 (the confidence-0 bug of 4e7e6dd would read ~0).
   const aaMode = await p.T('window.__p.aa.mode');
   await p.T("window.__p.setAA('off')");
   const body = fs.readFileSync(path.join(ROOT, 'docs/research/w74/scripts/content.js'), 'utf8');

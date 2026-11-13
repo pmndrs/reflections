@@ -84,7 +84,7 @@ struct RtParams {
   fillMinWeightSum: f32,        // 72
   missCapacity: u32,            // 73: the fill list starts at missList[missCapacity]
   fillFootprint: u32,           // 74: 2, 3 or 4 quads across
-  _pad75: u32,
+  fillFrame: u32,               // 75: the dispatch count (the stochastic fill's random number, W74 review)
   _pad76: vec4u,               // 76-79: reserved, RT_PARAMS_SIZE 320
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
@@ -499,6 +499,14 @@ fn bilateralTap(cell: vec2i, pixel: vec2i) -> BilateralTap {
   return t;
 }
 
+// A uniform number per pixel and frame (PCG hash) for the stochastic coverage choice.
+fn fillRandom(c: vec2i, frame: u32) -> f32 {
+  var h = u32(c.x) * 747796405u + u32(c.y) * 2891336453u + frame * 277803737u;
+  h = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
+  h = (h >> 22u) ^ h;
+  return f32(h >> 8u) * (1.0 / 16777216.0);
+}
+
 const FILL_FILLED: u32 = 0x80000000u;
 var<workgroup> wgFilled: atomic<u32>;
 var<workgroup> wgFallbacks: atomic<u32>;
@@ -518,11 +526,12 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
       let p = fillSurface(c);
       var out = vec4u(0u);
       if (p.valid) {
-        // one coverage class (W74 review): no partial confidence from mixing hits and misses, t from hits only
+        // one coverage class per px (W74 review): no partial confidence from mixing hits and misses, t from hits only;
+        // the class drawn by its weight share, so the expected confidence is the neighbours' (a majority vote biased it)
         // footprint 3: the pixel's own quad at the centre; 2 and 4 (even): the bilinear 2x2 of quads around the
         // pixel's position in quad units, (c + 0.5) / 2 - 0.5, so its lower cell is (c - 1) >> 1 (W74 review fix 2)
         let origin = select((c - 1) >> vec2u(1u), c >> vec2u(1u), P.fillFootprint == 3u);
-        let r = bilateralFillMajority(p, P.cameraPosition, c, origin, P.fillFootprint, w);
+        let r = bilateralFillStochastic(p, P.cameraPosition, c, origin, P.fillFootprint, w, fillRandom(c, P.fillFrame));
         if (r.weightSum > 0.0 && r.weightSum >= w.minWeightSum) {
           let conf = min(u32(round(saturate(r.confidence) * 16777215.0)), 0xffffffu); // (x + 0.5 rounds to 2^24 in f32 at 1)
           out = vec4u(pack2x16float(r.radiance.xy), pack2x16float(r.radiance.zw), bitcast<u32>(r.hitDistance), FILL_FILLED | ((r.source & 7u) << 24u) | conf);

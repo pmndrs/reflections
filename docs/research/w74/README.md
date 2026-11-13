@@ -22,6 +22,7 @@ struct BilateralResult { radiance: vec4f, hitDistance: f32, confidence: f32, sou
 fn bilateralWeight(p: BilateralSurface, viewDistance: f32, q: BilateralTap, w: BilateralWeights) -> f32
 fn bilateralFill(p: BilateralSurface, cameraPosition: vec3f, pixel: vec2i, originCell: vec2i, footprint: u32, w: BilateralWeights) -> BilateralResult
 fn bilateralFillMajority(p: BilateralSurface, cameraPosition: vec3f, pixel: vec2i, originCell: vec2i, footprint: u32, w: BilateralWeights) -> BilateralResult  // review fix 1
+fn bilateralFillStochastic(p: BilateralSurface, cameraPosition: vec3f, pixel: vec2i, originCell: vec2i, footprint: u32, w: BilateralWeights, u: f32) -> BilateralResult  // X4 uses it (bias follow-up)
 // the includer defines:
 fn bilateralTap(cell: vec2i, pixel: vec2i) -> BilateralTap
 ```
@@ -33,7 +34,8 @@ fn bilateralTap(cell: vec2i, pixel: vec2i) -> BilateralTap
   - X5's grid would be the half-res texels, with `spatial` = bilinear weights and footprint 2 (or 3 / 4).
 - Weight = `spatial` x `saturate(1 - |dot(n_p, x_q - x_p)| / (planeTolerance x |x_p - camera|))` x `pow(saturate(dot(n_p, n_q)), normalPower)` x `saturate(1 - |r_p - r_q| / roughnessTolerance)` x (bit `source` of `sourceMask`). A tolerance / power of 0 turns its term off. Defaults 0.01 / 16 / 0.1 / RT_SOURCE {1, 2, 4} / min sum 0.01.
 - **`bilateralFill` (linear).** Radiance rgb and confidence are the weighted means. Since review fix 1, ray length (`radiance.w`) and hit distance are confidence-weighted means, i.e. over the hits only: two hits and two misses give confidence 0.5 at the hits' t, not t/2. For a residual upsample (X5 step 4), pass the residual in `radiance.rgb`.
-- **`bilateralFillMajority` (X4 uses it).** The taps split into hits (confidence >= 0.5) and misses. The class with the larger weight wins and the result is that class alone: its rgb, confidence, t and dominant source. `weightSum` is the total over both classes (for the gate).
+- **`bilateralFillStochastic` (X4 uses it, bias follow-up).** As the majority, but the hit class wins with probability = its weight share (`u` = the caller's uniform number; X4 hashes pixel and frame, RT word 75). One class per px, and the expected confidence is unbiased.
+- **`bilateralFillMajority`.** The taps split into hits (confidence >= 0.5) and misses. The class with the larger weight wins and the result is that class alone: its rgb, confidence, t and dominant source. `weightSum` is the total over both classes (for the gate).
 - The caller compares `weightSum` with `minWeightSum` and decides the fallback (X4: keep intersect's probe term).
 - **Interface change since phase 1 (for X5):** structs and the `bilateralFill` signature are unchanged. Its `radiance.w` / `hitDistance` are now confidence-weighted, and there's a new sibling, `bilateralFillMajority`. Internal helpers `bilateralGatherClasses` / `bilateralResolve` / `BilateralClass` are new names in the module.
 
@@ -156,6 +158,27 @@ Orbit d2 (denoised) moves less: carConcept 0.295 / 0.300 / 0.300 / 0.307 / 0.307
   - carConcept: 0.364 → 0.373, +2.6 % (raw +16 %); before the fixes +4.3 % (raw +32 %).
   - moving: 0.546 → 0.572, +4.8 % (raw +6 %); before +6.1 %.
   - Still over the ~2 % floor, so the verdict holds: an option, not the RT default.
+
+## Bias follow-up (lead's question)
+
+On contact, a still frame at half vs full (`scripts/bias.js`). The fill pixels are found by a run where every fill falls back. Each stage is a mean over those pixels:
+
+| fill | px | radiance | raw signal (with the probe term) | denoised | confidence half / full |
+|---|---|---|---|---|---|
+| majority, succeeded | 14412 | -11.2 % | -11.4 % | -0.07 % | 0.266 / 0.292 |
+| majority, fell back | 583 | -89 % | +2.6 % | -0.8 % | 0.069 / 0.676 |
+| **stochastic, succeeded** | 14412 | **+0.7 %** | -7.3 % | -0.08 % | 0.297 / 0.292 |
+| stochastic, succeeded (moving) | 6890 | +6.3 % | +5.5 % | +1.2 % | 0.383 / 0.380 |
+| stochastic, footprint 2 | 13798 | +1.6 % | -6.8 % | -0.01 % | 0.287 / 0.281 |
+
+- The check's -18.7 % was mostly real. The majority vote turned glossy pixels with a stochastic 29 % hit share into misses: raw signal -11 % on successful fills. The denoiser hid it (-0.07 %).
+- Fallback pixels read -89 % in radiance only (black in three). With their probe term they are +2.6 %.
+- **Fix:** X4 now uses `bilateralFillStochastic` (the hit class wins with probability = its weight share). Radiance and confidence are unbiased (+0.7 %, 0.297 vs 0.292).
+- **Left over:** a scene-dependent ±5-7 % in the raw signal (contact -7.3 %, moving +5.5 %). By class, hits match (0.166 vs 0.168) and misses differ (0.211 vs 0.232): the fill moves which pixels are misses within about a quad, so their own probe term differs. The denoised output is within 1.2 %. Logged, not chased (time-box).
+- **After the fix:**
+  - ssr-rt content check: bias -8.0 % over the changed pixels (mostly the 583 fallbacks), confidence 0.665 vs 0.706.
+  - carConcept denoised orbit std at 0.05: +2.4 % (majority +2.6 %).
+- The verdict is unchanged.
 
 ## Notes
 

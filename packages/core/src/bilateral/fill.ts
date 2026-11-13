@@ -207,6 +207,22 @@ fn bilateralFillMajority(p: BilateralSurface, cameraPosition: vec3f, pixel: vec2
   r.weightSum = g.c[0].weight + g.c[1].weight;
   return r;
 }
+
+// Stochastic coverage (W74 review): the hit class wins with probability = its weight share, decided by
+// the caller's uniform random number u in [0, 1) (a hash of pixel and frame). Like the majority, a
+// result is one class (no partial confidence from mixing, t from hits only, that class's source); unlike
+// it, the expected confidence equals the neighbours' weighted hit share. In a glossy reflection the
+// hit / miss mix is stochastic, not a geometric edge: a majority vote pushed a 29 % hit share toward
+// misses (contact: filled px -11 % in the raw signal). The temporal noise this adds is the denoiser's.
+fn bilateralFillStochastic(p: BilateralSurface, cameraPosition: vec3f, pixel: vec2i, originCell: vec2i, footprint: u32, w: BilateralWeights, u: f32) -> BilateralResult {
+  var g = bilateralGatherClasses(p, cameraPosition, pixel, originCell, footprint, w); // var: runtime class index
+  var empty: BilateralClass;
+  let total = g.c[0].weight + g.c[1].weight;
+  let k = select(0u, 1u, u * total < g.c[1].weight);
+  var r = bilateralResolve(g.c[k], empty);
+  r.weightSum = total;
+  return r;
+}
 `;
 
 

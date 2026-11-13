@@ -428,6 +428,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     }), f, u, 68);
     u[73] = frame.tracer.outputs.missCapacity ?? 0;
     u[74] = [2, 3, 4].includes(s.fillFootprint as number) ? s.fillFootprint! : 3;
+    u[75] = dispatches; // the stochastic fill's frame (W74 review)
     device.queue.writeBuffer(params, 0, data);
   }
 
