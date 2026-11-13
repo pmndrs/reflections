@@ -19,6 +19,8 @@ declare module '@pmndrs/denoiser-ffx' {
     brdfWeights?: 'off' | 'replace' | 'combine';
     /** W78: the target lobe's alpha = the centre's alpha x this (the tracer's sample alpha scale). */
     brdfAlphaScale?: number;
+    /** W78: black samples keep the resolve's history (FFX drops it). */
+    keepHistoryOnBlack?: boolean;
   }
   export const FfxReflectionDenoiser:
     | (new (device: GPUDevice, options?: FfxReflectionDenoiserOptions) => TemporalDenoiser<SpecularInputs>)

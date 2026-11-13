@@ -314,9 +314,11 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   const nextNodeFrame = () => (renderer as N)._nodes.nodeFrame.update();
   // W78 (D5140): ?brdf=replace|combine, BRDF / pdf weights in FFX's prefilter (live key `brdf`)
   let brdfMode = brdfFromQuery(params);
+  let keepBlack = params.get('keepBlack') === '1';
   const draw = (cam: THREE.PerspectiveCamera, useAA: boolean) => {
     nextNodeFrame();
-    syncDenoiserBrdf(ssr, hybrid, brdfMode);
+    syncDenoiserBrdf(ssr, hybrid, brdfMode, keepBlack);
+    if (params.get('keepSample') === '1') ssr.settings.sampleDirection = true; // A/B runs: no tracer rebuild between modes
     syncCamera(camera, cam);
     const a = useAA ? aa : null;
     const j = a ? a.begin(camera) : {};
@@ -382,6 +384,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     hitDistW: () => setW53(),
     // W78 (D5140): the tracer rebuilds on an on / off flip (sampleDirection), the denoiser takes setOptions
     brdf: (v) => { brdfMode = brdfFromQuery(new URLSearchParams(v === null ? {} : { brdf: v })); resetAll(); },
+    keepBlack: (v) => { keepBlack = v === '1'; resetAll(); },
     'h.depthAware': (v) => { hybrid.depthAware.value = v === null ? 1 : Number(v); },
     'h.amount': (v) => { if (id === 'probes') return; amount = v === null ? 1 : Number(v); c.amount.value = h.amount.value = amount; },
     aa: (v) => {

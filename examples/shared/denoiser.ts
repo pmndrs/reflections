@@ -58,6 +58,9 @@ export function brdfFromQuery(q: URLSearchParams): DenoiserBrdf {
 }
 
 /**
+ * `keepBlack` (W78, `?keepBlack=1`): FFX's `keepHistoryOnBlack`, black samples accumulate instead of
+ * dropping the resolve's history (a dark environment, sparse glossy hits).
+ *
  * Apply a BRDF mode on a page: the tracer writes its sample directions (`settings.sampleDirection`, a
  * tracer rebuild on a flip), the hybrid hands them to the denoiser, and FFX weights by them with the
  * target lobe at the tracer's sample alpha (`mirrorBiasSplit`: alpha x sqrt(1 - f) under
@@ -68,12 +71,13 @@ export function syncDenoiserBrdf(
   ssr: { settings: ScreenSpaceReflectionsSettings & { sampleDirection?: boolean } },
   hybrid: { denoiserSampleDirection: boolean; denoiser: unknown },
   mode: DenoiserBrdf,
+  keepBlack = false,
 ): boolean {
   const on = mode !== 'off';
   const flipped = !!ssr.settings.sampleDirection !== on;
   if (on) ssr.settings.sampleDirection = true; else delete ssr.settings.sampleDirection;
   hybrid.denoiserSampleDirection = on;
   const d = hybrid.denoiser as { setOptions?: (o: FfxReflectionDenoiserOptions) => void } | null;
-  d?.setOptions?.({ brdfWeights: mode, brdfAlphaScale: on ? mirrorBiasSplit(ssr.settings).sample : 1 });
+  d?.setOptions?.({ brdfWeights: mode, brdfAlphaScale: on ? mirrorBiasSplit(ssr.settings).sample : 1, keepHistoryOnBlack: keepBlack });
   return flipped;
 }

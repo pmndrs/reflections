@@ -38,7 +38,7 @@ import {
   createPmndrsBvhTraceProviderFromObjects, installCubeArraySupport, reflectionProbes, sampleReflectionProbes,
 } from '@pmndrs/reflections/three';
 import { availableAssets, probeAtlasBytes } from '../../shared';
-import { createReflectionDenoiser, denoiserAvailable, hitSourceDenoiserOptions, hitSourceFromQuery, setDenoiserHitSource, type DenoiserHitSourceSettings } from '../../shared/denoiser';
+import { brdfFromQuery, createReflectionDenoiser, denoiserAvailable, hitSourceDenoiserOptions, hitSourceFromQuery, setDenoiserHitSource, syncDenoiserBrdf, type DenoiserBrdf, type DenoiserHitSourceSettings } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
 import { LINEAR_VIEWS, VIEWS, VIEW_IDS, VIEW_LEGENDS, buildDebugViews, type View } from './debugViews';
@@ -95,6 +95,18 @@ async function main() {
   const denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, timestampsOn, hitSourceDenoiserOptions(hs)) : null;
   const hybrid = new HybridReflections(ssr, { denoiser, denoiserHitSource: hs.hitSource });
   hybrid.denoise = q.get('denoise') !== '0' && !!denoiser;
+  // W78 (D5140): ?brdf=replace|combine, BRDF / pdf weights in FFX's prefilter; the example-only key
+  // `ssr.settings.denoiserBrdf` overrides it per frame. ?keepSample=1 keeps the tracer's sample output on
+  // whatever the mode (no tracer rebuild between modes, for A/B runs).
+  const brdfMode = brdfFromQuery(q);
+  let brdfApplied = 'off' + false;
+  const syncBrdf = () => {
+    const mode = ((ssr.settings as N).denoiserBrdf as DenoiserBrdf | undefined) ?? brdfMode;
+    const keepBlack = ((ssr.settings as N).denoiserKeepBlack as boolean | undefined) ?? q.get('keepBlack') === '1';
+    syncDenoiserBrdf(ssr, hybrid, mode, keepBlack);
+    if (q.get('keepSample') === '1') ssr.settings.sampleDirection = true;
+    if (mode + keepBlack !== brdfApplied) { hybrid.resetHistory(); brdfApplied = mode + keepBlack; }
+  };
   const nextNodeFrame = () => (renderer as N)._nodes.nodeFrame.update();
 
   // ---- state ---------------------------------------------------------------------------------------
@@ -366,6 +378,7 @@ async function main() {
     }
     controls.update();
     kit.camera.aspect = W / H; kit.camera.updateProjectionMatrix(); kit.camera.updateMatrixWorld();
+    syncBrdf();
     ssr.render(kit.scene, kit.camera, aa.begin(kit.camera));
     aa.end(kit.camera);
     hybrid.update();

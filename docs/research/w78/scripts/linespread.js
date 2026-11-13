@@ -2,7 +2,7 @@
 // optional METHODS, ROUGH, SAMPLES, SCENE. Each config starts from W72's keys and aa reset to their defaults.
 const methods = typeof METHODS !== 'undefined' ? METHODS : ['ours-raw', 'ours-denoised', 'ours-rt'];
 const rough = typeof ROUGH !== 'undefined' ? ROUGH : [0.05, 0.15, 0.3, 0.5];
-const BASE = { aa: null, 's.hitColorFilter': null, 's.hitColorConeScale': null, 's.mirrorBias': null, 's.mirrorBiasCompensate': null, lobeFilter: null, brdf: null };
+const BASE = { aa: null, 's.hitColorFilter': null, 's.hitColorConeScale': null, 's.mirrorBias': null, 's.mirrorBiasCompensate': null, lobeFilter: null, brdf: null, keepBlack: null };
 const out = [];
 for (const [name, s] of CONFIGS) {
   const t0 = performance.now();

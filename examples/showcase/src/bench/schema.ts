@@ -357,6 +357,10 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'Neighbours weighted by relative hit distance, exp(-k |t_p - t_q| / (t_p + t_q)); no extra input. 8 separates the lip as well as the source (50.6) but boils everywhere the hit distance varies (std p99 x5-10). 0 = off.',
     cost: '+1.3 ms at 1080p for k 8 (W53)',
   }),
+  sel('keepBlack', 'denoiser', 'Black samples keep the history', [['0', 'off (FFX: output 0, history dropped)'], ['1', 'on']], '0', {
+    appliesTo: OURS_DN, api: 'FfxReflectionDenoiser({ keepHistoryOnBlack })',
+    tradeoff: 'W78 (D5145): FFX\'s resolve writes 0 to the output and the history wherever a frame\'s prefiltered radiance is black, so a sparse glossy reflection over a dark environment never builds up (the line-spread gate\'s r 0.15 / 0.3 losses). On, black samples accumulate like any other.',
+  }),
   sel('brdf', 'denoiser', 'BRDF / pdf prefilter weights', [['off', 'off (FFX)'], ['replace', 'replace the luminance weight'], ['combine', 'combine with the luminance weight']], 'off', {
     appliesTo: OURS_DN, api: 'ssr.settings.sampleDirection = true; hybrid.denoiserSampleDirection = true; FfxReflectionDenoiser({ brdfWeights, brdfAlphaScale })',
     tradeoff: 'W78 (X3 phase B, D5140-D5145): each neighbour\'s sample in FFX\'s prefilter weighted by this px\'s GGX BRDF x cos along the direction to that sample\'s hit, over the sample\'s pdf (SSSR 2015\'s ratio estimator, W73\'s weights inside the denoiser instead of a pass in front of it). The tracer hands each px\'s direction and pdf through the seam (a tracer rebuild on an on / off flip).',

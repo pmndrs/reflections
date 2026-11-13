@@ -10,3 +10,5 @@ Setup (`scripts/identical.sh`, W74's with the denoised output hashed): `frameInd
 | showcase carConcept 960x540 | equal | 0/255 |
 
 Verdict: bit for bit at the default, through both repos (Metal only).
+
+**Re-run after merging main `22adc27` and adding `keepHistoryOnBlack` (Denoiser `26c54ba`):** the 5 ssr scenes hash equal to main's capture above on all 5 outputs (0/255). showcase carConcept: tracer outputs equal; the denoised hash varies between runs of the *same* build (three runs: `7cb21206` = main's, `a70b0d39`, `13b78d6a`; 2 px at 1/255), the class W74 saw on carConcept. Verdict unchanged: identical at the default, within carConcept's own run-to-run noise.

@@ -21,6 +21,8 @@
 // `?brdf=replace|combine` (W78, X3 phase B, default off): BRDF / pdf weights in the FFX denoiser's prefilter
 // (the tracer hands each pixel's sample direction and pdf through the seam). Also the example-only key
 // `settings.denoiserBrdf` ('off' | 'replace' | 'combine'), read every frame, so `__p.configStats` configs can set it.
+// `?keepBlack=1` (or `settings.denoiserKeepBlack`): FFX's `keepHistoryOnBlack` (black samples keep the resolve's history).
+// `?keepSample=1` keeps the tracer's sample output on in every mode (A/B runs without a tracer rebuild).
 // `?mirrorBias=0..1` (default 0, FFX): the tracer's bias of glossy rays toward the mirror direction
 // (core `settings.mirrorBias`, SSSR 2015 / PICA, D49); also a slider. `__p.mirrorBiasStats()` measures it.
 //
@@ -235,11 +237,13 @@ async function main() {
   hybrid.denoise = wantDenoise && !!denoiser;
   // W78 (D5140): the page's BRDF mode; `settings.denoiserBrdf` (example-only) overrides it per frame
   const brdfMode = brdfFromQuery(q);
-  let brdfApplied: DenoiserBrdf = 'off';
+  let brdfApplied = 'off' + false;
   const syncBrdf = () => {
     const mode = ((ssr.settings as N).denoiserBrdf as DenoiserBrdf | undefined) ?? brdfMode;
-    syncDenoiserBrdf(ssr, hybrid, mode);
-    if (mode !== brdfApplied) { hybrid.resetHistory(); brdfApplied = mode; }
+    const keepBlack = ((ssr.settings as N).denoiserKeepBlack as boolean | undefined) ?? q.get('keepBlack') === '1';
+    syncDenoiserBrdf(ssr, hybrid, mode, keepBlack);
+    if (q.get('keepSample') === '1') ssr.settings.sampleDirection = true; // A/B runs: no tracer rebuild between modes
+    if (mode + keepBlack !== brdfApplied) { hybrid.resetHistory(); brdfApplied = mode + keepBlack; }
   };
   if (q.has('mirrorBias')) ssr.settings.mirrorBias = Number(q.get('mirrorBias'));
   const gpuErrors: string[] = [];
