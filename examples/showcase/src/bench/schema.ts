@@ -181,7 +181,7 @@ export const SETTINGS: Setting[] = [
   bool('s.historyEdgeConfidence', 'sssr', 'History edge confidence', false, {
     appliesTo: OURS_SSR, api: 'settings.historyEdgeConfidence',
     cost: 'intersect +0.01, rt trace +0.005 ms at 1080p at rest (mirrorWall, hit final, re-shade off); traced rays +0.03-0.16 % while panning (W71)',
-    tradeoff: 'W71 (X1 #4, D5003): with Hit colour from last frame and Hit specular \'off\' (the only case a hit reads last frame\'s colour), the edge fade is min(now, previous) and a hit that was off screen last frame gets confidence 0 (probe / RT) instead of this frame\'s colour without specular: no lit / unlit pops at the screen edge while panning. More misses near the edges: more traced rays with RT. No effect with the re-shade (default).',
+    tradeoff: 'W71 (X1 #4, D5003): with Hit colour from last frame and Hit specular \'off\' (the only case a hit reads last frame\'s colour), the edge fade is min(now, previous) and a hit that was off screen last frame gets confidence 0 (probe / RT) instead of this frame\'s colour without specular: no lit / unlit pops at the screen edge while panning. Screen-space hits only: the RT pass\'s on-screen history reuse (D906) keeps the edge pop. More misses near the edges: more traced rays with RT. No effect with the re-shade (default).',
   }),
   sel('reshade', 'sssr', 'Hit specular (re-shade)', [['reshade', 'specular along the ray (re-shade)'], ['off', 'screen colour as is (FFX)']], 'reshade', {
     appliesTo: OURS_SSR, api: 'settings.hitShading',

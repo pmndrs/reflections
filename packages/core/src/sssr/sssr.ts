@@ -276,7 +276,9 @@ export interface ScreenSpaceReflectionsSettings {
    * read from last frame), the screen-edge fade becomes min(this frame's, the previous position's),
    * and a hit whose previous position was off screen gets confidence 0 (it goes to the probe or the
    * miss list) instead of this frame's colour without specular. More misses near the edges while
-   * the camera moves: more traced rays with RT on. Default false.
+   * the camera moves: more traced rays with RT on. Default false. Screen-space hits only: the
+   * ray-traced pass's on-screen hit reuse from history (D906) keeps its fallback to this frame's
+   * colour, so a traced hit can still pop at the edge.
    */
   historyEdgeConfidence?: boolean;
 }

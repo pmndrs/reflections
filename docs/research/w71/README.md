@@ -14,7 +14,7 @@ Stream X1 of `docs/plans/ssr-sources-experiments.md` (#1-#4 of `docs/research/ss
 `PARAMS_SIZE` 576 -> 640 (words 145-159 padded for X2 / X3); `RT_PARAMS_SIZE` 272 -> 320 (68-79 padded). The three adapter passes core settings through as before and the tracer's `hitLobeFilterGrazing` to the RT pass unless `traceSettings` sets one. `docs/SETTINGS.md` regenerated.
 
 Notes on scope:
-- #4 applies only where intersect reads last frame's colour: `hitColor: 'history'` **and** `hitShading: 'off'`. With the re-shade (the package default and the showcase's) a hit's colour is this frame's, so the setting does nothing there. The RT pass's on-screen reuse with history (D906) isn't covered.
+- #4 applies only where intersect reads last frame's colour: `hitColor: 'history'` **and** `hitShading: 'off'`. With the re-shade (the package default and the showcase's) a hit's colour is this frame's, so the setting does nothing there. Screen-space hits only: the RT pass's on-screen reuse with history (D906) still falls back to this frame's colour off screen, so traced hits keep the edge pop.
 - #3 in SSSR acts only in the re-shade (where the lobe filter lives).
 - #3 on the RT side is compiled into a second trace pipeline, built on first use with g > 0 (see "Default identical").
 
