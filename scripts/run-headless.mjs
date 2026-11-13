@@ -1746,33 +1746,37 @@ async function brdfPrefilterChecks(pages) {
     };
     const warns = []; const warn0 = console.warn; console.warn = (...a) => { warns.push(String(a[0])); warn0(...a); };
     await p.load('mirrorWall'); p.setFloorRoughness(0.3);
-    const keep = { ...p.ssr.settings };
-    p.ssr.settings = { ...keep, denoiserBrdf: 'off' }; p.ssr.resetHistory(); p.hybrid.resetHistory(); await p.step(40);
+    // deterministic frames (a fixed blue-noise frame, FFX's occupancy exit off), so off vs off is equal and any change is the option's
+    const keep = { ...p.ssr.settings, frameIndex: 5, minTraversalOccupancy: 0 };
+    const runOff = async () => { p.ssr.settings = { ...keep, denoiserBrdf: 'off' }; p.ssr.resetHistory(); p.hybrid.resetHistory(); await p.step(40); return read(p.renderer.backend.get(p.hybrid.denoised).texture); };
+    await runOff();
     const offSample = !!p.ssr.tracer.outputs.sampleDirection;
-    const A = await read(p.renderer.backend.get(p.hybrid.denoised).texture);
+    const A = await runOff();
+    const A2 = await runOff();
     const t = p.ssr.gbuffer.gpuTextures(); const [dep, nr] = [await read(t.depth), await read(t.normal)];
     const inv = p.ssr.gbuffer.conventions.depthInverted;
     p.ssr.settings = { ...keep, denoiserBrdf: 'replace', denoiserBrdfMin: 0 }; p.ssr.resetHistory(); p.hybrid.resetHistory(); await p.step(40);
     const S = p.ssr.tracer.outputs.sampleDirection; const sm = S ? await read(S) : null;
     const B = await read(p.renderer.backend.get(p.hybrid.denoised).texture);
-    let glossy = 0, withPdf = 0, unit = 0, changed = 0, nonFinite = 0;
+    let glossy = 0, withPdf = 0, unit = 0, changed = 0, nonFinite = 0, offDiff = 0;
     const lum = (f, i) => 0.2126 * f[i * 4] + 0.7152 * f[i * 4 + 1] + 0.0722 * f[i * 4 + 2];
     for (let i = 0; i < dep.length; i++) {
       if ((inv ? dep[i] <= 0 : dep[i] >= 1) || !(nr[i * 4 + 3] < 0.447)) continue;
       glossy++;
       if (sm && sm[i * 4 + 3] > 0) { withPdf++; if (Math.abs(Math.hypot(sm[i * 4], sm[i * 4 + 1], sm[i * 4 + 2]) - 1) < 1e-3) unit++; }
       const b = lum(B, i); if (!Number.isFinite(b)) nonFinite++; else if (Math.abs(b - lum(A, i)) > 0.01 * Math.max(lum(A, i), 0.05)) changed++;
+      if (Math.abs(lum(A2, i) - lum(A, i)) > 0.01 * Math.max(lum(A, i), 0.05)) offDiff++;
     }
     await p.setResolution('half'); await p.step(4);
     const halfWarned = warns.some((w) => w.includes("isn't handed on at reflectionResolution 'half'"));
-    await p.setResolution('full'); p.ssr.settings = keep; await p.step(2);
+    await p.setResolution('full'); delete keep.frameIndex; delete keep.minTraversalOccupancy; p.ssr.settings = keep; await p.step(2);
     console.warn = warn0;
-    return { offSample, hasSample: !!S, glossy, withPdf, unit, changed, nonFinite, halfWarned, errors: p.gpuErrors.length };
+    return { offSample, hasSample: !!S, glossy, withPdf, unit, changed, offDiff, nonFinite, halfWarned, errors: p.gpuErrors.length };
   })()`);
   if (r.skip) { console.log('  note: brdf-prefilter skipped (the denoiser has no brdfWeights: point DENOISER_REPO at the W78 branch)'); return; }
   check('BRDF prefilter (W78): off, no sample direction; on, most glossy px carry a unit direction and pdf > 0, and the denoised output changes; no NaN, no validation errors',
-    !r.offSample && r.hasSample && r.withPdf > 0.8 * r.glossy && r.unit === r.withPdf && r.changed > 0.05 * r.glossy && r.nonFinite === 0 && r.errors === 0,
-    `glossy px ${r.glossy}: with pdf ${(r.withPdf / r.glossy * 100).toFixed(1)}%, unit ${r.unit === r.withPdf}; denoised changed > 1%: ${(r.changed / r.glossy * 100).toFixed(1)}%; non-finite ${r.nonFinite}; errors ${r.errors}`);
+    !r.offSample && r.hasSample && r.withPdf > 0.8 * r.glossy && r.unit === r.withPdf && r.offDiff < 0.001 * r.glossy && r.changed > 0.05 * r.glossy && r.nonFinite === 0 && r.errors === 0,
+    `glossy px ${r.glossy}: with pdf ${(r.withPdf / r.glossy * 100).toFixed(1)}%, unit ${r.unit === r.withPdf}; denoised changed > 1%: ${(r.changed / r.glossy * 100).toFixed(1)}% (off vs off: ${(r.offDiff / r.glossy * 100).toFixed(2)}%); non-finite ${r.nonFinite}; errors ${r.errors}`);
   check("BRDF prefilter (W78): at reflectionResolution 'half' the hybrid warns that the direction isn't handed on", r.halfWarned && r.errors === 0, `warned ${r.halfWarned}`);
 }
 

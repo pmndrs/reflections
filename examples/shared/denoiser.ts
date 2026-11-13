@@ -81,8 +81,9 @@ export function syncDenoiserBrdf(
   const flipped = !!ssr.settings.sampleDirection !== on;
   if (on) ssr.settings.sampleDirection = true; else delete ssr.settings.sampleDirection;
   hybrid.denoiserSampleDirection = on;
-  const d = hybrid.denoiser as { setOptions?: (o: FfxReflectionDenoiserOptions) => void } | null;
-  d?.setOptions?.({ brdfWeights: mode, brdfMinAlpha: minRoughness * minRoughness });
+  // only on a denoiser that has the options (FFX from the Denoiser repo after W78): main's would just store them
+  const d = hybrid.denoiser as { options?: object; setOptions?: (o: FfxReflectionDenoiserOptions) => void } | null;
+  if (d?.setOptions && d.options && 'brdfWeights' in d.options) d.setOptions({ brdfWeights: mode, brdfMinAlpha: minRoughness * minRoughness });
   hybrid.denoiserKeepHistoryOnBlack = keepBlack;
   return flipped;
 }

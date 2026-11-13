@@ -111,7 +111,7 @@ export class HybridReflections {
    * resolution only. Default false.
    */
   denoiserSampleDirection = false;
-  private warnedSample: 'ratio' | 'half' | null = null;
+  private warnedSample: 'ratio' | 'half' | 'unsupported' | null = null;
   private keepBlack: boolean;
   private keepBlackExplicit: boolean;
   private keepBlackWarned = false;
@@ -425,7 +425,13 @@ export class HybridReflections {
     }
     const active = !!this.ssr.tracer?.outputs.hitColorFilterActive;
     const scale = mirrorBiasSplit({ ...s, hitColorFilter: active ? s.hitColorFilter : 'off' }).sample;
-    (this.seam?.denoiser as { setOptions?: (o: Record<string, unknown>) => void } | undefined)?.setOptions?.({ brdfAlphaScale: scale });
+    const d = this.seam?.denoiser as { options?: Record<string, unknown>; setOptions?: (o: Record<string, unknown>) => void } | undefined;
+    // a denoiser without BRDF weights (Denoiser main before W78) gets nothing: one warning, no options written into it
+    if (!d?.setOptions || !d.options || !('brdfAlphaScale' in d.options)) {
+      if (this.warnedSample !== 'unsupported') { this.warnedSample = 'unsupported'; console.warn('HybridReflections: denoiserSampleDirection needs a denoiser with BRDF weights (FFX brdfWeights, Denoiser repo after W78); not handed on'); }
+      return undefined;
+    }
+    d.setOptions({ brdfAlphaScale: scale });
     return t;
   }
 
