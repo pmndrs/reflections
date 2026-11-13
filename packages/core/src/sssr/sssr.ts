@@ -246,7 +246,28 @@ export interface ScreenSpaceReflectionsSettings {
    * traces its own ray (and goes to the miss list on its own). Costs a few more rays along edges.
    */
   quadCopy?: 'always' | 'sameSurface';
+  /**
+   * W74 (plan X4, D5060): which glossy misses go to the ray-traced pass. 'full' (default): every
+   * miss (FFX's hybrid sample). 'half': of the glossy misses at perceptual roughness >=
+   * `tracedHalfRateMinRoughness`, only those of every other 2x2 quad (a checkerboard of quads that
+   * flips each frame) are traced; the others go to the fill list (`missFillCapacity` entries after
+   * the miss list's own), and the traced pass's bilateral fill (`TracedReflectionsSettings.
+   * tracedMissRate: 'half'`) gives them their traced neighbours' result. Pass the same to both.
+   * Needs `missList`; without the traced pass the fill entries keep this pass's fallback.
+   */
+  tracedMissRate?: 'full' | 'half';
+  /**
+   * Perceptual roughness from which `tracedMissRate: 'half'` applies; below it (mirrors and
+   * near-mirrors) every miss is traced. Default {@link DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS}.
+   */
+  tracedHalfRateMinRoughness?: number;
 }
+
+/**
+ * Default `tracedHalfRateMinRoughness` (W74): perceptual 0.05 (alpha 0.0025), near FFX's mirror
+ * test (alpha < 1e-4, perceptual 0.01), so mirror-like floors and paint keep every traced ray.
+ */
+export const DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS = 0.05;
 
 export interface ScreenSpaceCamera {
   /** Column-major view matrix (world -> view). */
@@ -339,8 +360,15 @@ export interface ScreenSpaceReflectionsOutputs {
   missList?: GPUBuffer;
   /** [0] append counter (reset after intersect), [1] misses listed this frame, [2] overflow append counter (reset), [3] dropped past capacity this frame. */
   missCounter?: GPUBuffer;
-  /** Indirect args for a ray-traced pass over the miss list: 64 per group, 2-D groups (index (wg.y * nwg.x + wg.x) * 64 + local, bounds-check against missCounter[1]). */
+  /**
+   * Indirect args for a ray-traced pass over the miss list: 64 per group, 2-D groups (index (wg.y * nwg.x + wg.x) * 64 + local, bounds-check against missCounter[1]).
+   * W74: bytes 12-23 hold the same for the fill list (bounds-check against missCounter[5]).
+   */
   missArgs?: GPUBuffer;
+  /** W74 (X4): entries of the miss list before the fill list: the k-th fill entry is `missList[missCapacity + k]`. */
+  missCapacity?: number;
+  /** W74 (X4): fill-list entries at most (`tracedMissRate: 'half'`); past it intersect sends the entry to the miss list. */
+  missFillCapacity?: number;
 }
 
 export interface ScreenSpaceReflections {
@@ -438,10 +466,13 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   // counts what it drops (missCounter[3]). The per-tile cap (D9) will bound it further.
   const maxBinding = device.limits.maxStorageBufferBindingSize;
   if (W * H * 4 > maxBinding) throw new Error(`ssr: ${W}x${H} needs a ${W * H * 4} B ray list; the device's maxStorageBufferBindingSize is ${maxBinding}`);
-  const missCapacity = Math.min(W * H, Math.floor(maxBinding / 8));
-  const missList = useMissList ? buf('miss list', missCapacity * 8) : undefined;
-  const missCounter = useMissList ? buf('miss counter', 16) : undefined;
-  const missArgs = useMissList ? buf('miss args', 12, GPUBufferUsage.INDIRECT) : undefined;
+  // W74 (X4): the fill list of tracedMissRate 'half' follows the miss list in the same buffer (no
+  // extra binding in intersect): one entry per 2x2 quad of half the screen, plus a row of slack.
+  const missFillCapacity = useMissList ? Math.ceil(Math.ceil(W / 2) * Math.ceil(H / 2) / 2) + Math.ceil(W / 2) : 0;
+  const missCapacity = Math.min(W * H, Math.floor(maxBinding / 8) - missFillCapacity);
+  const missList = useMissList ? buf('miss list', (missCapacity + missFillCapacity) * 8) : undefined;
+  const missCounter = useMissList ? buf('miss counter', 32) : undefined;
+  const missArgs = useMissList ? buf('miss args', 24, GPUBufferUsage.INDIRECT) : undefined;
   const params = device.createBuffer({ label: 'ssr params', size: PARAMS_SIZE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const noiseTable = device.createBuffer({ label: 'ssr blue-noise table', size: 128 * 128 * 2, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   device.queue.writeBuffer(noiseTable, 0, blueNoiseBytes());
@@ -507,7 +538,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   let missArgsPipe: GPUComputePipeline | undefined, missArgsGroup: GPUBindGroup | undefined;
   if (useMissList) {
     const bgl = device.createBindGroupLayout({ label: 'ssr miss args', entries: [bufEntry(0), bufEntry(1)] });
-    missArgsPipe = pipe('miss args', missArgsWgsl(missCapacity), [bgl]);
+    missArgsPipe = pipe('miss args', missArgsWgsl(missCapacity, missFillCapacity), [bgl]);
     missArgsGroup = device.createBindGroup({
       label: 'ssr miss args', layout: bgl,
       entries: [{ binding: 0, resource: { buffer: missCounter! } }, { binding: 1, resource: { buffer: missArgs! } }],
@@ -517,6 +548,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const outputs: ScreenSpaceReflectionsOutputs = {
     radiance, hitDistance, confidence, extractedRoughness, depthHierarchy, blueNoise, rayList, denoiserTileList, tileFlags,
     rayCounter, indirectArgs, missList, missCounter, missArgs,
+    ...(useMissList ? { missCapacity, missFillCapacity } : {}),
   };
 
   let frameIndex = 0;
@@ -575,6 +607,10 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[138] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
     u[139] = useHitSource && inputs.hitSource ? 1 : 0;
     u[140] = (s.quadCopy ?? 'always') === 'sameSurface' ? 1 : 0;
+    // 141-153: other streams' words. 154-157: W74 (X4)
+    u[154] = useMissList && s.tracedMissRate === 'half' ? 1 : 0;
+    f[155] = Math.max(0, s.tracedHalfRateMinRoughness ?? DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS) ** 2;
+    u[156] = missFillCapacity;
     device.queue.writeBuffer(params, 0, data);
   }
 

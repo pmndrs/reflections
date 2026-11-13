@@ -51,6 +51,8 @@ const TRACE_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   maxTracedRaysPerFrame: 'n', maxRaysPerTile: 'n', maxRayLength: 'n', rayLengthRoughnessFalloff: 'n', normalOffset: 'n', reuseOnScreenHits: 'b',
   hitShadows: 'b', hitSpecular: 'b', onScreenDepthTolerance: 'n', iblFactor: 'n',
   hitShadeVisibility: 's', // W52 (D3640)
+  // W74 (X4, D5060): half-rate glossy misses + the bilateral fill
+  tracedMissRate: 's', tracedHalfRateMinRoughness: 'n', fillPlaneTolerance: 'n', fillNormalPower: 'n', fillRoughnessTolerance: 'n', fillSourceMask: 'n', fillMinWeightSum: 'n', fillFootprint: 'n',
 };
 /** @pmndrs/upscaler runtime settings the bench sets as `aa.<field>` (plus `sharpness` / `accum`, the showcase's keys). */
 const UPSCALER_FIELDS: Record<string, 'n' | 'b'> = { rcasDenoise: 'b', exposure: 'n', autoExposure: 'b', lockThinFeatures: 'b', detectShadingChanges: 'b' };

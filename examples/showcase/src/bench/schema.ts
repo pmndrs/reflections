@@ -233,6 +233,20 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W52 (D3640): D3513\'s visibility ray along R for on-screen re-shaded traced hits too. Wheel 43 -> 41 vs PT 26 (carConcept); mirrors seen in mirrors go black where blocked (facingMirrors, D3542). Needs Hit shadow rays on.',
     cost: 'rt trace +0.30 ms (W52)',
   }),
+  sel('t.tracedMissRate', 'rt', 'Traced miss rate (glossy)', [['full', 'full (every miss traced)'], ['half', 'half (every other quad + bilateral fill)']], 'full', {
+    appliesTo: RT, api: 'traceSettings.tracedMissRate (+ settings.tracedMissRate)',
+    tradeoff: 'W74 (X4, D5060): \'half\' traces the glossy misses of every other 2x2 quad (a checkerboard flipping each frame); the others take their traced neighbours\' result through core bilateralFill (plane distance, normal power, roughness, same source), or the probe where none fits. Half the glossy BVH rays; mirrors and near-mirrors stay full rate.',
+  }),
+  num('t.tracedHalfRateMinRoughness', 'rt', 'Half rate from roughness', 0, 1, 0.01, 0.05, {
+    appliesTo: RT, api: 'traceSettings.tracedHalfRateMinRoughness (DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS)',
+    tradeoff: 'W74: perceptual roughness from which \'half\' applies; smoother misses are all traced (mirror-like floors and paint keep their sharp reflections).',
+  }),
+  num('t.fillPlaneTolerance', 'rt', 'Fill: plane tolerance', 0, 0.1, 0.001, 0.01, { appliesTo: RT, api: 'traceSettings.fillPlaneTolerance (BilateralFillWeights.planeTolerance)', tradeoff: 'W74: a neighbour farther than this x the view distance from the pixel\'s tangent plane takes no weight (silhouettes, steps). 0 = off.' }),
+  num('t.fillNormalPower', 'rt', 'Fill: normal power', 0, 128, 1, 16, { appliesTo: RT, api: 'traceSettings.fillNormalPower', tradeoff: 'W74: pow(dot(n_p, n_q), k): higher keeps the fill on one face (curved and normal-mapped surfaces fall back to the probe more). 0 = off.' }),
+  num('t.fillRoughnessTolerance', 'rt', 'Fill: roughness tolerance', 0, 1, 0.01, 0.1, { appliesTo: RT, api: 'traceSettings.fillRoughnessTolerance', tradeoff: 'W74: perceptual roughness difference at which a neighbour\'s weight reaches 0. 0 = off.' }),
+  num('t.fillSourceMask', 'rt', 'Fill: accepted sources', 0, 31, 1, 22, { appliesTo: RT, api: 'traceSettings.fillSourceMask', tradeoff: 'W74: RT_SOURCE codes a neighbour may have, one bit each: 22 = traced hit (2) + traced miss (4) + on-screen traced hit (16). +1 also takes screen-space hits, +8 capped entries.' }),
+  num('t.fillMinWeightSum', 'rt', 'Fill: min weight sum', 0, 1, 0.01, 0.01, { appliesTo: RT, api: 'traceSettings.fillMinWeightSum', tradeoff: 'W74: below this the pixel keeps intersect\'s probe fallback (as an entry past the ray budget).' }),
+  sel('t.fillFootprint', 'rt', 'Fill: footprint (quads)', [['3', '3x3 quads'], ['2', '2x2 quads'], ['4', '4x4 quads']], 3, { appliesTo: RT, api: 'traceSettings.fillFootprint', tradeoff: 'W74: quads gathered around the pixel\'s own; 3 reaches the 4 traced edge neighbours of the checkerboard, 4 also the next ring (wider, softer).' }),
 
   // ---- hybrid ----------------------------------------------------------------------------------------------
   num('h.depthAware', 'hybrid', 'Depth-aware blend', 0, 1, 0.05, 1, { appliesTo: OURS_SSR, api: 'hybrid.depthAware.value', tradeoff: 'D2400: keeps the probe off hits it lies behind (1); 0 = FFX\'s confidence blend (the wall pattern showed through the reflected sphere, W22).' }),

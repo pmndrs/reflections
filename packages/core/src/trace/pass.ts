@@ -15,7 +15,8 @@ import { mat4Invert, mat4Mul } from '../sssr/math';
 import { PassTimer } from '../sssr/timer';
 import { checkStageLimits, countStageBindings } from '../limits';
 import { DEFAULT_HIT_LOBE_FILTER, DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, DEFAULT_SHADING_NORMAL_WGSL, DEFAULT_TRACE_ANY_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
-import { RT_BEGIN_WGSL, RT_PARAMS_SIZE, RT_STATE, RT_STATE_HEADER, rtTraceWgsl } from './shaders';
+import { RT_BEGIN_WGSL, RT_FILL_MARK_WGSL, RT_FILL_SCATTER_WGSL, RT_PARAMS_SIZE, RT_STATE, RT_STATE_HEADER, rtFillGatherWgsl, rtTraceWgsl } from './shaders';
+import { BILATERAL_FILL_WGSL, bilateralFillWeightWords, resolveBilateralFillWeights } from '../bilateral/fill';
 
 export interface TracedReflectionsOptions {
   width: number;
@@ -112,6 +113,28 @@ export interface TracedReflectionsSettings {
   roughnessThreshold?: number;
   /** Relative view-distance tolerance for that test. Default 0.02. */
   onScreenDepthTolerance?: number;
+  /**
+   * W74 (plan X4, D5060): 'half' runs the bilateral fill over the SSSR tracer's fill list after the
+   * trace: each of its pixels (glossy misses of the quads intersect didn't send to the miss list this
+   * frame) takes its traced neighbours' radiance, hit distance, confidence and source
+   * (core/bilateral, `fill*` below). No usable neighbour: it keeps intersect's fallback, source
+   * 'capped'. Pass the tracer's `tracedMissRate` (the three adapter does). Default 'full' (no fill).
+   */
+  tracedMissRate?: 'full' | 'half';
+  /** The SSSR tracer's `tracedHalfRateMinRoughness`, carried for adapters that pass one settings object to both (unused by this pass). */
+  tracedHalfRateMinRoughness?: number;
+  /** Fill weight: plane distance tolerance, relative to the view distance (`BilateralFillWeights.planeTolerance`). Default 0.01; 0 off. */
+  fillPlaneTolerance?: number;
+  /** Fill weight: pow(dot(n_p, n_q), this). Default 16; 0 off. */
+  fillNormalPower?: number;
+  /** Fill weight: perceptual roughness difference tolerance. Default 0.1; 0 off. */
+  fillRoughnessTolerance?: number;
+  /** Fill taps: RT_SOURCE codes accepted, one bit per code. Default 0b10110 (traced hit, traced miss, on-screen traced hit). */
+  fillSourceMask?: number;
+  /** Fill: below this weight sum the pixel keeps intersect's fallback. Default 0.01. */
+  fillMinWeightSum?: number;
+  /** Fill footprint in 2x2 quads across: 3 (default: the quad's 8 neighbours, of which the checkerboard traced the 4 edge ones), 2 or 4. */
+  fillFootprint?: 2 | 3 | 4;
   /** The fallback's `P.iblFactor`. Default 1. */
   iblFactor?: number;
   /** The constant fallback's colour (`P.fallbackColor`). Default [0, 0, 0]. */
@@ -148,6 +171,14 @@ export interface TracedReflectionsStats {
   frame: number;
   /** The most rays a tile could trace this frame (the floor share, + 1 for the tiles that got the remainder). */
   tileCap: number;
+  /** W74: entries on the fill list (glossy misses `tracedMissRate: 'half'` did not trace). */
+  halfRateSkipped: number;
+  /** W74: fill entries past the list's capacity (traced instead). */
+  fillOverflow: number;
+  /** W74: fill pixels that took their traced neighbours' result. */
+  filled: number;
+  /** W74: fill pixels with no usable neighbour (kept intersect's fallback). */
+  fillFallbacks: number;
 }
 
 export interface TracedReflections {
@@ -205,7 +236,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   const fallback = options.radianceFallback ?? constantRadianceFallback();
   const shading = options.hitShading ?? fallbackHitShading();
   const tilesX = Math.ceil(W / 8), tilesY = Math.ceil(H / 8);
-  const timer = options.timestamps && PassTimer.supported(device) ? new PassTimer(device, 4) : undefined;
+  const timer = options.timestamps && PassTimer.supported(device) ? new PassTimer(device, 8) : undefined; // begin, trace, + the fill's three (W74)
 
   checkTraceStageLimits(device, provider, fallback, shading);
 
@@ -276,6 +307,39 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     return providerGroup;
   };
 
+  // W74 (X4): the half-rate fill's passes and scratch, made on the first 'half' dispatch
+  interface Fill { mark: GPUComputePipeline; gather: GPUComputePipeline; scatter: GPUComputePipeline; scratch: GPUBuffer; bgl: [GPUBindGroupLayout, GPUBindGroupLayout, GPUBindGroupLayout] }
+  let fill: Fill | null = null;
+  const ensureFill = (capacity: number): Fill => {
+    const bytes = Math.max(16, capacity * 64);
+    if (fill && fill.scratch.size >= bytes) return fill;
+    fill?.scratch.destroy();
+    const scratch = device.createBuffer({ label: 'rt fill scratch', size: bytes, usage: GPUBufferUsage.STORAGE });
+    if (fill) return (fill = { ...fill, scratch });
+    const markBgl = device.createBindGroupLayout({ label: 'rt fill mark', entries: [buf(0, 'uniform'), buf(1, 'read-only-storage'), buf(2, 'read-only-storage'), sto(3, 'r32float')] });
+    const gatherBgl = device.createBindGroupLayout({
+      label: 'rt fill gather',
+      entries: [buf(0, 'uniform'), tex(1), tex(2), tex(3), tex(4), tex(5), tex(6), tex(7), buf(8, 'read-only-storage'), buf(9, 'read-only-storage'), buf(10, 'storage'), buf(11, 'storage')],
+    });
+    const scatterBgl = device.createBindGroupLayout({
+      label: 'rt fill scatter',
+      entries: [buf(0, 'uniform'), buf(1, 'read-only-storage'), buf(2, 'read-only-storage'), buf(3, 'read-only-storage'),
+        sto(4, 'rgba16float'), sto(5, 'r32float'), sto(6, 'r32float'), sto(7, 'r32float')],
+    });
+    checkStageLimits(device, 'rt: the fill gather pipeline', [['pass', { storageBuffers: 4, sampledTextures: 7 }]]);
+    checkStageLimits(device, 'rt: the fill scatter pipeline', [['pass', { storageBuffers: 3, storageTextures: 4 }]]);
+    const mk = (label: string, code: string, bgl: GPUBindGroupLayout) => device.createComputePipeline({
+      label, layout: device.createPipelineLayout({ label, bindGroupLayouts: [bgl] }),
+      compute: { module: device.createShaderModule({ label, code }), entryPoint: 'main' },
+    });
+    return (fill = {
+      mark: mk('rt fill mark', RT_FILL_MARK_WGSL, markBgl),
+      gather: mk('rt fill gather', rtFillGatherWgsl(BILATERAL_FILL_WGSL), gatherBgl),
+      scatter: mk('rt fill scatter', RT_FILL_SCATTER_WGSL, scatterBgl),
+      scratch, bgl: [markBgl, gatherBgl, scatterBgl],
+    });
+  };
+
   let afterSubmit: (() => void) | undefined;
 
   function writeParams(frame: TracedReflectionsDispatch, s: TracedReflectionsSettings) {
@@ -314,6 +378,13 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     u[64] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
     f[65] = Math.min(1, Math.max(0, s.hitLobeFilterMixed ?? 1));
     f[66] = (s.roughnessThreshold ?? 0.447) ** 2;
+    // 67: another stream's word. 68-75: W74 (X4) the half-rate fill
+    bilateralFillWeightWords(resolveBilateralFillWeights({
+      planeTolerance: s.fillPlaneTolerance, normalPower: s.fillNormalPower, roughnessTolerance: s.fillRoughnessTolerance,
+      sourceMask: s.fillSourceMask, minWeightSum: s.fillMinWeightSum,
+    }), f, u, 68);
+    u[73] = frame.tracer.outputs.missCapacity ?? 0;
+    u[74] = [2, 3, 4].includes(s.fillFootprint as number) ? s.fillFootprint! : 3;
     device.queue.writeBuffer(params, 0, data);
   }
 
@@ -367,15 +438,55 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     p.setBindGroup(3, frame.hitShadingBindGroup ?? emptyGroup);
     p.dispatchWorkgroupsIndirect(out.missArgs, 0);
     p.end();
+    if ((settings.tracedMissRate ?? 'full') === 'half' && out.missFillCapacity) {
+      // W74 (X4): mark, gather, scatter over the fill list (indirect args at byte 12)
+      const f = ensureFill(out.missFillCapacity);
+      const P0 = { binding: 0, resource: { buffer: params } };
+      const list = [{ binding: 1, resource: { buffer: out.missList } }, { binding: 2, resource: { buffer: out.missCounter } }];
+      const markGroup = device.createBindGroup({ label: 'rt fill mark', layout: f.bgl[0], entries: [P0, ...list, { binding: 3, resource: source.createView() }] });
+      const gatherGroup = device.createBindGroup({
+        label: 'rt fill gather', layout: f.bgl[1],
+        entries: [P0,
+          { binding: 1, resource: out.depthHierarchy.createView({ baseMipLevel: 0, mipLevelCount: 1 }) },
+          { binding: 2, resource: inputs.normal.createView() },
+          { binding: 3, resource: out.extractedRoughness.createView() },
+          { binding: 4, resource: out.radiance.createView() },
+          { binding: 5, resource: out.hitDistance.createView() },
+          { binding: 6, resource: out.confidence.createView() },
+          { binding: 7, resource: source.createView() },
+          { binding: 8, resource: { buffer: out.missList } },
+          { binding: 9, resource: { buffer: out.missCounter } },
+          { binding: 10, resource: { buffer: f.scratch } },
+          { binding: 11, resource: { buffer: state } }],
+      });
+      const scatterGroup = device.createBindGroup({
+        label: 'rt fill scatter', layout: f.bgl[2],
+        entries: [P0, ...list, { binding: 3, resource: { buffer: f.scratch } },
+          { binding: 4, resource: out.radiance.createView() },
+          { binding: 5, resource: out.hitDistance.createView() },
+          { binding: 6, resource: out.confidence.createView() },
+          { binding: 7, resource: source.createView() }],
+      });
+      // three passes: a pass boundary orders one's storage writes before the next one's reads
+      p = cmd.beginComputePass({ label: 'rt fill mark', timestampWrites: timer?.pass('rt fill mark') });
+      p.setPipeline(f.mark); p.setBindGroup(0, markGroup); p.dispatchWorkgroupsIndirect(out.missArgs, 12);
+      p.end();
+      p = cmd.beginComputePass({ label: 'rt fill gather', timestampWrites: timer?.pass('rt fill gather') });
+      p.setPipeline(f.gather); p.setBindGroup(0, gatherGroup); p.dispatchWorkgroupsIndirect(out.missArgs, 12);
+      p.end();
+      p = cmd.beginComputePass({ label: 'rt fill scatter', timestampWrites: timer?.pass('rt fill scatter') });
+      p.setPipeline(f.scatter); p.setBindGroup(0, scatterGroup); p.dispatchWorkgroupsIndirect(out.missArgs, 12);
+      p.end();
+    }
     dispatches++;
     let slot = statsSlots.find((x) => x.reading === null);
     if (!slot && statsSlots.length < MAX_STATS_SLOTS) {
-      slot = { buffer: device.createBuffer({ label: 'rt stats readback', size: RT_STATE_HEADER * 4 + 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), frame: 0, reading: null };
+      slot = { buffer: device.createBuffer({ label: 'rt stats readback', size: RT_STATE_HEADER * 4 + 32, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), frame: 0, reading: null };
       statsSlots.push(slot);
     }
     if (slot) { // all slots mapping (4 reads pending): this frame's counts are skipped
       cmd.copyBufferToBuffer(state, 0, slot.buffer, 0, RT_STATE_HEADER * 4);
-      cmd.copyBufferToBuffer(out.missCounter, 0, slot.buffer, RT_STATE_HEADER * 4, 16);
+      cmd.copyBufferToBuffer(out.missCounter, 0, slot.buffer, RT_STATE_HEADER * 4, Math.min(32, out.missCounter.size));
       slot.frame = dispatches;
       latestStats = slot;
     }
@@ -386,7 +497,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     device, width: W, height: H, provider, source, state, tilesX, tilesY, dispatch,
     readStats() {
       const slot = latestStats;
-      if (!slot) return Promise.resolve({ misses: 0, traced: 0, capped: 0, hits: 0, tracedMisses: 0, onScreenHits: 0, tilesWithMisses: 0, tileCap: 0, frame: 0 });
+      if (!slot) return Promise.resolve({ misses: 0, traced: 0, capped: 0, hits: 0, tracedMisses: 0, onScreenHits: 0, tilesWithMisses: 0, tileCap: 0, frame: 0, halfRateSkipped: 0, fillOverflow: 0, filled: 0, fillFallbacks: 0 });
       // one mapping per slot; a second caller for the same frame waits for the first
       slot.reading ??= slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
         const s = new Uint32Array(slot.buffer.getMappedRange().slice(0));
@@ -394,6 +505,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
         return {
           misses: s[RT_STATE_HEADER + 1], traced: s[RT_STATE.traced], capped: s[RT_STATE.capped], hits: s[RT_STATE.hits],
           tracedMisses: s[RT_STATE.misses], onScreenHits: s[RT_STATE.onScreen], tilesWithMisses: s[RT_STATE.tilesWithMisses], tileCap: s[RT_STATE.tileCap],
+          halfRateSkipped: s[RT_STATE_HEADER + 5] ?? 0, fillOverflow: s[RT_STATE_HEADER + 7] ?? 0, filled: s[RT_STATE.filled], fillFallbacks: s[RT_STATE.fillFallbacks],
           frame: slot.frame,
         };
       }).finally(() => { slot.reading = null; });
@@ -407,7 +519,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
       return timer.timings;
     },
     destroy() {
-      source.destroy(); state.destroy(); params.destroy(); for (const x of statsSlots) x.buffer.destroy(); noHistory.destroy(); noSource.destroy(); prevSource?.destroy();
+      source.destroy(); state.destroy(); params.destroy(); fill?.scratch.destroy(); for (const x of statsSlots) x.buffer.destroy(); noHistory.destroy(); noSource.destroy(); prevSource?.destroy();
       timer?.destroy();
     },
   };

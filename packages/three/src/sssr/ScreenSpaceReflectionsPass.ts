@@ -240,10 +240,13 @@ export class ScreenSpaceReflectionsPass {
     const hitSource = this.coreHitSource && this.rt && this.rayTracing ? this.rt.source : undefined;
     const inputs = screenSpaceInputsFromFrame(frame, core, { history: useHistory ? history : undefined, hitShadingBindGroup, hitSource });
     const hitShading = this.settings.hitShading ?? 'reshade';
+    // W74 (X4, D5060): traceSettings.tracedMissRate 'half' needs the traced pass's fill this frame
+    const tracing = !!this.rt && this.rayTracing;
     const out = core.dispatch(cmd, inputs, {
       frameIndex: frame.frameIndex, ...this.settings, hitColor: useHistory ? 'history' : 'current', fallbackColor: [0, 0, 0],
+      tracedMissRate: tracing ? this.traceSettings.tracedMissRate ?? 'full' : 'full', tracedHalfRateMinRoughness: this.traceSettings.tracedHalfRateMinRoughness,
     });
-    if (this.rt && this.rayTracing) {
+    if (this.rt && tracing) {
       // traced misses take black like the tracer's fallback: the composite adds probes /
       // environment for 1 - confidence, exactly the term three's lit image already has
       this.rt.dispatch(cmd, { tracer: core, inputs, hitShadingBindGroup }, { ...this.traceSettings, hitColor: useHistory ? 'history' : 'current', hitShading, hitLobeFilter: this.traceSettings.hitLobeFilter ?? this.settings.hitLobeFilter, hitShadeOcclusion: this.traceSettings.hitShadeOcclusion ?? this.settings.hitShadeOcclusion,
