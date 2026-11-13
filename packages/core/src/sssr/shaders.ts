@@ -773,7 +773,15 @@ fn marchRunning(m: ptr<function, March>) -> bool {
 // One iteration of the traversal loop; \`occupancy\` = active invocations (ffxWaveActiveCountBits(true)).
 fn marchStep(m: ptr<function, March>, occupancy: u32) {
   let current_mip_position = (*m).current_mip_resolution * (*m).position.xy;
-  let surface_z = loadDepth(vec2i(current_mip_position), (*m).current_mip);
+  // D5160: the pyramid's mips are floor-sized and the last texel of an odd level also covers the leftover
+  // row / column, so on screen the strip past the last whole texel maps one texel out of range; D303's 0 there
+  // is 'nearest' for forward-Z (the march steps down a mip, still correct) but 'farthest' for reverse-Z (the cell
+  // reads empty and the ray skips the strip). Clamp to the last texel for positions on screen.
+  var depth_texel = vec2i(current_mip_position);
+  if (all((*m).position.xy >= vec2f(0.0)) && all((*m).position.xy < vec2f(1.0))) {
+    depth_texel = min(depth_texel, vec2i(textureDimensions(t_depth_hierarchy, (*m).current_mip)) - vec2i(1));
+  }
+  let surface_z = loadDepth(depth_texel, (*m).current_mip);
   (*m).exit_due_to_low_occupancy = !(*m).is_mirror && occupancy <= P.minTraversalOccupancy;
   // FFX_SSSR_AdvanceRay
   var xy_plane = floor(current_mip_position) + (*m).floor_offset;
