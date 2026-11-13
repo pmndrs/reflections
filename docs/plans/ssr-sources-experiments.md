@@ -140,6 +140,12 @@ Frostbite's whole pipeline was this resolve plus a temporal pass, and Diligent's
 - The resolve needs only generic inputs: per-pixel direction or hit point, pdf, hit distance, the G-buffer. No SSSR internals.
 - It improves a reflection signal that isn't ours, e.g. the denoiser repo's own three SSR pages, or RT-only reflections.
 
+**Answer (W73, 2026-11-13): not promoted.**
+- The first criterion holds for the most part. The exceptions are the snap to classify's traced pixels and the hit-source split for our depth-aware blend.
+- The second criterion isn't shown. On our own signal the denoised output is 30-50 % noisier than the copy.
+- What carries over is the weighting: the plan's phase B, BRDF / pdf weights inside the FFX prefilter.
+- Details: `docs/research/w73/ratio-reuse-phase2.md`.
+
 ## X4: half-rate glossy RT misses (#8)
 
 - **Setting.** `tracedMissRate: 'full' | 'half'` (default 'full'), and `tracedHalfRateMinRoughness` (default near FFX's mirror test, so mirrors stay full rate).
