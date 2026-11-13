@@ -83,7 +83,8 @@ async function main() {
   // cube arrays on stock r187 (W20 shim, self-tested; patches nothing and probes keep the 2D array if it fails). ?shim=0 opts out.
   if (q.get('shim') !== '0') await installCubeArraySupport(renderer);
 
-  const ssr = new ScreenSpaceReflectionsPass(renderer, { missList: true, timestamps: true, gbufferOptions: { width: RW, height: RH } });
+  // W75 (X5, D5080): ?res=half traces, denoises at half res and upsamples
+  const ssr = new ScreenSpaceReflectionsPass(renderer, { missList: true, timestamps: true, gbufferOptions: { width: RW, height: RH }, ...(q.get('res') === 'half' || q.get('res') === 'mixed' ? { settings: { reflectionResolution: 'half' as const, halfResMinRoughness: q.get('res') === 'mixed' ? Number(q.get('halfResMin') ?? 0.05) : 0 } } : {}) });
   const device = ssr.device;
   const gpuErrors: string[] = [];
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });
@@ -557,6 +558,16 @@ async function main() {
       poses: () => Object.keys(kit!.views),
       setPose,
       setView: (v: View) => setView(v),
+      /**
+       * W75 (X5): reflection resolution, rebuilding the composites ('mixed' = half with the full-res mirror
+       * path below `minRoughness`, step 2).
+       */
+      async setResolution(r: 'full' | 'half' | 'mixed', minRoughness = 0.05) {
+        ssr.settings.reflectionResolution = r === 'full' ? 'full' : 'half';
+        ssr.settings.halfResMinRoughness = r === 'mixed' ? minRoughness : 0;
+        hybrid.rebuild(); buildDisplay();
+        ssr.resetHistory(); hybrid.resetHistory();
+      },
       /** The orbit camera as [pos, target] (scene units), and setting it (same convention as compare.html's `view()` / `setView()`). */
       camera: () => [kit!.camera.position.toArray(), controls.target.toArray()],
       setCamera(pos: [number, number, number], target: [number, number, number]) {

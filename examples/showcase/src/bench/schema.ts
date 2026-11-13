@@ -151,6 +151,16 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W58 (D3740): with samplesPerQuad < 4 a quad shares one ray. \'always\' copies it to every glossy px of the quad, across a silhouette too: on carConcept the skirt\'s reflection lands on the mirror floor below it (bright 2x2 dashes, raw) and the floor\'s on the skirt, the stair-stepped raw edge the denoiser then spreads. \'sameSurface\' gives px on another surface (depth > 5 %, normal > ~25 deg) their own ray. carConcept w50 960x540, lip / band MAD vs PT raw 18.6 / 14.0 -> 11.5 / 12.2, denoised 41.5 / 30.6 -> 34.4 / 26.9 (spq 4: 11.2 / 13.5, 34.3 / 27.7).',
     cost: '1080p: classify +0.02, intersect +0.02, rt trace ~+0.2 ms (carConcept w50, W58)',
   }),
+  sel('s.reflectionResolution', 'sssr', 'Reflection resolution', [['full', 'full'], ['half', 'half (trace + denoise at half res, joint bilateral upsample)']], 'full', {
+    apply: 'rebuild', appliesTo: OURS_SSR, api: 'settings.reflectionResolution',
+    tradeoff: 'W75 (X5, D5080): \'half\' point-samples the G-buffer at one pixel per 2x2 quad, traces (SSR + RT) and denoises there, and upsamples the residual (denoised - probe) with a joint bilateral filter (plane distance, normal, roughness). Fewer rays and a quarter of the denoiser\'s pixels; mirrors and thin edges lose resolution (step 1: everything at half res). carConcept w50 MAD vs PT denoised: band 30.6 -> 58.3, lip 41.5 -> 50.5 (raw +0.4..+2.4).',
+    cost: '1080p, AA off, rt (W75 phase 2): carConcept frame sum 14.0 -> 10.6 ms (rt trace 2.53 -> 0.89, denoise 1.94 -> 0.51, upsample +0.37, half-res sample +0.16); contact 11.2 -> 9.0; mirrorWall 8.2 -> 6.6',
+  }),
+  num('s.halfResMinRoughness', 'sssr', 'Half res: full-res path below roughness', 0, 1, 0.01, 0, {
+    apply: 'rebuild', appliesTo: OURS_SSR, api: 'settings.halfResMinRoughness',
+    tradeoff: 'W75 (X5 step 2, D5084): with half-res reflections, pixels below this perceptual roughness (mirrors, near-mirrors) are traced by a second full-res tracer (every pixel its own ray, its own RT pass, no denoiser) and composited at full res. 0 = every pixel at half res (step 1). At 0.05 carConcept\'s 0.03 floor goes to the full-res path.',
+    cost: 'a second full-res tracer + RT pass: at 0.01, 1080p sum carConcept 11.6 (half 10.6, full 14.0), mirrorWall 8.4 (full 8.2); at 0.05 carConcept 28.0 vs full 23.1 (W75)',
+  }),
   sel('s.rayReuse', 'sssr', 'Ray reuse', [['copy', 'copy (FFX quad copy)'], ['ratio', 'ratio estimator (BRDF / pdf-weighted neighbours)']], 'copy', {
     appliesTo: OURS_SSR, api: 'settings.rayReuse',
     tradeoff: 'W73 (X3, D5040): what a glossy px without its own ray gets. \'copy\' pastes its quad\'s ray (FFX). \'ratio\' resolves every glossy px from its own ray, its quad\'s and s.rayReuseTaps neighbours within s.rayReuseRadius, weighted by its own BRDF along the direction to each neighbour\'s hit over that ray\'s pdf (SSSR 2015, DiligentFX); same surface only. The target: ratio at spq 1 about as quiet as copy at spq 4. Experiment; the FFX denoiser still runs after it.',

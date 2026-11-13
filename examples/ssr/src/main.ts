@@ -209,6 +209,9 @@ async function main() {
   const ssr = new ScreenSpaceReflectionsPass(renderer, {
     gbufferOptions: { width: W, height: H }, missList: true, timestamps: q.has('timing') || layoutMode,
     subgroups: q.get('variant') !== 'workgroup',
+    // W75 (X5, D5080): ?res=half traces, denoises at half res and upsamples
+    // (?res=mixed: mirrors below ?halfResMin= (default 0.05) on a full-res path, step 2)
+    ...(q.get('res') === 'half' || q.get('res') === 'mixed' ? { settings: { reflectionResolution: 'half' as const, halfResMinRoughness: q.get('res') === 'mixed' ? Number(q.get('halfResMin') ?? 0.05) : 0 } } : {}),
   });
   const device = ssr.device;
   // hybrid resolve + denoise seam (phase 5)
@@ -779,6 +782,16 @@ async function main() {
       assets: async () => { const dirs = new Set((await availableAssets()).map((a) => a.dir)); return Object.entries(ASSET_SCENES).filter(([dir]) => dirs.has(dir)).map(([, a]) => a.id); },
       load: (id: string) => load(id),
       setPose, setView: (v: View) => setView(v),
+      /**
+       * W75 (X5): reflection resolution, rebuilding the composites ('mixed' = half with the full-res mirror
+       * path below `minRoughness`, step 2).
+       */
+      async setResolution(r: 'full' | 'half' | 'mixed', minRoughness = 0.05) {
+        ssr.settings.reflectionResolution = r === 'full' ? 'full' : 'half';
+        ssr.settings.halfResMinRoughness = r === 'mixed' ? minRoughness : 0;
+        hybrid.rebuild(); buildDisplay();
+        ssr.resetHistory(); hybrid.resetHistory();
+      },
       setSSR(on: boolean) { composite!.amount.value = on ? 1 : 0; },
       /** W22: the composite's depth-aware blend (D2400) on / off (FFX's confidence blend). */
       setDepthAware(on: boolean) { hybrid.depthAware.value = on ? 1 : 0; depthBox.checked = on; },

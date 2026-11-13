@@ -287,6 +287,12 @@ export interface ScreenSpaceReflectionsSettings {
    */
   rayReusePattern?: 'frame' | 'pixel';
   /**
+   * W75 (plan X5 step 2, D5084): perceptual roughness below which this tracer traces nothing: those
+   * pixels take the path of pixels above `roughnessThreshold` (the radiance fallback, confidence 0),
+   * left to another tracer (three's half-res reflections hand them to a full-res one). Default 0.
+   */
+  minRoughness?: number;
+  /**
    * W71 (X1 #1, D5000): which pixel of a 2x2 quad traces when `samplesPerQuad` < 4 (the others take
    * its ray). 'fixed' (default, FFX): the top-left, every frame, so the copy's 2x2 grid stays put under
    * TAA / an upscaler. 'frame': the corner cycles with the frame index (diagonal first). 'pattern': a
@@ -338,13 +344,13 @@ export interface ScreenSpaceReflectionsSettings {
   tracedHalfRateMinRoughness?: number;
 }
 
-const QUAD_BASE_ROTATION: Record<string, number> = { fixed: 0, frame: 1, pattern: 2 };
-
 /**
  * Default `tracedHalfRateMinRoughness` (W74): perceptual 0.05 (alpha 0.0025), near FFX's mirror
  * test (alpha < 1e-4, perceptual 0.01), so mirror-like floors and paint keep every traced ray.
  */
 export const DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS = 0.05;
+
+const QUAD_BASE_ROTATION: Record<string, number> = { fixed: 0, frame: 1, pattern: 2 };
 
 export interface ScreenSpaceCamera {
   /** Column-major view matrix (world -> view). */
@@ -753,10 +759,12 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     f[142] = Math.max(0, s.thicknessDepthFactor ?? 0);
     f[143] = Math.min(1, Math.max(0, s.hitLobeFilterGrazing ?? 0));
     u[144] = (s.historyEdgeConfidence ? 1 : 0) | ((s.thicknessDepthMode ?? 'add') === 'relative' ? 2 : 0);
-    // 154-157: W74 (X4)
+    // 154-156: W74 (X4)
     u[154] = useMissList && s.tracedMissRate === 'half' ? 1 : 0;
     f[155] = Math.max(0, s.tracedHalfRateMinRoughness ?? DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS) ** 2;
     u[156] = missFillCapacity;
+    // 157: W75 (X5 step 2)
+    f[157] = Math.max(0, s.minRoughness ?? 0) ** 2;
     device.queue.writeBuffer(params, 0, data);
   }
 

@@ -10,3 +10,5 @@ export {
   createDepthPyramidBuilder, createDepthPyramidTexture, depthPyramidMipCount,
   type DepthPyramidBuilder, type DepthPyramidOptions,
 } from './depthPyramid';
+// Per-pass GPU timestamps (W75: the half-res passes in the adapters time themselves with it).
+export { PassTimer } from './timer';

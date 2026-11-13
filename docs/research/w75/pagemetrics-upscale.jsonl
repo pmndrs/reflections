@@ -1,0 +1,8 @@
+{"tag":"up1.5","scene":"contact","config":"full","drift":0.9041,"driftOver":0.7869,"restFlicker":3.8841,"orbitStd":8.5317,"orbitD2":14.6199,"quad":0.0186,"quadSignal":0.5035}
+{"tag":"up1.5","scene":"contact","config":"half","drift":1.021,"driftOver":0.9768,"restFlicker":4.3963,"orbitStd":9.8513,"orbitD2":14.6097,"quad":-0.0523,"quadSignal":0.6182}
+{"tag":"up1.5","scene":"mirrorWall","config":"full","drift":0.3945,"driftOver":0.0889,"restFlicker":0.01,"orbitStd":0.8996,"orbitD2":1.984,"quad":0.0326,"quadSignal":0.1749}
+{"tag":"up1.5","scene":"mirrorWall","config":"half","drift":0.4326,"driftOver":0.0793,"restFlicker":0.0105,"orbitStd":0.9161,"orbitD2":1.7698,"quad":0.0425,"quadSignal":0.1183}
+{"tag":"up2","scene":"contact","config":"full","drift":1.1149,"driftOver":0.8846,"restFlicker":3.8489,"orbitStd":9.4096,"orbitD2":14.341,"quad":-0.0711,"quadSignal":0.6811}
+{"tag":"up2","scene":"contact","config":"half","drift":1.1703,"driftOver":0.9521,"restFlicker":3.3707,"orbitStd":9.6727,"orbitD2":14.0561,"quad":-0.0463,"quadSignal":0.2948}
+{"tag":"up2","scene":"mirrorWall","config":"full","drift":0.5147,"driftOver":0.1753,"restFlicker":0.0479,"orbitStd":1.1416,"orbitD2":1.9042,"quad":0.1266,"quadSignal":0.141}
+{"tag":"up2","scene":"mirrorWall","config":"half","drift":0.4243,"driftOver":0.0392,"restFlicker":0.0473,"orbitStd":1.059,"orbitD2":1.6415,"quad":0.0533,"quadSignal":0.0575}
