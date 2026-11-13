@@ -150,11 +150,13 @@ export function mirrorBiasSplit(s0: Pick<ScreenSpaceReflectionsSettings, 'mirror
  */
 export const DEFAULT_HIT_COLOR_FILTER: 'off' | 'cone' = 'cone';
 /**
- * W76: `hitColorConeGrazing` when unset: the cone's grazing shrink at full strength. X0's grazing sweep
- * (r 0.15 floor, cone + compensation 0.5): denoised gradient vs the PT at 5 / 15 deg x0.53 / x0.53 ->
- * x0.67 / x0.63 (the pre-W76 default x0.79 / x0.75), 60 deg unchanged.
+ * W76: `hitColorConeGrazing` when unset: off. The shrink sharpens the grazing floor (X0 grazing, r 0.15,
+ * cone + compensation 0.5: denoised gradient vs the PT at 5 / 15 deg x0.53 / x0.53 -> x0.67 / x0.63 at 1,
+ * x0.59 / x0.58 at 0.5; pre-W76 x0.79 / x0.75), but it narrows the line-spread gate's r 0.15 reflection
+ * (seen at 15 deg) past the +-10 % the cone default was chosen for: x1.01 -> x0.84 at 1, x0.91 at 0.5
+ * (AA on; AA off x0.96 -> x0.93 / x0.86). So it stays an option of the cone, off by default.
  */
-export const DEFAULT_HIT_COLOR_CONE_GRAZING = 1;
+export const DEFAULT_HIT_COLOR_CONE_GRAZING = 0;
 /** W76: `mirrorBiasCompensate` when unset (it acts only with `hitColorFilter: 'cone'`). */
 export const DEFAULT_MIRROR_BIAS_COMPENSATE = true;
 /** W76: `mirrorBias` when unset and compensation is on (cone + `mirrorBiasCompensate`); 0 otherwise (D49's truncation stays opt-in). */
@@ -412,8 +414,8 @@ export interface ScreenSpaceReflectionsSettings {
    * W76 (X1 #3 folded into X2's cone, D5002 / D5100): SSSR 2015 slide 85's grazing shrink of the
    * cone, `coneTan *= mix(1, mix(saturate(2 NdotV), 1, sqrt(perceptual roughness)), this)`: a floor
    * seen at a grazing angle takes a narrower cone (a finer pyramid mip), so the cone's blur at low
-   * elevations drops. Only with `hitColorFilter: 'cone'`. 0..1, default
-   * {@link DEFAULT_HIT_COLOR_CONE_GRAZING} (the slide's); 0 = W72's cone without it. (W71's
+   * elevations drops. Only with `hitColorFilter: 'cone'`. 0..1 (1 = the slide's), default
+   * {@link DEFAULT_HIT_COLOR_CONE_GRAZING} (0, off: at 1 the line-spread gate's r 0.15 line comes out x0.84). (W71's
    * `hitLobeFilterGrazing`, the same shrink on `hitLobeFilter`, measured as a no-op and was removed.)
    */
   hitColorConeGrazing?: number;

@@ -242,8 +242,8 @@ async function sssrCoreChecks(pages) {
   check('sssr cube-environment fallback: same rays and hits', se.rays === st.rays && Math.abs(se.mirrorHitFraction - st.mirrorHitFraction) < 1e-3,
     `rays ${se.rays}, hit ${(se.mirrorHitFraction * 100).toFixed(1)}%`);
   savePng('sssr-core-env.png', await env.T('window.__p.shot()'));
-  const graz = await env.T('window.__p.identity({ hitColorConeGrazing: 0 }, {})'); // W76 (X1 #3 on the cone, D5100)
-  check('sssr W76 hitColorConeGrazing (default 1 vs 0) changes the cone hits only (cube environment: same lists)', graz.radianceDiffPixels > 0 && graz.listsSame && graz.hitDiffPixels === 0,
+  const graz = await env.T('window.__p.identity({}, { hitColorConeGrazing: 1 })'); // W76 (X1 #3 on the cone, D5100)
+  check('sssr W76 hitColorConeGrazing 1 (default 0) changes the cone hits only (cube environment: same lists)', graz.radianceDiffPixels > 0 && graz.listsSame && graz.hitDiffPixels === 0,
     `radiance ${graz.radianceDiffPixels} px differ, hit distance ${graz.hitDiffPixels}, lists same ${graz.listsSame}`);
   // fallbackRoughness (D1806): 'surface' takes misses' fallback at the pixel's roughness (the rough-path
   // lookup), 'mirror' is FFX's roughness 0. Mirrors and confidence-1 pixels must not change.
@@ -276,8 +276,8 @@ async function sssrCoreChecks(pages) {
  */
 async function x1CoreChecks(s, hasSubgroups) {
   // (W76 removed historyEdgeConfidence, D5003)
-  // (W76 removed hitLobeFilterGrazing and historyEdgeConfidence; hitColorConeGrazing 1 is W76's default)
-  const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitColorConeGrazing: 1 };
+  // (W76 removed hitLobeFilterGrazing and historyEdgeConfidence; its cone shrink hitColorConeGrazing defaults to 0)
+  const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitColorConeGrazing: 0 };
   // 'relative' at k 0 is off (review: thickness 0 would make smoothstep(0, 0, d) undefined)
   for (const [name, def] of [...Object.entries(X1_DEFAULTS), ['all of them', X1_DEFAULTS], ['relative at k 0', { thicknessDepthMode: 'relative', thicknessDepthFactor: 0 }]]) {
     const r = await s.T(`window.__p.identity({}, ${JSON.stringify(typeof def === 'object' ? def : { [name]: def })})`);
@@ -342,8 +342,8 @@ async function x1CoreChecks(s, hasSubgroups) {
  * ('relative' 0.02), so there the explicit RT-off values are not the defaults and are not compared.
  */
 const X1_KEYS = ['quadBaseRotation', 'thicknessDepthFactor', 'thicknessDepthMode', 'hitColorConeGrazing'];
-const X1_DEFAULT_SETTINGS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitColorConeGrazing: 1 };
-const X1_DEFAULT_SETTINGS_RT = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0.02, thicknessDepthMode: 'relative', hitColorConeGrazing: 1 };
+const X1_DEFAULT_SETTINGS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitColorConeGrazing: 0 };
+const X1_DEFAULT_SETTINGS_RT = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0.02, thicknessDepthMode: 'relative', hitColorConeGrazing: 0 };
 const X1_SHOT = `async (keys, settings, n, pan) => {
   const p = window.__p;
   p.stop();
@@ -413,7 +413,7 @@ async function grazingSweep(pages) {
       for (const mixed of [1, 0]) {
         for (const g of [0, 0.5, 1]) {
           const m = await p.T(`(async () => { const P = window.__p;
-            P.setSetting('s.hitLobeFilterMixed', ${mixed === 1 ? 'null' : mixed}); P.setSetting('s.hitColorConeGrazing', ${g === 1 ? 'null' : g});
+            P.setSetting('s.hitLobeFilterMixed', ${mixed === 1 ? 'null' : mixed}); P.setSetting('s.hitColorConeGrazing', ${g === 0 ? 'null' : g});
             await P.step(2);
             return P.measure({ samples: ${spp}, warmup: 24, frames: 8, methods: ['ours-denoised', 'ours-rt'] }); })()`);
           const by = Object.fromEntries(m.rows.map((r) => [r.region, r]));
