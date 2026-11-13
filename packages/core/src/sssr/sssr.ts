@@ -116,6 +116,16 @@ export interface ScreenSpaceReflectionsOptions {
    * off unless asked for. Default false.
    */
   hitSource?: boolean;
+  /**
+   * W78 (X3 phase B, D5140): write `outputs.sampleDirection`, each pixel's sample for a denoiser that
+   * weights samples by BRDF / pdf (denoiser-core `SpecularInputs.direction`; FFX `brdfWeights`):
+   * rgba32float, the ray's world direction in .xyz and the pdf it was drawn with in .w (0 where no
+   * ray reached the pixel this frame, and on mirrors). The quad copies carry their ray's sample; a
+   * ray-traced pass over the miss list traces the same directions, so its pixels keep theirs. One
+   * more storage texture in intersect (4 of the default 4) and a clear per frame, so off unless asked
+   * for. Not meaningful with `rayReuse: 'ratio'` (its resolve already mixed the samples). Default false.
+   */
+  sampleDirection?: boolean;
 }
 
 /** The largest `mirrorBias` `mirrorBiasCompensate` uses (W72): the sample keeps alpha x 0.1. */
@@ -514,6 +524,11 @@ export interface ScreenSpaceReflectionsOutputs {
   hitColorPyramid?: GPUTexture;
   /** W72: this frame ran `hitColorFilter: 'cone'` (false while its pipelines build, or where it is unavailable). */
   hitColorFilterActive?: boolean;
+  /**
+   * W78 (`options.sampleDirection`, D5140): rgba32float, each pixel's ray direction (world, .xyz) and
+   * its pdf (.w; 0 = no sample this frame). denoiser-core's `SpecularInputs.direction`.
+   */
+  sampleDirection?: GPUTexture;
 }
 
 export interface ScreenSpaceReflections {
@@ -583,6 +598,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const fallback = options.radianceFallback ?? constantRadianceFallback();
   const useMissList = options.missList ?? false;
   const useHitSource = options.hitSource ?? false;
+  const useSample = options.sampleDirection ?? false;
   const timer = options.timestamps && PassTimer.supported(device) ? new PassTimer(device) : undefined;
   // FFX: min(7, ceil(log2(max(w, h)))) -- a copy at mip 0 plus six reduced mips.
   const mipCount = depthPyramidMipCount(W, H);
@@ -601,6 +617,8 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const confidence = tex('confidence', 'r32float');
   const extractedRoughness = tex('extracted roughness', 'r32float');
   const blueNoise = tex('blue noise', 'rgba8unorm', 128, 128);
+  // W78 (D5140): cleared by a render pass each frame, so it is also a render attachment
+  const sampleDirection = useSample ? device.createTexture({ label: 'ssr sample direction', size: [W, H], format: 'rgba32float', usage: STex | GPUTextureUsage.RENDER_ATTACHMENT }) : undefined;
   const rayList = buf('ray list', W * H * 4);
   const denoiserTileList = buf('denoiser tile list', tilesX * tilesY * 4);
   const tileFlags = buf('tile flags', tilesX * tilesY * 4);
@@ -668,7 +686,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     bufEntry(6, 'read-only-storage'), bufEntry(7, 'read-only-storage'),
     storageTexEntry(8, 'rgba16float'), storageTexEntry(9, 'r32float'), storageTexEntry(10, 'r32float'),
     ...(useMissList ? [bufEntry(11), bufEntry(12)] : []), texEntry(13), texEntry(14), texEntry(15), texEntry(16), texEntry(17),
-    ...(useHitSource ? [texEntry(18)] : [])];
+    ...(useHitSource ? [texEntry(18)] : []), ...(useSample ? [storageTexEntry(22, 'rgba32float')] : [])];
   const intersectBgl = device.createBindGroupLayout({ label: 'ssr intersect', entries: intersectEntries });
   // the re-shade's radiance (W44): the hit shading's @group(3), groups 1-2 empty where unused
   const hitShading = options.hitSpecularShading;
@@ -679,12 +697,12 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const fallbackCounts = { storageBuffers: fallback.storageBufferCount, storageTextures: fallback.storageTextureCount, sampledTextures: fallback.sampledTextureCount };
   const hitShadingCounts = hitShading?.layout ? { storageBuffers: hitShading.storageBufferCount, storageTextures: hitShading.storageTextureCount, sampledTextures: hitShading.sampledTextureCount } : {};
   checkStageLimits(device, 'ssr: the intersect pipeline', [
-    ['pass', { storageBuffers: useMissList ? 4 : 2, storageTextures: 3, sampledTextures: useHitSource ? 11 : 10 }],
+    ['pass', { storageBuffers: useMissList ? 4 : 2, storageTextures: useSample ? 4 : 3, sampledTextures: useHitSource ? 11 : 10 }],
     ['radiance fallback', fallbackCounts],
     ['hit shading', hitShadingCounts],
   ]);
   const layoutsWith = (bgl: GPUBindGroupLayout) => (hitShading?.layout ? [bgl, fallback.layout ?? emptyBgl, emptyBgl, hitShading.layout] : withFallback(bgl));
-  const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource), layoutsWith(intersectBgl));
+  const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource, false, false, useSample), layoutsWith(intersectBgl));
 
   // W73 (rayReuse 'ratio', D5040): intersect's storing variant and the resolve are built with
   // createComputePipelineAsync on the first 'ratio' frame; the tracer keeps copying until both resolve, so
@@ -707,7 +725,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
       if (W * H * 16 > maxBinding) throw new Error(`ssr: rayReuse 'ratio' at ${W}x${H} needs a ${W * H * 16} B record buffer; the device's maxStorageBufferBindingSize is ${maxBinding}`);
       // intersect's group 0 plus the record buffer (binding 19), and the resolve's own group (D4900)
       checkStageLimits(device, "ssr: the intersect pipeline with rayReuse 'ratio'", [
-        ['pass', { storageBuffers: (useMissList ? 4 : 2) + 1, storageTextures: 3, sampledTextures: useHitSource ? 11 : 10 }],
+        ['pass', { storageBuffers: (useMissList ? 4 : 2) + 1, storageTextures: useSample ? 4 : 3, sampledTextures: useHitSource ? 11 : 10 }],
         ['radiance fallback', fallbackCounts],
         ['hit shading', hitShadingCounts],
       ]);
@@ -725,7 +743,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     });
     Promise.all([
       device.createComputePipelineAsync(pipeDescriptor(`intersect (${variant}, ray reuse)`,
-        intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource, true), layoutsWith(intersectBgl))),
+        intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource, true, false, useSample), layoutsWith(intersectBgl))),
       device.createComputePipelineAsync(pipeDescriptor('ray reuse', rayReuseResolveWgsl(inverted, fallback.wgsl), withFallback(resolveBgl))),
     ]).then(([intersectPipe, resolvePipe]) => {
       if (destroyed) return;
@@ -762,7 +780,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     const reuse = which === 'reuse';
     try {
       checkStageLimits(device, `ssr: the intersect pipeline with hitColorFilter 'cone'${reuse ? " and rayReuse 'ratio'" : ''}`, [
-        ['pass', { storageBuffers: (useMissList ? 4 : 2) + (reuse ? 1 : 0), storageTextures: 3, sampledTextures: (useHitSource ? 11 : 10) + 1 }],
+        ['pass', { storageBuffers: (useMissList ? 4 : 2) + (reuse ? 1 : 0), storageTextures: useSample ? 4 : 3, sampledTextures: (useHitSource ? 11 : 10) + 1 }],
         ['radiance fallback', fallbackCounts],
         ['hit shading', hitShadingCounts],
       ]);
@@ -771,7 +789,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     coneWarm ??= warmDownsampler(device, 'rgba16float', W, H, hitColorLevels, sourceFormat);
     Promise.all([
       device.createComputePipelineAsync(pipeDescriptor(`intersect (${variant}, cone${reuse ? ', ray reuse' : ''})`,
-        intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource, reuse, true), layoutsWith(bgl))),
+        intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource, reuse, true, useSample), layoutsWith(bgl))),
       coneWarm,
     ]).then(([pipe]) => {
       if (destroyed) return;
@@ -805,6 +823,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     radiance, hitDistance, confidence, extractedRoughness, depthHierarchy, blueNoise, rayList, denoiserTileList, tileFlags,
     rayCounter, indirectArgs, missList, missCounter, missArgs,
     ...(useMissList ? { missCapacity, missFillCapacity } : {}),
+    ...(sampleDirection ? { sampleDirection } : {}),
   };
 
   let frameIndex = 0;
@@ -954,7 +973,8 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
         { binding: 17, resource: (inputs.clearcoat ?? dummyMaterial).createView() },
         ...(useHitSource ? [{ binding: 18, resource: (inputs.hitSource ?? dummyVariance).createView() }] : []),
         ...(R ? [{ binding: 19, resource: { buffer: R.records } }] : []),
-        ...(K ? [{ binding: 20, resource: hitColorPyramid!.createView() }, { binding: 21, resource: hitColorSampler! }] : [])],
+        ...(K ? [{ binding: 20, resource: hitColorPyramid!.createView() }, { binding: 21, resource: hitColorSampler! }] : []),
+        ...(sampleDirection ? [{ binding: 22, resource: sampleDirection.createView() }] : [])],
     });
     const resolveGroup = R && device.createBindGroup({
       label: 'ssr ray reuse', layout: R.resolveBgl,
@@ -990,6 +1010,8 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
       downsamplerFor(device).encodePass(p, hitColorPyramid!, { source: { texture: coneSource }, reduction: 'average' });
       p.end();
     }
+    // W78 (D5140): no sample until a ray writes one
+    if (sampleDirection) cmd.beginRenderPass({ label: 'ssr sample direction clear', colorAttachments: [{ view: sampleDirection.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end();
     pass('intersect', (p) => {
       p.setPipeline(K ? K.pipe : R ? R.intersectPipe : intersectPipe); p.setBindGroup(0, intersectGroup);
       if (fallback.layout) p.setBindGroup(1, inputs.fallbackBindGroup!);
@@ -1024,7 +1046,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
       return timer.timings;
     },
     destroy() {
-      for (const t of [depthHierarchy, radiance, hitDistance, confidence, extractedRoughness, blueNoise, dummyVariance, dummyHistory, dummyMaterial, hitColorPyramid]) t?.destroy();
+      for (const t of [depthHierarchy, radiance, hitDistance, confidence, extractedRoughness, blueNoise, dummyVariance, dummyHistory, dummyMaterial, hitColorPyramid, sampleDirection]) t?.destroy();
       for (const b of [rayList, denoiserTileList, tileFlags, rayCounter, indirectArgs, missList, missCounter, missArgs, params, noiseTable, reuseRecords]) b?.destroy();
       destroyed = true;
       timer?.destroy();

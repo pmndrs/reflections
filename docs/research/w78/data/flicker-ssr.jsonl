@@ -1,0 +1,24 @@
+{"scene":"mirrorWall","round":0,"name":"off","drift":[0.038,0.0119,1],"rest":[0.003,0.0273],"orbit":[0.0739,0.55,1.5185]}
+{"scene":"mirrorWall","round":0,"name":"keepBlack","drift":[0.0339,0.0109,1],"rest":[0.0032,0.0278],"orbit":[0.0733,0.5497,1.5177]}
+{"scene":"mirrorWall","round":0,"name":"combine","drift":[0.0315,0.0114,1],"rest":[0.0041,0.0511],"orbit":[0.0749,0.5502,1.5198]}
+{"scene":"mirrorWall","round":0,"name":"combine + keepBlack","drift":[0.0304,0.0074,1],"rest":[0.0037,0.0407],"orbit":[0.0743,0.5499,1.5179]}
+{"scene":"mirrorWall","round":1,"name":"off","drift":[0.0292,0.0099,1],"rest":[0.0038,0.0422],"orbit":[0.0725,0.5499,1.5188]}
+{"scene":"mirrorWall","round":1,"name":"keepBlack","drift":[0.0326,0.0144,1],"rest":[0.0038,0.0362],"orbit":[0.0749,0.5499,1.5184]}
+{"scene":"mirrorWall","round":1,"name":"combine","drift":[0.032,0.006,1],"rest":[0.0041,0.0546],"orbit":[0.0744,0.5503,1.5202]}
+{"scene":"mirrorWall","round":1,"name":"combine + keepBlack","drift":[0.0321,0.0069,1],"rest":[0.0038,0.0367],"orbit":[0.073,0.5501,1.5193]}
+{"scene":"contact","round":0,"name":"off","drift":[0.1873,0.0558,3],"rest":[0.0745,1.0818],"orbit":[0.2469,13.1173,33.6314]}
+{"scene":"contact","round":0,"name":"keepBlack","drift":[0.1858,0.0408,3],"rest":[0.074,1.0704],"orbit":[0.2547,13.1172,33.6356]}
+{"scene":"contact","round":0,"name":"combine","drift":[0.1773,0.0347,2],"rest":[0.0727,1.0196],"orbit":[0.2534,13.1175,33.6323]}
+{"scene":"contact","round":0,"name":"combine + keepBlack","drift":[0.182,0.0422,3],"rest":[0.0736,1.0339],"orbit":[0.2553,13.1177,33.6314]}
+{"scene":"contact","round":1,"name":"off","drift":[0.1853,0.035,3],"rest":[0.0745,1.0725],"orbit":[0.25,13.1165,33.629]}
+{"scene":"contact","round":1,"name":"keepBlack","drift":[0.1915,0.0483,3],"rest":[0.0725,1.0318],"orbit":[0.2509,13.1174,33.6279]}
+{"scene":"contact","round":1,"name":"combine","drift":[0.1946,0.0522,3],"rest":[0.0726,1.0303],"orbit":[0.2531,13.1175,33.626]}
+{"scene":"contact","round":1,"name":"combine + keepBlack","drift":[0.1788,0.0372,2],"rest":[0.072,1.0232],"orbit":[0.2517,13.1176,33.631]}
+{"scene":"facingMirrors","round":0,"name":"off","drift":[0.0365,0.0604,1],"rest":[0.0047,0.0814],"orbit":[0.0751,1.726,4.2502]}
+{"scene":"facingMirrors","round":0,"name":"keepBlack","drift":[0.0337,0.0447,1],"rest":[0.0044,0.0749],"orbit":[0.0761,1.7263,4.251]}
+{"scene":"facingMirrors","round":0,"name":"combine","drift":[0.0311,0.0479,1],"rest":[0.0043,0.0768],"orbit":[0.0759,1.7261,4.2522]}
+{"scene":"facingMirrors","round":0,"name":"combine + keepBlack","drift":[0.0412,0.0696,1],"rest":[0.0045,0.069],"orbit":[0.0759,1.7262,4.2513]}
+{"scene":"facingMirrors","round":1,"name":"off","drift":[0.0357,0.0499,1],"rest":[0.0046,0.0709],"orbit":[0.0762,1.726,4.2491]}
+{"scene":"facingMirrors","round":1,"name":"keepBlack","drift":[0.0403,0.0729,1],"rest":[0.0048,0.086],"orbit":[0.0759,1.7264,4.2528]}
+{"scene":"facingMirrors","round":1,"name":"combine","drift":[0.0316,0.044,1],"rest":[0.0046,0.0834],"orbit":[0.074,1.7262,4.2524]}
+{"scene":"facingMirrors","round":1,"name":"combine + keepBlack","drift":[0.034,0.0414,1],"rest":[0.0046,0.0782],"orbit":[0.075,1.726,4.2514]}
