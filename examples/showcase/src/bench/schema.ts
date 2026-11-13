@@ -177,6 +177,10 @@ export const SETTINGS: Setting[] = [
     pageDefault: 'final', appliesTo: OURS_SSR, api: 'settings.hitColor (+ historySource)',
     tradeoff: '`current` (FFX, the package default) has no reflections in reflections: a mirror seen in a mirror is black (W9: 99.6% px). `final` reprojects last frame\'s final image (D69, D1002): mirror-in-mirror, one frame late, can ghost.',
   }),
+  bool('s.historyEdgeConfidence', 'sssr', 'History edge confidence', false, {
+    appliesTo: OURS_SSR, api: 'settings.historyEdgeConfidence',
+    tradeoff: 'W71 (X1 #4, D5003): with Hit colour from last frame and Hit specular \'off\' (the only case a hit reads last frame\'s colour), the edge fade is min(now, previous) and a hit that was off screen last frame gets confidence 0 (probe / RT) instead of this frame\'s colour without specular: no lit / unlit pops at the screen edge while panning. More misses near the edges: more traced rays with RT. No effect with the re-shade (default).',
+  }),
   sel('reshade', 'sssr', 'Hit specular (re-shade)', [['reshade', 'specular along the ray (re-shade)'], ['off', 'screen colour as is (FFX)']], 'reshade', {
     appliesTo: OURS_SSR, api: 'settings.hitShading',
     tradeoff: 'W44 (D3540): a hit keeps its screen diffuse and evaluates its specular along the ray. Fixes carConcept\'s reflected door (48 -> 100 vs PT 118, W50); with the lobe filter and the denoiser it is the halo under the door / skirt (lip 37 -> 80 vs PT 48, D3610).',

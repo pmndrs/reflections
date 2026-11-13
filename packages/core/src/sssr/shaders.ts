@@ -581,7 +581,26 @@ fn lobeFilterGrazingScale(n_dot_v: f32, alpha: f32) -> f32 {
   return mix(1.0, mix(saturate(2.0 * n_dot_v), 1.0, sqrt(sqrt(max(alpha, 0.0)))), P.hitLobeFilterGrazing);
 }
 
+// W71 (X1 #4, D5003; Diligent SSR_Intersection.fx): with the hit colour from last frame, the screen
+// edge fade is min(this frame's, the previous position's), and a hit whose previous position was off
+// screen gets no confidence (FFX's hybrid sample takes this frame's specular-free colour there, a pop).
+const X1_HISTORY_EDGE: u32 = 1u;
 const X1_THICKNESS_RELATIVE: u32 = 2u;
+fn screenEdgeVignette(uv: vec2f) -> f32 {
+  let size = vec2f(P.renderSize);
+  let fov = 0.05 * vec2f(size.y / size.x, 1.0); // validateHit's fade
+  let border = smoothstep(vec2f(0.0), fov, uv) * (1.0 - smoothstep(vec2f(1.0) - fov, vec2f(1.0), uv));
+  return border.x * border.y;
+}
+fn historyEdgeScale(hit_uv: vec2f) -> f32 {
+  let pc = clamp(vec2i(vec2f(P.renderSize) * hit_uv), vec2i(0), vec2i(P.renderSize) - 1);
+  let prev_uv = hit_uv - textureLoad(t_motion, pc, 0).xy * P.motionVectorScale;
+  if (any(prev_uv < vec2f(0.0)) || any(prev_uv >= vec2f(1.0))) { return 0.0; }
+  let now = screenEdgeVignette(hit_uv);
+  let prev = screenEdgeVignette(prev_uv);
+  if (prev >= now || now <= 0.0) { return 1.0; }
+  return prev / now;
+}
 
 fn reshadeHit(hit_uv: vec2f, world_hit: vec3f, ray_direction: vec3f) -> vec3f {
   let p = clamp(vec2i(vec2f(P.renderSize) * hit_uv), vec2i(0), vec2i(P.renderSize) - 1);
@@ -841,6 +860,10 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   }
   var confidence = 0.0;
   if (valid_hit) { confidence = validateHit(hit, (*r).uv, world_space_ray, screen_size, thickness, (*r).march.most_detailed_mip); }
+  // W71 (X1 #4, D5003): historyEdgeConfidence, where the hit's colour comes from last frame.
+  if (confidence > 0.0 && (P.x1Flags & X1_HISTORY_EDGE) != 0u && P.hitColorFromHistory != 0u && P.hitShadingMode != HIT_SHADING_RESHADE) {
+    confidence *= historyEdgeScale(hit.xy);
+  }
   var hit_radiance = vec3f(0.0);
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
   if (confidence > 0.0) {

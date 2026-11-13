@@ -270,6 +270,14 @@ export interface ScreenSpaceReflectionsSettings {
    * adapter passes it to the ray-traced pass unless `traceSettings` sets its own.
    */
   hitLobeFilterGrazing?: number;
+  /**
+   * W71 (X1 #4, D5003): with `hitColor: 'history'` (and `hitShading: 'off'`, where a hit's colour is
+   * read from last frame), the screen-edge fade becomes min(this frame's, the previous position's),
+   * and a hit whose previous position was off screen gets confidence 0 (it goes to the probe or the
+   * miss list) instead of this frame's colour without specular. More misses near the edges while
+   * the camera moves: more traced rays with RT on. Default false.
+   */
+  historyEdgeConfidence?: boolean;
 }
 
 const QUAD_BASE_ROTATION: Record<string, number> = { fixed: 0, frame: 1, pattern: 2 };
@@ -605,7 +613,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[141] = QUAD_BASE_ROTATION[s.quadBaseRotation ?? 'fixed'] ?? 0;
     f[142] = Math.max(0, s.thicknessDepthFactor ?? 0);
     f[143] = Math.min(1, Math.max(0, s.hitLobeFilterGrazing ?? 0));
-    u[144] = ((s.thicknessDepthMode ?? 'add') === 'relative' ? 2 : 0);
+    u[144] = (s.historyEdgeConfidence ? 1 : 0) | ((s.thicknessDepthMode ?? 'add') === 'relative' ? 2 : 0);
     device.queue.writeBuffer(params, 0, data);
   }
 

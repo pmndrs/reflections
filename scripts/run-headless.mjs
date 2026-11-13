@@ -6,6 +6,8 @@
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | bench | probe-layouts)
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
+//   pnpm check -- --only ssr-exp-x1              # W71 (X1): each X1 setting at its default = absent on examples/ssr; historyEdgeConfidence at rest / panning
+//   pnpm check -- --only ssr-exp-grazing         # W71 (X1 #3): grazing sweep 5/15/30/60 deg vs the path tracer, hitLobeFilterGrazing 0 / 0.5 / 1 (minutes)
 //   pnpm check -- --only hit-source              # W53: the denoiser's hit source through the seam (needs the Denoiser repo's W53 branch)
 //   pnpm check -- --only probe-bindings          # W62: Sponza's three-size probe set at the default 16 sampled textures
 //   pnpm check -- --only probe-bindings-measure  # W62: Sponza with fewer probe sizes vs the path tracer (MAD, PSNR), lookup ms; out/w62-probe-bindings.json
@@ -268,7 +270,7 @@ async function sssrCoreChecks(pages) {
  * images bit for bit as the setting absent; the rotated quad bases keep the variants' parity.
  */
 async function x1CoreChecks(s, hasSubgroups) {
-  const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitLobeFilterGrazing: 0 };
+  const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitLobeFilterGrazing: 0, historyEdgeConfidence: false };
   for (const [name, def] of [...Object.entries(X1_DEFAULTS), ['all four', X1_DEFAULTS]]) {
     const r = await s.T(`window.__p.identity({}, ${JSON.stringify(typeof def === 'object' ? def : { [name]: def })})`);
     check(`sssr X1 ${name}: default ${JSON.stringify(def)} = absent, bit for bit`, r.listsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
@@ -301,6 +303,54 @@ async function x1CoreChecks(s, hasSubgroups) {
     check(`sssr X1 parity (${Object.entries(cfg).map(([k, v]) => `${k} ${v}`).join(', ')}): lists and images`,
       r.rayListSame && r.tileListSame && r.missListSame && r.tileFlagsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
       `rays ${r.rays}, misses ${r.misses}, radiance ${r.radianceDiffPixels} px`);
+  }
+}
+
+/**
+ * `--only ssr-exp-x1` (W71, X1: D5000-D5003): on examples/ssr (denoised, AA off, hit colour from last
+ * frame, re-shade off so historyEdgeConfidence applies; RT off and on), every X1 setting at its default
+ * renders the same image as the setting absent (max 0/255; the absent run repeated gives the noise
+ * floor), and historyEdgeConfidence changes nothing at rest and something while the camera pans.
+ */
+const X1_KEYS = ['quadBaseRotation', 'thicknessDepthFactor', 'thicknessDepthMode', 'hitLobeFilterGrazing', 'historyEdgeConfidence'];
+const X1_DEFAULT_SETTINGS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitLobeFilterGrazing: 0, historyEdgeConfidence: false };
+const X1_SHOT = `async (keys, settings, n, pan) => {
+  const p = window.__p;
+  p.stop();
+  for (const k of keys) delete p.ssr.settings[k];
+  p.setSettings({ frameIndex: 7, minTraversalOccupancy: 0, ...settings });
+  const cam = p.kit.camera, c = p.controls;
+  if (!window.__x1Pose) window.__x1Pose = { pos: cam.position.clone(), target: c.target.clone() };
+  cam.position.copy(window.__x1Pose.pos); c.target.copy(window.__x1Pose.target); c.update();
+  p.ssr.resetHistory(); p.hybrid.resetHistory(); p.aa?.reset?.();
+  for (let i = 0; i < n; i++) {
+    if (pan) { const a = pan * (i - n + 1); const d = window.__x1Pose.target.clone().sub(window.__x1Pose.pos); d.applyAxisAngle(new p.THREE.Vector3(0, 1, 0), a); c.target.copy(window.__x1Pose.pos).add(d); c.update(); }
+    await p.step(1);
+  }
+  return p.shot();
+}`;
+async function x1Checks(pages) {
+  for (const [scene, rt] of [['mirrorWall', 0], ['mirrorWall', 1], ['facingMirrors', 0]]) {
+    const pg = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&scene=${scene}&rt=${rt}&denoise=1&aa=off&hit=final&reshade=off`);
+    pages.push(pg);
+    const shot = (s, n = 8, pan = 0) => pg.T(`(${X1_SHOT})(${JSON.stringify(X1_KEYS)}, ${JSON.stringify(s)}, ${n}, ${pan})`);
+    const diff = (a, b) => pg.T(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
+    const A = await shot({}), A2 = await shot({});
+    const floor = await diff(A, A2);
+    const rows = [];
+    for (const [k, v] of [...Object.entries(X1_DEFAULT_SETTINGS), ['all', X1_DEFAULT_SETTINGS]]) {
+      const d = await diff(A, await shot(typeof v === 'object' ? v : { [k]: v }));
+      rows.push(`${k} ${d.max}`);
+      check(`X1 ${scene}${rt ? ' rt' : ''}: ${k} at its default = absent (max /255)`, d.max === 0 || d.max <= floor.max, `max ${d.max}, mean ${d.mean.toFixed(4)}; absent twice: max ${floor.max}`);
+    }
+    if (scene === 'mirrorWall' && !rt) {
+      const rest = await diff(await shot({ historyEdgeConfidence: true }), A);
+      const panOff = await shot({}, 8, 0.02), panOn = await shot({ historyEdgeConfidence: true }, 8, 0.02);
+      const pan = await diff(panOff, panOn);
+      check('X1 historyEdgeConfidence: no change at rest, a change while panning (mirrorWall, hit final, re-shade off)', rest.max <= floor.max && pan.mean > 0,
+        `at rest max ${rest.max}; panning 0.02 rad / frame: mean ${pan.mean.toFixed(4)}, max ${pan.max}`);
+    }
+    pg.close();
   }
 }
 
@@ -2998,6 +3048,7 @@ async function main() {
     }
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (only === 'halo-options') await haloOptionChecks(pages); // W52 (D3640-D3642)
+    if (only === 'ssr-exp-x1') await x1Checks(pages); // W71 (X1, D5000-D5003): defaults identical on examples/ssr
     if (only === 'hit-source') await hitSourceChecks(pages); // W53 (D3660-D3662)
     if (runs('probe-layouts')) await probeLayoutChecks(pages); // W61
     if (runs('probe-bindings')) await probeBindingChecks(pages); // W62
