@@ -191,6 +191,8 @@ export class ScreenSpaceReflectionsPass {
   private halfTimer: PassTimer | null = null;
   private halfTimerDone: (() => void) | undefined;
   private lastTraceFrame: FrameInputs | null = null;
+  private latchedMode: 'full' | 'half' | 'mixed' = 'full';
+  private latchedMinRoughness = 0;
   /** W75 (X5 step 2): the full-res mirror path (tracer, traced pass, targets, history). */
   private mirrorCore: CoreTracer | null = null;
   private mirrorRt: TracedReflections | null = null;
@@ -228,24 +230,34 @@ export class ScreenSpaceReflectionsPass {
    * its half-size point-sampled copy (what the denoise seam must be given). Null before the first trace.
    */
   get traceFrame(): FrameInputs | null { return this.lastTraceFrame; }
-  /** W75: the resolution the last trace ran at. */
-  get resolution(): 'full' | 'half' { return this.lastTraceFrame && this.gbuffer.frame && this.lastTraceFrame !== this.gbuffer.frame ? 'half' : 'full'; }
+  /** W75: the resolution the last trace ran at (latched by `trace()`, not read from the settings). */
+  get resolution(): 'full' | 'half' { return this.latchedMode === 'full' ? 'full' : 'half'; }
   /**
-   * W75 (X5 step 2): the full-res mirror path's targets (created on first call, sized to the G-buffer):
-   * radiance / hit distance / confidence / source of the pixels below `settings.halfResMinRoughness`.
+   * W75: the mode the last trace ran in, latched once per `trace()`: 'full', 'half', or 'mixed' (half
+   * with the full-res mirror path below `traceMinRoughness`). `HybridReflections.update()` follows it,
+   * so a setting changed between `render()` and `update()` takes effect on the next frame.
+   */
+  get traceMode(): 'full' | 'half' | 'mixed' { return this.latchedMode; }
+  /** W75: the `halfResMinRoughness` the last trace used (0 unless `traceMode` is 'mixed'). */
+  get traceMinRoughness(): number { return this.latchedMinRoughness; }
+  /**
+   * W75 (X5 step 2): the full-res mirror path's targets: radiance / hit distance / confidence / source
+   * of the pixels below `settings.halfResMinRoughness`. Created 1x1 on the first call (composites built
+   * for half res bind them), sized to the G-buffer while the mirror path runs, back to 1x1 when it stops.
    */
   mirrorTargets(): ScreenSpaceMirrorTargets {
-    const { width: w, height: h } = this.gbuffer;
     this.mirrorOut ??= {
-      radiance: make('ssr mirror radiance', w, h, THREE.HalfFloatType, THREE.RGBAFormat),
-      hitDistance: make('ssr mirror hit distance', w, h, THREE.FloatType, THREE.RedFormat),
-      confidence: make('ssr mirror confidence', w, h, THREE.FloatType, THREE.RedFormat),
-      source: make('ssr mirror rt source', w, h, THREE.FloatType, THREE.RedFormat),
+      radiance: make('ssr mirror radiance', 1, 1, THREE.HalfFloatType, THREE.RGBAFormat),
+      hitDistance: make('ssr mirror hit distance', 1, 1, THREE.FloatType, THREE.RedFormat),
+      confidence: make('ssr mirror confidence', 1, 1, THREE.FloatType, THREE.RedFormat),
+      source: make('ssr mirror rt source', 1, 1, THREE.FloatType, THREE.RedFormat),
     };
-    for (const t of Object.values(this.mirrorOut)) if (t.image.width !== w || t.image.height !== h) (t as unknown as { setSize(w: number, h: number): void }).setSize(w, h);
     return this.mirrorOut;
   }
-  /** W75: the mirror path ran in the last trace (`halfResMinRoughness` > 0 with 'half'). */
+  private sizeMirrorTargets(w: number, h: number) {
+    for (const t of Object.values(this.mirrorTargets())) if (t.image.width !== w || t.image.height !== h) (t as unknown as { setSize(w: number, h: number): void }).setSize(w, h);
+  }
+  /** W75: the mirror path ran in the last trace (`traceMode` 'mixed'). */
   get mirrorPath(): boolean { return this.mirrorRan; }
   /** Per-pass GPU timestamps were asked for (`options.timestamps`). */
   get timestamps(): boolean { return this.options.timestamps ?? false; }
@@ -288,7 +300,11 @@ export class ScreenSpaceReflectionsPass {
   trace(fullFrame: FrameInputs, camera: THREE.Camera) {
     const device = this.device;
     // W75 (X5): 'half' traces a point-sampled half-size copy of the frame
+    // latched once per frame (review fix 5): the settings are read here and nowhere else this frame
     const half = (this.settings.reflectionResolution ?? 'full') === 'half';
+    const mirrorMin = half ? Math.max(0, this.settings.halfResMinRoughness ?? 0) : 0;
+    this.latchedMode = !half ? 'full' : mirrorMin > 0 ? 'mixed' : 'half';
+    this.latchedMinRoughness = mirrorMin;
     const [tw, th] = half ? halfResolutionSize(fullFrame.width, fullFrame.height) : [fullFrame.width, fullFrame.height];
     this.ensure(tw, th, fullFrame.conventions.depthInverted);
     const core = this.core!;
@@ -328,7 +344,6 @@ export class ScreenSpaceReflectionsPass {
     // W74 (X4, D5060): traceSettings.tracedMissRate 'half' needs the traced pass's fill this frame
     const tracing = !!this.rt && this.rayTracing;
     // W75 (X5 step 2): mirrors and near-mirrors go to the full-res mirror path, the half-res tracer skips them
-    const mirrorMin = half ? Math.max(0, this.settings.halfResMinRoughness ?? 0) : 0;
     const out = core.dispatch(cmd, inputs, {
       frameIndex: frame.frameIndex, ...this.settings, hitColor: useHistory ? 'history' : 'current', fallbackColor: [0, 0, 0],
       tracedMissRate: tracing ? this.traceSettings.tracedMissRate ?? 'full' : 'full', tracedHalfRateMinRoughness: this.traceSettings.tracedHalfRateMinRoughness,
@@ -347,7 +362,11 @@ export class ScreenSpaceReflectionsPass {
       this.sourceDirty = false;
     }
     if (mirrorMin > 0) this.traceMirror(cmd, fullFrame, mirrorMin, { wantHistory, appHistory, useHistory, hitShadingBindGroup, hitShading });
-    else if (this.mirrorCore) this.destroyMirror();
+    else if (this.mirrorCore || this.mirrorRan) {
+      // review fix 4: leaving 'mixed' frees the mirror tracer and shrinks its targets (half-res composites keep binding them)
+      this.destroyMirror();
+      this.sizeMirrorTargets(1, 1);
+    }
     this.mirrorRan = mirrorMin > 0;
     // after both traces read it: this frame's lit image becomes next frame's history
     if (source && !this.historySource) cmd.copyTextureToTexture({ texture: source }, { texture: history! }, size);
@@ -375,6 +394,7 @@ export class ScreenSpaceReflectionsPass {
     const device = this.device;
     const { width: w, height: h } = frame;
     const size = [w, h];
+    this.sizeMirrorTargets(w, h);
     const t = this.mirrorTargets();
     const m0 = this.mirrorCore;
     if (!m0 || m0.width !== w || m0.height !== h || m0.depthInverted !== frame.conventions.depthInverted) {

@@ -105,10 +105,18 @@ export class HybridReflections {
   private readonly quad: THREE.QuadMesh;
   private readonly signalMaterial = new THREE.NodeMaterial();
   private ran = false;
-  /** W75: the mode the signal material was built for ('mixed': half with the full-res mirror path); the half-res residual pass and its targets. */
-  private builtMode: 'full' | 'half' | 'mixed' = 'full';
-  private get builtHalf(): boolean { return this.builtMode !== 'full'; }
-  /** W75 (X5 step 2): `ssr.settings.halfResMinRoughness`, read by composites built in 'mixed' mode. */
+  /**
+   * W75: the resolution the signal / residual materials were built for ('half' covers 'mixed': the
+   * mirror path is a uniform, `mirrorMinRoughness`), and the one the app's last `composite()` was.
+   */
+  private builtFamily: 'full' | 'half' = 'full';
+  private get builtHalf(): boolean { return this.builtFamily === 'half'; }
+  private appFamily: 'full' | 'half' | null = null;
+  private warnedStale: 'full' | 'half' | null = null;
+  /**
+   * W75 (X5 step 2): the latched `traceMinRoughness` in frames the pass traced 'mixed', else 0, so a
+   * composite built for half res takes the mirror path only in frames that ran it (review fix 2).
+   */
   private readonly mirrorMinRoughness = uniform(0);
   private up: Upsampled | null = null;
   private upsample: ReflectionUpsample | null = null;
@@ -156,7 +164,7 @@ export class HybridReflections {
    * switch); composites built before keep their old sources, so rebuild those too. Drops history.
    */
   rebuild() {
-    this.builtMode = this.wantMode;
+    this.builtFamily = this.frameFamily ?? (this.wantHalf ? 'half' : 'full');
     if (this.builtHalf) {
       // W75 (X5): at half res, each texel composites its sample pixel (2x, 2y) of the full-res G-buffer
       const at = uv().mul(this.halfUVScale).sub(this.halfUVOffset);
@@ -175,19 +183,20 @@ export class HybridReflections {
 
   /** W75: the tracer's settings ask for half-res reflections. */
   private get wantHalf(): boolean { return (this.ssr.settings.reflectionResolution ?? 'full') === 'half'; }
-  /** W75: 'full', 'half', or 'mixed' (half with mirrors on the full-res path, step 2). */
-  private get wantMode(): 'full' | 'half' | 'mixed' {
-    return !this.wantHalf ? 'full' : (this.ssr.settings.halfResMinRoughness ?? 0) > 0 ? 'mixed' : 'half';
-  }
+  /** W75: the resolution the pass traced the last frame at (latched there; null before the first trace). */
+  private get frameFamily(): 'full' | 'half' | null { return this.ssr.traceFrame ? this.ssr.resolution : null; }
 
   /**
    * Build a composite (TSL nodes) that uses the denoised radiance while the denoiser runs. Pass a
    * `uv` to composite at another screen uv (e.g. a debug grid cell).
    */
   composite(opts: { uv?: N; signalOnly?: boolean } = {}): ScreenSpaceComposite {
-    // W75: in 'half' mode composites read the upsampled residual (the mode at call time is built in)
+    // W75: with reflectionResolution 'half' at call time, composites read the upsampled residual, and the
+    // full-res mirror path wherever a frame ran 'mixed' (a uniform, so half <-> mixed needs no rebuild).
+    // Between 'full' and 'half' the app rebuilds its composites (update() warns once when they are stale).
+    if (!opts.signalOnly) this.appFamily = this.wantHalf ? 'half' : 'full';
     if (this.wantHalf && !opts.signalOnly) {
-      const m = this.wantMode === 'mixed' ? { ...this.ssr.mirrorTargets(), minRoughness: this.mirrorMinRoughness } : null;
+      const m = { ...this.ssr.mirrorTargets(), minRoughness: this.mirrorMinRoughness };
       return this.compositeAt({ uv: opts.uv ?? uv(), upsampled: { ...this.ensureUpsampled(), mirror: m } });
     }
     return this.compositeAt(opts);
@@ -227,10 +236,17 @@ export class HybridReflections {
     const frame = this.ssr.gbuffer.frame;
     const tracer = this.ssr.tracer;
     this.roughnessThreshold.value = this.ssr.settings.roughnessThreshold ?? 0.447;
-    // W75: a mode change rebuilds the signal pass; composites the app built keep theirs (rebuild them)
-    if (this.wantMode !== this.builtMode) this.rebuild();
-    this.mirrorMinRoughness.value = this.ssr.settings.halfResMinRoughness ?? 0;
-    if (this.builtHalf && frame && tracer && this.ssr.resolution === 'half') { this.updateHalf(frame); return; }
+    // W75: follow the resolution the pass latched for this frame (review fix 5), not the settings: a
+    // change rebuilds the signal / residual materials; composites the app built keep theirs
+    const family = this.frameFamily;
+    if (family && family !== this.builtFamily) this.rebuild();
+    this.mirrorMinRoughness.value = this.ssr.traceMode === 'mixed' ? this.ssr.traceMinRoughness : 0;
+    if (family && this.appFamily && family !== this.appFamily && this.warnedStale !== family) {
+      this.warnedStale = family;
+      console.warn(`HybridReflections: the pass now traces at ${family} resolution but the last composite() was built for ${this.appFamily}; rebuild the composites, or reflections are wrong`);
+    }
+    if (family === 'full') this.releaseHalf();
+    if (family === 'half' && frame && tracer) { this.updateHalf(frame); return; }
     if (!this.seam || !this.denoise || !frame || !tracer) { this.denoiseActive.value = 0; this.ran = false; return; }
     const { renderer } = this.ssr;
     const { width: w, height: h } = frame;
@@ -326,9 +342,21 @@ export class HybridReflections {
         radiance: getGPUTexture(renderer, up.residual), confidence: getGPUTexture(renderer, up.confidence),
         hitDistance: getGPUTexture(renderer, up.hitDistance), source: getGPUTexture(renderer, up.source),
       },
-    }, { minRoughness: this.ssr.mirrorPath ? this.ssr.settings.halfResMinRoughness ?? 0 : 0, ...this.upsampleSettings }, this.timer?.pass('upsample'));
+    }, { minRoughness: this.ssr.traceMode === 'mixed' ? this.ssr.traceMinRoughness : 0, ...this.upsampleSettings }, this.timer?.pass('upsample'));
     this.timerDone = this.timer?.end(enc);
     device.queue.submit([enc.finish()]);
+  }
+
+  /**
+   * W75 (review fix 4): frames at full res free the half-res path's internal targets, and shrink the
+   * upsampled targets to 1x1 unless the app's composites still read them (built for half res).
+   */
+  private releaseHalf() {
+    this.upsample?.destroy(); this.upsample = null;
+    this.residualTarget?.dispose(); this.residualTarget = null;
+    if (this.up && this.appFamily !== 'half') {
+      for (const t of Object.values(this.up)) if (t.width !== 1 || t.height !== 1) (t as unknown as { setSize(w: number, h: number): void }).setSize(1, 1);
+    }
   }
 
   /** Drop the denoiser's history (camera cut, scene switch). */
