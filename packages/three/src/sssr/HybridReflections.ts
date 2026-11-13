@@ -98,7 +98,7 @@ export class HybridReflections {
    * resolution only. Default false.
    */
   denoiserSampleDirection = false;
-  private warnedSample: 'half' | null = null;
+  private warnedSample: 'ratio' | 'half' | null = null;
   /**
    * W75 (X5): the joint bilateral upsample's weights (core `ReflectionUpsampleSettings`: plane
    * tolerance, normal power, roughness tolerance, source mask, min weight sum, wide fallback), read
@@ -290,7 +290,9 @@ export class HybridReflections {
   }
 
   /**
-   * W78 (D5140, review fixes): the sample direction to hand the denoiser this frame, or undefined. With it, the denoiser's target lobe follows the alpha the tracer actually sampled this frame
+   * W78 (D5140, review fixes): the sample direction to hand the denoiser this frame, or undefined. Not with
+   * `rayReuse: 'ratio'` (its resolve already mixed the rays, so a pixel's value is no longer its own ray's; warns
+   * once). With it, the denoiser's target lobe follows the alpha the tracer actually sampled this frame
    * (`brdfAlphaScale`, the sample share of `mirrorBiasSplit`): compensation counts only while the cone filter
    * really ran (`outputs.hitColorFilterActive`; while its pipelines build, or where it is unavailable, the tracer
    * samples the full lobe). Set on denoisers with a `setOptions` (FFX), so apps don't repeat that gating.
@@ -298,6 +300,10 @@ export class HybridReflections {
   private sampleDirectionFor(t: GPUTexture | undefined): GPUTexture | undefined {
     if (!this.denoiserSampleDirection || !t) return undefined;
     const s = this.ssr.settings;
+    if (s.rayReuse === 'ratio') {
+      if (this.warnedSample !== 'ratio') { this.warnedSample = 'ratio'; console.warn("HybridReflections: denoiserSampleDirection is skipped with rayReuse 'ratio' (its resolve already mixed the samples)"); }
+      return undefined;
+    }
     const active = !!this.ssr.tracer?.outputs.hitColorFilterActive;
     const scale = mirrorBiasSplit({ ...s, hitColorFilter: active ? s.hitColorFilter : 'off' }).sample;
     (this.seam?.denoiser as { setOptions?: (o: Record<string, unknown>) => void } | undefined)?.setOptions?.({ brdfAlphaScale: scale });
