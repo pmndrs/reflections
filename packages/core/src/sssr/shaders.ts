@@ -55,7 +55,7 @@
 import { SCREEN_VISIBILITY_WGSL } from '../trace/hitShading';
 
 /** Byte size of the uniform block (struct Params below). */
-export const PARAMS_SIZE = 560;
+export const PARAMS_SIZE = 576;
 
 export const PARAMS_WGSL = /* wgsl */ `
 struct Params {
@@ -103,6 +103,7 @@ struct Params {
   hitLobeFilterMixed: f32,
   hitShadeOcclusion: u32,
   hasHitSource: u32,
+  quadCopySameSurface: u32,
 };
 @group(0) @binding(0) var<uniform> P: Params;
 `;
@@ -216,6 +217,22 @@ fn loadRoughness(p: vec2i) -> f32 {
 fn loadWorldSpaceNormal(p: vec2i) -> vec3f {
   return normalize(P.normalsUnpackMul * textureLoad(t_normal, p, 0).xyz + P.normalsUnpackAdd);
 }
+// The pixel whose ray a non-base quad pixel copies (FFX's copy: x neighbour for spq 2, the quad's
+// even-even pixel for spq 1).
+fn quadBase(id: vec2u, samples_per_quad: u32) -> vec2i {
+  if (samples_per_quad == 2u) { return vec2i(id ^ vec2u(1u, 0u)); }
+  return vec2i(id & vec2u(~1u));
+}
+// Same surface for the quad copy (D3740): view depth within 5 % and normals within ~25 degrees.
+fn sameSurfaceAsBase(p: vec2i, b_in: vec2i) -> bool {
+  let b = min(b_in, vec2i(P.renderSize) - 1);
+  let zp = textureLoad(t_depth_hierarchy, p, 0).x;
+  let zb = textureLoad(t_depth_hierarchy, b, 0).x;
+  let vp = screenSpaceToViewSpace(vec3f((vec2f(p) + 0.5) * P.inverseRenderSize, zp)).z;
+  let vb = screenSpaceToViewSpace(vec3f((vec2f(b) + 0.5) * P.inverseRenderSize, zb)).z;
+  let near = abs(vp - vb) <= 0.05 * max(abs(vp), abs(vb));
+  return near && dot(loadWorldSpaceNormal(p), loadWorldSpaceNormal(b)) > 0.9;
+}
 fn isReflectiveSurface(p: vec2i) -> bool {
   let z = textureLoad(t_depth_hierarchy, p, 0).x;
   return ${inverted ? 'z > FAR_PLANE' : 'z < FAR_PLANE'};
@@ -236,7 +253,14 @@ fn main(@builtin(local_invocation_index) lid: u32, @builtin(workgroup_id) wg: ve
   needs_ray = needs_ray && is_glossy_reflection && is_reflective_surface;
   let needs_denoiser = needs_ray && !isMirrorReflection(roughness);
   let is_base_ray = isBaseRay(dispatch_thread_id, P.samplesPerQuad);
-  needs_ray = needs_ray && (!needs_denoiser || is_base_ray);
+  // W58 (D3740), quadCopy 'sameSurface': a quad pixel on another surface than the ray that would be
+  // copied to it (a silhouette inside the quad) traces its own ray. FFX copies regardless and leaves
+  // the edge to its denoiser; without it (or across a hit-source split) the copy shows as 2x2 steps.
+  var own_ray = false;
+  if (P.quadCopySameSurface != 0u && needs_denoiser && !is_base_ray) {
+    own_ray = !sameSurfaceAsBase(px, quadBase(dispatch_thread_id, P.samplesPerQuad));
+  }
+  needs_ray = needs_ray && (!needs_denoiser || is_base_ray || own_ray);
   if (P.temporalVarianceGuidedTracingEnabled != 0u && needs_denoiser && !needs_ray) {
     let has_temporal_variance = textureLoad(t_variance, px, 0).x > P.varianceThreshold;
     needs_ray = needs_ray || has_temporal_variance;
