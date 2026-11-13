@@ -164,18 +164,13 @@ export class HybridReflections {
   private readonly signalMaterial = new THREE.NodeMaterial();
   private ran = false;
   /**
-   * W75: the resolution the signal / residual materials were built for ('half' covers 'mixed': the
-   * mirror path is a uniform, `mirrorMinRoughness`), and the one the app's last `composite()` was.
+   * W75: the resolution the signal / residual materials were built for, and the one the app's last
+   * `composite()` was.
    */
   private builtFamily: 'full' | 'half' = 'full';
   private get builtHalf(): boolean { return this.builtFamily === 'half'; }
   private appFamily: 'full' | 'half' | null = null;
   private warnedStale: 'full' | 'half' | null = null;
-  /**
-   * W75 (X5 step 2): the latched `traceMinRoughness` in frames the pass traced 'mixed', else 0, so a
-   * composite built for half res takes the mirror path only in frames that ran it (review fix 2).
-   */
-  private readonly mirrorMinRoughness = uniform(0);
   private up: Upsampled | null = null;
   private upsample: ReflectionUpsample | null = null;
   private residualTarget: THREE.RenderTarget | null = null;
@@ -308,14 +303,10 @@ export class HybridReflections {
    * `uv` to composite at another screen uv (e.g. a debug grid cell).
    */
   composite(opts: { uv?: N; signalOnly?: boolean } = {}): ScreenSpaceComposite {
-    // W75: with reflectionResolution 'half' at call time, composites read the upsampled residual, and the
-    // full-res mirror path wherever a frame ran 'mixed' (a uniform, so half <-> mixed needs no rebuild).
+    // W75: with reflectionResolution 'half' at call time, composites read the upsampled residual.
     // Between 'full' and 'half' the app rebuilds its composites (update() warns once when they are stale).
     if (!opts.signalOnly) this.appFamily = this.wantHalf ? 'half' : 'full';
-    if (this.wantHalf && !opts.signalOnly) {
-      const m = { ...this.ssr.mirrorTargets(), minRoughness: this.mirrorMinRoughness };
-      return this.compositeAt({ uv: opts.uv ?? uv(), upsampled: { ...this.ensureUpsampled(), mirror: m } });
-    }
+    if (this.wantHalf && !opts.signalOnly) return this.compositeAt({ uv: opts.uv ?? uv(), upsampled: this.ensureUpsampled() });
     return this.compositeAt(opts);
   }
 
@@ -357,7 +348,6 @@ export class HybridReflections {
     // change rebuilds the signal / residual materials; composites the app built keep theirs
     const family = this.frameFamily;
     if (family && family !== this.builtFamily) this.rebuild();
-    this.mirrorMinRoughness.value = this.ssr.traceMode === 'mixed' ? this.ssr.traceMinRoughness : 0;
     if (family && this.appFamily && family !== this.appFamily && this.warnedStale !== family) {
       this.warnedStale = family;
       console.warn(`HybridReflections: the pass now traces at ${family} resolution but the last composite() was built for ${this.appFamily}; rebuild the composites, or reflections are wrong`);
@@ -412,9 +402,9 @@ export class HybridReflections {
    * W78 (D5140, review fixes): the sample direction to hand the denoiser this frame, or undefined. Not with
    * `rayReuse: 'ratio'` (its resolve already mixed the rays, so a pixel's value is no longer its own ray's; warns
    * once). With it, the denoiser's target lobe follows the alpha the tracer actually sampled this frame
-   * (`brdfAlphaScale`, the sample share of `mirrorBiasSplit`): compensation counts only while the cone filter
-   * really ran (`outputs.hitColorFilterActive`; while its pipelines build, or where it is unavailable, the tracer
-   * samples the full lobe). Set on denoisers with a `setOptions` (FFX), so apps don't repeat that gating.
+   * (`brdfAlphaScale`, the sample share of `mirrorBiasSplit` of `outputs.settings`, the resolved settings the
+   * tracer ran: compensation counts only while the cone filter really ran; while its pipelines build, or where
+   * it is unavailable, the tracer samples the full lobe). Set on denoisers with a `setOptions` (FFX), so apps don't repeat that gating.
    */
   private sampleDirectionFor(t: GPUTexture | undefined): GPUTexture | undefined {
     if (!this.denoiserSampleDirection || !t) return undefined;
@@ -423,8 +413,9 @@ export class HybridReflections {
       if (this.warnedSample !== 'ratio') { this.warnedSample = 'ratio'; console.warn("HybridReflections: denoiserSampleDirection is skipped with rayReuse 'ratio' (its resolve already mixed the samples)"); }
       return undefined;
     }
-    const active = !!this.ssr.tracer?.outputs.hitColorFilterActive;
-    const scale = mirrorBiasSplit({ ...s, hitColorFilter: active ? s.hitColorFilter : 'off' }).sample;
+    // W76: from the settings the tracer resolved and ran this frame (its defaults, and 'off' while the cone builds)
+    const ran = this.ssr.tracer?.outputs.settings;
+    const scale = ran ? mirrorBiasSplit(ran).sample : 1;
     const d = this.seam?.denoiser as { options?: Record<string, unknown>; setOptions?: (o: Record<string, unknown>) => void } | undefined;
     // a denoiser without BRDF weights (Denoiser main before W78) gets nothing: one warning, no options written into it
     if (!d?.setOptions || !d.options || !('brdfAlphaScale' in d.options)) {
@@ -507,7 +498,7 @@ export class HybridReflections {
         radiance: getGPUTexture(renderer, up.residual), confidence: getGPUTexture(renderer, up.confidence),
         hitDistance: getGPUTexture(renderer, up.hitDistance), source: getGPUTexture(renderer, up.source),
       },
-    }, { minRoughness: this.ssr.traceMode === 'mixed' ? this.ssr.traceMinRoughness : 0, ...this.upsampleSettings }, this.timer?.pass('upsample'));
+    }, this.upsampleSettings, this.timer?.pass('upsample'));
     this.timerDone = this.timer?.end(enc);
     device.queue.submit([enc.finish()]);
   }

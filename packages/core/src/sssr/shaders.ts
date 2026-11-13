@@ -107,8 +107,8 @@ struct Params {
   // W71 (X1, words 141-144; D5000-D5003)
   quadBaseRotation: u32,
   thicknessDepthFactor: f32,
-  hitLobeFilterGrazing: f32,
-  x1Flags: u32, // bit 0 historyEdgeConfidence, bit 1 thicknessDepthMode 'relative'
+  hitColorConeGrazing: f32, // 143: W76 (was W71's hitLobeFilterGrazing, D5002)
+  x1Flags: u32, // bit 1 thicknessDepthMode 'relative'; bit 0 was historyEdgeConfidence (removed by W76, D5003), always 0
   // W72 (X2 #5 / #6, words 145-149; D5020-D5022)
   hitColorFilterCone: u32,
   hitColorConeScale: f32,
@@ -125,7 +125,7 @@ struct Params {
   tracedHalfRate: u32,            // 154 (W74, X4): glossy misses of every other quad go to the fill list
   tracedHalfRateMinAlpha: f32,    // 155: ... from this alpha up (mirrors and near-mirrors stay full rate)
   missFillCapacity: u32,          // 156: fill entries at most (they follow the miss list's missListCapacity entries)
-  minRoughnessAlpha: f32,         // 157 (W75, X5 step 2): classify traces no pixel below this alpha (they take the rough path)
+  _pad157: f32,                   // 157: was W75's minRoughnessAlpha (X5 step 2's full-res mirror path; removed by W76, D5084)
   maxCandidates: u32,             // 158 (W80, D5180): hits tried per ray (1 = FFX)
   _pad159: u32,
 };
@@ -298,8 +298,7 @@ fn main(@builtin(local_invocation_index) lid: u32, @builtin(workgroup_id) wg: ve
 
   var needs_ray = on_screen;
   let is_reflective_surface = on_screen && isReflectiveSurface(px);
-  // W75 (X5 step 2): pixels below minRoughnessAlpha are left to another tracer (the full-res mirror path)
-  let is_glossy_reflection = isGlossyReflection(roughness) && !(roughness < P.minRoughnessAlpha);
+  let is_glossy_reflection = isGlossyReflection(roughness);
   needs_ray = needs_ray && is_glossy_reflection && is_reflective_surface;
   let needs_denoiser = needs_ray && !isMirrorReflection(roughness);
   let is_base_ray = isBaseRay(dispatch_thread_id, P.samplesPerQuad);
@@ -645,33 +644,15 @@ ${hitSource ? `  if (P.hasHitSource == 0u || P.hitLobeFilterMixed >= 1.0) { retu
   return 1.0;` : '  return 1.0;'}
 }
 
-// W71 (X1 #3, D5002): the lobe filter's spread shrinks at grazing angles, SSSR 2015 slide 85's cone
+// W76 (X1 #3 on X2's cone, D5002 / D5100): SSSR 2015 slide 85's grazing shrink of the cone,
 // coneTan *= lerp(saturate(NdotV * 2), 1, sqrt(roughness)) (roughness perceptual: sqrt(sqrt(alpha))),
-// blended in by hitLobeFilterGrazing (0 = off, 1 = the slide's).
-fn lobeFilterGrazingScale(n_dot_v: f32, alpha: f32) -> f32 {
-  return mix(1.0, mix(saturate(2.0 * n_dot_v), 1.0, sqrt(sqrt(max(alpha, 0.0)))), P.hitLobeFilterGrazing);
+// blended in by hitColorConeGrazing (0 = off, 1 = the slide's).
+fn coneGrazingScale(n_dot_v: f32, alpha: f32) -> f32 {
+  return mix(1.0, mix(saturate(2.0 * n_dot_v), 1.0, sqrt(sqrt(max(alpha, 0.0)))), P.hitColorConeGrazing);
 }
 
-// W71 (X1 #4, D5003; Diligent SSR_Intersection.fx): with the hit colour from last frame, the screen
-// edge fade is min(this frame's, the previous position's), and a hit whose previous position was off
-// screen gets no confidence (FFX's hybrid sample takes this frame's specular-free colour there, a pop).
-const X1_HISTORY_EDGE: u32 = 1u;
+// W71 (X1 #2): bit 1 of x1Flags. (Bit 0 was X1 #4's historyEdgeConfidence, removed by W76: D5003.)
 const X1_THICKNESS_RELATIVE: u32 = 2u;
-fn screenEdgeVignette(uv: vec2f) -> f32 {
-  let size = vec2f(P.renderSize);
-  let fov = 0.05 * vec2f(size.y / size.x, 1.0); // validateHit's fade
-  let border = smoothstep(vec2f(0.0), fov, uv) * (1.0 - smoothstep(vec2f(1.0) - fov, vec2f(1.0), uv));
-  return border.x * border.y;
-}
-fn historyEdgeScale(hit_uv: vec2f) -> f32 {
-  let pc = clamp(vec2i(vec2f(P.renderSize) * hit_uv), vec2i(0), vec2i(P.renderSize) - 1);
-  let prev_uv = hit_uv - textureLoad(t_motion, pc, 0).xy * P.motionVectorScale;
-  if (any(prev_uv < vec2f(0.0)) || any(prev_uv >= vec2f(1.0))) { return 0.0; }
-  let now = screenEdgeVignette(hit_uv);
-  let prev = screenEdgeVignette(prev_uv);
-  if (prev >= now || now <= 0.0) { return 1.0; }
-  return prev / now;
-}
 
 fn reshadeHit(hit_uv: vec2f, world_hit: vec3f, ray_direction: vec3f, cone_mip: f32) -> vec3f {
   let p = clamp(vec2i(vec2f(P.renderSize) * hit_uv), vec2i(0), vec2i(P.renderSize) - 1);
@@ -984,21 +965,19 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   let world_space_ray = world_space_hit - world_space_origin;
   let world_ray_length = max(0.0, length(world_space_ray));
   var confidence = rayConfidence(r);
-  // W71 (X1 #4, D5003): historyEdgeConfidence, where the hit's colour comes from last frame.
-  if (confidence > 0.0 && (P.x1Flags & X1_HISTORY_EDGE) != 0u && P.hitColorFromHistory != 0u && P.hitShadingMode != HIT_SHADING_RESHADE) {
-    confidence *= historyEdgeScale(hit.xy);
-  }
   var hit_radiance = vec3f(0.0);
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
   if (confidence > 0.0) {
     var cone_mip = 0.0;${pyr ? `
-    if (P.hitColorFilterCone != 0u) { cone_mip = hitColorConeMip(world_space_hit, world_ray_length, (*r).roughness); } // W72 (D5020)` : ''}
-    if (P.hitShadingMode == HIT_SHADING_RESHADE) {
-      var spread = P.hitLobeFilter * lobeFilterMixScale((*r).coords) * (*r).roughness * P.filterAlphaScale; // D3550: the ray stands for its lobe; W72 (D5021): x the share the sample leaves to filters
-      if (P.hitLobeFilterGrazing > 0.0) {
-        let n_vs = (P.viewMatrix * vec4f(loadWorldSpaceNormal(vec2i((*r).coords)), 0.0)).xyz;
-        spread *= lobeFilterGrazingScale(dot(n_vs, -normalize((*r).view_space_ray)), (*r).roughness);
+    if (P.hitColorFilterCone != 0u) {
+      cone_mip = hitColorConeMip(world_space_hit, world_ray_length, (*r).roughness); // W72 (D5020)
+      if (P.hitColorConeGrazing > 0.0) { // W76: SSSR 2015 slide 85's grazing shrink on the cone (D5100)
+        let n_cone = (P.viewMatrix * vec4f(loadWorldSpaceNormal(vec2i((*r).coords)), 0.0)).xyz;
+        cone_mip += log2(max(coneGrazingScale(dot(n_cone, -normalize((*r).view_space_ray)), (*r).roughness), 1e-4));
       }
+    }` : ''}
+    if (P.hitShadingMode == HIT_SHADING_RESHADE) {
+      let spread = P.hitLobeFilter * lobeFilterMixScale((*r).coords) * (*r).roughness * P.filterAlphaScale; // D3550: the ray stands for its lobe; W72 (D5021): x the share the sample leaves to filters
       hitLobeSpread = spread * spread;
       hsoPixel = (*r).coords;
       hit_radiance = reshadeHit(hit.xy, world_space_hit, normalize(world_space_reflected_direction), cone_mip);

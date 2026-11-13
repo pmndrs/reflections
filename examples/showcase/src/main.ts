@@ -46,6 +46,7 @@ import { LINEAR_VIEWS, VIEWS, VIEW_IDS, VIEW_LEGENDS, buildDebugViews, type View
 import { SHOWCASE, type FloorKind, type ShowcaseEntry, type ShowcaseScene } from './scenes';
 import { geometryRoughnessFromQuery, setGeometryRoughness } from './geometryRoughness';
 import { SPEC_AA_DEFAULT, setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } from './specAA';
+import { ssrSettingsFromQuery } from '../../shared/ssrQuery';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -90,9 +91,11 @@ async function main() {
   const presetName = (q.get('preset') as ReflectionsPresetName | null) ?? null;
   const ssr = new ScreenSpaceReflectionsPass(renderer, {
     missList: true, timestamps: true, gbufferOptions: { width: RW, height: RH }, ...(presetName ? { preset: presetName } : {}),
-    ...(q.get('res') === 'half' || q.get('res') === 'mixed' ? { settings: { reflectionResolution: 'half' as const, halfResMinRoughness: q.get('res') === 'mixed' ? Number(q.get('halfResMin') ?? 0.05) : 0 } } : {}),
+    ...(q.get('res') === 'half' || q.get('res') === 'mixed' ? { settings: { reflectionResolution: 'half' as const } } : {}),
     ...(q.get('res') === 'full' ? { settings: { reflectionResolution: 'full' as const } } : {}),
   });
+  Object.assign(ssr.settings, ssrSettingsFromQuery(q)); // W76: ?s.<field>=<value> from the first frame
+  if (q.get('res') === 'mixed' || q.has('halfResMin')) console.warn("?res=mixed / ?halfResMin= were removed (W76, D5084: halfResMinRoughness and the full-res mirror path); running ?res=half");
   const device = ssr.device;
   const gpuErrors: string[] = [];
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });
@@ -583,13 +586,9 @@ async function main() {
       poses: () => Object.keys(kit!.views),
       setPose,
       setView: (v: View) => setView(v),
-      /**
-       * W75 (X5): reflection resolution, rebuilding the composites ('mixed' = half with the full-res mirror
-       * path below `minRoughness`, step 2).
-       */
-      async setResolution(r: 'full' | 'half' | 'mixed', minRoughness = 0.05) {
-        ssr.settings.reflectionResolution = r === 'full' ? 'full' : 'half';
-        ssr.settings.halfResMinRoughness = r === 'mixed' ? minRoughness : 0;
+      /** W75 (X5): reflection resolution, rebuilding the composites (W76 removed step 2's 'mixed', D5084). */
+      async setResolution(r: 'full' | 'half') {
+        ssr.settings.reflectionResolution = r;
         hybrid.rebuild(); buildDisplay();
         ssr.resetHistory(); hybrid.resetHistory();
       },

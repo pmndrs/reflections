@@ -18,7 +18,7 @@
 import * as THREE from 'three/webgpu';
 import { uniform } from 'three/tsl';
 import {
-  createHalfResolutionFrame, createScreenSpaceReflections, createTracedReflections, DEFAULT_ROUGHNESS_THRESHOLD, halfResolutionSize, isReflectionsPresetName, PassTimer, REFLECTION_PRESET_NAMES, reflectionsPreset, screenSpaceInputsFromFrame,
+  createHalfResolutionFrame, createScreenSpaceReflections, createTracedReflections, halfResolutionSize, isReflectionsPresetName, PassTimer, REFLECTION_PRESET_NAMES, reflectionsPreset, screenSpaceInputsFromFrame,
   type FrameInputs, type ReflectionResolution, type ReflectionsPresetName, type HalfResolutionFrame, type HitLights, type ScreenSpaceReflections as CoreTracer,
   type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant, type TraceProvider, type TracedReflections,
   type TracedReflectionsSettings, type TracedReflectionsStats,
@@ -44,14 +44,8 @@ export interface ScreenSpaceReflectionsPassSettings extends ScreenSpaceReflectio
    * built for one mode: after a change, rebuild them (`hybrid.rebuild()` and your `composite()` calls).
    */
   reflectionResolution?: ReflectionResolution;
-  /**
-   * W75 (plan X5 step 2, D5084): with 'half', pixels below this perceptual roughness (mirrors and
-   * near-mirrors) are traced by a second, full-res tracer instead (every pixel its own ray, its own
-   * ray-traced pass over its miss list, no denoiser), and composited at full res; the half-res tracer
-   * skips them (core `minRoughness`). Default 0: every pixel at half res (step 1). A change between 0
-   * and > 0 needs the composites rebuilt, like `reflectionResolution`.
-   */
-  halfResMinRoughness?: number;
+  // W75's `halfResMinRoughness` (X5 step 2: a full-res mirror path under half res) was removed by W76:
+  // it restored mirror sharpness but doubled orbit flicker at full res's cost (D5084).
   /**
    * W78 (X3 phase B, D5140): the tracer also writes each pixel's sample direction and pdf (core
    * `options.sampleDirection`, `tracer.outputs.sampleDirection`), for a denoiser that weights
@@ -60,14 +54,6 @@ export interface ScreenSpaceReflectionsPassSettings extends ScreenSpaceReflectio
    * half-res path doesn't hand it on). Default false.
    */
   sampleDirection?: boolean;
-}
-
-/** W75 (X5 step 2): the full-res mirror path's outputs, as the pass's own targets (full size). */
-export interface ScreenSpaceMirrorTargets {
-  radiance: THREE.StorageTexture;
-  hitDistance: THREE.StorageTexture;
-  confidence: THREE.StorageTexture;
-  source: THREE.StorageTexture;
 }
 
 export interface ScreenSpaceReflectionsPassOptions {
@@ -212,16 +198,7 @@ export class ScreenSpaceReflectionsPass {
   private halfTimer: PassTimer | null = null;
   private halfTimerDone: (() => void) | undefined;
   private lastTraceFrame: FrameInputs | null = null;
-  private latchedMode: 'full' | 'half' | 'mixed' = 'full';
-  private latchedMinRoughness = 0;
-  /** W75 (X5 step 2): the full-res mirror path (tracer, traced pass, targets, history). */
-  private mirrorCore: CoreTracer | null = null;
-  private mirrorRt: TracedReflections | null = null;
-  private mirrorOut: ScreenSpaceMirrorTargets | null = null;
-  private mirrorHistory: GPUTexture | null = null;
-  private mirrorHistoryReady = false;
-  private mirrorSourceDirty = false;
-  private mirrorRan = false;
+  private latchedMode: 'full' | 'half' = 'full';
 
   constructor(renderer: THREE.WebGPURenderer, options: ScreenSpaceReflectionsPassOptions = {}) {
     this.renderer = renderer;
@@ -259,34 +236,13 @@ export class ScreenSpaceReflectionsPass {
    */
   get traceFrame(): FrameInputs | null { return this.lastTraceFrame; }
   /** W75: the resolution the last trace ran at (latched by `trace()`, not read from the settings). */
-  get resolution(): 'full' | 'half' { return this.latchedMode === 'full' ? 'full' : 'half'; }
+  get resolution(): 'full' | 'half' { return this.latchedMode; }
   /**
-   * W75: the mode the last trace ran in, latched once per `trace()`: 'full', 'half', or 'mixed' (half
-   * with the full-res mirror path below `traceMinRoughness`). `HybridReflections.update()` follows it,
-   * so a setting changed between `render()` and `update()` takes effect on the next frame.
+   * W75: the mode the last trace ran in, latched once per `trace()`: 'full' or 'half'.
+   * `HybridReflections.update()` follows it, so a setting changed between `render()` and `update()`
+   * takes effect on the next frame.
    */
-  get traceMode(): 'full' | 'half' | 'mixed' { return this.latchedMode; }
-  /** W75: the `halfResMinRoughness` the last trace used (0 unless `traceMode` is 'mixed'). */
-  get traceMinRoughness(): number { return this.latchedMinRoughness; }
-  /**
-   * W75 (X5 step 2): the full-res mirror path's targets: radiance / hit distance / confidence / source
-   * of the pixels below `settings.halfResMinRoughness`. Created 1x1 on the first call (composites built
-   * for half res bind them), sized to the G-buffer while the mirror path runs, back to 1x1 when it stops.
-   */
-  mirrorTargets(): ScreenSpaceMirrorTargets {
-    this.mirrorOut ??= {
-      radiance: make('ssr mirror radiance', 1, 1, THREE.HalfFloatType, THREE.RGBAFormat),
-      hitDistance: make('ssr mirror hit distance', 1, 1, THREE.FloatType, THREE.RedFormat),
-      confidence: make('ssr mirror confidence', 1, 1, THREE.FloatType, THREE.RedFormat),
-      source: make('ssr mirror rt source', 1, 1, THREE.FloatType, THREE.RedFormat),
-    };
-    return this.mirrorOut;
-  }
-  private sizeMirrorTargets(w: number, h: number) {
-    for (const t of Object.values(this.mirrorTargets())) if (t.image.width !== w || t.image.height !== h) (t as unknown as { setSize(w: number, h: number): void }).setSize(w, h);
-  }
-  /** W75: the mirror path ran in the last trace (`traceMode` 'mixed'). */
-  get mirrorPath(): boolean { return this.mirrorRan; }
+  get traceMode(): 'full' | 'half' { return this.latchedMode; }
   /** Per-pass GPU timestamps were asked for (`options.timestamps`). */
   get timestamps(): boolean { return this.options.timestamps ?? false; }
   /** 'subgroups' or 'workgroup' once the first frame ran. */
@@ -302,7 +258,6 @@ export class ScreenSpaceReflectionsPass {
   setTraceProvider(provider: TraceProvider | null) {
     this.rt?.destroy();
     this.rt = null;
-    this.destroyMirror();
     if (!provider) { this.traceOptions = null; this.rayTracing = false; return; }
     this.traceOptions = { ...this.traceOptions, provider };
     this.rayTracing = true;
@@ -330,9 +285,7 @@ export class ScreenSpaceReflectionsPass {
     // W75 (X5): 'half' traces a point-sampled half-size copy of the frame
     // latched once per frame (review fix 5): the settings are read here and nowhere else this frame
     const half = (this.settings.reflectionResolution ?? 'full') === 'half';
-    const mirrorMin = half ? Math.max(0, this.settings.halfResMinRoughness ?? 0) : 0;
-    this.latchedMode = !half ? 'full' : mirrorMin > 0 ? 'mixed' : 'half';
-    this.latchedMinRoughness = mirrorMin;
+    this.latchedMode = half ? 'half' : 'full';
     const [tw, th] = half ? halfResolutionSize(fullFrame.width, fullFrame.height) : [fullFrame.width, fullFrame.height];
     this.ensure(tw, th, fullFrame.conventions.depthInverted);
     const core = this.core!;
@@ -377,36 +330,27 @@ export class ScreenSpaceReflectionsPass {
     if (wantHalf && !this.rt!.halfRateReady) this.rt!.prepareHalfRate().catch((e) => console.error(e));
     const halfRate = wantHalf && this.rt!.halfRateReady;
     const halfRateMin = this.traceSettings.tracedHalfRateMinRoughness ?? this.settings.tracedHalfRateMinRoughness;
-    // W75 (X5 step 2): mirrors and near-mirrors go to the full-res mirror path, the half-res tracer skips them
     const out = core.dispatch(cmd, inputs, {
       frameIndex: frame.frameIndex, ...this.settings, hitColor: useHistory ? 'history' : 'current', fallbackColor: [0, 0, 0],
-      missesTraced: !!(this.rt && this.rayTracing), // W73 (D5043): rayReuse 'ratio' leaves the traced pass's pixels to it
+      // W73 (D5043): rayReuse 'ratio' leaves the traced pass's pixels to it; W76: also the ray-tracing defaults (an unset thickness 'relative' 0.02)
+      missesTraced: tracing,
       tracedMissRate: halfRate ? 'half' : 'full', tracedHalfRateMinRoughness: halfRateMin,
-      ...(mirrorMin > 0 ? { minRoughness: mirrorMin } : {}),
     });
     if (this.rt && tracing) {
       // traced misses take black like the tracer's fallback: the composite adds probes /
       // environment for 1 - confidence, exactly the term three's lit image already has
       this.rt.dispatch(cmd, { tracer: core, inputs, hitShadingBindGroup }, { ...this.traceSettings, hitColor: useHistory ? 'history' : 'current', hitShading, hitLobeFilter: this.traceSettings.hitLobeFilter ?? this.settings.hitLobeFilter, hitShadeOcclusion: this.traceSettings.hitShadeOcclusion ?? this.settings.hitShadeOcclusion,
         hitLobeFilterMixed: this.traceSettings.hitLobeFilterMixed ?? this.settings.hitLobeFilterMixed,
-        hitLobeFilterGrazing: this.traceSettings.hitLobeFilterGrazing ?? this.settings.hitLobeFilterGrazing, roughnessThreshold: this.settings.roughnessThreshold, fallbackColor: [0, 0, 0],
-        tracedMissRate: halfRate ? 'half' : 'full', tracedHalfRateMinRoughness: halfRateMin,
-        // W72 (D5021): the traced lobe filter follows the tracer's lobe split
-        mirrorBias: this.settings.mirrorBias, mirrorBiasCompensate: this.settings.mirrorBiasCompensate, hitColorFilter: this.settings.hitColorFilter, hitColorConeScale: this.settings.hitColorConeScale });
+        roughnessThreshold: this.settings.roughnessThreshold, fallbackColor: [0, 0, 0],
+        tracedMissRate: halfRate ? 'half' : 'full', tracedHalfRateMinRoughness: halfRateMin });
+        // W72 (D5021) / W76: the traced lobe filter follows the lobe split the tracer ran (core takes it from `outputs.settings`)
       cmd.copyTextureToTexture({ texture: this.rt.source }, { texture: this.gpu(this.source) }, size);
       this.sourceDirty = true;
     } else if (this.sourceDirty) {
       cmd.beginRenderPass({ colorAttachments: [{ view: this.gpu(this.source).createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end();
       this.sourceDirty = false;
     }
-    if (mirrorMin > 0) this.traceMirror(cmd, fullFrame, mirrorMin, { wantHistory, appHistory, useHistory, hitShadingBindGroup, hitShading });
-    else if (this.mirrorCore || this.mirrorRan) {
-      // review fix 4: leaving 'mixed' frees the mirror tracer and shrinks its targets (half-res composites keep binding them)
-      this.destroyMirror();
-      this.sizeMirrorTargets(1, 1);
-    }
-    this.mirrorRan = mirrorMin > 0;
-    // after both traces read it: this frame's lit image becomes next frame's history
+    // after the traced pass read it: this frame's lit image becomes next frame's history
     if (source && !this.historySource) cmd.copyTextureToTexture({ texture: source }, { texture: history! }, size);
     // next frame's history: the lit copy above, or the app texture drawn after this frame
     this.historyValid = !!source;
@@ -422,77 +366,8 @@ export class ScreenSpaceReflectionsPass {
     this.uniforms.viewProjection.value.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
   }
 
-  /**
-   * W75 (X5 step 2): trace the pixels below `minRoughness` at full res: a second core tracer whose
-   * roughness threshold is `minRoughness` (every pixel its own ray: samplesPerQuad 4), its own traced
-   * pass over its miss list, its own full-res history; outputs into `mirrorTargets()`.
-   */
-  private traceMirror(cmd: GPUCommandEncoder, frame: FrameInputs, minRoughness: number,
-    o: { wantHistory: boolean; appHistory?: GPUTexture; useHistory: boolean; hitShadingBindGroup: GPUBindGroup; hitShading: 'reshade' | 'off' }) {
-    const device = this.device;
-    const { width: w, height: h } = frame;
-    const size = [w, h];
-    this.sizeMirrorTargets(w, h);
-    const t = this.mirrorTargets();
-    const m0 = this.mirrorCore;
-    if (!m0 || m0.width !== w || m0.height !== h || m0.depthInverted !== frame.conventions.depthInverted) {
-      this.destroyMirror();
-      this.mirrorCore = createScreenSpaceReflections(device, {
-        width: w, height: h, depthInverted: frame.conventions.depthInverted, variant: this.core!.variant,
-        missList: !!this.traceOptions || (this.options.missList ?? false), timestamps: this.timestamps, hitSpecularShading: this.hitShading!.shading,
-      });
-    }
-    const mc = this.mirrorCore!;
-    if (this.traceOptions && !this.mirrorRt) {
-      this.mirrorRt = createTracedReflections(device, { width: w, height: h, provider: this.traceOptions.provider, hitShading: this.hitShading!.shading, timestamps: this.timestamps });
-    }
-    let history: GPUTexture | undefined;
-    const src = o.wantHistory ? o.appHistory ?? frame.textures.lit : undefined;
-    if (src) {
-      if (!this.mirrorHistory || this.mirrorHistory.format !== src.format || this.mirrorHistory.width !== w || this.mirrorHistory.height !== h) {
-        this.mirrorHistory?.destroy();
-        this.mirrorHistory = device.createTexture({ label: 'ssr mirror hit-colour history', size, format: src.format, usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING });
-        this.mirrorHistoryReady = false;
-      }
-      history = this.mirrorHistory;
-      if (o.appHistory) cmd.copyTextureToTexture({ texture: src }, { texture: history }, size);
-    }
-    const useHistory = o.useHistory && !!history && (this.mirrorHistoryReady || !!o.appHistory);
-    const inputs = screenSpaceInputsFromFrame(frame, mc, { history: useHistory ? history : undefined, hitShadingBindGroup: o.hitShadingBindGroup });
-    const threshold = Math.min(minRoughness, this.settings.roughnessThreshold ?? DEFAULT_ROUGHNESS_THRESHOLD);
-    const out = mc.dispatch(cmd, inputs, {
-      frameIndex: frame.frameIndex, ...this.settings, roughnessThreshold: threshold, minRoughness: 0, samplesPerQuad: 4,
-      hitColor: useHistory ? 'history' : 'current', fallbackColor: [0, 0, 0], tracedMissRate: 'full', hitLobeFilterMixed: 1,
-      missesTraced: !!(this.mirrorRt && this.rayTracing), // W73 (D5043)
-    });
-    if (this.mirrorRt && this.rayTracing) {
-      this.mirrorRt.dispatch(cmd, { tracer: mc, inputs, hitShadingBindGroup: o.hitShadingBindGroup }, {
-        ...this.traceSettings, tracedMissRate: 'full', hitColor: useHistory ? 'history' : 'current', hitShading: o.hitShading,
-        hitLobeFilter: this.traceSettings.hitLobeFilter ?? this.settings.hitLobeFilter, hitShadeOcclusion: this.traceSettings.hitShadeOcclusion ?? this.settings.hitShadeOcclusion,
-        hitLobeFilterMixed: 1, hitLobeFilterGrazing: this.traceSettings.hitLobeFilterGrazing ?? this.settings.hitLobeFilterGrazing, roughnessThreshold: threshold, fallbackColor: [0, 0, 0],
-      });
-      cmd.copyTextureToTexture({ texture: this.mirrorRt.source }, { texture: this.gpu(t.source) }, size);
-      this.mirrorSourceDirty = true;
-    } else if (this.mirrorSourceDirty || !this.mirrorRan) {
-      cmd.beginRenderPass({ colorAttachments: [{ view: this.gpu(t.source).createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end();
-      this.mirrorSourceDirty = false;
-    }
-    if (src && !o.appHistory) cmd.copyTextureToTexture({ texture: src }, { texture: history! }, size);
-    this.mirrorHistoryReady = !!src;
-    cmd.copyTextureToTexture({ texture: out.radiance }, { texture: this.gpu(t.radiance) }, size);
-    cmd.copyTextureToTexture({ texture: out.hitDistance }, { texture: this.gpu(t.hitDistance) }, size);
-    cmd.copyTextureToTexture({ texture: out.confidence }, { texture: this.gpu(t.confidence) }, size);
-  }
-
-  private destroyMirror() {
-    this.mirrorCore?.destroy(); this.mirrorCore = null;
-    this.mirrorRt?.destroy(); this.mirrorRt = null;
-    this.mirrorHistory?.destroy(); this.mirrorHistory = null;
-    this.mirrorHistoryReady = false;
-  }
-
   /** Forget last frame's colour (camera cut, scene switch); the next frame's hits use this frame's scene colour. */
-  resetHistory() { this.historyValid = false; this.mirrorHistoryReady = false; }
+  resetHistory() { this.historyValid = false; }
 
   private historyTexture(format: GPUTextureFormat, w: number, h: number): GPUTexture {
     const t = this.history;
@@ -507,11 +382,6 @@ export class ScreenSpaceReflectionsPass {
   /** With `timestamps`: ms per core pass for the last traced frame ('rt begin', 'rt trace' with `trace`; 'total' sums all). */
   async readTimings(): Promise<ReadonlyMap<string, number>> {
     const t = new Map(await (this.core?.readTimings() ?? Promise.resolve(new Map<string, number>())));
-    if (this.mirrorCore && this.mirrorRan) {
-      for (const [k, v] of await this.mirrorCore.readTimings()) if (k !== 'total') t.set(`mirror ${k}`, v);
-      if (this.mirrorRt && this.rayTracing) for (const [k, v] of await this.mirrorRt.readTimings()) if (k !== 'total') t.set(`mirror ${k}`, v);
-      if (t.has('total')) t.set('total', [...t].filter(([k]) => k !== 'total').reduce((a, [, v]) => a + v, 0));
-    }
     if (this.halfTimer && this.resolution === 'half') {
       this.halfTimerDone?.(); this.halfTimerDone = undefined;
       await this.halfTimer.read();
@@ -581,7 +451,6 @@ export class ScreenSpaceReflectionsPass {
     this.hitShading ??= new ThreeHitShading(this.device, (t) => this.gpu(t));
     const probes = trace?.probes !== undefined ? trace.probes : this.sceneProbes;
     if (this.hitShading.prepare(this.environmentTexture(), probes)) {
-      this.destroyMirror();
       this.rt?.destroy(); this.rt = null;
       this.core?.destroy(); this.core = null;
     }
@@ -621,8 +490,6 @@ export class ScreenSpaceReflectionsPass {
     this.hitShading?.destroy();
     this.half?.destroy();
     this.halfTimer?.destroy();
-    this.destroyMirror();
-    if (this.mirrorOut) for (const t of Object.values(this.mirrorOut)) t.dispose();
     this.blackEnvironment?.dispose();
     for (const t of [this.radiance, this.hitDistance, this.confidence, this.source]) t.dispose();
     if (this.ownsGBuffer) this.gbuffer.dispose();
