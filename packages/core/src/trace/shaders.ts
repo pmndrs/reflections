@@ -8,7 +8,7 @@ import { HIT_WGSL } from './provider';
 import { SCREEN_VISIBILITY_WGSL, shadeLobeWgslFor } from './hitShading';
 
 /** Byte size of the uniform block (struct RtParams). */
-export const RT_PARAMS_SIZE = 272;
+export const RT_PARAMS_SIZE = 320;
 
 /** u32 words before the per-tile counters in the state buffer. */
 export const RT_STATE_HEADER = 16;
@@ -70,6 +70,11 @@ struct RtParams {
   hitShadeOcclusion: u32,
   hitLobeFilterMixed: f32,
   glossyAlpha: f32,
+  hitLobeFilterGrazing: f32, // W71 (X1 #3, word 67; D5002)
+  // words 68-79: reserved for the other SSR-sources streams, RT_PARAMS_SIZE 320
+  _pad68: vec4u,
+  _pad72: vec4u,
+  _pad76: vec4u,
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
@@ -113,7 +118,7 @@ fn main() {
  * `traceFirstHit` (group 2), `hitShadingWgsl` `shadeTracedHit` (group 3 if it binds anything),
  * `materialWgsl` `traceHitMaterial`.
  */
-export function rtTraceWgsl(parts: { fallbackWgsl: string; providerWgsl: string; materialWgsl: string; anyHitWgsl: string; shadingNormalWgsl: string; hitShadingWgsl: string }): string {
+export function rtTraceWgsl(parts: { fallbackWgsl: string; providerWgsl: string; materialWgsl: string; anyHitWgsl: string; shadingNormalWgsl: string; hitShadingWgsl: string; lobeGrazing?: boolean }): string {
   return /* wgsl */ `
 ${RT_PARAMS_WGSL}
 @group(0) @binding(1) var t_depth: texture_2d<f32>;
@@ -359,7 +364,13 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
   var source = ${RT_SOURCE.tracedHit}u;
   let spread = P.hitLobeFilter * rtLobeMixScale(coords) * alpha; // D3550: the ray stands for its lobe
   hitLobeSpread = spread * spread;
-  if (P.reuseOnScreen != 0u && onScreenRadiance(hitP, hitN, &L)) {
+${parts.lobeGrazing ? `  // W71 (X1 #3, D5002): shrink it at grazing angles, as the SSSR tracer's lobeFilterGrazingScale. Compiled
+  // in only while hitLobeFilterGrazing > 0: with the branch present the default's output moved (up to
+  // 14/255 on 6 px of rooms, Metal), so the default pipeline is today's code.
+  let n_dot_v = dot(N, normalize(P.cameraPosition - surface));
+  let g = mix(1.0, mix(saturate(2.0 * n_dot_v), 1.0, sqrt(sqrt(max(alpha, 0.0)))), P.hitLobeFilterGrazing);
+  hitLobeSpread *= g * g;
+` : ''}  if (P.reuseOnScreen != 0u && onScreenRadiance(hitP, hitN, &L)) {
     source = ${RT_SOURCE.onScreenHit}u;
     atomicAdd(&state[${RT_STATE.onScreen}], 1u);
     // W44 (D3540): the screen's diffuse plus the hit material's specular along the ray, as the

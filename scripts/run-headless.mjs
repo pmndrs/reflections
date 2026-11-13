@@ -7,6 +7,8 @@
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | bench | probe-layouts)
 //   pnpm check -- --only ssr-exp-metrics         # X0 (W70): the experiment metrics smoke (examples/shared/metrics); ssr-exp-baseline = the full baseline (scripts/ssr-exp.mjs)
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
+//   pnpm check -- --only ssr-exp-x1              # W71 (X1): each X1 setting at its default = absent on examples/ssr; historyEdgeConfidence at rest / panning
+//   pnpm check -- --only ssr-exp-grazing         # W71 (X1 #3): grazing sweep 5/15/30/60 deg vs the path tracer, hitLobeFilterGrazing 0 / 0.5 / 1 (minutes)
 //   pnpm check -- --only hit-source              # W53: the denoiser's hit source through the seam (needs the Denoiser repo's W53 branch)
 //   pnpm check -- --only probe-bindings          # W62: Sponza's three-size probe set at the default 16 sampled textures
 //   pnpm check -- --only probe-bindings-measure  # W62: Sponza with fewer probe sizes vs the path tracer (MAD, PSNR), lookup ms; out/w62-probe-bindings.json
@@ -218,6 +220,7 @@ async function sssrCoreChecks(pages) {
     check('sssr parity (default occupancy): lists', r.rayListSame && r.tileListSame && r.tileFlagsSame, `rays ${r.rays}`);
     console.log(`  default occupancy: radiance differs on ${r.radianceDiffPixels} px, misses ${r.misses.join(' vs ')} (informational)`);
   }
+  await x1CoreChecks(s, hasSubgroups); // W71 (X1)
   // Reverse-Z: same scene, max-reduced pyramid; the hit fraction should match the forward-Z page closely.
   const rz = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?reverse`);
   pages.push(rz);
@@ -236,6 +239,9 @@ async function sssrCoreChecks(pages) {
   check('sssr cube-environment fallback: same rays and hits', se.rays === st.rays && Math.abs(se.mirrorHitFraction - st.mirrorHitFraction) < 1e-3,
     `rays ${se.rays}, hit ${(se.mirrorHitFraction * 100).toFixed(1)}%`);
   savePng('sssr-core-env.png', await env.T('window.__p.shot()'));
+  const graz = await env.T('window.__p.identity({}, { hitLobeFilterGrazing: 1 })'); // W71 (X1 #3)
+  check('sssr X1 hitLobeFilterGrazing 1 changes re-shaded hits only (cube environment: same lists)', graz.radianceDiffPixels > 0 && graz.listsSame && graz.hitDiffPixels === 0,
+    `radiance ${graz.radianceDiffPixels} px differ, hit distance ${graz.hitDiffPixels}, lists same ${graz.listsSame}`);
   // fallbackRoughness (D1806): 'surface' takes misses' fallback at the pixel's roughness (the rough-path
   // lookup), 'mirror' is FFX's roughness 0. Mirrors and confidence-1 pixels must not change.
   const fr = await env.T('window.__p.fallbackRoughness()');
@@ -259,6 +265,153 @@ async function sssrCoreChecks(pages) {
   pages.push(big);
   const t = await big.T('window.__p.time(30)');
   console.log(`  GPU ms ${t.size.join('x')} (${t.variant}, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
+}
+
+/**
+ * W71 (X1, D5000-D5003) on examples/sssr-core: each setting at its default gives the same lists and
+ * images bit for bit as the setting absent; the rotated quad bases keep the variants' parity.
+ */
+async function x1CoreChecks(s, hasSubgroups) {
+  const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitLobeFilterGrazing: 0, historyEdgeConfidence: false };
+  // 'relative' at k 0 is off (review: thickness 0 would make smoothstep(0, 0, d) undefined)
+  for (const [name, def] of [...Object.entries(X1_DEFAULTS), ['all four', X1_DEFAULTS], ['relative at k 0', { thicknessDepthMode: 'relative', thicknessDepthFactor: 0 }]]) {
+    const r = await s.T(`window.__p.identity({}, ${JSON.stringify(typeof def === 'object' ? def : { [name]: def })})`);
+    check(`sssr X1 ${name}: default ${JSON.stringify(def)} = absent, bit for bit`, r.listsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
+      `rays ${r.rays.join(' / ')}, misses ${r.misses.join(' / ')}, differing px radiance ${r.radianceDiffPixels}, hit ${r.hitDiffPixels}`);
+  }
+  // the settings act (no history input here, so not historyEdgeConfidence; the grazing filter on the ?env page,
+  // since the constant fallback looks the same at every roughness)
+  const thick = await s.T('window.__p.identity({}, { thicknessDepthFactor: 0.05 })');
+  const rel = await s.T("window.__p.identity({}, { thicknessDepthFactor: 0.001, thicknessDepthMode: 'relative' })");
+  check('sssr X1 thicknessDepthFactor and its relative mode change the hits (k 0.05 added: fewer misses; relative 0.001: more)',
+    thick.misses[1] < thick.misses[0] && rel.misses[1] > rel.misses[0],
+    `misses ${thick.misses.join(' to ')} at k 0.05, ${rel.misses.join(' to ')} relative 0.001`);
+  // quadBaseRotation (D5000): which corner carries the copies, over 4 frames
+  const corners = {};
+  for (const rot of ['fixed', 'frame', 'pattern']) {
+    corners[rot] = [];
+    for (let f = 0; f < 4; f++) corners[rot].push((await s.T(`window.__p.quadCorners({ quadBaseRotation: '${rot}', frameIndex: ${f} })`)).corners);
+  }
+  const share = (c) => { const n = c.reduce((a, b) => a + b, 0) || 1; return c.map((v) => v / n); };
+  const fixedOk = corners.fixed.every((c) => c[0] > 0 && c[1] + c[2] + c[3] === 0);
+  const order = [0, 3, 1, 2]; // quadCorner(k): tl, br, tr, bl (index tl 0, tr 1, bl 2, br 3)
+  const frameOk = corners.frame.every((c, f) => share(c)[order[f]] > 0.99);
+  const patternOk = corners.pattern.every((c) => share(c).every((v) => v > 0.15 && v < 0.35));
+  check('sssr X1 quadBaseRotation: fixed = top-left, frame cycles the corner, pattern spreads all four per frame', fixedOk && frameOk && patternOk,
+    `copy-carrying rays per corner [tl, tr, bl, br]: fixed ${JSON.stringify(corners.fixed[0])}, frame ${corners.frame.map((c) => JSON.stringify(c)).join(' ')}, pattern f0 ${JSON.stringify(corners.pattern[0])}`);
+  if (!hasSubgroups) return;
+  for (const cfg of [{ quadBaseRotation: 'frame', frameIndex: 5 }, { quadBaseRotation: 'pattern', frameIndex: 6 }, { quadBaseRotation: 'pattern', frameIndex: 6, samplesPerQuad: 2 },
+    { quadBaseRotation: 'pattern', frameIndex: 3, quadCopy: 'sameSurface' }]) {
+    const r = await s.T(`window.__p.parity(${JSON.stringify({ minTraversalOccupancy: 0, ...cfg })})`);
+    check(`sssr X1 parity (${Object.entries(cfg).map(([k, v]) => `${k} ${v}`).join(', ')}): lists and images`,
+      r.rayListSame && r.tileListSame && r.missListSame && r.tileFlagsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
+      `rays ${r.rays}, misses ${r.misses}, radiance ${r.radianceDiffPixels} px`);
+  }
+}
+
+/**
+ * `--only ssr-exp-x1` (W71, X1: D5000-D5003): on examples/ssr (denoised, AA off, hit colour from last
+ * frame, re-shade off so historyEdgeConfidence applies; RT off and on), every X1 setting at its default
+ * renders the same image as the setting absent (max 0/255; the absent run repeated gives the noise
+ * floor), and historyEdgeConfidence changes nothing at rest and something while the camera pans.
+ */
+const X1_KEYS = ['quadBaseRotation', 'thicknessDepthFactor', 'thicknessDepthMode', 'hitLobeFilterGrazing', 'historyEdgeConfidence'];
+const X1_DEFAULT_SETTINGS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitLobeFilterGrazing: 0, historyEdgeConfidence: false };
+const X1_SHOT = `async (keys, settings, n, pan) => {
+  const p = window.__p;
+  p.stop();
+  for (const k of keys) delete p.ssr.settings[k];
+  p.setSettings({ frameIndex: 7, minTraversalOccupancy: 0, ...settings });
+  const cam = p.kit.camera, c = p.controls;
+  if (!window.__x1Pose) window.__x1Pose = { pos: cam.position.clone(), target: c.target.clone() };
+  cam.position.copy(window.__x1Pose.pos); c.target.copy(window.__x1Pose.target); c.update();
+  p.ssr.resetHistory(); p.hybrid.resetHistory(); p.aa?.reset?.();
+  for (let i = 0; i < n; i++) {
+    if (pan) { const a = pan * (i - n + 1); const d = window.__x1Pose.target.clone().sub(window.__x1Pose.pos); d.applyAxisAngle(new p.THREE.Vector3(0, 1, 0), a); c.target.copy(window.__x1Pose.pos).add(d); c.update(); }
+    await p.step(1);
+  }
+  return p.shot();
+}`;
+async function x1Checks(pages) {
+  for (const [scene, rt] of [['mirrorWall', 0], ['mirrorWall', 1], ['facingMirrors', 0]]) {
+    const pg = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&scene=${scene}&rt=${rt}&denoise=1&aa=off&hit=final&reshade=off`);
+    pages.push(pg);
+    const shot = (s, n = 8, pan = 0) => pg.T(`(${X1_SHOT})(${JSON.stringify(X1_KEYS)}, ${JSON.stringify(s)}, ${n}, ${pan})`);
+    const diff = (a, b) => pg.T(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
+    const A = await shot({}), A2 = await shot({});
+    const floor = await diff(A, A2);
+    const rows = [];
+    for (const [k, v] of [...Object.entries(X1_DEFAULT_SETTINGS), ['all', X1_DEFAULT_SETTINGS]]) {
+      const d = await diff(A, await shot(typeof v === 'object' ? v : { [k]: v }));
+      rows.push(`${k} ${d.max}`);
+      check(`X1 ${scene}${rt ? ' rt' : ''}: ${k} at its default = absent (max /255)`, d.max === 0 || d.max <= floor.max, `max ${d.max}, mean ${d.mean.toFixed(4)}; absent twice: max ${floor.max}`);
+    }
+    if (scene === 'mirrorWall' && !rt) {
+      const rest = await diff(await shot({ historyEdgeConfidence: true }), A);
+      // while panning: X0's edgePan (second difference at the screen border, reflection px); on must not pop more
+      // than off, within the off runs' own spread + 5 % (W70's guess for d2)
+      const edge = async (on) => { await pg.T(`(() => { const p = window.__p; for (const k of ${JSON.stringify(X1_KEYS)}) delete p.ssr.settings[k]; p.setSettings({ historyEdgeConfidence: ${on} }); })()`);
+        return (await pg.T('window.__p.metrics.edgePan()')).regions.borderReflection.d2; };
+      const off1 = await edge(false), on = await edge(true), off2 = await edge(false);
+      check('X1 historyEdgeConfidence: no change at rest; panning, edge pops no worse than off (mirrorWall, hit final, re-shade off; X0 edgePan border-reflection d2)',
+        rest.max <= floor.max && on <= Math.max(off1, off2) * 1.05,
+        `at rest max ${rest.max}; edgePan d2 off ${off1} / ${off2}, on ${on}`);
+    }
+    pg.close();
+  }
+}
+
+/**
+ * `--only ssr-exp-grazing` (W71, X1 #3, D5002; the maintainer's test case for hitLobeFilterGrazing):
+ * the bench (showcase/bench.html), one glossy floor seen at camera elevations 5 / 15 / 30 / 60 deg
+ * (the floor point under the scene's centre as target, the hero pose's heading and distance), the
+ * bench's Measure vs the path tracer (OIDN) per elevation over the glossy px and the lower half of the
+ * frame (the floor), with hitLobeFilterGrazing 0 / 0.5 / 1 and hitLobeFilterMixed off (1) / on (0),
+ * methods ours denoised and ours + RT. X0's grazing sweep (gradient energy) and line spread are not
+ * on main yet: this is the error half, shaped so X0 can absorb it (one row per scene x elevation x
+ * setting). GRAZING_SCENES=toyCar,carConcept, GRAZING_FLOOR=<roughness> (default 0.2),
+ * GRAZING_SPP (default 32). JSON to out/w71-grazing.json.
+ */
+async function grazingSweep(pages) {
+  const scenes = (process.env.GRAZING_SCENES ?? 'toyCar').split(',');
+  const floorR = Number(process.env.GRAZING_FLOOR ?? 0.2), spp = Number(process.env.GRAZING_SPP ?? 32);
+  const rows = [];
+  for (const scene of scenes) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual&scene=${scene}&pose=hero&left=ours-denoised&right=pathtraced&aa=off&floorRoughness=${floorR}`);
+    pages.push(p);
+    if (!(await p.T('window.__p.entries()')).length) { console.log('  (no showcase assets: grazing sweep skipped)'); p.close(); return; }
+    await p.T(`(async () => { const P = window.__p; P.addRegion('floorHalf', [0, 0.5, 1, 0.5]); await P.step(2); })()`);
+    for (const elev of [5, 15, 30, 60]) {
+      await p.T(`(async () => {
+        const P = window.__p, [pos, t] = P.view(), e = ${elev} * Math.PI / 180;
+        const h = [pos[0] - t[0], pos[2] - t[2]], hl = Math.hypot(...h), d = Math.hypot(pos[0] - t[0], pos[1] - t[1], pos[2] - t[2]);
+        if (!window.__g0) window.__g0 = { h: [h[0] / hl, h[1] / hl], d, t };
+        const g = window.__g0, target = [g.t[0], 0.001, g.t[2]];
+        P.setView([target[0] + g.d * Math.cos(e) * g.h[0], target[1] + g.d * Math.sin(e), target[2] + g.d * Math.cos(e) * g.h[1]], target);
+        await P.step(2);
+      })()`);
+      savePng(`w71-grazing-${scene}-${elev}.png`, await p.T('window.__p.shot()'));
+      for (const mixed of [1, 0]) {
+        for (const g of [0, 0.5, 1]) {
+          const m = await p.T(`(async () => { const P = window.__p;
+            P.setSetting('s.hitLobeFilterMixed', ${mixed === 1 ? 'null' : mixed}); P.setSetting('s.hitLobeFilterGrazing', ${g === 0 ? 'null' : g});
+            await P.step(2);
+            return P.measure({ samples: ${spp}, warmup: 24, frames: 8, methods: ['ours-denoised', 'ours-rt'] }); })()`);
+          const by = Object.fromEntries(m.rows.map((r) => [r.region, r]));
+          const row = { scene, elevation: elev, floorRoughness: floorR, hitLobeFilterGrazing: g, hitLobeFilterMixed: mixed, spp: m.referenceSamples,
+            regions: Object.fromEntries(['glossy', 'floorHalf'].map((k) => [k, { px: by[k]?.px, ptLuma: by[k]?.refLuma, methods: by[k]?.methods }])) };
+          rows.push(row);
+          const f = (k, id) => { const v = by[k]?.methods[id]; return v ? `${v.mad.toFixed(2)}/${v.luma.toFixed(1)}` : '-'; };
+          console.log(`  ${scene} ${String(elev).padStart(2)} deg mix ${mixed} graz ${g}: glossy MAD/luma dn ${f('glossy', 'ours-denoised')} rt ${f('glossy', 'ours-rt')} (PT ${by.glossy?.refLuma.toFixed(1)}); floor half dn ${f('floorHalf', 'ours-denoised')} rt ${f('floorHalf', 'ours-rt')} (PT ${by.floorHalf?.refLuma.toFixed(1)})`);
+        }
+      }
+    }
+    const errs = await p.T('window.__p.gpuErrors()');
+    check(`grazing sweep ${scene}: ran every elevation x setting, no GPU errors`, errs.length === 0 && rows.filter((r) => r.scene === scene).length === 24, errs[0] ?? `${rows.length} rows`);
+    p.close();
+  }
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, 'w71-grazing.json'), JSON.stringify(rows, null, 1));
 }
 
 /**
@@ -2651,7 +2804,7 @@ async function pixi3dChecks(pages) {
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' || only === 'ssr-exp-baseline' ? 3_600_000 : 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' || only === 'ssr-exp-baseline' || only === 'ssr-exp-grazing' ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -2955,6 +3108,8 @@ async function main() {
     }
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (only === 'halo-options') await haloOptionChecks(pages); // W52 (D3640-D3642)
+    if (only === 'ssr-exp-x1') await x1Checks(pages); // W71 (X1, D5000-D5003): defaults identical on examples/ssr
+    if (only === 'ssr-exp-grazing') await grazingSweep(pages); // W71 (X1 #3): grazing sweep vs the path tracer (minutes), JSON to out/w71-grazing.json
     if (only === 'hit-source') await hitSourceChecks(pages); // W53 (D3660-D3662)
     if (runs('probe-layouts')) await probeLayoutChecks(pages); // W61
     if (runs('probe-bindings')) await probeBindingChecks(pages); // W62
