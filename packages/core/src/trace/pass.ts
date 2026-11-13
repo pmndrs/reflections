@@ -206,6 +206,15 @@ export interface TracedReflections {
    * earlier read is pending. `frame` says which dispatch they are from.
    */
   readStats(): Promise<TracedReflectionsStats>;
+  /**
+   * W74 (review fix 4): the half-rate fill's pipelines are compiled (asynchronously, on the first
+   * `tracedMissRate: 'half'` dispatch or `prepareHalfRate()`). Until then a 'half' dispatch runs no
+   * fill: give the SSSR tracer 'full' meanwhile (the three adapter does), or its fill entries keep
+   * intersect's fallback for those frames.
+   */
+  readonly halfRateReady: boolean;
+  /** Starts compiling the fill's pipelines; resolves when `halfRateReady`. */
+  prepareHalfRate(): Promise<void>;
   /** With `timestamps`: ms per pass ('rt begin', 'rt trace', 'total') for the last frame. */
   readTimings(): Promise<ReadonlyMap<string, number>>;
   destroy(): void;
@@ -332,15 +341,17 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     return providerGroup;
   };
 
-  // W74 (X4): the half-rate fill's passes and scratch, made on the first 'half' dispatch
-  interface Fill { mark: GPUComputePipeline; gather: GPUComputePipeline; scatter: GPUComputePipeline; scratch: GPUBuffer; bgl: [GPUBindGroupLayout, GPUBindGroupLayout, GPUBindGroupLayout] }
-  let fill: Fill | null = null;
-  const ensureFill = (capacity: number): Fill => {
-    const bytes = Math.max(16, capacity * 64);
-    if (fill && fill.scratch.size >= bytes) return fill;
-    fill?.scratch.destroy();
-    const scratch = device.createBuffer({ label: 'rt fill scratch', size: bytes, usage: GPUBufferUsage.STORAGE });
-    if (fill) return (fill = { ...fill, scratch });
+  // W74 (X4): the half-rate fill's passes, compiled asynchronously on the first 'half' request
+  // (review fix 4, as W71's second trace pipeline): until they resolve, dispatch runs no fill and
+  // `halfRateReady` is false, so an adapter keeps the tracer at 'full' meanwhile. The scratch buffer
+  // is made (or grown) at dispatch, a plain allocation.
+  interface FillPipes { mark: GPUComputePipeline; gather: GPUComputePipeline; scatter: GPUComputePipeline; bgl: [GPUBindGroupLayout, GPUBindGroupLayout, GPUBindGroupLayout] }
+  let fillPipes: FillPipes | null = null;
+  let fillPending: Promise<void> | null = null;
+  let fillScratch: GPUBuffer | null = null;
+  const prepareHalfRate = (): Promise<void> => {
+    if (fillPipes) return Promise.resolve();
+    if (fillPending) return fillPending;
     const markBgl = device.createBindGroupLayout({ label: 'rt fill mark', entries: [buf(0, 'uniform'), buf(1, 'read-only-storage'), buf(2, 'read-only-storage'), sto(3, 'r32float')] });
     const gatherBgl = device.createBindGroupLayout({
       label: 'rt fill gather',
@@ -353,16 +364,22 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     });
     checkStageLimits(device, 'rt: the fill gather pipeline', [['pass', { storageBuffers: 4, sampledTextures: 7 }]]);
     checkStageLimits(device, 'rt: the fill scatter pipeline', [['pass', { storageBuffers: 3, storageTextures: 4 }]]);
-    const mk = (label: string, code: string, bgl: GPUBindGroupLayout) => device.createComputePipeline({
+    const mk = (label: string, code: string, bgl: GPUBindGroupLayout) => device.createComputePipelineAsync({
       label, layout: device.createPipelineLayout({ label, bindGroupLayouts: [bgl] }),
       compute: { module: device.createShaderModule({ label, code }), entryPoint: 'main' },
     });
-    return (fill = {
-      mark: mk('rt fill mark', RT_FILL_MARK_WGSL, markBgl),
-      gather: mk('rt fill gather', rtFillGatherWgsl(BILATERAL_FILL_WGSL), gatherBgl),
-      scatter: mk('rt fill scatter', RT_FILL_SCATTER_WGSL, scatterBgl),
-      scratch, bgl: [markBgl, gatherBgl, scatterBgl],
-    });
+    fillPending = Promise.all([
+      mk('rt fill mark', RT_FILL_MARK_WGSL, markBgl),
+      mk('rt fill gather', rtFillGatherWgsl(BILATERAL_FILL_WGSL), gatherBgl),
+      mk('rt fill scatter', RT_FILL_SCATTER_WGSL, scatterBgl),
+    ]).then(([mark, gather, scatter]) => { fillPipes = { mark, gather, scatter, bgl: [markBgl, gatherBgl, scatterBgl] }; });
+    return fillPending;
+  };
+  const fillScratchFor = (capacity: number): GPUBuffer => {
+    const bytes = Math.max(16, capacity * 64);
+    if (fillScratch && fillScratch.size >= bytes) return fillScratch;
+    fillScratch?.destroy();
+    return (fillScratch = device.createBuffer({ label: 'rt fill scratch', size: bytes, usage: GPUBufferUsage.STORAGE }));
   };
 
   let afterSubmit: (() => void) | undefined;
@@ -464,9 +481,11 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     p.setBindGroup(3, frame.hitShadingBindGroup ?? emptyGroup);
     p.dispatchWorkgroupsIndirect(out.missArgs, 0);
     p.end();
-    if ((settings.tracedMissRate ?? 'full') === 'half' && out.missFillCapacity) {
+    const wantFill = (settings.tracedMissRate ?? 'full') === 'half' && !!out.missFillCapacity;
+    if (wantFill && !fillPipes) prepareHalfRate().catch((e) => console.error('rt: the half-rate fill pipelines failed', e)); // no fill until compiled (halfRateReady)
+    if (wantFill && fillPipes) {
       // W74 (X4): mark, gather, scatter over the fill list (indirect args at byte 12)
-      const f = ensureFill(out.missFillCapacity);
+      const f = fillPipes, scratch = fillScratchFor(out.missFillCapacity!);
       const P0 = { binding: 0, resource: { buffer: params } };
       const list = [{ binding: 1, resource: { buffer: out.missList } }, { binding: 2, resource: { buffer: out.missCounter } }];
       const markGroup = device.createBindGroup({ label: 'rt fill mark', layout: f.bgl[0], entries: [P0, ...list, { binding: 3, resource: source.createView() }] });
@@ -482,12 +501,12 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
           { binding: 7, resource: source.createView() },
           { binding: 8, resource: { buffer: out.missList } },
           { binding: 9, resource: { buffer: out.missCounter } },
-          { binding: 10, resource: { buffer: f.scratch } },
+          { binding: 10, resource: { buffer: scratch } },
           { binding: 11, resource: { buffer: state } }],
       });
       const scatterGroup = device.createBindGroup({
         label: 'rt fill scatter', layout: f.bgl[2],
-        entries: [P0, ...list, { binding: 3, resource: { buffer: f.scratch } },
+        entries: [P0, ...list, { binding: 3, resource: { buffer: scratch } },
           { binding: 4, resource: out.radiance.createView() },
           { binding: 5, resource: out.hitDistance.createView() },
           { binding: 6, resource: out.confidence.createView() },
@@ -520,7 +539,8 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   }
 
   return {
-    device, width: W, height: H, provider, source, state, tilesX, tilesY, dispatch,
+    device, width: W, height: H, provider, source, state, tilesX, tilesY, dispatch, prepareHalfRate,
+    get halfRateReady() { return fillPipes !== null; },
     readStats() {
       const slot = latestStats;
       if (!slot) return Promise.resolve({ misses: 0, traced: 0, capped: 0, hits: 0, tracedMisses: 0, onScreenHits: 0, tilesWithMisses: 0, tileCap: 0, frame: 0, halfRateSkipped: 0, fillOverflow: 0, filled: 0, fillFallbacks: 0 });
@@ -545,7 +565,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
       return timer.timings;
     },
     destroy() {
-      source.destroy(); state.destroy(); params.destroy(); fill?.scratch.destroy(); for (const x of statsSlots) x.buffer.destroy(); noHistory.destroy(); noSource.destroy(); prevSource?.destroy();
+      source.destroy(); state.destroy(); params.destroy(); fillScratch?.destroy(); for (const x of statsSlots) x.buffer.destroy(); noHistory.destroy(); noSource.destroy(); prevSource?.destroy();
       timer?.destroy();
     },
   };

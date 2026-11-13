@@ -1166,6 +1166,7 @@ async function halfRateChecks(p) {
   await p.T('window.__p.step(3)');
   const full = await p.T('window.__p.traceStats()');
   await p.T("window.__p.setTraceSettings({ tracedMissRate: 'half' })");
+  await p.T('window.__p.ssr.traced.prepareHalfRate()'); // the fill compiles asynchronously (review fix 4)
   await p.T('window.__p.step(3)');
   const half = await p.T('window.__p.traceStats()');
   await p.T('window.__p.setTraceSettings({})');

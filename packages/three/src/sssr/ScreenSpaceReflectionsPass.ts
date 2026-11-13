@@ -243,7 +243,10 @@ export class ScreenSpaceReflectionsPass {
     // W74 (X4, D5060): tracedMissRate 'half' needs the traced pass's fill this frame. traceSettings wins, then
     // settings (review fix 3: either place works); both passes get the same value.
     const tracing = !!this.rt && this.rayTracing;
-    const halfRate = tracing && (this.traceSettings.tracedMissRate ?? this.settings.tracedMissRate) === 'half';
+    const wantHalf = tracing && (this.traceSettings.tracedMissRate ?? this.settings.tracedMissRate) === 'half';
+    // review fix 4: 'full' until the fill's pipelines (compiled asynchronously) are ready
+    if (wantHalf && !this.rt!.halfRateReady) this.rt!.prepareHalfRate().catch((e) => console.error(e));
+    const halfRate = wantHalf && this.rt!.halfRateReady;
     const halfRateMin = this.traceSettings.tracedHalfRateMinRoughness ?? this.settings.tracedHalfRateMinRoughness;
     const out = core.dispatch(cmd, inputs, {
       frameIndex: frame.frameIndex, ...this.settings, hitColor: useHistory ? 'history' : 'current', fallbackColor: [0, 0, 0],
