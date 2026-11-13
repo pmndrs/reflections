@@ -97,6 +97,12 @@ export interface CompareMethod {
   set?(key: string, value: string | null): SetResult;
   /** W51: the value a setting has on this method now (for the bench's controls when unset), if it can tell. */
   get?(key: string): string | undefined;
+  /** X0 (W70, examples/shared/metrics): ours only, the raw signal (the denoiser's input) as linear RGBA floats at the render size. */
+  readSignal?(): Promise<{ data: Float32Array; width: number; height: number }>;
+  /** X0: ours only, the denoised output (null while the denoiser isn't running). */
+  readDenoised?(): Promise<{ data: Float32Array; width: number; height: number } | null>;
+  /** X0: ours only, the denoiser on / off without a rebuild; returns the previous state. */
+  setDenoise?(on: boolean): boolean;
   /** W51: GPU ms per pass of the last timed frame (ours with `timestamps=1`). */
   timings?(): ReadonlyMap<string, number>;
   gpuErrors(): string[];

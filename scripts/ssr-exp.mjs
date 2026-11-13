@@ -41,7 +41,27 @@ export async function ssrExpMetricsSmoke(ctx, pages) {
   check('ssr-exp metrics: every page metric runs on examples/ssr contact (upscaler, denoiser) and returns finite numbers, no GPU errors',
     bad.length === 0 && errs.length === 0 && parts.every((k) => r[k]) && px > 1000,
     `reflection px ${px}; drift ${r.restDrift?.regions?.reflection?.mean}; orbit std ${r.orbitFlicker?.regions?.reflection?.std}; quad ratio ${r.quadEnergy?.display?.reflection?.ratio} (signal ${r.quadEnergy?.signal?.reflection?.ratio}); pan d2 ${r.edgePan?.regions?.borderReflection?.d2}; speckle ${r.speckle?.regions?.reflection?.pct}%; energy loss ${r.energy?.regions?.reflection?.loss}${bad.length ? '; non-finite ' + bad.slice(0, 3).join(', ') : ''}${errs.length ? '; ' + errs[0] : ''}`);
-  return r;
+
+  // the bench: the PT metrics (line spread, grazing) at a few samples, Measure's X0 columns, the page metrics on a bench method
+  console.log('ssr-exp-metrics: examples/showcase/bench.html lineSpread / grazing');
+  before = ctx.results.logs.length;
+  const b = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual&scene=lineSpread&pose=e15&left=ours-denoised&right=ours-denoised`);
+  pages.push(b);
+  const ents = await b.T('window.__p.entries()');
+  if (!ents.includes('lineSpread')) { console.log(`  (no studio HDRI: bench part skipped; entries ${ents.join(', ')}; ${await b.T("document.querySelector('#status')?.textContent")})`); return r; }
+  const ls = await b.T("window.__p.metrics.lineSpread({ roughness: [0.15], samples: 16, warmup: 8, frames: 2 })");
+  ctx.savePng('ssr-exp-lineSpread.png', await b.T('window.__p.shot()'));
+  const gz = await b.T("window.__p.metrics.grazing({ elevations: [15], samples: 16, warmup: 8, frames: 2 })");
+  ctx.savePng('ssr-exp-grazing.png', await b.T('window.__p.shot()'));
+  const cols = await b.T('window.__p.lastMeasure.rows.map((x) => ({ region: x.region, refQuad: x.refQuad, ...x.methods["ours-denoised"] }))');
+  const pm = await b.T(`window.__p.metrics.all(${JSON.stringify(SMOKE_ALL)})`);
+  bad = [...nonFinite(ls).map((x) => 'lineSpread.' + x), ...nonFinite(gz).map((x) => 'grazing.' + x), ...nonFinite(cols).map((x) => 'measure.' + x), ...nonFinite(pm).map((x) => 'bench.' + x)];
+  errs = errsSince(ctx, before).concat(await b.T('window.__p.gpuErrors()'));
+  const lr = ls.rows[0], gr = gz.rows[0];
+  check('ssr-exp metrics: the bench line spread, grazing sweep, Measure X0 columns and page metrics return finite numbers, no GPU errors',
+    bad.length === 0 && errs.length === 0 && lr?.pt > 0 && lr.methods['ours-denoised']?.width > 0 && gr?.px > 1000 && cols.every((c) => Number.isFinite(c.std)) && !!pm.energy,
+    `line spread r 0.15 @ e15: PT ${lr?.pt} px, ours ${lr?.methods['ours-denoised']?.width} px (${lr?.methods['ours-denoised']?.columns} columns); grazing e15: ${gr?.px} glossy px, MAD ${gr?.methods['ours-denoised']?.mad}, gradient ratio ${gr?.methods['ours-denoised']?.gradientRatio}; glossy std ${cols.find((c) => c.region === 'glossy')?.std}, quad ${cols.find((c) => c.region === 'glossy')?.quad}; bench energy loss ${pm.energy?.regions?.reflection?.loss}${bad.length ? '; non-finite ' + bad.slice(0, 3).join(', ') : ''}${errs.length ? '; ' + errs[0] : ''}`);
+  return { ssr: r, lineSpread: ls, grazing: gz, measure: cols, bench: pm };
 }
 
 export async function ssrExpBaseline(ctx, pages) {

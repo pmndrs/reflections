@@ -173,10 +173,13 @@ export interface Speckle { px: number; speckles: number; pct: number; sigma: num
  * `floor`: 2 for 8-bit display frames, ~1e-3 for linear signal frames.
  */
 export function speckle(l: Luma, w: number, h: number, mask: Mask, sigma = 3, floor = 2): Speckle {
-  let px = 0, sp = 0;
+  return speckleCount(speckleFlags(l, w, h, sigma, floor), mask, sigma);
+}
+/** Per-pixel speckle flags (1 = speckle) over the whole frame (the 2 px border is 0): count them per region with {@link speckleCount}. */
+export function speckleFlags(l: Luma, w: number, h: number, sigma = 3, floor = 2): Uint8Array {
+  const f = new Uint8Array(w * h);
   for (let y = 2; y < h - 2; y++) for (let x = 2; x < w - 2; x++) {
-    const i = y * w + x; if (!mask[i]) continue;
-    px++;
+    const i = y * w + x;
     let s = 0, q = 0;
     for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
       if (!dx && !dy) continue;
@@ -184,8 +187,13 @@ export function speckle(l: Luma, w: number, h: number, mask: Mask, sigma = 3, fl
     }
     const m = s / 24, sd = Math.sqrt(Math.max(0, q / 24 - m * m));
     const e = l[i] - m;
-    if (e > sigma * sd && e > floor && e > 0.05 * Math.abs(m)) sp++;
+    if (e > sigma * sd && e > floor && e > 0.05 * Math.abs(m)) f[i] = 1;
   }
+  return f;
+}
+export function speckleCount(flags: Uint8Array, mask: Mask, sigma = 3): Speckle {
+  let px = 0, sp = 0;
+  for (let i = 0; i < flags.length; i++) if (mask[i]) { px++; sp += flags[i]; }
   return { px, speckles: sp, pct: px ? (100 * sp) / px : 0, sigma };
 }
 

@@ -25,6 +25,11 @@ import { denoiserAvailable } from '../../shared/denoiser';
 import { GROUPS, SETTINGS, decodeValue, effectiveDefault, encodeValue, settingById, type Setting, type Value } from './bench/schema';
 import { appliesText } from './bench/settingsDoc';
 import { EXTRA_VIEWS, NAMED_REGIONS, decodeRegions, encodeRegions, regionPixels, type Region } from './bench/regions';
+// X0 (W70): the experiment plan's metrics (../../shared/metrics/README.md) and its two procedural scenes
+import { METRIC_SCENES } from '../../shared/metrics/scenes';
+import { createMetrics, type Metrics } from '../../shared/metrics/run';
+import { Accumulator, fullMask, lumaOfRGBA, quadEnergy, speckleCount, speckleFlags } from '../../shared/metrics/stats';
+import { benchPTMetrics, type BenchPTMetrics } from '../../shared/metrics/bench';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -74,6 +79,7 @@ async function main() {
   if (!navigator.gpu) { statusEl.textContent = 'WebGPU is not available in this browser.'; return; }
   const have = new Set((await availableAssets()).map((a) => `${a.dir}/${a.file}`));
   const entries = SHOWCASE.filter((e) => have.has(`${e.asset}/${e.asset === 'Sponza' ? 'Sponza.gltf' : e.asset + '.glb'}`) && have.has(`hdri/${e.hdri}`));
+  entries.push(...METRIC_SCENES.filter((e) => have.has(`hdri/${e.hdri}`))); // X0 (W70): procedural, the HDRI file only
   if (!entries.length) {
     statusEl.textContent = 'No showcase assets found. Run `pnpm assets`, then reload.';
     Object.assign(window, { __p: { entries: () => [], ready: true } });
@@ -525,9 +531,16 @@ async function main() {
   }
 
   // ---- measure -----------------------------------------------------------------------------------------
-  interface RegionRow { region: string; px: number; refLuma: number; methods: Record<string, { mad: number; luma: number; frameMad: number }> }
+  /**
+   * X0 (W70): per region also `std` (mean per-pixel temporal std of 8-bit luma over the measured frames), `quad`
+   * (2x2 energy ratio of the mean frame, ../../shared/metrics/stats.ts quadEnergy; `refQuad` the PT's) and
+   * `speckle` (% px > 3 sigma of their 5x5 neighbourhood, display luma, mean over the frames).
+   */
+  interface RegionRow { region: string; px: number; refLuma: number; refQuad: number; methods: Record<string, { mad: number; luma: number; frameMad: number; std: number; quad: number; speckle: number }> }
   interface Measure { scene: string; pose: string; size: [number, number]; referenceSamples: number; frames: number; warmup: number; rows: RegionRow[]; settings: string; seconds: number; methods: MethodId[] }
   let lastMeasure: Measure | null = null;
+  /** X0: the last Measure's images (the PT reference, each method's mean RGB of the measured frames) and region masks. */
+  let lastImages: { ref: Uint8ClampedArray; means: Map<MethodId, Float32Array>; masks: Map<string, Uint8Array> } | null = null;
   async function accumulate(pt: CompareMethod, samples: number, onStep?: () => void) {
     pt.setMaxSamples?.(samples);
     const t0 = performance.now();
@@ -567,27 +580,37 @@ async function main() {
         if (r.pose && r.pose !== pose) continue;
         sets.push({ name: r.name, px: regionPixels(r, W, H, ref) });
       }
+      const masks = new Map(sets.map((s) => { const m = new Uint8Array(W * H); for (const i of s.px) m[i] = 1; return [s.name, m] as const; }));
+      const refL = lumaOfRGBA(ref, W * H);
       const rows: RegionRow[] = sets.map((s) => {
         let l = 0; for (const i of s.px) l += 0.2126 * ref[i * 4] + 0.7152 * ref[i * 4 + 1] + 0.0722 * ref[i * 4 + 2];
-        return { region: s.name, px: s.px.length, refLuma: s.px.length ? l / s.px.length : 0, methods: {} };
+        return { region: s.name, px: s.px.length, refLuma: s.px.length ? l / s.px.length : 0, refQuad: quadEnergy(refL, W, H, masks.get(s.name)!).ratio, methods: {} };
       });
+      const means = new Map<MethodId, Float32Array>();
       for (const id of methods) {
         const m = await get(id);
         m.reset();
         for (let f = 0; f < warmup; f++) { m.frame(camera); await m.idle(); if (f % 8 === 0) { say(`${METHOD_SHORT[id]}: warm-up ${f} / ${warmup}`); await nextFrame(); } }
         const sum = new Float64Array(W * H * 3);
         const frameMad = new Float64Array(sets.length);
+        const lumAcc = new Accumulator(W * H), spk = new Float64Array(sets.length);
         for (let f = 0; f < K; f++) {
           m.frame(camera); m.present?.();
           const d = read(m.canvas);
           await m.idle();
           for (let i = 0, n = W * H; i < n; i++) { sum[i * 3] += d[i * 4]; sum[i * 3 + 1] += d[i * 4 + 1]; sum[i * 3 + 2] += d[i * 4 + 2]; }
+          const L = lumaOfRGBA(d, W * H), flags = speckleFlags(L, W, H);
+          lumAcc.add(L);
+          sets.forEach((s, j) => { spk[j] += speckleCount(flags, masks.get(s.name)!).pct / K; });
           sets.forEach((s, j) => {
             let a = 0; for (const i of s.px) a += (Math.abs(d[i * 4] - ref[i * 4]) + Math.abs(d[i * 4 + 1] - ref[i * 4 + 1]) + Math.abs(d[i * 4 + 2] - ref[i * 4 + 2])) / 3;
             frameMad[j] += s.px.length ? a / s.px.length / K : 0;
           });
           if (f % 8 === 0) { say(`${METHOD_SHORT[id]}: frame ${f} / ${K}`); await nextFrame(); }
         }
+        const mean = new Float32Array(W * H * 3);
+        for (let i = 0; i < W * H * 3; i++) mean[i] = sum[i] / K;
+        const meanL = lumAcc.mean();
         sets.forEach((s, j) => {
           let mad = 0, lum = 0;
           for (const i of s.px) {
@@ -596,12 +619,15 @@ async function main() {
             lum += 0.2126 * r + 0.7152 * g + 0.0722 * b;
           }
           const n = s.px.length || 1;
-          rows[j].methods[id] = { mad: mad / n, luma: lum / n, frameMad: frameMad[j] };
+          const mk = masks.get(s.name)!;
+          rows[j].methods[id] = { mad: mad / n, luma: lum / n, frameMad: frameMad[j], std: lumAcc.std(mk), quad: quadEnergy(meanL, W, H, mk).ratio, speckle: spk[j] };
         });
+        means.set(id, mean);
         if (!sides.includes(id)) drop(id);
         say(table(rows, methods.filter((x) => rows[0].methods[x]), refSamples, K));
       }
       lastMeasure = { scene: entry.id, pose, size: [W, H], referenceSamples: refSamples, frames: K, warmup, rows, settings: settingsQuery(), seconds: (performance.now() - t0) / 1000, methods };
+      lastImages = { ref, means, masks };
       say(table(rows, methods, refSamples, K));
       return lastMeasure;
     } finally { busy = false; }
@@ -613,7 +639,10 @@ async function main() {
     for (const r of rows) {
       lines.push(`${r.region.slice(0, 11).padEnd(12)}${col(String(r.px), 7)}${col(r.refLuma.toFixed(1), 6)}${methods.map((m) => { const v = r.methods[m]; return col(v ? `${v.mad.toFixed(1)} / ${v.luma.toFixed(1)}` : '-', 14); }).join('')}`);
     }
-    return head + lines.join('\n') + '\n\nMAD: mean over the region of |mean frame - PT| (RGB)\nluma: the method\'s mean luma there (the PT\'s in column PT)\nregions defined at another pose are skipped';
+    const fl = [`${'region'.padEnd(12)}${col('PT quad', 8)}${methods.map((m) => col(METHOD_SHORT[m].slice(0, 13), 20)).join('')}`];
+    for (const r of rows) fl.push(`${r.region.slice(0, 11).padEnd(12)}${col(r.refQuad.toFixed(3), 8)}${methods.map((m) => { const v = r.methods[m]; return col(v ? `${v.std.toFixed(2)} / ${v.quad.toFixed(3)} / ${v.speckle.toFixed(2)}` : '-', 20); }).join('')}`);
+    return head + lines.join('\n') + '\n\nMAD: mean over the region of |mean frame - PT| (RGB)\nluma: the method\'s mean luma there (the PT\'s in column PT)\nregions defined at another pose are skipped' +
+      '\n\nX0 flicker columns: std / quad / speckle %\n' + fl.join('\n') + '\n\nstd: per-pixel temporal std of luma over the measured frames; quad: 2x2 energy ratio of the mean (0 none, 1 flat quads); speckle: % px > 3 sigma of their 5x5 neighbours';
   }
 
   // ---- code / presets ------------------------------------------------------------------------------------
@@ -949,6 +978,67 @@ async function main() {
     ].filter(Boolean).join('\n');
   }, 500);
 
+  // ---- X0 (W70) metrics ------------------------------------------------------------------------------------
+  /** Run `f` with the rAF loop held off (it would render between the metric's frames). */
+  const exclusive = async <T>(f: () => Promise<T>): Promise<T> => { const was = busy; busy = true; try { return await f(); } finally { busy = was; } };
+  /** The page metrics (../../shared/metrics/run.ts) on one method's canvas (default: side A); the camera is the bench's. */
+  function metricsFor(id: MethodId = sides[0]): Metrics {
+    const m = () => get(id);
+    return createMetrics({
+      width: W, height: H,
+      async step(n = 1) { const x = await m(); for (let i = 0; i < n; i++) x.frame(camera); await x.idle(); },
+      async grab() { const x = await m(); x.frame(camera); x.present?.(); const d = read(x.canvas); await x.idle(); return d; },
+      reset() { live.get(id)?.reset(); },
+      async reflectionMask() {
+        const x = await m();
+        if (!x.renderMask) return fullMask(W * H); // three's SSR / the PT: no G-buffer of ours
+        x.renderMask(camera); const d = read(x.canvas); await x.idle();
+        const mk = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) mk[i] = d[i * 4] > 127 ? 1 : 0;
+        return mk;
+      },
+      // the scene's named regions at this pose (W50's lip / band / door take their masks from the last Measure's PT)
+      async extraRegions() {
+        const out: Record<string, Uint8Array> = {};
+        for (const r of allRegions()) {
+          if (r.pose && r.pose !== pose) continue;
+          const px = regionPixels(r, W, H, lastImages && lastMeasure?.scene === entry.id && lastMeasure.pose === pose ? lastImages.ref : null);
+          if (!px.length) continue;
+          const mk = new Uint8Array(W * H); for (const i of px) mk[i] = 1; out[r.name] = mk;
+        }
+        return out;
+      },
+      getView: () => ({ pos: camera.position.toArray() as [number, number, number], target: controls.target.toArray() as [number, number, number] }),
+      setView(pos, target) { camera.position.set(...pos); controls.target.set(...target); camera.lookAt(controls.target); camera.updateMatrixWorld(); },
+      readSignal: async () => { const x = await m(); if (!x.readSignal) throw new Error(`${id}: no signal readback`); return x.readSignal(); },
+      readDenoised: async () => { const x = await m(); return x.readDenoised ? x.readDenoised() : null; },
+      setDenoise(on) { return live.get(id)?.setDenoise?.(on) ?? false; },
+      describe: () => ({ page: 'bench', scene: entry.id, pose, method: id, settings: settingsQuery(), status: live.get(id)?.status() }),
+    });
+  }
+  const ptMetrics: BenchPTMetrics = benchPTMetrics({
+    width: W, height: H, camera,
+    scene: () => entry.id, load, setPose, setSetting: (k, v) => setSetting(k, v), getSetting: (k) => q.get(k),
+    pending: () => ({ methods: [...pending].filter((x) => live.has(x)), page: pagePending }), rebuild,
+    measure: (o) => measure(o as Parameters<typeof measure>[0]),
+    lastImages: () => lastImages as never,
+  });
+  type MOpt = { method?: MethodId };
+  const pageMetric = <K extends Exclude<keyof Metrics, 'regions'>>(k: K) => (o: MOpt & Record<string, unknown> = {}) =>
+    exclusive(async () => {
+      if (!manual) { frozen = true; freezeBox.checked = true; }
+      return (metricsFor(o.method)[k] as (x: unknown) => Promise<unknown>)(o);
+    });
+  const benchMetrics = {
+    /** The page metrics bound to one method: `of('ours-raw').speckle()`. */
+    of: metricsFor,
+    restDrift: pageMetric('restDrift'), orbitFlicker: pageMetric('orbitFlicker'), quadEnergy: pageMetric('quadEnergy'),
+    edgePan: pageMetric('edgePan'), speckle: pageMetric('speckle'), energy: pageMetric('energy'), all: pageMetric('all'),
+    lineSpread: (o?: Parameters<BenchPTMetrics['lineSpread']>[0]) => ptMetrics.lineSpread(o),
+    grazing: (o?: Parameters<BenchPTMetrics['grazing']>[0]) => ptMetrics.grazing(o),
+    /** The last Measure's X0 images (PT reference, each method's mean). */
+    get lastImages() { return lastImages; },
+  };
+
   // ---- start -------------------------------------------------------------------------------------------
   setMode(mode);
   markPreset();
@@ -1005,6 +1095,7 @@ async function main() {
       resetAll, applyQuery, copyAsCode, settingsQuery,
       addRegion, regions: () => allRegions().map((r) => ({ ...r })), regionPixels: (name: string) => { const r = allRegions().find((x) => x.name === name); return r ? regionPixels(r, W, H, null).length : 0; },
       measure, get lastMeasure() { return lastMeasure; },
+      metrics: benchMetrics, // X0 (W70): ../../shared/metrics/README.md
       get lastDiff() { return lastDiff; },
       timings: () => Object.fromEntries(sides.map((id) => [id, Object.fromEntries(live.get(id)?.timings?.() ?? [])])),
       info: () => ({ scene: entry.id, pose, sides: [...sides], mode, split, frozen, size: [W, H], live: [...live.keys()], status: Object.fromEntries([...live].map(([k, m]) => [k, m.status()])), info: Object.fromEntries([...live].map(([k, m]) => [k, m.info()])) }),
