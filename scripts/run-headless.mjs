@@ -355,6 +355,59 @@ async function x1Checks(pages) {
 }
 
 /**
+ * `--only ssr-exp-grazing` (W71, X1 #3, D5002; the maintainer's test case for hitLobeFilterGrazing):
+ * the bench (showcase/bench.html), one glossy floor seen at camera elevations 5 / 15 / 30 / 60 deg
+ * (the floor point under the scene's centre as target, the hero pose's heading and distance), the
+ * bench's Measure vs the path tracer (OIDN) per elevation over the glossy px and the lower half of the
+ * frame (the floor), with hitLobeFilterGrazing 0 / 0.5 / 1 and hitLobeFilterMixed off (1) / on (0),
+ * methods ours denoised and ours + RT. X0's grazing sweep (gradient energy) and line spread are not
+ * on main yet: this is the error half, shaped so X0 can absorb it (one row per scene x elevation x
+ * setting). GRAZING_SCENES=toyCar,carConcept, GRAZING_FLOOR=<roughness> (default 0.2),
+ * GRAZING_SPP (default 32). JSON to out/w71-grazing.json.
+ */
+async function grazingSweep(pages) {
+  const scenes = (process.env.GRAZING_SCENES ?? 'toyCar').split(',');
+  const floorR = Number(process.env.GRAZING_FLOOR ?? 0.2), spp = Number(process.env.GRAZING_SPP ?? 32);
+  const rows = [];
+  for (const scene of scenes) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual&scene=${scene}&pose=hero&left=ours-denoised&right=pathtraced&aa=off&floorRoughness=${floorR}`);
+    pages.push(p);
+    if (!(await p.T('window.__p.entries()')).length) { console.log('  (no showcase assets: grazing sweep skipped)'); p.close(); return; }
+    await p.T(`(async () => { const P = window.__p; P.addRegion('floorHalf', [0, 0.5, 1, 0.5]); await P.step(2); })()`);
+    for (const elev of [5, 15, 30, 60]) {
+      await p.T(`(async () => {
+        const P = window.__p, [pos, t] = P.view(), e = ${elev} * Math.PI / 180;
+        const h = [pos[0] - t[0], pos[2] - t[2]], hl = Math.hypot(...h), d = Math.hypot(pos[0] - t[0], pos[1] - t[1], pos[2] - t[2]);
+        if (!window.__g0) window.__g0 = { h: [h[0] / hl, h[1] / hl], d, t };
+        const g = window.__g0, target = [g.t[0], 0.001, g.t[2]];
+        P.setView([target[0] + g.d * Math.cos(e) * g.h[0], target[1] + g.d * Math.sin(e), target[2] + g.d * Math.cos(e) * g.h[1]], target);
+        await P.step(2);
+      })()`);
+      savePng(`w71-grazing-${scene}-${elev}.png`, await p.T('window.__p.shot()'));
+      for (const mixed of [1, 0]) {
+        for (const g of [0, 0.5, 1]) {
+          const m = await p.T(`(async () => { const P = window.__p;
+            P.setSetting('s.hitLobeFilterMixed', ${mixed === 1 ? 'null' : mixed}); P.setSetting('s.hitLobeFilterGrazing', ${g === 0 ? 'null' : g});
+            await P.step(2);
+            return P.measure({ samples: ${spp}, warmup: 24, frames: 8, methods: ['ours-denoised', 'ours-rt'] }); })()`);
+          const by = Object.fromEntries(m.rows.map((r) => [r.region, r]));
+          const row = { scene, elevation: elev, floorRoughness: floorR, hitLobeFilterGrazing: g, hitLobeFilterMixed: mixed, spp: m.referenceSamples,
+            regions: Object.fromEntries(['glossy', 'floorHalf'].map((k) => [k, { px: by[k]?.px, ptLuma: by[k]?.refLuma, methods: by[k]?.methods }])) };
+          rows.push(row);
+          const f = (k, id) => { const v = by[k]?.methods[id]; return v ? `${v.mad.toFixed(2)}/${v.luma.toFixed(1)}` : '-'; };
+          console.log(`  ${scene} ${String(elev).padStart(2)} deg mix ${mixed} graz ${g}: glossy MAD/luma dn ${f('glossy', 'ours-denoised')} rt ${f('glossy', 'ours-rt')} (PT ${by.glossy?.refLuma.toFixed(1)}); floor half dn ${f('floorHalf', 'ours-denoised')} rt ${f('floorHalf', 'ours-rt')} (PT ${by.floorHalf?.refLuma.toFixed(1)})`);
+        }
+      }
+    }
+    const errs = await p.T('window.__p.gpuErrors()');
+    check(`grazing sweep ${scene}: ran every elevation x setting, no GPU errors`, errs.length === 0 && rows.filter((r) => r.scene === scene).length === 24, errs[0] ?? `${rows.length} rows`);
+    p.close();
+  }
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, 'w71-grazing.json'), JSON.stringify(rows, null, 1));
+}
+
+/**
  * examples/scenes: every procedural scene (and every downloaded asset scene) renders into the
  * frame-contract G-buffer with no validation errors, and each target holds what the contract says.
  */
@@ -2744,7 +2797,7 @@ async function pixi3dChecks(pages) {
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' ? 3_600_000 : 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' || only === 'ssr-exp-grazing' ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -3049,6 +3102,7 @@ async function main() {
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (only === 'halo-options') await haloOptionChecks(pages); // W52 (D3640-D3642)
     if (only === 'ssr-exp-x1') await x1Checks(pages); // W71 (X1, D5000-D5003): defaults identical on examples/ssr
+    if (only === 'ssr-exp-grazing') await grazingSweep(pages); // W71 (X1 #3): grazing sweep vs the path tracer (minutes), JSON to out/w71-grazing.json
     if (only === 'hit-source') await hitSourceChecks(pages); // W53 (D3660-D3662)
     if (runs('probe-layouts')) await probeLayoutChecks(pages); // W61
     if (runs('probe-bindings')) await probeBindingChecks(pages); // W62
