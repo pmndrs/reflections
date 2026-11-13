@@ -7,6 +7,22 @@ Maintainer decision 3 (2026-11-13). W73 found that BRDF / pdf weights (SSSR 2015
 
 Run everything with `DENOISER_REPO=~/Developer/Denoiser-w78`. Nothing is pushed.
 
+## Update after review (2026-11-13, later)
+
+- **`keepHistoryOnBlack` is on by default on our side.** `HybridReflections.denoiserKeepHistoryOnBlack` defaults to true. It is set through `setOptions` on denoisers that have the option; `false`, `?keepBlack=0` or the bench's `keepBlack` 0 turn it off. This followed the maintainer's priority, flicker first:
+  - Rest drift and orbit flicker at cone + compensation 0.5, keepBlack on vs off, all within the floor: mirrorWall, contact, facingMirrors, chess, carConcept (`data/flicker-*.jsonl`).
+  - moving and offscreen, the two scenes whose image it changes, over 7 paired rounds in both orders, also within the floor. Whichever config runs second reads a little higher, so that is an order effect.
+- **What it changes** (identity capture vs main): offscreen 2326 px, where the emissive strips' floor reflection comes back; moving 3237 px, where the knot's floor reflection fills in instead of breaking up; contact 24 px; carConcept 12 px; the mirrors 0. Crops: `keepblack-{moving,offscreen}.png`.
+- **`brdfWeights: 'combine'` at the new gate (`brdfMinAlpha` 0.01)** is also within the floor, but it reads higher on chess in both rounds (+1.5 %) and adds little over keepBlack. It stays experimental.
+- **Review fixes:**
+  1. A miss sent to the half-rate fill list writes pdf 0.
+  2. The BRDF target lobe follows the alpha the tracer actually sampled (`outputs.hitColorFilterActive`). `HybridReflections` sets `brdfAlphaScale` itself.
+  3. No direction is handed on with `rayReuse: 'ratio'` (warns once).
+  4. FFX caps the weight at 1e8 (the 1e30 cap overflowed f32 when squared).
+  5. `brdfMinAlpha` defaults to 0.01, and the examples follow it.
+  6. A new check, `pnpm check --only brdf-prefilter`, which also covers the half-res warning.
+- **The Denoiser branch is split:** `keepHistoryOnBlack` (`ba5e88d`) and its test-bed flag (`a9f5769`) sit at the base, on main as is, for a standalone PR. Then the BRDF weights (`bc0912b`) and the two fixes (`cf7755b`, `81bbb09`). The pre-split history is kept as `w78-brdf-prefilter-v1`.
+
 ## Short answer
 
 - **The BRDF weights work inside the prefilter, but FFX's temporal resolve was throwing their result away.**
