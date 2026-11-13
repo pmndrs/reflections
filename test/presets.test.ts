@@ -4,14 +4,14 @@ import { REFLECTION_PRESETS, REFLECTION_PRESET_KEYS, REFLECTION_PRESET_NAMES, de
 import { PRESET_DOCS, SETTINGS, presetUrlKeys } from '../examples/showcase/src/bench/schema';
 
 describe('reflection presets', () => {
-  it("'performance' is half-res + the denoiser's hit source 'hits'", () => {
-    expect(reflectionsPreset('performance')).toEqual({ tracer: { reflectionResolution: 'half' }, denoiser: { hitSource: 'hits' } });
+  it("'performance' is half-res only (the maintainer dropped the hit source: flicker first)", () => {
+    expect(reflectionsPreset('performance')).toEqual({ tracer: { reflectionResolution: 'half' }, denoiser: {} });
   });
 
   it('explicit settings win key by key; undefined overrides are ignored; the frozen table is not mutated', () => {
-    const p = reflectionsPreset('performance', { tracer: { reflectionResolution: 'full', samplesPerQuad: 2, mirrorBias: undefined }, denoiser: { hitSource: undefined } });
+    const p = reflectionsPreset('performance', { tracer: { reflectionResolution: 'full', samplesPerQuad: 2, mirrorBias: undefined }, denoiser: { hitSource: 'all' } });
     expect(p.tracer).toEqual({ reflectionResolution: 'full', samplesPerQuad: 2 });
-    expect(p.denoiser).toEqual({ hitSource: 'hits' });
+    expect(p.denoiser).toEqual({ hitSource: 'all' }); // an override can still add one
     p.tracer.reflectionResolution = 'half';
     expect(REFLECTION_PRESETS.performance.tracer.reflectionResolution).toBe('half');
     expect(REFLECTION_PRESETS.default).toEqual({ tracer: {}, denoiser: {} });
@@ -23,7 +23,7 @@ describe('reflection presets', () => {
       for (const k of Object.keys(REFLECTION_PRESETS[n].tracer)) expect(REFLECTION_PRESET_KEYS.tracer, `${n}.tracer.${k}`).toContain(k);
       for (const k of Object.keys(REFLECTION_PRESETS[n].denoiser)) expect(REFLECTION_PRESET_KEYS.denoiser, `${n}.denoiser.${k}`).toContain(k);
     }
-    expect(REFLECTION_PRESET_KEYS).toEqual({ tracer: ['reflectionResolution'], denoiser: ['hitSource'] });
+    expect(REFLECTION_PRESET_KEYS).toEqual({ tracer: ['reflectionResolution'], denoiser: [] });
   });
 
   it('unknown names throw; isReflectionsPresetName guards them', () => {
@@ -45,7 +45,7 @@ describe('reflection presets', () => {
   });
 
   it('the bench maps every preset onto URL keys its schema has, with values the controls offer', () => {
-    expect(presetUrlKeys('performance')).toEqual({ 's.reflectionResolution': 'half', hitSource: 'hits' });
+    expect(presetUrlKeys('performance')).toEqual({ 's.reflectionResolution': 'half' });
     expect(presetUrlKeys('default')).toEqual({});
     expect(presetUrlKeys(null)).toEqual({});
     const byId = new Map(SETTINGS.map((s) => [s.id, s]));

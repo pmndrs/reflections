@@ -6,6 +6,8 @@ Branch `worktree-agent-a236ab3f3d4eb74e3`, from main `62f7162`. Every number bel
 
 **W76's future defaults are pinned in every run:** `hitColorFilter: 'cone'`, `mirrorBiasCompensate: true`, `mirrorBias: 0.5`. W76 is making them the defaults, so these numbers are what users will get. (Bench: URL keys; ssr page and showcase: set on `ssr.settings` by the scripts; the scripts wait for the cone's async intersect variant before measuring, and the timing rows record that it was active.) One control run without them is marked.
 
+**Update after the review (maintainer, 2026-11-13):** 'performance' is now **half resolution only**. The hit source was dropped because flicker ranks first: on carConcept it made the sill band's orbit flicker 2.5x (below). It stays its own documented switch (`hybrid.setDenoiserHitSource`, bench `hitSource`). The matrix below was measured with it on. The "ref: half (no hits) x1" row is the shipped preset at ratio 1. The hit source is a no-op without RT, so the ours-denoised columns are unaffected. 'default' is now empty: the package defaults stay the only source of truth. **All GPU ms here are relative: re-time on a quiet machine.**
+
 ## The preset (what was built)
 
 - **Core** (`packages/core/src/presets.ts`, plain data, engine-agnostic): `REFLECTION_PRESETS` (`default`, `performance`), `reflectionsPreset(name, overrides)` (explicit settings win key by key; `undefined` is ignored), `denoiserHitSourceOptions(mode)` (FFX's option names), types `ReflectionResolution`, `DenoiserHitSourceMode`.

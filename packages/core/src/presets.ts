@@ -3,7 +3,7 @@
 // hybrid resolve, and anything the app sets explicitly wins over the preset.
 //
 //   const p = reflectionsPreset('performance', { tracer: { samplesPerQuad: 2 } });
-//   // p.tracer: { reflectionResolution: 'half', samplesPerQuad: 2 }, p.denoiser: { hitSource: 'hits' }
+//   // p.tracer: { reflectionResolution: 'half', samplesPerQuad: 2 }, p.denoiser: {}
 //
 // The three adapter takes `preset` in `ScreenSpaceReflectionsPass` / `HybridReflections` options and
 // `applyReflectionsPreset()` at runtime. docs/SETTINGS.md ("Presets") gives each preset's cost and
@@ -43,18 +43,16 @@ export type ReflectionsPresetName = 'default' | 'performance';
  * the only source of truth for them). 'performance' (W77):
  * - `reflectionResolution: 'half'`: trace (SSR and RT) and denoise at half size, joint bilateral
  *   upsample. 1080p: -1.6 to -3.4 ms of the frame (W75), the most of any setting.
- * - `hitSource: 'hits'`: the half-res denoiser covers twice the screen area, so bright screen-space hits
- *   spread over dark traced ones at silhouettes (carConcept's sill band, MAD vs the path tracer 30.6 at
- *   full -> 58.3 at half); keeping the two hit sources apart brings it to 39.4, but the band's orbit
- *   flicker goes x2.5 (W77). Needs a denoiser that takes a hit source (FFX: `separateHitSources` +
- *   `missesMatchAnySource`); a no-op without ray tracing. Pending with the maintainer: to ship half res
- *   alone, delete the one `denoiser:` line of 'performance' below (docs/SETTINGS.md, "Presets").
+ * - No denoiser hit source (maintainer, 2026-11-13). `hitSource: 'hits'` brought carConcept's sill band
+ *   back from 58 to 39 MAD at half res, but made the band's orbit flicker x2.5 (W77), and flicker ranks
+ *   first. It stays its own switch (`HybridReflections.setDenoiserHitSource`); to put it back in the
+ *   preset, add `denoiser: Object.freeze({ hitSource: 'hits' as const })` to 'performance'.
  */
 export const REFLECTION_PRESETS: Readonly<Record<ReflectionsPresetName, Readonly<ReflectionsPreset>>> = Object.freeze({
   default: Object.freeze({ tracer: Object.freeze({}), denoiser: Object.freeze({}) }),
   performance: Object.freeze({
     tracer: Object.freeze({ reflectionResolution: 'half' as const }),
-    denoiser: Object.freeze({ hitSource: 'hits' as const }), // W77: the one line to drop for "half res alone"
+    denoiser: Object.freeze({}),
   }),
 });
 

@@ -82,7 +82,7 @@ export const SETTINGS: Setting[] = [
   // ---- preset (W77): first, since it sets keys of the groups below ------------------------------------------
   sel('preset', 'preset', 'Preset', REFLECTION_PRESET_NAMES.map((n) => [n, n] as const), 'default', {
     apply: 'rebuild', appliesTo: OURS_SSR, api: "ScreenSpaceReflectionsPass({ preset }) + HybridReflections({ preset }); applyReflectionsPreset() at runtime",
-    tradeoff: 'Sets the URL keys the preset names (performance: s.reflectionResolution half, hitSource hits) wherever the URL doesn\'t set them; the controls of those keys keep showing their own value. Clearing a key returns it to the preset\'s value.',
+    tradeoff: 'Sets the URL keys the preset names (performance: s.reflectionResolution half) wherever the URL doesn\'t set them; the controls of those keys keep showing their own value. Clearing a key returns it to the preset\'s value.',
   }),
   // ---- anti-aliasing (top: the maintainer's ask, W51) -----------------------------------------------------
   sel('aa', 'aa', 'AA mode', [['upscaler', 'Upscaler (@pmndrs/upscaler, TAA at ratio 1)'], ['taa', 'TAA (W40 resolve)'], ['off', 'Off']], null, {
@@ -357,7 +357,7 @@ export const SETTINGS: Setting[] = [
   // W53 (D3660-D3662): live (the denoiser's setOptions + HybridReflections.denoiserHitSource), no rebuild
   sel('hitSource', 'denoiser', 'Keep hit sources apart', [['0', 'off'], ['hits', 'screen vs traced hits'], ['all', 'hits and misses']], '0', {
     appliesTo: OURS_DN, api: 'hybrid.denoiserHitSource = true; FfxReflectionDenoiser({ separateHitSources, missesMatchAnySource })',
-    tradeoff: 'The denoiser stops blending bright screen-space hits into dark traced ones (the W50 halo: carConcept lip 80 -> 59 with hits, 52 with all, PT 48, at 960x540; at 1080p the halo is mostly gone anyway). hits: no regression on chess / toyCar / Sponza. all: boils where rays flip between hit and miss (std p99 x4-10). Both show a 2x2 stair step at source edges (D3663).',
+    tradeoff: 'W77 (maintainer: not in the performance preset): with RT it lowers silhouette error but raises flicker there. carConcept w50 sill band at half res MAD 57.9 -> 39.3, but the band\'s orbit flicker 1.16 -> 2.94 (reflection region 0.41 -> 0.51); at full res band 30.6 -> 23.2, band flicker 0.90 -> 1.32; chess, Sponza, the ssr scenes unchanged; no effect without RT. The denoiser stops blending bright screen-space hits into dark traced ones (the W50 halo: carConcept lip 80 -> 59 with hits, 52 with all, PT 48, at 960x540; at 1080p the halo is mostly gone anyway). hits: no regression on chess / toyCar / Sponza. all: boils where rays flip between hit and miss (std p99 x4-10). Both show a 2x2 stair step at source edges (D3663).',
     cost: '+0.35 ms (hits) / +0.51 ms (all) at 1080p, ~0 at 960x540 (W53)',
   }),
   num('hitDistW', 'denoiser', 'Hit-distance weight', 0, 16, 1, 0, {
@@ -457,19 +457,19 @@ export interface PresetDoc {
 export const PRESET_DOCS: PresetDoc[] = [
   {
     name: 'default',
-    sets: 'The package defaults of every key a preset sets: `reflectionResolution: \'full\'`, denoiser hit source off. Applying it undoes another preset.',
+    sets: 'Nothing: every key a preset names goes back to what the app passed at construction, else to the package default.',
     cost: '',
-    tradeoffs: 'Full-resolution trace and denoise.',
+    tradeoffs: 'Full-resolution trace and denoise (the package defaults).',
     avoid: '',
-    upscaler: 'At ratio 1.5 the reflections cost 1-2.5 ms at 1080p already (W77), so the upscaler is the bigger saving.',
+    upscaler: 'At ratio 1.5 the reflections are already a small share of the frame (W77), so the upscaler is the bigger saving.',
   },
   {
     name: 'performance',
-    sets: '`reflectionResolution: \'half\'` (trace, RT and denoise at half size in each axis, joint bilateral upsample) and the denoiser\'s hit source `\'hits\'` (screen-space and traced hits kept apart; no effect without RT).',
-    cost: '1080p, ratio 1, RT on, cone defaults (W77; shared GPU, least-contended page): reflection passes carConcept 6.0 -> 2.6 ms, chess 4.0 -> 1.6, Sponza 3.3 -> 2.4, mirrorWall 10.7 -> 5.0, contact 12.4 -> 7.4; frame -2 to -7 ms. At ratio 1.5 about -1 ms; at ratio 2 nothing (its sample + upsample passes, ~0.3-1 ms, eat the saving).',
-    tradeoffs: 'W77 bench vs the path tracer (960x540, ours-rt): carConcept frame MAD 7.8 -> 8.4, lip 41.8 -> 36.7, band 30.6 -> 39.3 (58 without the hit source); chess 6.9 -> 7.2; Sponza unchanged. Flicker: chess / Sponza / mirrorWall orbit within 5-8 %; carConcept +42 % (0.36 -> 0.51), most of it the hit source at the sill band (band 1.16 -> 2.94). Mirrors: jagged reflected edges (W75). A thin bright reflection loses most of its peak at r 0.05 and is lost at r 0.15 (line spread).',
-    avoid: 'With an upscale ratio of 2 (no saving, thin features lost, carConcept door MAD +4); when the frame already upscales at 1.5 or more and reflections are a small share; mirror-heavy close-ups where reflected edges must stay crisp; thin bright emitters (neon strips, specular lines) on glossy floors.',
-    upscaler: 'Use it at ratio 1. At 1.5 it still saves ~1 ms but stacks: a thin strip at r 0.05 is lost, mirrorWall orbit flicker +17 %. Not at 2. Given the choice, upscale 1.5 first (the whole frame shrinks: carConcept 24.7 -> 8.8 ms) and keep full-res reflections.',
+    sets: '`reflectionResolution: \'half\'`: trace, RT and denoise at half size in each axis, joint bilateral upsample. No denoiser hit source (maintainer, 2026-11-13: flicker first); that stays its own switch (Denoiser group, `hitSource`).',
+    cost: 'Relative only, re-time on a quiet machine (W77: 1080p, ratio 1, RT, cone defaults, GPU shared with other runs, least-contended page, measured with the hit source on, which W53 puts at +0.35 ms): reflection passes about halve, carConcept 6.0 -> 2.6 ms, chess 4.0 -> 1.6, Sponza 3.3 -> 2.4, mirrorWall 10.7 -> 5.0, contact 12.4 -> 7.4. At ratio 1.5 about -1 ms; at ratio 2 nothing (its half-res sample + upsample passes eat the saving).',
+    tradeoffs: 'W77 bench vs the path tracer (960x540, ours-rt, ratio 1): carConcept frame MAD 7.8 -> 8.9, lip 41.8 -> 50.0, sill band 30.6 -> 57.9 (the half-res denoiser covers twice the screen area); chess 6.9 -> 7.2; Sponza unchanged. Orbit flicker of the reflection: carConcept 0.36 -> 0.41, chess 0.23 -> 0.25, Sponza 0.53 -> 0.55. Mirrors: jagged reflected edges (W75). A thin bright reflection loses most of its peak at r 0.05 and is lost at r 0.15 (line spread).',
+    avoid: 'With an upscale ratio of 2 (no saving, thin features lost, carConcept door MAD +4); when the frame already upscales at 1.5 or more and reflections are a small share; mirror close-ups whose reflected edges must stay crisp; thin bright emitters (neon strips, specular lines) on glossy floors; RT scenes whose silhouettes over a mirror floor matter (the car sill: add hitSource \'hits\' if its flicker is acceptable).',
+    upscaler: 'Use it at ratio 1. At 1.5 it still saves ~1 ms but stacks: a thin strip at r 0.05 is lost, mirrorWall orbit flicker +17 %. Not at 2. Given the choice, upscale 1.5 first (the whole frame shrinks) and keep full-res reflections.',
   },
 ];
 
