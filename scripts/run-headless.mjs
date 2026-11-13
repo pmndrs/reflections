@@ -382,6 +382,36 @@ async function hybridChecks(pages) {
     `${b.sphere.px} px reflect the sphere: probe weight ${b.sphereProbe.toFixed(3)} (FFX blend ${f.sphereProbe.toFixed(3)}); ${b.behind.px} px reflect the wall behind it: hit weight ${b.behindSSR.toFixed(3)} (FFX ${f.behindSSR.toFixed(3)})`);
   await p.T('window.__p.setDepthAware(true)');
   await seamChecks(p);
+  await halfResChecks(pages); // W75 (X5, D5080)
+}
+
+/**
+ * W75 (X5, D5080): `reflectionResolution: 'half'` (examples/ssr ?res=half), with the denoiser and the
+ * ray-traced pass: the tracer and the denoiser run at ceil(w/2) x ceil(h/2), the residual is upsampled,
+ * and the final image stays close to full res (mean |diff| per channel vs a 'full' page of the same scene).
+ */
+async function halfResChecks(pages) {
+  const full = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1`);
+  const half = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1&res=half`);
+  pages.push(full, half);
+  for (const id of ['mirrorWall', 'contact']) {
+    const before = results.logs.length;
+    const shot = {};
+    for (const [k, p] of [['full', full], ['half', half]]) {
+      await p.T(`window.__p.load(${JSON.stringify(id)})`);
+      await p.T('(window.__p.ssr.settings.frameIndex = 5, true)');
+      await p.T('window.__p.step(24)');
+      shot[k] = await p.T('window.__p.shot()');
+    }
+    savePng(`half-res-${id}-final.png`, shot.half);
+    const info = await half.T('({ res: window.__p.ssr.resolution, w: window.__p.ssr.tracer.width, h: window.__p.ssr.tracer.height, gw: window.__p.ssr.gbuffer.width, gh: window.__p.ssr.gbuffer.height })');
+    const st = await half.T('window.__p.ssr.readTraceStats()');
+    const d = await half.T(`(${IMAGE_STATS})(${JSON.stringify(shot.half)}, ${JSON.stringify(shot.full)})`);
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    check(`half-res ${id}: traced and denoised at half size, upsampled, final within 6/255 mean of full res, no validation errors`,
+      errs.length === 0 && info.res === 'half' && info.w === Math.ceil(info.gw / 2) && info.h === Math.ceil(info.gh / 2) && (st?.traced ?? 0) > 0 && d.mean < 6,
+      errs.length ? errs.slice(0, 2).join(' | ') : `tracer ${info.w}x${info.h} of ${info.gw}x${info.gh}, ${st?.traced} traced rays, final vs full mean ${d.mean.toFixed(2)} max ${d.max}`);
+  }
 }
 
 /**
@@ -2972,6 +3002,7 @@ async function main() {
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (only === 'halo-options') await haloOptionChecks(pages); // W52 (D3640-D3642)
     if (only === 'hit-source') await hitSourceChecks(pages); // W53 (D3660-D3662)
+    if (only === 'half-res') await halfResChecks(pages); // W75 (X5, D5080): also part of hybrid
     if (runs('probe-layouts')) await probeLayoutChecks(pages); // W61
     if (runs('probe-bindings')) await probeBindingChecks(pages); // W62
     if (only === 'probe-bindings-measure') await probeBindingMeasure(pages); // W62: the measurement (minutes), JSON to out/w62-probe-bindings.json
