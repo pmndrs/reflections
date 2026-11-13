@@ -50,6 +50,7 @@ const SSSR_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   rayReuse: 's', rayReuseTaps: 'n', rayReuseRadius: 'n', rayReuseMixSources: 'b', rayReusePattern: 's', // W73 (D5040, D5047)
   quadBaseRotation: 's', thicknessDepthFactor: 'n', thicknessDepthMode: 's', hitLobeFilterGrazing: 'n', historyEdgeConfidence: 'b', // W71 (X1, D5000-D5003)
   hitColorFilter: 's', hitColorConeScale: 'n', mirrorBiasCompensate: 'b', // W72 (D5020-D5022)
+  maxCandidates: 'n', // W80 (D5180)
 };
 /** `ScreenSpaceReflectionsPass.traceSettings` fields the bench sets as `t.<field>`. */
 const TRACE_FIELDS: Record<string, 'n' | 'b' | 's'> = {
@@ -487,6 +488,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
       if (aa && aa.mode === 'upscaler') for (const [k, v] of aa.timings) out.set(`upscaler ${k}`, v);
       return out;
     },
+    traceStats: () => (ssr.rayTracing ? ssr.readTraceStats() : Promise.resolve(null)),
     gpuErrors: () => errors,
     dispose() {
       provider?.destroy();
