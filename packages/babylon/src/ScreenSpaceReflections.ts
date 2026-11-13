@@ -128,7 +128,8 @@ export class ScreenSpaceReflections {
     this.lastFrame = frame;
     const inputs = screenSpaceInputsFromFrame(frame, tracer, { fallbackBindGroup: this.probes?.set.bindGroup });
     const settings: ScreenSpaceReflectionsSettings = { ...this.settings, frameIndex: frame.frameIndex };
-    if (!this.enabled) settings.roughnessThreshold = 0;
+    // disabled: nothing traced, and no hit-colour pyramid built for it (W76: the cone is the default)
+    if (!this.enabled) { settings.roughnessThreshold = 0; settings.hitColorFilter = 'off'; }
     tracer.dispatch(encoder, inputs, settings);
     this.device.queue.submit([encoder.finish()]);
   }

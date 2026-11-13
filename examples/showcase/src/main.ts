@@ -91,10 +91,11 @@ async function main() {
   const presetName = (q.get('preset') as ReflectionsPresetName | null) ?? null;
   const ssr = new ScreenSpaceReflectionsPass(renderer, {
     missList: true, timestamps: true, gbufferOptions: { width: RW, height: RH }, ...(presetName ? { preset: presetName } : {}),
-    ...(q.get('res') === 'half' ? { settings: { reflectionResolution: 'half' as const } } : {}),
+    ...(q.get('res') === 'half' || q.get('res') === 'mixed' ? { settings: { reflectionResolution: 'half' as const } } : {}),
     ...(q.get('res') === 'full' ? { settings: { reflectionResolution: 'full' as const } } : {}),
   });
   Object.assign(ssr.settings, ssrSettingsFromQuery(q)); // W76: ?s.<field>=<value> from the first frame
+  if (q.get('res') === 'mixed' || q.has('halfResMin')) console.warn("?res=mixed / ?halfResMin= were removed (W76, D5084: halfResMinRoughness and the full-res mirror path); running ?res=half");
   const device = ssr.device;
   const gpuErrors: string[] = [];
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });

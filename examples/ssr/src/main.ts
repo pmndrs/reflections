@@ -23,8 +23,11 @@
 // `settings.denoiserBrdf` ('off' | 'replace' | 'combine'), read every frame, so `__p.configStats` configs can set it.
 // `?keepBlack=0` (or `settings.denoiserKeepBlack: false`): FFX's own black handling; on by default (HybridReflections.denoiserKeepHistoryOnBlack, D5145).
 // `?keepSample=1` keeps the tracer's sample output on in every mode (A/B runs without a tracer rebuild).
-// `?mirrorBias=0..1` (default 0, FFX): the tracer's bias of glossy rays toward the mirror direction
-// (core `settings.mirrorBias`, SSSR 2015 / PICA, D49); also a slider. `__p.mirrorBiasStats()` measures it.
+// `?mirrorBias=0..1`: the tracer's bias of glossy rays toward the mirror direction (core `settings.mirrorBias`,
+// SSSR 2015 / PICA, D49); also a slider. `__p.mirrorBiasStats()` measures it. Default (W76): 0.5 with the cone
+// and compensation (the bias narrows the sampled lobe and the cone puts the width back); a bias set without
+// `mirrorBiasCompensate` is D49's truncation (`?s.mirrorBiasCompensate=1` keeps compensation). The slider keeps
+// whatever compensation the tracer was running.
 //
 // `?specOcc=1` (default 0): Lagarde's specular occlusion (D66) on the probe / environment part of the
 // composite, from a screen-space AO (three's GTAO on the G-buffer, ../../shared/ao.ts); also a checkbox,
@@ -219,7 +222,7 @@ async function main() {
     gbufferOptions: { width: W, height: H }, missList: true, timestamps: q.has('timing') || layoutMode,
     subgroups: q.get('variant') !== 'workgroup',
     // W75 (X5, D5080): ?res=half traces, denoises at half res and upsamples
-    ...(q.get('res') === 'half' ? { settings: { reflectionResolution: 'half' as const } } : {}),
+    ...(q.get('res') === 'half' || q.get('res') === 'mixed' ? { settings: { reflectionResolution: 'half' as const } } : {}),
     ...(q.get('res') === 'full' ? { settings: { reflectionResolution: 'full' as const } } : {}),
     // W77: ?preset=performance|default (core REFLECTION_PRESETS); ?res= and ?hitSource= given explicitly win
     ...(presetName ? { preset: presetName } : {}),
@@ -259,6 +262,7 @@ async function main() {
   };
   if (q.has('mirrorBias')) ssr.settings.mirrorBias = Number(q.get('mirrorBias'));
   Object.assign(ssr.settings, ssrSettingsFromQuery(q)); // W76: ?s.<field>=<value> from the first frame
+  if (q.get('res') === 'mixed' || q.has('halfResMin')) console.warn("?res=mixed / ?halfResMin= were removed (W76, D5084: halfResMinRoughness and the full-res mirror path); running ?res=half");
   const gpuErrors: string[] = [];
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });
   // With the loop stopped, three renders each shadow map once per camera per frame: advance it ourselves.
@@ -680,8 +684,12 @@ async function main() {
   const thr = document.createElement('input'); thr.type = 'range'; thr.min = '0'; thr.max = '1'; thr.step = '0.01'; thr.value = '0.447';
   thr.oninput = () => { ssr.settings.roughnessThreshold = Number(thr.value); refreshUI(); if (!looping) frame(); };
   row('Roughness threshold (perceptual)', thr);
-  const biasIn = document.createElement('input'); biasIn.type = 'range'; biasIn.min = '0'; biasIn.max = '1'; biasIn.step = '0.05'; biasIn.value = String(ssr.settings.mirrorBias ?? 0);
-  biasIn.oninput = () => { ssr.settings.mirrorBias = Number(biasIn.value); hybrid.resetHistory(); refreshUI(); if (!looping) frame(); };
+  const biasIn = document.createElement('input'); biasIn.type = 'range'; biasIn.min = '0'; biasIn.max = '1'; biasIn.step = '0.05'; biasIn.value = String(ssr.settings.mirrorBias ?? 0.5); // W76: the resolved default (cone + compensation)
+  biasIn.oninput = () => {
+    // W76: a set mirrorBias alone means D49's truncation; keep the compensation the tracer ran (on by default)
+    ssr.settings.mirrorBiasCompensate ??= ssr.tracer?.outputs.settings?.mirrorBiasCompensate ?? true;
+    ssr.settings.mirrorBias = Number(biasIn.value); hybrid.resetHistory(); refreshUI(); if (!looping) frame();
+  };
   row('Mirror bias (D49)', biasIn);
   const ssrBox = document.createElement('input'); ssrBox.type = 'checkbox'; ssrBox.checked = true;
   ssrBox.onchange = () => { composite!.amount.value = ssrBox.checked ? 1 : 0; if (!looping) frame(); };
@@ -759,7 +767,7 @@ async function main() {
     if (kit!.views[pose]) poseSel.value = pose;
     status.textContent = [
       `three r${THREE.REVISION} | ${kit!.title} | ${W}x${H}${manual ? ' | manual (loop stopped)' : ''}`,
-      `variant ${ssr.variant ?? '(first frame pending)'} | hit colour ${hitMode} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | mirrorBias ${ssr.settings.mirrorBias ?? 0} | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
+      `variant ${ssr.variant ?? '(first frame pending)'} | hit colour ${hitMode} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | mirrorBias ${ssr.tracer?.outputs.settings?.mirrorBias ?? ssr.settings.mirrorBias ?? 0.5}${ssr.tracer?.outputs.settings?.mirrorBiasCompensate && ssr.tracer?.outputs.settings?.hitColorFilter === 'cone' ? ' (compensated)' : ''} | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
       `specular IBL term: ${probes ? `${probes.bakedProbes.length} probe(s) by coverage, then scene.environment` : 'scene.environment'} | specular occlusion ${specOcc ? 'on (GTAO, probe part)' : 'off'} (?specOcc=1)`,
       `denoise: ${denoiser ? `${hybrid.denoise ? 'on' : 'off'} (${denoiser.name}, from ${denoiserSource})` : 'unavailable (no sibling Denoiser repo; raw signal)'}`,
       ...(probes ? [`probes: ${(() => { const L = currentLayout(); return L ? `layout '${L.name}' (${L.description}${L.blend !== undefined ? `, blend ${L.blend} x ${L.spacing!.toFixed(2)} m cell` : ''})` : (layoutName && kit && !hasProbeLayouts(kit.id) ? `(no layouts for ${kit.id}: rooms, offscreen, showcaseSponza)` : 'the scene\'s own'); })()} | ${sizeSummary()} px + environment ${probes.bakedResolutions[0]} px | atlases ${(probeAtlasBytes(probes as N) / 1e6).toFixed(1)} MB (layout budget ${(PROBE_LAYOUT_BUDGET / 1e6).toFixed(1)}) | bake ${lastBake ? lastBake.ms.toFixed(0) : '-'} ms (wall, 2 bounces unless ?bounces=)`] : []),
