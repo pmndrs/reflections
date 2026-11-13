@@ -1,7 +1,7 @@
 // W77: core's named presets (plain data) and the bench's mapping of them onto its URL keys.
 import { describe, expect, it } from 'vitest';
 import { REFLECTION_PRESETS, REFLECTION_PRESET_NAMES, denoiserHitSourceOptions, reflectionsPreset } from '../packages/core/src/presets';
-import { SETTINGS, presetUrlKeys } from '../examples/showcase/src/bench/schema';
+import { PRESET_DOCS, SETTINGS, presetUrlKeys } from '../examples/showcase/src/bench/schema';
 
 describe('reflection presets', () => {
   it("'performance' is half-res + the denoiser's hit source 'hits'", () => {
@@ -33,6 +33,10 @@ describe('reflection presets', () => {
     expect(denoiserHitSourceOptions('off')).toEqual({ separateHitSources: false, missesMatchAnySource: false });
     expect(denoiserHitSourceOptions('hits')).toEqual({ separateHitSources: true, missesMatchAnySource: true });
     expect(denoiserHitSourceOptions('all')).toEqual({ separateHitSources: true, missesMatchAnySource: false });
+  });
+
+  it('docs/SETTINGS.md documents every preset once', () => {
+    expect(PRESET_DOCS.map((d) => d.name).sort()).toEqual([...REFLECTION_PRESET_NAMES].sort());
   });
 
   it('the bench maps every preset onto URL keys its schema has, with values the controls offer', () => {

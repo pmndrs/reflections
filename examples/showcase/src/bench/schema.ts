@@ -440,6 +440,39 @@ export const SETTINGS: Setting[] = [
   bool('ptClearcoat', 'pathtracer', 'Clear coat', true, { apply: 'rebuild', appliesTo: ['pathtraced'], tradeoff: 'Off drops the clear-coat layer (the old WebGL tracer rendered it black, D2303).' }),
 ];
 
+/** W77: what docs/SETTINGS.md says about each named preset (core REFLECTION_PRESETS); one entry per preset. */
+export interface PresetDoc {
+  name: ReflectionsPresetName;
+  /** What it sets, in words. */
+  sets: string;
+  /** Measured GPU cost or saving, with its source. */
+  cost: string;
+  /** What it trades. */
+  tradeoffs: string;
+  /** When not to use it. */
+  avoid: string;
+  /** How it combines with the upscaler's render ratio. */
+  upscaler: string;
+}
+export const PRESET_DOCS: PresetDoc[] = [
+  {
+    name: 'default',
+    sets: 'The package defaults of every key a preset sets: `reflectionResolution: \'full\'`, denoiser hit source off. Applying it undoes another preset.',
+    cost: '',
+    tradeoffs: 'Full-resolution trace and denoise.',
+    avoid: '',
+    upscaler: 'At ratio 1.5 the reflections cost 1-2.5 ms at 1080p already (W77), so the upscaler is the bigger saving.',
+  },
+  {
+    name: 'performance',
+    sets: '`reflectionResolution: \'half\'` (trace, RT and denoise at half size in each axis, joint bilateral upsample) and the denoiser\'s hit source `\'hits\'` (screen-space and traced hits kept apart; no effect without RT).',
+    cost: '1080p, ratio 1, RT on, cone defaults (W77; shared GPU, least-contended page): reflection passes carConcept 6.0 -> 2.6 ms, chess 4.0 -> 1.6, Sponza 3.3 -> 2.4, mirrorWall 10.7 -> 5.0, contact 12.4 -> 7.4; frame -2 to -7 ms. At ratio 1.5 about -1 ms; at ratio 2 nothing (its sample + upsample passes, ~0.3-1 ms, eat the saving).',
+    tradeoffs: 'W77 bench vs the path tracer (960x540, ours-rt): carConcept frame MAD 7.8 -> 8.4, lip 41.8 -> 36.7, band 30.6 -> 39.3 (58 without the hit source); chess 6.9 -> 7.2; Sponza unchanged. Flicker: chess / Sponza / mirrorWall orbit within 5-8 %; carConcept +42 % (0.36 -> 0.51), most of it the hit source at the sill band (band 1.16 -> 2.94). Mirrors: jagged reflected edges (W75). A thin bright reflection loses most of its peak at r 0.05 and is lost at r 0.15 (line spread).',
+    avoid: 'With an upscale ratio of 2 (no saving, thin features lost, carConcept door MAD +4); when the frame already upscales at 1.5 or more and reflections are a small share; mirror-heavy close-ups where reflected edges must stay crisp; thin bright emitters (neon strips, specular lines) on glossy floors.',
+    upscaler: 'Use it at ratio 1. At 1.5 it still saves ~1 ms but stacks: a thin strip at r 0.05 is lost, mirrorWall orbit flicker +17 %. Not at 2. Given the choice, upscale 1.5 first (the whole frame shrinks: carConcept 24.7 -> 8.8 ms) and keep full-res reflections.',
+  },
+];
+
 /** What the schema can't reach without a package change (listed in docs/SETTINGS.md). */
 export const NOT_EXPOSED: { name: string; why: string }[] = [
   { name: 'settings.fallbackColor', why: 'The three adapter forces the tracer\'s constant fallback black (the composite adds the probe); a constant colour is meaningless there.' },
