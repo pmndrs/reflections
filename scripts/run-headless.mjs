@@ -715,14 +715,17 @@ async function rayReuseChecks(pages) {
   }
   check("ssr rayReuse: 'copy' is the default path, 'ratio' copies until its pipelines are built, then changes the radiance",
     h.unset === h.copy && h.copy === h['copy again'] && h['ratio (first frame)'] === h.copy && h.copy !== h.ratio, JSON.stringify(h));
-  const std = {};
-  for (const m of ['copy', 'ratio']) {
-    await p.T(`window.__p.setSettings({ rayReuse: '${m}' })`);
-    std[m] = (await p.T('window.__p.mirrorBiasStats({ biases: [0], bins: [0.2, 0.3, 0.4], frames: 16, refFrames: 2, denoise: [false] })')).results[0].bins;
-  }
+  // raw (denoiser off), against one reference: the mean of 32 raw copy@4 frames (every px its own ray)
+  const q = await p.T(`window.__p.configStats({ configs: [{ name: 'copy', settings: { rayReuse: 'copy' } }, { name: 'ratio', settings: { rayReuse: 'ratio' } }],
+    ref: { rayReuse: 'copy', samplesPerQuad: 4 }, bins: [0.2, 0.3, 0.4], frames: 16, refFrames: 32, denoise: [false] })`);
+  const [cp, ra] = ['copy', 'ratio'].map((n) => q.results.find((x) => x.name === n).bins);
   await p.T('(["rayReuse", "minTraversalOccupancy", "temporalVarianceGuidedTracing"].forEach((k) => delete window.__p.ssr.settings[k]), true)');
-  check("ssr rayReuse 'ratio': less raw noise on the roughnessRamp strips (r 0.2-0.4)", std.copy.every((b, k) => b.px > 1000 && std.ratio[k].std < b.std),
-    std.copy.map((b, k) => `r ${b.roughness}: std ${b.std.toFixed(2)} -> ${std.ratio[k].std.toFixed(2)} (${b.px} px)`).join('; '));
+  check("ssr rayReuse 'ratio': less raw noise on the roughnessRamp strips (r 0.2-0.4)", cp.every((b, k) => b.px > 1000 && ra[k].std < b.std),
+    cp.map((b, k) => `r ${b.roughness}: std ${b.std.toFixed(2)} -> ${ra[k].std.toFixed(2)} (${b.px} px)`).join('; '));
+  // a dimming or biased estimator also lowers the std: its mean must stay at copy@4's (8-bit luma; the
+  // smoother signal reads ~0.5 brighter through the tone curve, W73 phase 1)
+  check("ssr rayReuse 'ratio': mean luma within 1.5 / 255 of copy@4 on the same strips (no dimming, no bias)", ra.every((b) => Math.abs(b.signed) < 1.5) && cp.every((b) => Math.abs(b.signed) < 1.5),
+    cp.map((b, k) => `r ${b.roughness}: copy ${b.signed.toFixed(2)}, ratio ${ra[k].signed.toFixed(2)} (copy@4 mean ${q.refStats[k].mean.toFixed(1)})`).join('; '));
 }
 
 /**
