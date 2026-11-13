@@ -5,9 +5,11 @@
 // prelude: TAG (file prefix), CONFIGS (preset names, default ['default', 'performance'])
 const S = await (async () => { for (let i = 0; i < 600 && !(window.__p && window.__p.metrics && window.__p.ssr); i++) await new Promise((r) => setTimeout(r, 500)); return window.__p; })();
 S.stop?.();
-S.setSettings({ hitColorFilter: 'cone', mirrorBiasCompensate: true, mirrorBias: 0.5 });
+// NOPIN: today's defaults instead (W75's setup), to tell the cone defaults' effect on the stacking apart
+if (typeof NOPIN === 'undefined') S.setSettings({ hitColorFilter: 'cone', mirrorBiasCompensate: true, mirrorBias: 0.5 });
 const r2 = (x, n = 3) => (typeof x === 'number' ? +x.toFixed(n) : x);
 const coneReady = async () => {
+  if (typeof NOPIN !== 'undefined') { await S.metrics.restDrift({ a: 2, b: 3, restFrames: 0, alignPhase: false }); return false; }
   for (let i = 0; i < 40; i++) { await S.metrics.restDrift({ a: 2, b: 3, restFrames: 0, alignPhase: false }); if (S.ssr.tracer?.outputs?.hitColorFilterActive) return true; await new Promise((r) => setTimeout(r, 250)); }
   return false;
 };
