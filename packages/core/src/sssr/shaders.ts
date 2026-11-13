@@ -1170,7 +1170,8 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
     if (!rec.valid || (traced_misses && rec.miss)) { continue; }
     if (known_source && (rec.confidence > 0.0) != own_hit) { continue; }
     let aq = textureLoad(t_roughness, q, 0).x;
-    if (isMirrorReflection(aq)) { continue; }
+    // mirrors (delta pdf) and rough px (no ray: a stale record after the stamp wraps) are not reused
+    if (isMirrorReflection(aq) || !isGlossyReflection(aq)) { continue; }
     let zq = textureLoad(t_depth_hierarchy, q, 0).x;
     if (!isSurface(zq)) { continue; }
     // the same surface: normals within ~25 degrees, within 2 % of the view distance of this pixel's plane (D5042)
