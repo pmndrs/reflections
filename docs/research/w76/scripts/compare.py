@@ -8,8 +8,7 @@ R = lambda o, r='reflection': (o or {}).get('regions', {}).get(r, {})
 def flag(old, new, absf, relf):
     if old is None or new is None: return ''
     d = new - old
-    if abs(d) <= absf and (old == 0 or abs(d) / abs(old) <= relf): return ''
-    if abs(d) / max(abs(old), 1e-9) <= relf: return ''
+    if abs(d) <= absf or abs(d) / max(abs(old), 1e-9) <= relf: return ''
     return ' **UP**' if d > 0 else ' (down)'
 def f(x, n=3): return '-' if x is None else f'{x:.{n}f}'
 print('## examples/ssr (reflection region; W70 -> W76)\n')
