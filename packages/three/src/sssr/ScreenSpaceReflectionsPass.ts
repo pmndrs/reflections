@@ -240,18 +240,22 @@ export class ScreenSpaceReflectionsPass {
     const hitSource = this.coreHitSource && this.rt && this.rayTracing ? this.rt.source : undefined;
     const inputs = screenSpaceInputsFromFrame(frame, core, { history: useHistory ? history : undefined, hitShadingBindGroup, hitSource });
     const hitShading = this.settings.hitShading ?? 'reshade';
-    // W74 (X4, D5060): traceSettings.tracedMissRate 'half' needs the traced pass's fill this frame
+    // W74 (X4, D5060): tracedMissRate 'half' needs the traced pass's fill this frame. traceSettings wins, then
+    // settings (review fix 3: either place works); both passes get the same value.
     const tracing = !!this.rt && this.rayTracing;
+    const halfRate = tracing && (this.traceSettings.tracedMissRate ?? this.settings.tracedMissRate) === 'half';
+    const halfRateMin = this.traceSettings.tracedHalfRateMinRoughness ?? this.settings.tracedHalfRateMinRoughness;
     const out = core.dispatch(cmd, inputs, {
       frameIndex: frame.frameIndex, ...this.settings, hitColor: useHistory ? 'history' : 'current', fallbackColor: [0, 0, 0],
-      tracedMissRate: tracing ? this.traceSettings.tracedMissRate ?? 'full' : 'full', tracedHalfRateMinRoughness: this.traceSettings.tracedHalfRateMinRoughness,
+      tracedMissRate: halfRate ? 'half' : 'full', tracedHalfRateMinRoughness: halfRateMin,
     });
     if (this.rt && tracing) {
       // traced misses take black like the tracer's fallback: the composite adds probes /
       // environment for 1 - confidence, exactly the term three's lit image already has
       this.rt.dispatch(cmd, { tracer: core, inputs, hitShadingBindGroup }, { ...this.traceSettings, hitColor: useHistory ? 'history' : 'current', hitShading, hitLobeFilter: this.traceSettings.hitLobeFilter ?? this.settings.hitLobeFilter, hitShadeOcclusion: this.traceSettings.hitShadeOcclusion ?? this.settings.hitShadeOcclusion,
         hitLobeFilterMixed: this.traceSettings.hitLobeFilterMixed ?? this.settings.hitLobeFilterMixed,
-        hitLobeFilterGrazing: this.traceSettings.hitLobeFilterGrazing ?? this.settings.hitLobeFilterGrazing, roughnessThreshold: this.settings.roughnessThreshold, fallbackColor: [0, 0, 0] });
+        hitLobeFilterGrazing: this.traceSettings.hitLobeFilterGrazing ?? this.settings.hitLobeFilterGrazing, roughnessThreshold: this.settings.roughnessThreshold, fallbackColor: [0, 0, 0],
+        tracedMissRate: halfRate ? 'half' : 'full', tracedHalfRateMinRoughness: halfRateMin });
       cmd.copyTextureToTexture({ texture: this.rt.source }, { texture: this.gpu(this.source) }, size);
       this.sourceDirty = true;
     } else if (this.sourceDirty) {

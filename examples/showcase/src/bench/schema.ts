@@ -258,11 +258,11 @@ export const SETTINGS: Setting[] = [
     cost: 'rt trace +0.30 ms (W52)',
   }),
   sel('t.tracedMissRate', 'rt', 'Traced miss rate (glossy)', [['full', 'full (every miss traced)'], ['half', 'half (every other quad + bilateral fill)']], 'full', {
-    appliesTo: RT, api: 'traceSettings.tracedMissRate (+ settings.tracedMissRate)',
+    appliesTo: RT, api: 'traceSettings.tracedMissRate (or settings.tracedMissRate; traceSettings wins)',
     tradeoff: 'W74 (X4, D5060): \'half\' traces the glossy misses of every other 2x2 quad (a checkerboard flipping each frame); the others take their traced neighbours\' result through core bilateralFill (plane distance, normal power, roughness, same source), or the probe where none fits. Half the glossy BVH rays; mirrors and near-mirrors stay full rate.',
   }),
   num('t.tracedHalfRateMinRoughness', 'rt', 'Half rate from roughness', 0, 1, 0.01, 0.05, {
-    appliesTo: RT, api: 'traceSettings.tracedHalfRateMinRoughness (DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS)',
+    appliesTo: RT, api: 'traceSettings.tracedHalfRateMinRoughness (or settings.; DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS)',
     tradeoff: 'W74: perceptual roughness from which \'half\' applies; smoother misses are all traced (mirror-like floors and paint keep their sharp reflections).',
   }),
   num('t.fillPlaneTolerance', 'rt', 'Fill: plane tolerance', 0, 0.1, 0.001, 0.01, { appliesTo: RT, api: 'traceSettings.fillPlaneTolerance (BilateralFillWeights.planeTolerance)', tradeoff: 'W74: a neighbour farther than this x the view distance from the pixel\'s tangent plane takes no weight (silhouettes, steps). 0 = off.' }),
