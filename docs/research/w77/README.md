@@ -150,6 +150,12 @@ Frame = the whole 1080p frame (G-buffer and lighting at the render size, reflect
 - **The question:** flicker ranks above accuracy in TRIAGE. Should `performance` drop the hit source (band 58, flicker as full) or keep it (band 39, carConcept +24 % orbit)?
 - The preset ships as decided (with 'hits'). This is a proposed decision-page question, not a change made here.
 
+## Checks (after merging main 22adc27)
+
+- `pnpm typecheck` and `pnpm test` (19 files, 75 tests) pass.
+- `pnpm check` preset, ssr, hybrid, half-res, showcase, bench, regressions: 135 PASS, 1 FAIL ([checks.txt](checks.txt)).
+- The failure is W75's "runtime switch full -> half -> full ends identical" at max 1/255 (mean 0.000). The same check passed in the hybrid section two minutes earlier, and passed again when the half-res section was re-run ([checks-half-res-rerun.txt](checks-half-res-rerun.txt)). It reads as a sub-pixel flake under a shared GPU (backlog line in handoff-row.md).
+
 ## Not done
 
 - 1440p; a quiet GPU. The timings here were taken next to other agents' runs; re-time on an idle machine before quoting absolute ms.
