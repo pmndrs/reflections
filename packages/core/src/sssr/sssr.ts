@@ -125,8 +125,8 @@ export interface ScreenSpaceReflectionsOptions {
   hitColorPyramid?: boolean;
 }
 
-/** Levels of the hit-colour pyramid (W72): mip 0 (a converting copy) plus five reductions, so cones up to 32 px wide. */
-export const HIT_COLOR_PYRAMID_LEVELS = 6;
+/** Levels of the hit-colour pyramid (W72): mip 0 (a converting copy) plus seven reductions, so cones up to 128 px wide (6 levels capped the r 0.35 sphere at 32 px: raw fireflies 1.72 % vs 1.22 % at 8, line spread unchanged). */
+export const HIT_COLOR_PYRAMID_LEVELS = 8;
 
 /**
  * W72 (X2 #6, D5021, D5022): how a glossy pixel's lobe (alpha) is split between the ray's sample
