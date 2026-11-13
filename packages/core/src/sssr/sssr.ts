@@ -737,6 +737,9 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     if (useHistory && (!inputs.history || !inputs.motion)) throw new Error("ssr: hitColor 'history' needs inputs.history and inputs.motion");
     if (inputs.history && (inputs.history.width !== W || inputs.history.height !== H)) throw new Error(`ssr: history is ${inputs.history.width}x${inputs.history.height}, expected ${W}x${H}`);
     const R = settings.rayReuse === 'ratio' ? ensureReuse() : null;
+    // back on 'copy' (or 'ratio' not built yet): free the 16 B/px records; a later 'ratio' frame allocates a
+    // fresh (zeroed) buffer, and the stamp keeps counting, so nothing stale matches
+    if (!R && reuseRecords) { reuseRecords.destroy(); reuseRecords = null; }
     if (R) reuseStamp = (reuseStamp % 32767) + 1; // 15 bits, never 0 (a fresh buffer's)
     writeParams(inputs, settings, useHistory);
     const classifyGroup = device.createBindGroup({
