@@ -261,6 +261,12 @@ export interface ScreenSpaceReflectionsSettings {
    * near-mirrors) every miss is traced. Default {@link DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS}.
    */
   tracedHalfRateMinRoughness?: number;
+  /**
+   * W75 (plan X5 step 2, D5084): perceptual roughness below which this tracer traces nothing: those
+   * pixels take the path of pixels above `roughnessThreshold` (the radiance fallback, confidence 0),
+   * left to another tracer (three's half-res reflections hand them to a full-res one). Default 0.
+   */
+  minRoughness?: number;
 }
 
 /**
@@ -611,6 +617,8 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[154] = useMissList && s.tracedMissRate === 'half' ? 1 : 0;
     f[155] = Math.max(0, s.tracedHalfRateMinRoughness ?? DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS) ** 2;
     u[156] = missFillCapacity;
+    // 157: W75 (X5 step 2)
+    f[157] = Math.max(0, s.minRoughness ?? 0) ** 2;
     device.queue.writeBuffer(params, 0, data);
   }
 

@@ -105,8 +105,11 @@ export class HybridReflections {
   private readonly quad: THREE.QuadMesh;
   private readonly signalMaterial = new THREE.NodeMaterial();
   private ran = false;
-  /** W75: the mode the signal material was built for; the half-res residual pass and its targets. */
-  private builtHalf = false;
+  /** W75: the mode the signal material was built for ('mixed': half with the full-res mirror path); the half-res residual pass and its targets. */
+  private builtMode: 'full' | 'half' | 'mixed' = 'full';
+  private get builtHalf(): boolean { return this.builtMode !== 'full'; }
+  /** W75 (X5 step 2): `ssr.settings.halfResMinRoughness`, read by composites built in 'mixed' mode. */
+  private readonly mirrorMinRoughness = uniform(0);
   private up: Upsampled | null = null;
   private upsample: ReflectionUpsample | null = null;
   private residualTarget: THREE.RenderTarget | null = null;
@@ -153,7 +156,7 @@ export class HybridReflections {
    * switch); composites built before keep their old sources, so rebuild those too. Drops history.
    */
   rebuild() {
-    this.builtHalf = this.wantHalf;
+    this.builtMode = this.wantMode;
     if (this.builtHalf) {
       // W75 (X5): at half res, each texel composites its sample pixel (2x, 2y) of the full-res G-buffer
       const at = uv().mul(this.halfUVScale).sub(this.halfUVOffset);
@@ -172,6 +175,10 @@ export class HybridReflections {
 
   /** W75: the tracer's settings ask for half-res reflections. */
   private get wantHalf(): boolean { return (this.ssr.settings.reflectionResolution ?? 'full') === 'half'; }
+  /** W75: 'full', 'half', or 'mixed' (half with mirrors on the full-res path, step 2). */
+  private get wantMode(): 'full' | 'half' | 'mixed' {
+    return !this.wantHalf ? 'full' : (this.ssr.settings.halfResMinRoughness ?? 0) > 0 ? 'mixed' : 'half';
+  }
 
   /**
    * Build a composite (TSL nodes) that uses the denoised radiance while the denoiser runs. Pass a
@@ -179,11 +186,14 @@ export class HybridReflections {
    */
   composite(opts: { uv?: N; signalOnly?: boolean } = {}): ScreenSpaceComposite {
     // W75: in 'half' mode composites read the upsampled residual (the mode at call time is built in)
-    if (this.wantHalf && !opts.signalOnly) return this.compositeAt({ uv: opts.uv ?? uv(), upsampled: this.ensureUpsampled() });
+    if (this.wantHalf && !opts.signalOnly) {
+      const m = this.wantMode === 'mixed' ? { ...this.ssr.mirrorTargets(), minRoughness: this.mirrorMinRoughness } : null;
+      return this.compositeAt({ uv: opts.uv ?? uv(), upsampled: { ...this.ensureUpsampled(), mirror: m } });
+    }
     return this.compositeAt(opts);
   }
 
-  private compositeAt(opts: { uv?: N; signalOnly?: boolean; upsampled?: Upsampled }): ScreenSpaceComposite {
+  private compositeAt(opts: { uv?: N; signalOnly?: boolean; upsampled?: ScreenSpaceCompositeOptions['upsampled'] }): ScreenSpaceComposite {
     const { denoiser: _d, denoiserMotion: _m, denoiserRoughness: _r, denoiserHitSource: _h, ...rest } = this.options;
     return screenSpaceComposite(this.ssr, {
       ...rest, uv: opts.uv ?? uv(),
@@ -218,7 +228,8 @@ export class HybridReflections {
     const tracer = this.ssr.tracer;
     this.roughnessThreshold.value = this.ssr.settings.roughnessThreshold ?? 0.447;
     // W75: a mode change rebuilds the signal pass; composites the app built keep theirs (rebuild them)
-    if (this.wantHalf !== this.builtHalf) this.rebuild();
+    if (this.wantMode !== this.builtMode) this.rebuild();
+    this.mirrorMinRoughness.value = this.ssr.settings.halfResMinRoughness ?? 0;
     if (this.builtHalf && frame && tracer && this.ssr.resolution === 'half') { this.updateHalf(frame); return; }
     if (!this.seam || !this.denoise || !frame || !tracer) { this.denoiseActive.value = 0; this.ran = false; return; }
     const { renderer } = this.ssr;
@@ -315,7 +326,7 @@ export class HybridReflections {
         radiance: getGPUTexture(renderer, up.residual), confidence: getGPUTexture(renderer, up.confidence),
         hitDistance: getGPUTexture(renderer, up.hitDistance), source: getGPUTexture(renderer, up.source),
       },
-    }, this.upsampleSettings, this.timer?.pass('upsample'));
+    }, { minRoughness: this.ssr.mirrorPath ? this.ssr.settings.halfResMinRoughness ?? 0 : 0, ...this.upsampleSettings }, this.timer?.pass('upsample'));
     this.timerDone = this.timer?.end(enc);
     device.queue.submit([enc.finish()]);
   }

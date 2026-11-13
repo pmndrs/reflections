@@ -120,7 +120,7 @@ struct Params {
   tracedHalfRate: u32,            // 154 (W74, X4): glossy misses of every other quad go to the fill list
   tracedHalfRateMinAlpha: f32,    // 155: ... from this alpha up (mirrors and near-mirrors stay full rate)
   missFillCapacity: u32,          // 156: fill entries at most (they follow the miss list's missListCapacity entries)
-  _pad157: u32,
+  minRoughnessAlpha: f32,         // 157 (W75, X5 step 2): classify traces no pixel below this alpha (they take the rough path)
 };
 @group(0) @binding(0) var<uniform> P: Params;
 `;
@@ -266,7 +266,8 @@ fn main(@builtin(local_invocation_index) lid: u32, @builtin(workgroup_id) wg: ve
 
   var needs_ray = on_screen;
   let is_reflective_surface = on_screen && isReflectiveSurface(px);
-  let is_glossy_reflection = isGlossyReflection(roughness);
+  // W75 (X5 step 2): pixels below minRoughnessAlpha are left to another tracer (the full-res mirror path)
+  let is_glossy_reflection = isGlossyReflection(roughness) && !(roughness < P.minRoughnessAlpha);
   needs_ray = needs_ray && is_glossy_reflection && is_reflective_surface;
   let needs_denoiser = needs_ray && !isMirrorReflection(roughness);
   let is_base_ray = isBaseRay(dispatch_thread_id, P.samplesPerQuad);

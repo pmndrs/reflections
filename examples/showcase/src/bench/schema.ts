@@ -155,6 +155,10 @@ export const SETTINGS: Setting[] = [
     apply: 'rebuild', appliesTo: OURS_SSR, api: 'settings.reflectionResolution',
     tradeoff: 'W75 (X5, D5080): \'half\' point-samples the G-buffer at one pixel per 2x2 quad, traces (SSR + RT) and denoises there, and upsamples the residual (denoised - probe) with a joint bilateral filter (plane distance, normal, roughness). Fewer rays and a quarter of the denoiser\'s pixels; mirrors and thin edges lose resolution (step 1: everything at half res).',
   }),
+  num('s.halfResMinRoughness', 'sssr', 'Half res: full-res path below roughness', 0, 1, 0.01, 0, {
+    apply: 'rebuild', appliesTo: OURS_SSR, api: 'settings.halfResMinRoughness',
+    tradeoff: 'W75 (X5 step 2, D5084): with half-res reflections, pixels below this perceptual roughness (mirrors, near-mirrors) are traced by a second full-res tracer (every pixel its own ray, its own RT pass, no denoiser) and composited at full res. 0 = every pixel at half res (step 1).',
+  }),
   num('s.maxTraversalIntersections', 'sssr', 'Max march steps', 0, 256, 1, 128, { appliesTo: OURS_SSR, api: 'settings.maxTraversalIntersections', tradeoff: 'Hi-Z march steps per ray: fewer is cheaper and sends long rays to the miss list (probe or RT); 0 = SSR off.' }),
   num('s.minTraversalOccupancy', 'sssr', 'Min occupancy', 0, 64, 1, 4, { appliesTo: OURS_SSR, api: 'settings.minTraversalOccupancy', tradeoff: 'Glossy rays stop once this few lanes of their subgroup still march (FFX): higher ends long tails earlier (cheaper, more misses). Mirrors ignore it.' }),
   num('s.depthBufferThickness', 'sssr', 'Thickness', 0, 0.5, 0.001, 0.2, {

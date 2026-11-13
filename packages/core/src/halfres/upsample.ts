@@ -22,6 +22,11 @@ import type { FrameInputs } from '../frame/contract';
 export interface ReflectionUpsampleSettings extends Partial<BilateralFillWeights> {
   /** Where no bilinear tap fits, gather a 4x4 tent of samples around the pixel before giving up. Default true. */
   wideFallback?: boolean;
+  /**
+   * Samples below this perceptual roughness never tap (X5 step 2: those pixels were traced by the
+   * full-res mirror path, their half-res texels hold no reflection). Default 0.
+   */
+  minRoughness?: number;
 }
 
 /** The upsample's default weights: bilateralFill's, with every source accepted (codes 0-7). */
@@ -74,6 +79,7 @@ struct U {
   normalMul: f32, normalAdd: f32, roughChannel: u32, roughPerceptual: u32,
   roughMul: f32, roughAdd: f32, hasSource: u32, wideFallback: u32,
   w: BilateralWeights,
+  tapMinRoughness: f32,
 };
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var tDepth: ${depthType};
@@ -114,6 +120,7 @@ fn bilateralTap(cell: vec2i, pixel: vec2i) -> BilateralTap {
   t.spatial = k.x * k.y;
   if (t.spatial <= 0.0) { return t; }
   t.surface = surfaceAt(min(cell * 2, vec2i(u.fullSize) - 1));
+  if (t.surface.roughness < u.tapMinRoughness) { t.spatial = 0.0; return t; }
   t.radiance = textureLoad(tRadiance, cell, 0);
   t.hitDistance = textureLoad(tHit, cell, 0).x;
   t.confidence = textureLoad(tConfidence, cell, 0).x;
@@ -210,6 +217,7 @@ export function createReflectionUpsample(device: GPUDevice, options: { width: nu
       f[28] = c.roughnessUnpack?.mul ?? 1; f[29] = c.roughnessUnpack?.add ?? 0;
       u[30] = inputs.source ? 1 : 0; u[31] = settings.wideFallback ?? true ? 1 : 0;
       bilateralFillWeightWords(w, f, u, 32);
+      f[37] = Math.max(0, settings.minRoughness ?? 0);
       device.queue.writeBuffer(uniforms, 0, data);
       const depth = frame.textures.depth;
       const isDepth = depth.format.startsWith('depth');
