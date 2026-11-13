@@ -103,3 +103,67 @@ carConcept at W50's pose, 960x540, PT 16 spp, 48 warm-up + 8 measured frames; lu
 Measure scores the mean, and the cone mostly moves variance, so 'cone' alone is within noise of the default (wheel 13.8 -> 14.0 raw). With the bias (either form) the denoised wheel reflection, too bright by 21 levels at the default, comes down (89.5 -> 78.7 comp 0.5, 69.6 trunc 0.5; PT 68.3) and the denoised car region improves 17.2 -> 15.7; the door darkens 4-5 levels away from the PT. Truncation and compensation are close on these means; they should differ in width, which is what the line-spread gate measures.
 
 The cone leaves the denoiser's loss where it is (that loss is the specular part's). Compensation at 0.7 lowers it (15 -> 10 %, 18.5 -> 14 %) but the raw mean drops 7-9 %, so the denoised value barely moves (door 0.882 -> 0.875, skirt 0.852 -> 0.824). Whether the drop is bias or truth needs the PT (phase 2 / the Measure below).
+
+## Phase 2 (X0's metrics; main a234de9 merged)
+
+All on a shared GPU (load 50-150 at times; one line-spread batch stalled and was re-run). PT metrics on the bench (`metrics.lineSpread`, `metrics.grazing`), page metrics through `__p.metrics`. Raw = ours-raw, dn = ours-denoised. Configs as phase 1 plus `comp 0` (compensation at f 0 = the sample full, every filter 0).
+
+### Line-spread gate (`linespread-batch{1,2}.jsonl`; lineSpread e15, PT 512 spp; width ratio vs PT, peak % of the PT's in brackets; "lost" = peak < 10 %)
+
+The gate is relative (W70: the defaults already fail): no combination may widen the reflection vs the default; closer to the PT is better.
+
+| config | AA on: r 0.05 dn / +RT | AA on: r 0.15 dn / +RT | AA off: r 0.05 dn | AA off: r 0.15 raw / dn |
+|---|---|---|---|---|
+| default | x1.24 (46) / x1.29 | lost (2) / lost (3) | x1.23 | x1.47 / lost (8) |
+| cone | x1.22 (38) / x1.26 | lost (3) / lost (4) | x1.20 | lost (5) / lost (3) |
+| cone x2 | **x1.33** (39) / x1.32 | lost | | |
+| comp 0 | x1.24 / x1.29 (= default) | lost | | |
+| comp 0.3 | x1.22 (48) / x1.27 | **x0.98 (20)** / x0.96 | | |
+| comp 0.5 | x1.18 (49) / x1.24 | **x0.99 (13)** / x0.98 | x1.19 | x1.02 / **x0.95 (14)** |
+| comp 0.7 | x1.14 (46) / x1.17 | x0.93 (11) / x0.93 | x1.12 | x0.97 / x0.88 (11) |
+| D49 trunc 0.5 | x1.15 (61) / x1.20 | x0.55 (68) / x0.51 | x1.16 | x0.81 / x0.52 |
+
+r 0.3 and 0.5: lost in every configuration, denoised and + RT, AA on and off (raw AA off: default x1.15, trunc 0.5 x0.97; the rest lost).
+
+- **Compensation brings r 0.15 back**, within ±10 % of the PT, with AA on and off (f 0.3-0.5; f 0.7 x0.88 with AA off), and narrows r 0.05 toward the PT (x1.24 -> x1.18 at 0.5). Fewer, dimmer-but-wider hits survive the upscaler's clamp and the FFX denoiser, and the sum-of-squares split keeps the width honest.
+- **D49's truncation also brings it back but at half the width** (x0.52-0.55): the sharpening the budget predicts.
+- **Plain cone** doesn't widen r 0.05 (x1.22) but brings nothing back, and with AA off it loses the raw r 0.15 reflection (the full-lobe cone spreads a 1.5 cm strip until its peak is 5 % of the PT's): the double blur. **cone x2 widens** (x1.33): fails.
+
+### Grazing (`grazing.jsonl`; r 0.15 floor, PT 256 spp + OIDN; MAD vs PT, gradient ratio)
+
+| config | dn 5° | dn 15° | dn 30° | dn 60° | raw 5° / 15° |
+|---|---|---|---|---|---|
+| default | 7.8, x0.79 | 10.0, x0.75 | 10.5, x0.78 | 13.9, x0.50 | 32.1 / 25.5 (gradient x80 / x26: fireflies) |
+| cone | 8.5, x0.40 | 10.0, x0.36 | 10.3, x0.50 | 14.0, x0.42 | 8.2 / 9.8 |
+| comp 0.3 | 6.7, x0.55 | 8.9, x0.54 | 10.1, x0.68 | 13.9, x0.49 | 7.8 / 11.1 |
+| comp 0.5 | 7.1, x0.52 | 9.0, x0.52 | 10.2, x0.67 | 13.9, x0.50 | 7.1 / 10.2 |
+| comp 0.7 | 7.7, x0.51 | 9.1, x0.52 | 10.3, x0.69 | 13.9, x0.52 | 7.3 / 9.7 |
+| trunc 0.5 | 16.6, x1.81 | 17.1, x1.65 | 13.4, x1.35 | 14.0, x0.67 | 40.4 / 29.3 |
+
+The cone takes the raw grazing error down 4x (fireflies on the emissive checker wall). Denoised, compensation lowers MAD by 0.7-1.1 at 5-15° but is blurrier than the default (gradient x0.52 vs x0.79), plain cone more so (x0.36-0.40): at grazing views the cone has no shrink yet (X1 #3's `lerp(sat(2 NdotV), 1, sqrt(r))` would apply to it).
+
+### Energy, speckle, flicker (`page-metrics-*.jsonl`)
+
+No change outside the noise floor on near-mirror scenes. carConcept w50 reflection: loss 3.0 % (default) / 2.9 (cone) / 5.2 (comp 0.3) / 4.2 (comp 0.5) / 3.2 (comp 0.7), denoised 0.953 / 0.953 / 0.949 / 0.956 / 0.964; signal speckle 0.055-0.059 %. examples/ssr mirrorWall and contact: rest drift, orbit std and d2 equal within 0.01-0.03 (floor 0.03); energy loss 0.4-0.5 % / 1.6-2.3 %.
+
+### Leakage at depth edges (`leakage-carConcept-w50-floor03.jsonl`)
+
+carConcept w50 on a r 0.3 floor, MAD vs PT over the car's floor reflection split into the 15 % px with the largest PT gradient (reflected silhouettes) and the rest. Denoised edge / flat: default 29.88 / 14.57, cone 30.01 / 14.57, cone x2 29.91 / 14.52, comp 0.5 28.33 / 13.15 (raw edge 30.92 -> 31.05 / 30.99 / 32.59). No leakage beyond 0.13: no depth-aware pyramid.
+
+### The 32 px cap (`cap-8-levels-*.jsonl`)
+
+At 6 levels the r 0.35 sphere's cone was capped (cone = cone x2). With 8 levels (128 px): cone fireflies 1.72 -> 1.22 %, p999 4.0 -> 3.2; comp 0.5 fireflies 1.14 -> 0.90 %; the line spread identical to the second decimal. `HIT_COLOR_PYRAMID_LEVELS` is now 8.
+
+### GPU ms (`timing-1080p.txt`; examples/ssr mirrorWall, floor r 0.2, 1920x1080, raw, loop stopped, configs interleaved, medians; relative only, shared GPU at load 120-150)
+
+The hit-colour pyramid pass: +0.24 / +0.26 ms (two runs of 5 and 9 rounds). Intersect: 0.315 -> 0.316 / 0.393 -> 0.373 (within noise). Other passes moved by the same amount in every config (contention). A cheaper pyramid (start at half res and read mip 0 from the source, or rg11b10ufloat) is a fine-tune item.
+
+### Verdicts (proposed; the maintainer picks)
+
+| setting | verdict | why |
+|---|---|---|
+| `hitColorFilter: 'cone'` alone | **keep as option** (default 'off') | Kills raw screen-colour fireflies (sphere p999 /7, arcade fireflies /2, grazing raw MAD /4), no widening at r 0.05, no leakage; but brings no lost reflection back, blurs the denoised grazing floor (x0.40 vs 0.79), +0.25 ms at 1080p. Useful raw / without the denoiser. |
+| `hitColorFilter: 'cone'` + `mirrorBiasCompensate` + `mirrorBias` 0.5 | **candidate default** | The only combination that passes the line-spread gate where the defaults fail: r 0.15 back at x0.99 (AA on) / x0.95 (AA off), r 0.05 x1.24 -> 1.18; floor r 0.3 car denoised MAD 17.2 -> 15.7, silhouettes 29.9 -> 28.3; grazing MAD -0.7..-1.0 at 5-15°; energy and flicker unchanged. Against: blurrier at grazing (x0.52 vs 0.79, until X1 #3), carConcept paint's raw specular outliers rise (the lobe filter loses its x1.41), +0.25 ms. f 0.3 also passes (peak 20 %); f 0.7 fails with AA off (x0.88). |
+| `hitColorConeScale` | **keep 1** | 2 widens r 0.05 to x1.33. |
+| `mirrorBias` without compensation (D49) | unchanged (0) | Truncation at 0.5 brings r 0.15 back at x0.55: too sharp, grazing x1.8 noisy. |
+| pyramid levels | **8** (was 6) | Fewer fireflies where cones exceed 32 px, gate unchanged. |
