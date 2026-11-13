@@ -253,11 +253,11 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   });
   const empty = device.createBindGroupLayout({ label: 'rt empty', entries: [] });
   const emptyGroup = device.createBindGroup({ layout: empty, entries: [] });
-  // W71 (X1 #3): a second pipeline with the grazing lobe-filter shrink, built on first use (hitLobeFilterGrazing > 0)
-  const tracePipes = new Map<boolean, GPUComputePipeline>();
-  const tracePipeFor = (lobeGrazing: boolean) => {
-    let pipe = tracePipes.get(lobeGrazing);
-    if (pipe) return pipe;
+  // W71 (X1 #3): the grazing lobe-filter shrink lives in a second pipeline (with the branch present the default
+  // shader's output moved, D5002). It is built with createComputePipelineAsync on first use
+  // (hitLobeFilterGrazing > 0), and the default pipeline keeps tracing until it resolves, so no frame stalls
+  // on the compile (D3D12 compiles slowly); the first few frames trace without the shrink.
+  const traceDescriptor = (lobeGrazing: boolean): GPUComputePipelineDescriptor => {
     const code = rtTraceWgsl({
       fallbackWgsl: fallback.wgsl,
       providerWgsl: provider.code({ group: 2, firstBinding: 0 }),
@@ -269,16 +269,25 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     });
     // the fallback and the hit shading may both carry the probe lookup's includes (D4901): keep one copy
     const label = `rt trace (${provider.name}${lobeGrazing ? ', lobe grazing' : ''})`;
-    const traceModule = device.createShaderModule({ label, code: dedupeWgslChunks(code) });
-    pipe = device.createComputePipeline({
+    return {
       label,
       layout: device.createPipelineLayout({ bindGroupLayouts: [traceBgl, fallback.layout ?? empty, providerBgl, shading.layout ?? empty] }),
-      compute: { module: traceModule, entryPoint: 'main' },
-    });
-    tracePipes.set(lobeGrazing, pipe);
-    return pipe;
+      compute: { module: device.createShaderModule({ label, code: dedupeWgslChunks(code) }), entryPoint: 'main' },
+    };
   };
-  tracePipeFor(false);
+  const tracePipe = device.createComputePipeline(traceDescriptor(false));
+  let grazingPipe: GPUComputePipeline | null = null;
+  let grazingPending = false;
+  const tracePipeFor = (lobeGrazing: boolean) => {
+    if (!lobeGrazing) return tracePipe;
+    if (grazingPipe) return grazingPipe;
+    if (!grazingPending) {
+      grazingPending = true;
+      device.createComputePipelineAsync(traceDescriptor(true)).then((p) => { grazingPipe = p; })
+        .catch((e) => { console.error('rt trace: the lobe-grazing pipeline failed to build; tracing without it', e); });
+    }
+    return tracePipe;
+  };
 
   let providerGroup: GPUBindGroup | null = null, providerVersion = -1;
   const providerBindGroup = () => {
