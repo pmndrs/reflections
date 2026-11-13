@@ -808,6 +808,7 @@ async function ssrChecks(pages) {
   console.log(`  GPU ms ${t.size.join('x')} through the three adapter (${t.variant}, mirrorWall, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
   await mirrorBiasChecks(pages);
   await rayReuseChecks(pages);
+  await hitColorFilterChecks(pages); // W72
   await denoiserGateChecks(pages);
   await specOccChecks(pages);
 }
@@ -910,6 +911,89 @@ async function denoiserGateChecks(pages) {
  * roughnessRamp strips (r 0.2-0.4). `--mirror-bias` runs the full sweep (roughnessRamp strips and
  * the mirrorWall floor at r 0.2 / 0.3 / 0.4, bias 0 / 0.25 / 0.5 / 0.75, denoise off and on) into out/mirror-bias.json.
  */
+/**
+ * W72 (X2, D5020-D5024): hitColorFilter / mirrorBiasCompensate. examples/ssr roughnessRamp strips, raw, occupancy 0 (D301).
+ * - Unset, 'off', compensate without the cone (ignored) and unset again after 'cone' give the same radiance bit for
+ *   bit; 'cone' and 'cone' + compensate change it (the cone variant builds async: frames run as 'off' until
+ *   `outputs.hitColorFilterActive`).
+ * - The mean of the glossy radiance with 'cone' stays within 10 % of 'off' (a black or wrong pyramid fails).
+ * - 'cone' + rayReuse 'ratio' differs from 'ratio' alone (the ratio intersect variant reads the pyramid).
+ * - hitColor 'history' with hitShading 'off' (the pyramid of last frame's colour) changes the hits.
+ * - ?rt=1: 'cone' differs from 'off' after the traced pass (on-screen reused hits read the pyramid), defaults unchanged.
+ * - A 97x61 canvas and the pixi3d arcade (when its vendor build is there) run 'cone'. No GPU errors anywhere.
+ */
+const HCF_PAGE = `async (cmd) => {
+  const p = window.__p;
+  const keys = ['hitColorFilter', 'hitColorConeScale', 'mirrorBias', 'mirrorBiasCompensate', 'rayReuse', 'hitShading'];
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const set = (s) => { for (const k of keys) delete p.ssr.settings[k]; p.setSettings(s); };
+  // until the tracer runs the cone (and ray reuse's own async build), at most ~6 s
+  // ray reuse has no ready flag: give its async build 2 s
+  const settle = async (wantCone, minSteps) => { for (let i = 0; i < 60; i++) { await p.step(1); if ((!wantCone || p.ssr.tracer.outputs.hitColorFilterActive) && i >= minSteps) break; await sleep(100); } return !wantCone || !!p.ssr.tracer.outputs.hitColorFilterActive; };
+  const mean = async () => {
+    const t = p.ssr.tracer.outputs, dev = p.ssr.device;
+    const read = async (tex, bpp) => { const bpr = Math.ceil(tex.width * bpp / 256) * 256; const b = dev.createBuffer({ size: bpr * tex.height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }); const e = dev.createCommandEncoder(); e.copyTextureToBuffer({ texture: tex }, { buffer: b, bytesPerRow: bpr }, [tex.width, tex.height]); dev.queue.submit([e.finish()]); await b.mapAsync(GPUMapMode.READ); const out = new Uint8Array(tex.width * tex.height * bpp); const src = new Uint8Array(b.getMappedRange()); for (let y = 0; y < tex.height; y++) out.set(src.subarray(y * bpr, y * bpr + tex.width * bpp), y * tex.width * bpp); b.unmap(); b.destroy(); return out; };
+    const h2f = (h) => { const e = (h >> 10) & 31, f = h & 1023; return e === 0 ? f * 5.96e-8 : (1 + f / 1024) * 2 ** (e - 15); };
+    const r = new Uint16Array((await read(t.radiance, 8)).buffer), a = new Float32Array((await read(t.extractedRoughness, 4)).buffer);
+    let s = 0, n = 0; for (let i = 0; i < a.length; i++) if (a[i] > 1e-4 && a[i] < 0.2) { s += 0.2126 * h2f(r[i * 4]) + 0.7152 * h2f(r[i * 4 + 1]) + 0.0722 * h2f(r[i * 4 + 2]); n++; }
+    return n ? s / n : 0;
+  };
+  const out = {};
+  for (const [name, s] of cmd) {
+    set(s);
+    const active = await settle(s.hitColorFilter === 'cone', s.rayReuse ? 20 : 4);
+    out[name] = { hash: await p.radianceHash(7), active, mean: await mean() };
+  }
+  set({});
+  return { out, errors: p.gpuErrors.length };
+}`;
+async function hitColorFilterChecks(pages) {
+  const base = { minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false };
+  const cone = { hitColorFilter: 'cone' }, comp = { hitColorFilter: 'cone', mirrorBias: 0.5, mirrorBiasCompensate: true };
+  const run = async (url, cmd, scene = 'roughnessRamp') => {
+    const p = await openPage(url);
+    pages.push(p);
+    await p.T(`window.__p.load('${scene}')`);
+    if (scene === 'roughnessRamp') await p.T("window.__p.setPose('strips')");
+    await p.T(`window.__p.setSettings(${JSON.stringify(base)})`);
+    await p.T('window.__p.step(4)');
+    return p.T(`(${HCF_PAGE})(${JSON.stringify(cmd)})`);
+  };
+  const a = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=current`, [
+    ['unset', {}], ['off', { hitColorFilter: 'off' }], ['compensate, no cone', { mirrorBiasCompensate: true }],
+    ['bias 0.5', { mirrorBias: 0.5 }], ['bias 0.5 + compensate, no cone', { mirrorBias: 0.5, mirrorBiasCompensate: true }],
+    ['cone', cone], ['cone + compensate 0.5', comp], ['unset again', {}],
+    ['ratio', { rayReuse: 'ratio' }], ['cone + ratio', { ...cone, rayReuse: 'ratio' }], ['comp + ratio', { ...comp, rayReuse: 'ratio' }]]);
+  const h = Object.fromEntries(Object.entries(a.out).map(([k, v]) => [k, v.hash]));
+  const ratioMean = a.out.cone.mean / a.out.off.mean;
+  check('ssr hitColorFilter / mirrorBiasCompensate (W72): defaults are the old path bit for bit, cone changes the hits, its mean stays within 10 % of off, no GPU errors',
+    h.unset === h.off && h.unset === h['compensate, no cone'] && h.unset === h['unset again'] && h['bias 0.5'] === h['bias 0.5 + compensate, no cone']
+    && a.out.cone.active && h.cone !== h.unset && h['cone + compensate 0.5'] !== h.cone && h['cone + compensate 0.5'] !== h['bias 0.5']
+    && Math.abs(ratioMean - 1) < 0.1 && a.errors === 0,
+    `${JSON.stringify(h)}; glossy mean cone / off ${ratioMean.toFixed(4)}; GPU errors ${a.errors}`);
+  check("ssr hitColorFilter 'cone' with rayReuse 'ratio' (W72 + W73): the ratio intersect variant reads the pyramid",
+    a.out['cone + ratio'].active && h.ratio !== h.unset && h['cone + ratio'] !== h.ratio && h['comp + ratio'] !== h['cone + ratio'] && a.errors === 0,
+    `ratio ${h.ratio}, cone + ratio ${h['cone + ratio']}, comp + ratio ${h['comp + ratio']}`);
+  const b = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=final`, [['off', { hitShading: 'off' }], ['cone', { ...cone, hitShading: 'off' }], ['off again', { hitShading: 'off' }]]);
+  check("ssr hitColorFilter 'cone' with hitColor 'history' and hitShading 'off' (the pyramid of last frame's colour)",
+    b.out.cone.active && b.out.cone.hash !== b.out.off.hash && Math.abs(b.out.cone.mean / b.out.off.mean - 1) < 0.1 && b.errors === 0,
+    `off ${b.out.off.hash} / cone ${b.out.cone.hash}, mean ratio ${(b.out.cone.mean / b.out.off.mean).toFixed(4)}; GPU errors ${b.errors}`);
+  const c = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=current&rt=1`, [['unset', {}], ['cone', cone], ['comp 0.5', comp], ['unset again', {}]], 'contact');
+  check("ssr hitColorFilter 'cone' with ?rt=1 (traced pass after the tracer): defaults unchanged, cone and compensation change the result",
+    c.out.cone.active && c.out.unset.hash === c.out['unset again'].hash && c.out.cone.hash !== c.out.unset.hash && c.out['comp 0.5'].hash !== c.out.cone.hash && c.errors === 0,
+    `${JSON.stringify(Object.fromEntries(Object.entries(c.out).map(([k, v]) => [k, v.hash])))}; GPU errors ${c.errors}`);
+  const d = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=current&w=97&h=61`, [['off', {}], ['cone', comp]], 'mirrorWall');
+  check("ssr hitColorFilter 'cone' on a 97x61 canvas (odd sizes, a short pyramid)", d.out.cone.active && d.errors === 0, `active ${d.out.cone.active}, GPU errors ${d.errors}`);
+  if (fs.existsSync(path.join(ROOT, 'examples/pixi3d/vendor/package.json'))) {
+    const q = await openPage(`http://127.0.0.1:${PORT}/pixi3d/arcade/`);
+    pages.push(q);
+    const r = await q.T(`(async () => { const P = window.__p; P.stop(); P.view.ssr.settings.hitColorFilter = 'cone'; P.view.ssr.settings.mirrorBias = 0.5; P.view.ssr.settings.mirrorBiasCompensate = true;
+      let active = false; for (let i = 0; i < 60 && !active; i++) { await P.step(1); active = !!P.view.ssr.core.outputs.hitColorFilterActive; await new Promise((r) => setTimeout(r, 100)); }
+      delete P.view.ssr.settings.hitColorFilter; await P.step(2); return { active, off: !P.view.ssr.core.outputs.hitColorFilterActive, errors: P.gpuErrors.length }; })()`);
+    check("pixi3d arcade: hitColorFilter 'cone' toggles on and off without a rebuild (W72)", r.active && r.off && r.errors === 0, JSON.stringify(r));
+  }
+}
+
 async function mirrorBiasChecks(pages) {
   const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0`);
   pages.push(p);
@@ -3263,6 +3347,7 @@ async function main() {
     if (runs('sssr-core')) await sssrCoreChecks(pages);
     if (runs('ssr')) await ssrChecks(pages);
     if (runs('hybrid')) await hybridChecks(pages);
+    if (only === 'hit-color-filter') await hitColorFilterChecks(pages); // W72: hitColorFilter / mirrorBiasCompensate alone (also part of ssr)
     if (only === 'mirror-bias') await mirrorBiasChecks(pages); // W32: the mirrorBias check alone (also part of ssr)
     if (only === 'ray-reuse') await rayReuseChecks(pages); // W73: the rayReuse check alone (also part of ssr)
     if (only === 'denoiser-gate') await denoiserGateChecks(pages); // W34: the D1402 check alone (also part of ssr)

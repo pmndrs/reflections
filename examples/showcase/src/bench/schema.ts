@@ -239,10 +239,25 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W52 (D3642): a re-shaded hit marches the depth buffer along R and darkens where blocked (the re-shade had no occlusion, W44). Wheel 43 -> 37 (PT 26); works without RT. Untuned.',
     cost: 'intersect +0.04 ms (W52)',
   }),
-  num('s.mirrorBias', 'sssr', 'Mirror bias', 0, 1, 0.01, 0, {
+  num('s.mirrorBias', 'sssr', 'Mirror bias', 0, 0.99, 0.01, 0, { // W72: capped (compensated, f stops at 0.99: MAX_COMPENSATED_BIAS)
     appliesTo: OURS_SSR, api: 'settings.mirrorBias',
     tradeoff: 'D49: truncates the GGX lobe toward the mirror direction: less noise, a sharper (biased) reflection. W32 / W39: no gain with the denoiser on a still or orbiting camera; W40: 0.7 halves rest shimmer on the carConcept floor (0.31 -> 0.14/255).',
     cost: 'free (one multiply in the sample)',
+  }),
+  sel('s.hitColorFilter', 'sssr', 'Hit colour filter', [['off', 'off (the hit texel, FFX)'], ['cone', 'cone (pre-filtered pyramid by the lobe cone at the hit)']], 'off', {
+    appliesTo: OURS_SSR, api: 'settings.hitColorFilter (the tracer builds its variant async on the first \'cone\' frame)',
+    tradeoff: 'W72 (X2 #5, D5020): a screen-space hit reads its screen colour (the re-shade\'s diffuse) from an 8-level pyramid at log2 of the lobe cone\'s width in px where the ray hits: long rays blur, contacts stay sharp (SSSR 2015). Raw fireflies go (r 0.35 sphere p999 23.9 -> 3.2 x mean, grazing emissive wall raw MAD 32 -> 8 at 5 deg); no widening on the line spread (r 0.05 x1.24 -> 1.22) and no leakage at silhouettes, but alone it brings no lost glossy reflection back and the denoised grazing floor gets blurrier (gradient x0.79 -> 0.40). Use it with Compensate mirror bias.',
+    cost: '1080p (mirrorWall, glossy floor, shared GPU, A/B): pyramid pass +0.24-0.26 ms, intersect within noise (W72)',
+  }),
+  num('s.hitColorConeScale', 'sssr', 'Hit colour cone scale', 0, 4, 0.05, 1, {
+    appliesTo: OURS_SSR, api: 'settings.hitColorConeScale',
+    tradeoff: 'W72 (D5020): scales the cone of Hit colour filter (1 = the reflected GGX lobe\'s full width at half maximum, 2.57 alpha). Only with the cone on. 2 widens the line spread (r 0.05 x1.22 -> 1.33): keep 1.',
+    cost: 'free',
+  }),
+  bool('s.mirrorBiasCompensate', 'sssr', 'Compensate mirror bias', false, {
+    appliesTo: OURS_SSR, api: 'settings.mirrorBiasCompensate (+ traceSettings, mirrorBiasSplit)',
+    tradeoff: 'W72 (X2 #6, D5021-D5022; needs Hit colour filter cone): Mirror bias f narrows the sampled lobe to alpha sqrt(1 - f) instead of truncating it, and the cone and the lobe filter (SSR and RT) supply alpha sqrt(f): less noise at the same total width. At f 0.5 the line spread\'s r 0.15 reflection, lost at the defaults, comes back at x0.99 of the PT (AA off x0.95) and r 0.05 narrows x1.24 -> 1.18; truncation (no compensation) brings it back at x0.55 (too sharp). Grazing denoised MAD -0.7..-1.0 at 5-15 deg but blurrier. f 0.7 x0.93 (AA off x0.88).',
+    cost: 'free on top of the cone (scales in the sample and the lobe filter)',
   }),
   sel('s.fallbackRoughness', 'sssr', 'Miss fallback roughness', [['surface', 'surface (the pixel\'s roughness)'], ['mirror', 'mirror (FFX: the ray\'s direction, sharp)']], 'surface', {
     appliesTo: OURS_SSR, api: 'settings.fallbackRoughness (+ traceSettings.fallbackRoughness)',

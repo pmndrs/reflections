@@ -8,7 +8,7 @@ import { HIT_WGSL } from './provider';
 import { SCREEN_VISIBILITY_WGSL, shadeLobeWgslFor } from './hitShading';
 
 /** Byte size of the uniform block (struct RtParams). */
-export const RT_PARAMS_SIZE = 320;
+export const RT_PARAMS_SIZE = 320; // 80 words (W72 owns 76-79)
 
 /** u32 words before the per-tile counters in the state buffer. */
 export const RT_STATE_HEADER = 16;
@@ -85,7 +85,10 @@ struct RtParams {
   missCapacity: u32,            // 73: the fill list starts at missList[missCapacity]
   fillFootprint: u32,           // 74: 2, 3 or 4 quads across
   fillFrame: u32,               // 75: the dispatch count (the stochastic fill's random number, W74 review)
-  _pad76: vec4u,               // 76-79: reserved, RT_PARAMS_SIZE 320
+  lobeFilterShare: f32,         // 76: W72 (X2 #6, D5021)
+  coneAlphaScale: f32,          // 77: W72 (D5024): the cone at on-screen reused hits (hitColorConeScale x filter share; 0 = off)
+  pxPerUnit: f32,               // 78: 0.5 x height x projection[1][1] (px per world unit at clip w 1)
+  pad79: u32,                   // 79: reserved, RT_PARAMS_SIZE 320
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
@@ -275,7 +278,19 @@ fn storeSource(packed: u32, c: vec2u, source: u32) {
 
 // D55: a hit the camera sees this frame takes the scene colour there (diffuse + emissive, no
 // specular: view independent, so reusing it from another direction is fair).
-fn onScreenRadiance(hitP: vec3f, hitN: vec3f, out_color: ptr<function, vec3f>) -> bool {
+// W72 (D5024): with the SSSR tracer's hitColorFilter 'cone', t_color is its hit-colour pyramid (level 0 a copy
+// of the scene colour): an on-screen reused hit loads the level of the cone's width in px there, nearest
+// (no sampler in this pass), as the screen-space hit samples it. cone_width: the cone's world width at the hit.
+fn onScreenColor(c: vec2u, clip_w: f32, cone_width: f32) -> vec3f {
+  var level = 0u;
+  if (P.coneAlphaScale > 0.0) {
+    let px = cone_width * P.pxPerUnit / max(clip_w, 1e-6);
+    level = u32(clamp(round(log2(max(px, 1e-8))), 0.0, f32(textureNumLevels(t_color) - 1u)));
+  }
+  let dims = vec2u(textureDimensions(t_color, level));
+  return textureLoad(t_color, min(c >> vec2u(level), dims - 1u), level).rgb;
+}
+fn onScreenRadiance(hitP: vec3f, hitN: vec3f, out_color: ptr<function, vec3f>, cone_width: f32) -> bool {
   let clip = P.viewProjection * vec4f(hitP, 1.0);
   if (clip.w <= 0.0) { return false; }
   let ndc = clip.xyz / clip.w;
@@ -289,7 +304,7 @@ fn onScreenRadiance(hitP: vec3f, hitN: vec3f, out_color: ptr<function, vec3f>) -
   let dSeen = length(seen - P.cameraPosition);
   if (abs(dHit - dSeen) > P.onScreenDepthTolerance * dHit) { return false; }
   if (dot(loadNormal(c), hitN) < 0.5) { return false; }
-  *out_color = textureLoad(t_color, c, 0).rgb;
+  *out_color = onScreenColor(c, clip.w, cone_width);
   // With the SSSR tracer's hitColor 'history' (D1002), on-screen hits take last frame's colour too,
   // reprojected through motion; off screen last frame keeps this frame's scene colour. Not when the
   // hit is re-shaded (W44): its view-independent part is this frame's scene colour.
@@ -375,7 +390,8 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
   }
   var L = vec3f(0.0);
   var source = ${RT_SOURCE.tracedHit}u;
-  let spread = P.hitLobeFilter * rtLobeMixScale(coords) * alpha; // D3550: the ray stands for its lobe
+  // D3550: the ray stands for its lobe; W72 (D5021): x the share the sample leaves to filters (1, or sqrt(mirrorBias) with mirrorBiasCompensate)
+  let spread = P.hitLobeFilter * rtLobeMixScale(coords) * alpha * P.lobeFilterShare;
   hitLobeSpread = spread * spread;
 ${parts.lobeGrazing ? `  // W71 (X1 #3, D5002): shrink it at grazing angles, as the SSSR tracer's lobeFilterGrazingScale. Compiled
   // in only while hitLobeFilterGrazing > 0: with the branch present the default's output moved (up to
@@ -383,7 +399,7 @@ ${parts.lobeGrazing ? `  // W71 (X1 #3, D5002): shrink it at grazing angles, as 
   let n_dot_v = dot(N, normalize(P.cameraPosition - surface));
   let g = mix(1.0, mix(saturate(2.0 * n_dot_v), 1.0, sqrt(sqrt(max(alpha, 0.0)))), P.hitLobeFilterGrazing);
   hitLobeSpread *= g * g;
-` : ''}  if (P.reuseOnScreen != 0u && onScreenRadiance(hitP, hitN, &L)) {
+` : ''}  if (P.reuseOnScreen != 0u && onScreenRadiance(hitP, hitN, &L, 2.0 * hit.t * tan(min(1.287 * alpha * P.coneAlphaScale, 1.4)))) {
     source = ${RT_SOURCE.onScreenHit}u;
     atomicAdd(&state[${RT_STATE.onScreen}], 1u);
     // W44 (D3540): the screen's diffuse plus the hit material's specular along the ray, as the

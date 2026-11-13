@@ -54,7 +54,7 @@
 
 import { SCREEN_VISIBILITY_WGSL } from '../trace/hitShading';
 
-/** Byte size of the uniform block (struct Params below). */
+/** Byte size of the uniform block (struct Params below): 160 words, 141-159 shared out by stream (W72: 145-149). */
 export const PARAMS_SIZE = 640;
 
 export const PARAMS_WGSL = /* wgsl */ `
@@ -109,12 +109,12 @@ struct Params {
   thicknessDepthFactor: f32,
   hitLobeFilterGrazing: f32,
   x1Flags: u32, // bit 0 historyEdgeConfidence, bit 1 thicknessDepthMode 'relative'
-  // words 145-149: reserved for the other SSR-sources streams (X2)
-  _pad145: u32,
-  _pad146: u32,
-  _pad147: u32,
-  _pad148: u32,
-  _pad149: u32,
+  // W72 (X2 #5 / #6, words 145-149; D5020-D5022)
+  hitColorFilterCone: u32,
+  hitColorConeScale: f32,
+  mirrorBiasCompensate: u32,
+  sampleAlphaScale: f32,
+  filterAlphaScale: f32,
   // W73 (X3, words 150-153; D5040): ratio-estimator ray reuse. Flags bit 0 = 'ratio', bit 1 = misses are
   // traced after this dispatch, bit 2 = mix hits and misses, bit 3 = tap pattern fixed per pixel; taps;
   // radius in px (before the roughness scale); the record stamp of this dispatch.
@@ -476,8 +476,9 @@ fn main() {
  * re-shade (W44, D3540); see `screenSpaceHitShadingWgsl` in ./sssr.ts. `hitSource`: bind last
  * frame's per-pixel hit source at binding 18 (W52, D3641).
  */
-export function intersectWgsl(variant: Variant, inverted: boolean, fallbackWgsl: string, missList: boolean, hitShadingWgsl: string, hitSource = false, rayReuse = false): string {
+export function intersectWgsl(variant: Variant, inverted: boolean, fallbackWgsl: string, missList: boolean, hitShadingWgsl: string, hitSource = false, rayReuse = false, hitColorPyramid = false): string {
   const sg = variant === 'subgroups';
+  const pyr = hitColorPyramid; // W72 (D5020): bindings 20-21
   // W73 (rayReuse 'ratio', D5040): the variant that also stores each ray's record for the resolve. With
   // rayReuse false the generated WGSL is today's, character for character.
   const reuseDecl = rayReuse ? `\n@group(0) @binding(19) var<storage, read_write> rayRecords: array<vec4u>;\n${RAY_RECORD_STORE_WGSL}` : '';
@@ -508,6 +509,7 @@ ${missList ? `@group(0) @binding(11) var<storage, read_write> missList: array<ve
 @group(0) @binding(16) var t_metalness: texture_2d<f32>;
 @group(0) @binding(17) var t_clearcoat: texture_2d<f32>;
 ${hitSource ? '@group(0) @binding(18) var t_hit_source: texture_2d<f32>;' : ''}${reuseDecl}
+${pyr ? '@group(0) @binding(20) var t_hit_color_pyramid: texture_2d<f32>;\n@group(0) @binding(21) var s_hit_color: sampler;' : ''}
 ${fallbackWgsl}
 ${hitShadingWgsl}
 
@@ -537,14 +539,43 @@ fn loadInputColor(p: vec2i) -> vec3f {
 // Hit colour from last frame (D69, the hybrid sample's g_lit_scene_history): reproject the hit
 // through this frame's motion (uv-space current - previous, times motionVectorScale) and load the
 // previous frame's colour there (nearest texel; D1002). Off screen last frame: this frame's colour.
-fn loadHitColor(hit_uv: vec2f) -> vec3f {
+fn loadHitColor(hit_uv: vec2f, cone_mip: f32) -> vec3f {
   let size = vec2f(P.renderSize);
   let p = vec2i(size * hit_uv);
-  if (P.hitColorFromHistory == 0u) { return loadInputColor(p); }
+  if (P.hitColorFromHistory == 0u) {${pyr ? `
+    if (cone_mip > 0.0) { return sampleHitColorCone(hit_uv, cone_mip); }` : ''}
+    return loadInputColor(p);
+  }
   let pc = clamp(p, vec2i(0), vec2i(P.renderSize) - 1);
   let prev_uv = hit_uv - textureLoad(t_motion, pc, 0).xy * P.motionVectorScale;
-  if (any(prev_uv < vec2f(0.0)) || any(prev_uv >= vec2f(1.0))) { return loadInputColor(p); }
+  if (any(prev_uv < vec2f(0.0)) || any(prev_uv >= vec2f(1.0))) { return loadInputColor(p); }${pyr ? `
+  if (cone_mip > 0.0) { return sampleHitColorCone(prev_uv, cone_mip); } // the pyramid is of last frame's colour here` : ''}
   return textureLoad(t_history, vec2i(prev_uv * vec2f(textureDimensions(t_history))), 0).xyz;
+}
+// W72 (X2 #5, D5020): cone-footprint hit colour (SSSR 2015's pre-filtered colour pyramid; Colbert &
+// Krivanek 2007's filtered importance sampling). The part of the reflecting pixel's lobe the ray's
+// sample does not cover (alpha x filterAlphaScale: all of it, or sqrt(mirrorBias) of it with
+// mirrorBiasCompensate) is taken as a cone from the ray's origin; its width where the ray hits,
+// projected at the hit's depth, picks the pyramid mip. The cone's full angle is the reflected GGX
+// lobe's full width at half maximum, 2 x 2 x 0.6436 alpha (half-vector half width at half maximum
+// tan = 0.6436 alpha for small alpha, doubled by the reflection), scaled by hitColorConeScale.
+// Short rays (contacts) and mirrors land below mip 0 and load the texel as before.
+fn hitColorConeMip(world_hit: vec3f, ray_length: f32, alpha: f32) -> f32 {
+  let a = alpha * P.filterAlphaScale * P.hitColorConeScale;
+  let width_world = 2.0 * ray_length * tan(min(1.287 * a, 1.4));
+  let clip_w = (P.projection * (P.viewMatrix * vec4f(world_hit, 1.0))).w;
+  let px = width_world * 0.5 * f32(P.renderSize.y) * P.projection[1][1] / max(clip_w, 1e-6);
+  return log2(max(px, 1e-8));
+}
+${pyr ? `fn sampleHitColorCone(uv: vec2f, mip: f32) -> vec3f {
+  let m = min(mip, f32(textureNumLevels(t_hit_color_pyramid) - 1u));
+  return textureSampleLevel(t_hit_color_pyramid, s_hit_color, uv, m).rgb;
+}` : ''}
+// The view-independent colour a hit returns (the re-shade's diffuse): the screen texel, or with the
+// cone filter (W72) the pyramid at the cone's mip.
+fn hitScreenColor(p: vec2i, hit_uv: vec2f, cone_mip: f32) -> vec3f {${pyr ? `
+  if (cone_mip > 0.0) { return sampleHitColorCone(hit_uv, cone_mip); }` : ''}
+  return loadInputColor(p);
 }
 // View-dependent re-shade of a screen-space hit (W44, D3540; FFX reuses the screen colour as is).
 // The screen holds what leaves the hit toward the camera; the ray wants what leaves it toward the
@@ -632,10 +663,10 @@ fn historyEdgeScale(hit_uv: vec2f) -> f32 {
   return prev / now;
 }
 
-fn reshadeHit(hit_uv: vec2f, world_hit: vec3f, ray_direction: vec3f) -> vec3f {
+fn reshadeHit(hit_uv: vec2f, world_hit: vec3f, ray_direction: vec3f, cone_mip: f32) -> vec3f {
   let p = clamp(vec2i(vec2f(P.renderSize) * hit_uv), vec2i(0), vec2i(P.renderSize) - 1);
   let N = loadWorldSpaceNormal(p);
-  return hitShadeLobe(hitMaterialSpecular(p), world_hit, N, ray_direction, vec3f(0.0), loadInputColor(p));
+  return hitShadeLobe(hitMaterialSpecular(p), world_hit, N, ray_direction, vec3f(0.0), hitScreenColor(p, hit_uv, cone_mip));
 }
 fn sampleRandomVector2D(p: vec2u) -> vec2f { return textureLoad(t_blue_noise, vec2i(p % 128u), 0).xy; }
 
@@ -673,7 +704,12 @@ fn sampleReflectionVector(view_direction: vec3f, normal: vec3f, roughness: f32, 
   // Mirror bias (SSSR 2015 slide 68, PICA p451; D49): pull the lobe's radial number toward the
   // mirror end. In Heitz's VNDF U1 sets the disk radius (r = sqrt(U1)), so the mirror end is
   // U1 = 0: U1 = lerp(u.x, 0, bias). bias 0 multiplies by exactly 1 (FFX, bit for bit).
-  let sampled_normal_tbn = sampleGGXVNDF(view_direction_tbn, roughness, roughness, u.x * (1.0 - P.mirrorBias), u.y);
+  // W72 (X2 #6, D5022): with mirrorBiasCompensate the bias narrows the lobe instead (alpha x
+  // sqrt(1 - bias), sampleAlphaScale; no truncation) and the cone filter supplies alpha x sqrt(bias).
+  // Both scales are exactly 1 / the select picks mirrorBias by default (bit for bit).
+  let bias = select(P.mirrorBias, 0.0, P.mirrorBiasCompensate != 0u);
+  let a = roughness * P.sampleAlphaScale;
+  let sampled_normal_tbn = sampleGGXVNDF(view_direction_tbn, a, a, u.x * (1.0 - bias), u.y);
   let reflected_direction_tbn = reflect(-view_direction_tbn, sampled_normal_tbn);
   let TBN_col0 = vec3f(TBN_row0[0], TBN_row1[0], TBN_row2[0]);
   let TBN_col1 = vec3f(TBN_row0[1], TBN_row1[1], TBN_row2[1]);
@@ -899,17 +935,19 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   var hit_radiance = vec3f(0.0);
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
   if (confidence > 0.0) {
+    var cone_mip = 0.0;${pyr ? `
+    if (P.hitColorFilterCone != 0u) { cone_mip = hitColorConeMip(world_space_hit, world_ray_length, (*r).roughness); } // W72 (D5020)` : ''}
     if (P.hitShadingMode == HIT_SHADING_RESHADE) {
-      var spread = P.hitLobeFilter * lobeFilterMixScale((*r).coords) * (*r).roughness; // D3550: the ray stands for its lobe
+      var spread = P.hitLobeFilter * lobeFilterMixScale((*r).coords) * (*r).roughness * P.filterAlphaScale; // D3550: the ray stands for its lobe; W72 (D5021): x the share the sample leaves to filters
       if (P.hitLobeFilterGrazing > 0.0) {
         let n_vs = (P.viewMatrix * vec4f(loadWorldSpaceNormal(vec2i((*r).coords)), 0.0)).xyz;
         spread *= lobeFilterGrazingScale(dot(n_vs, -normalize((*r).view_space_ray)), (*r).roughness);
       }
       hitLobeSpread = spread * spread;
       hsoPixel = (*r).coords;
-      hit_radiance = reshadeHit(hit.xy, world_space_hit, normalize(world_space_reflected_direction));
+      hit_radiance = reshadeHit(hit.xy, world_space_hit, normalize(world_space_reflected_direction), cone_mip);
     } else {
-      hit_radiance = loadHitColor(hit.xy);
+      hit_radiance = loadHitColor(hit.xy, cone_mip);
     }
   }
   let hit_distance = select(0.0, world_ray_length, confidence > 0.0);${reuseInit}
@@ -1190,9 +1228,14 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
   var sum_hit_w = 0.0;
   var sum_t = 0.0;
   var sum_length = 0.0;
+  // W72 (D5023): with mirrorBiasCompensate the rays were sampled at alpha x sampleAlphaScale (sqrt(1 - f))
+  // and each ray's value already carries the cone / lobe filter's alpha x sqrt(f). The target lobe is the
+  // sample's too, so the resolve doesn't re-widen: its spread plus the filters' adds up to alpha. Both
+  // scales are exactly 1 without compensation.
+  let alpha_s = alpha * P.sampleAlphaScale;
   // The pixel's own ray: w = brdfCos / pdf = G1(L).
   if (own.valid && dot(N, own.dir) > 0.0) {
-    let w = brdfCos(N, V, own.dir, alpha) / max(vndfPdf(N, V, own.dir, alpha), 1e-12);
+    let w = brdfCos(N, V, own.dir, alpha_s) / max(vndfPdf(N, V, own.dir, alpha_s), 1e-12);
     sum_w += w; sum_value += w * own.value; sum_confidence += w * own.confidence;
     sum_length += w * own.t;
     if (own.confidence > 0.0) { sum_hit_w += w * own.confidence; sum_t += w * own.confidence * own.t; }
@@ -1245,9 +1288,9 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
       L = (H - X) / max(t, 1e-6);
     }
     if (dot(N, L) <= 0.0) { continue; }
-    let pdf = vndfPdf(Nq, normalize(cam - Xq), rec.dir, aq);
+    let pdf = vndfPdf(Nq, normalize(cam - Xq), rec.dir, aq * P.sampleAlphaScale);
     if (!(pdf > 0.0)) { continue; }
-    let w = brdfCos(N, V, L, alpha) / pdf;
+    let w = brdfCos(N, V, L, alpha_s) / pdf;
     if (!(w > 0.0) || w > 3.0e38) { continue; }
     sum_w += w; sum_value += w * rec.value; sum_confidence += w * rec.confidence;
     sum_length += w * t;

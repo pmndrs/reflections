@@ -1,0 +1,4 @@
+{"name":"default","px":4834,"mean":0.1358,"relStd":0.788,"speckle":0.0482,"fireflies":0.0238,"p999":23.64,"sigma":0.0537}
+{"name":"cone","px":4834,"mean":0.1322,"relStd":0.534,"speckle":0.0424,"fireflies":0.0122,"p999":3.22,"sigma":0.0586}
+{"name":"cone x2","px":4834,"mean":0.1341,"relStd":0.525,"speckle":0.041,"fireflies":0.0069,"p999":2.72,"sigma":0.0646}
+{"name":"comp 0.5","px":4834,"mean":0.1386,"relStd":0.44,"speckle":0.0327,"fireflies":0.009,"p999":3.26,"sigma":0.0463}
