@@ -247,7 +247,7 @@ export interface ScreenSpaceReflectionsSettings {
    */
   quadCopy?: 'always' | 'sameSurface';
   /**
-   * W77 (D5120): hits the march may try per ray, 1..8 (default 1 = FFX: the first place the ray goes
+   * W80 (D5180): hits the march may try per ray, 1..8 (default 1 = FFX: the first place the ray goes
    * behind the depth buffer is validated once, and a rejected one is a miss). With N > 1 a candidate
    * that fails validation (thickness, back face, too near the origin) while on screen and not
    * background restarts the march just past that leaf cell, so a ray that crosses a thin foreground
@@ -585,7 +585,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[138] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
     u[139] = useHitSource && inputs.hitSource ? 1 : 0;
     u[140] = (s.quadCopy ?? 'always') === 'sameSurface' ? 1 : 0;
-    u[158] = Math.min(8, Math.max(1, Math.round(s.maxCandidates ?? 1))); // W77 (D5120)
+    u[158] = Math.min(8, Math.max(1, Math.round(s.maxCandidates ?? 1))); // W80 (D5180)
     device.queue.writeBuffer(params, 0, data);
   }
 

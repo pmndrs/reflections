@@ -1,4 +1,4 @@
-// W77: pass timings + miss counts per s.maxCandidates (bench manual mode = loop stopped).
+// W80: pass timings + miss counts per s.maxCandidates (bench manual mode = loop stopped).
 // bench.html?manual&scene=carConcept&pose=w50&size=1920x1080&left=ours-rt&right=ours-rt (prelude: R rounds, VALS)
 const ROUNDS = typeof R !== 'undefined' ? R : 5;
 const VALS_ = typeof VALS !== 'undefined' ? VALS : [1, 2, 4, 8];

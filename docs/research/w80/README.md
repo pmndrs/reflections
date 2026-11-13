@@ -1,4 +1,4 @@
-# W77: keep marching after a rejected hit (`maxCandidates`)
+# W80: keep marching after a rejected hit (`maxCandidates`)
 
 The idea is from three.js PR bhouston/three.js#155 (`SSRTrace.js`, `traceHiZ`'s `maxCandidates`). FFX SSSR marches to the first place the ray goes behind the depth buffer and validates that hit once. If it fails (confidence 0), the ray is a miss and takes the probe, the environment or the RT fallback. Here a rejected hit restarts the march just past that leaf cell and keeps going, up to N candidates.
 

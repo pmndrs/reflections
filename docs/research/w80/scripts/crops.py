@@ -1,4 +1,4 @@
-"""W77: thinPost misses / final at maxCandidates 1 (left) and 8 (right), floor region around the post, 3x. python3 crops.py out/w77 docs/research/w77/thinpost.jpg"""
+"""W80: thinPost misses / final at maxCandidates 1 (left) and 8 (right), floor region around the post, 3x. python3 crops.py out/w80 docs/research/w80/thinpost.jpg"""
 import sys
 from PIL import Image
 

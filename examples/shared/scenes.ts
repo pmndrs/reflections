@@ -327,7 +327,7 @@ export function multiMaterial(opts: SceneOptions = {}): KitScene {
 }
 
 /**
- * W77 (D5120): the case `maxCandidates` targets. A thin post (6 cm) and a thin rail (4 cm) stand in front of the
+ * W80 (D5180): the case `maxCandidates` targets. A thin post (6 cm) and a thin rail (4 cm) stand in front of the
  * patterned wall, over the mirror floor. A floor ray that goes up through the post's screen columns while it is
  * behind the post first finds the post, fails the thickness test and takes the probe, though the wall
  * behind is on screen. Not in `SCENES` (loadable by id: `examples/ssr?scene=thinPost`).

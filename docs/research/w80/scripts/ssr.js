@@ -1,4 +1,4 @@
-// W77: examples/ssr page (index.html?manual&scene=X&w=960&h=540&aa=off&denoise=0 [&rt=1]); prelude: VALS = [1,2,4,8]
+// W80: examples/ssr page (index.html?manual&scene=X&w=960&h=540&aa=off&denoise=0 [&rt=1]); prelude: VALS = [1,2,4,8]
 // For each maxCandidates: blendStats (W22 classes) + stats (wall / hitErr / streak / facing) + miss count; loop stopped.
 P.stop && P.stop();
 if (typeof POSE !== 'undefined') P.setPose(POSE);

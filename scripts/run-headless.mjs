@@ -198,7 +198,7 @@ async function sssrCoreChecks(pages) {
   if (!hasSubgroups) console.log('  device has no subgroups: parity skipped');
   else {
     for (const cfg of [{ minTraversalOccupancy: 0, samplesPerQuad: 1 }, { minTraversalOccupancy: 0, samplesPerQuad: 2 }, { minTraversalOccupancy: 0, samplesPerQuad: 4 },
-      // W77 (D5120): the candidate restart is in both variants' loops
+      // W80 (D5180): the candidate restart is in both variants' loops
       { minTraversalOccupancy: 0, samplesPerQuad: 1, maxCandidates: 4 }, { minTraversalOccupancy: 0, samplesPerQuad: 4, maxCandidates: 8 }]) {
       const r = await s.T(`window.__p.parity(${JSON.stringify(cfg)})`);
       const tag = `occupancy 0, ${cfg.samplesPerQuad} spq${cfg.maxCandidates ? `, maxCandidates ${cfg.maxCandidates}` : ''}`;

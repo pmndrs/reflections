@@ -1,4 +1,4 @@
-// W77: bit-for-bit check of the default: FNV hash of the tracer's radiance at frame index 7 (occupancy 0 = deterministic, D301).
+// W80: bit-for-bit check of the default: FNV hash of the tracer's radiance at frame index 7 (occupancy 0 = deterministic, D301).
 // prelude: POSE, optional MC (maxCandidates, default unset). Prints the hash twice.
 P.stop && P.stop();
 if (typeof POSE !== 'undefined') P.setPose(POSE);

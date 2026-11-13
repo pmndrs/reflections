@@ -10,7 +10,7 @@ const [url, outDir, jsFile] = process.argv.slice(2);
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 fs.mkdirSync(outDir, { recursive: true });
-const dir = path.join(os.tmpdir(), `w77-${Date.now()}-${process.pid}`);
+const dir = path.join(os.tmpdir(), `w80-${Date.now()}-${process.pid}`);
 const chrome = spawn(CHROME, ['--headless=new', '--no-sandbox', '--use-angle=metal', '--enable-unsafe-webgpu', '--enable-features=Vulkan',
   '--window-size=1800,1400', '--remote-debugging-port=0', `--user-data-dir=${dir}`, url], { stdio: 'ignore', detached: true });
 const kill = () => { try { process.kill(-chrome.pid, 'SIGKILL'); } catch {} try { spawnSync('pkill', ['-9', '-f', dir]); } catch {} try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} };

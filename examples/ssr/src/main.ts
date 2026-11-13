@@ -1329,7 +1329,7 @@ async function main() {
       }
       if (nr[i * 4 + 1] < 0.99) continue;
       floorPx++; floorConf += conf[i];
-      if (kit!.id !== 'mirrorWall' && kit!.id !== 'thinPost') continue; // W77: thinPost shares the wall (z = -3) and the mirror floor
+      if (kit!.id !== 'mirrorWall' && kit!.id !== 'thinPost') continue; // W80: thinPost shares the wall (z = -3) and the mirror floor
       P.set(((x + 0.5) / W) * 2 - 1, 1 - ((y + 0.5) / H) * 2, depth[i]).applyMatrix4(invVP);
       d.copy(P).sub(eye).normalize(); d.y = -d.y; // planar mirror at y = 0
       if (d.z >= -1e-4) continue;

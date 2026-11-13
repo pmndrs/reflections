@@ -104,7 +104,7 @@ struct Params {
   hitShadeOcclusion: u32,
   hasHitSource: u32,
   quadCopySameSurface: u32,
-  // words 141-157 belong to other workstreams (W70-W74); W77's maxCandidates is word 158.
+  // words 141-157 belong to other workstreams (W70-W74); W80's maxCandidates is word 158.
   _r141: u32,
   _r142: u32,
   _r143: u32,
@@ -794,7 +794,7 @@ fn setupRay(ray_index: u32) -> Ray {
   return r;
 }
 
-// The hit's confidence (validateHit with the ray's thickness): shared by finishRay and the W77 candidate test.
+// The hit's confidence (validateHit with the ray's thickness): shared by finishRay and the W80 candidate test.
 fn rayConfidence(r: ptr<function, Ray>) -> f32 {
   let screen_size = vec2f(P.renderSize);
   let hit = (*r).march.position;
@@ -810,7 +810,7 @@ fn rayConfidence(r: ptr<function, Ray>) -> f32 {
   return confidence;
 }
 
-// W77 (D5120), maxCandidates > 1: the march ended on a hit (not the budget, not low occupancy) that
+// W80 (D5180), maxCandidates > 1: the march ended on a hit (not the budget, not low occupancy) that
 // validateHit rejects while the hit is on screen and not background (those ends stay misses). Restart the
 // march just past that leaf cell: the exit plane of the cell at the most detailed mip plus uv_offset
 // (AdvanceRay's step), back at the most detailed mip. The shared maxTraversalIntersections still bounds

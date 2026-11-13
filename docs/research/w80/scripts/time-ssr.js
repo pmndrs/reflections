@@ -1,4 +1,4 @@
-// W77: core pass ms (median of 30, loop stopped) per maxCandidates at 1920x1080, examples/ssr (prelude: POSE, ROUNDS).
+// W80: core pass ms (median of 30, loop stopped) per maxCandidates at 1920x1080, examples/ssr (prelude: POSE, ROUNDS).
 // Values alternate each round so drift cancels; the median over rounds is reported.
 P.stop && P.stop();
 if (typeof POSE !== 'undefined') P.setPose(POSE);
