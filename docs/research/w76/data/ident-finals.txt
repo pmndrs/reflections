@@ -15,7 +15,7 @@ contact.png max 0 /255, px > 0: 0
 facingMirrors.png max 0 /255, px > 0: 0
 mirrorWall.png max 0 /255, px > 0: 0
 moving.png max 0 /255, px > 0: 0
-offscreen.png max 3 /255, px > 0: 22
+offscreen.png max 0 /255, px > 0: 0
 == car
 carConcept.png max 0 /255, px > 0: 0
 == sponza
