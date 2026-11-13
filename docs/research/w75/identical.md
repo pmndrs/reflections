@@ -15,3 +15,5 @@ Verdict: bit for bit at the default. 'full' builds no new node: `HybridReflectio
 **Re-run after step 2** (`f01ed6d`: core `minRoughness` in classify, word 157; the mirror path): same 11 captures, raw-output hashes equal to main's, finals 0/255 (0 px). Still bit for bit.
 
 **Re-run after the review fixes** (`f77c76e`, main `2c3ec3a` with W71 merged in): same 11 captures vs a build of main `2c3ec3a` (sources swapped in, served module checked): raw-output hashes equal, finals 0/255 (0 px).
+
+**Re-run after merging main 6b2e35f** (W74 review fixes, W73 rayReuse; branch `515879e`): same 11 captures vs a build of main `6b2e35f`: raw-output hashes equal, finals 0/255 (0 px).

@@ -96,3 +96,28 @@ All numbers 960x540 unless marked; page metrics on the reflection region (G-buff
 
 - **`reflectionResolution: 'half'`: option, not default.** It saves 1.6-3.4 ms at 1080p (25-35 % of the reflection frame on carConcept) and keeps rest drift and orbit flicker within ~5 % on the ssr scenes at ratio 1. It costs at silhouettes and thin emitters: carConcept band 30.5 -> 58.3, the line's peak -78 %, carConcept orbit +15 %; stacking with `?upscale=1.5` adds +15 % orbit on contact. Recommend it as a performance preset, paired with `hitSource: 'hits'` (band 39.4) and not combined with an upscale ratio > 1.
 - **`halfResMinRoughness` (step 2): keep at 0 (off); drop unless the mirror path gets a denoiser.** 0.01 is the only sensible threshold (0.05 catches smooth glossy floors); there it restores mirror sharpness but doubles orbit flicker on mirrors and costs as much as full res.
+
+# After the review and the main merges (main 6b2e35f: W74's kernel fixes, W73 rayReuse, W71)
+
+- **Kernel.** The upsample keeps the linear `bilateralFill`, not the majority or stochastic pick: a residual upsample wants the weighted mean, and a per-pixel class pick would make it binary. W74's kernel now weights the ray length (radiance.w) by confidence. The residual's alpha is the composite's ssrWeight, which needs a plain mean, so `ReflectionUpsampleInputs.weightInAlpha` upsamples it in the confidence slot instead. Origin: footprints 2 / 4 take floor(p / 2), the lower cell of the bilinear pair in sample space, which is W74's convention.
+- **Re-measure** (carConcept w50, ours-rt, MAD vs PT, [measure3-car960.jsonl](measure3-car960.jsonl)). The kernel change moves nothing (same as phase 2 to within 0.1).
+
+| config | frame | lip | band | door | car |
+|---|---|---|---|---|---|
+| full (denoised) | 7.9 | 41.5 | 30.6 | 14.1 | 14.9 |
+| half | 9.1 | 50.5 | 58.3 | 15.5 | 17.7 |
+| half + hitSource 'hits' | 8.6 | 36.9 | 39.4 | 15.4 | 16.6 |
+| full + rayReuse 'ratio' | 7.9 | 41.7 | 30.5 | 14.1 | 15.0 |
+| half + ratio | 9.1 | 50.5 | 60.1 | 15.5 | 17.8 |
+| half + ratio + hitSource | 8.6 | 35.5 | 40.2 | 15.4 | 16.6 |
+| raw: full / half / half + ratio | 7.2 / 7.6 / 7.6 | 18.6 / 22.8 / 22.5 | 14.0 / 16.4 / 16.4 | 14.5 / 15.0 / 15.0 | 13.7 / 14.8 / 14.8 |
+
+  With RT on, `rayReuse: 'ratio'` changes almost nothing here: its resolve leaves the traced pass's pixels to it (D5043), and carConcept's floor rays are mostly traced. It does not recover what half res loses.
+- **Smoke:** half res + `rayReuse: 'ratio'` + `tracedMissRate: 'half'` together (contact, RT): all finite, 940 quads skipped, 3594 px filled, no validation errors (a `--only half-res` line). On the way: at full res on the ssr page, W74's `halfRateReady` stayed false after 80 frames (scripts/triple-debug.js; W74's lane).
+- **Checks** (after the merge): sssr-core, ssr, hybrid (+ half-res), ssr-rt, showcase, regressions: 166 PASS, 0 FAIL ([checks-merge2.txt](checks-merge2.txt)). Default-identical vs main 6b2e35f: hashes equal, finals 0/255.
+
+## Final verdict
+
+- **`reflectionResolution: 'half'`: an option, not the default.** Pair it with `hitSource: 'hits'` as a performance preset (1080p frame -1.6 to -3.4 ms; carConcept denoised band 30.6 -> 39.4, lip 41.5 -> 36.9, frame 7.9 -> 8.6). Don't combine it with an upscale ratio above 1. Without hitSource, the band doubles (the denoiser's 2x screen footprint) and a thin emitter loses ~3/4 of its peak.
+- **`halfResMinRoughness`: keep 0; drop it unless the mirror path gets a denoiser** (orbit flicker x2 on mirrors at 0.01, at full res's cost).
+- **Ratio reuse:** no effect on the half-res losses with RT on; the two compose without errors.
