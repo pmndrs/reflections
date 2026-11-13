@@ -119,7 +119,7 @@ The example scenes' classify also rises 0.147 to 0.170 ms over the run (drift: t
 
 - `pnpm typecheck` and `pnpm test` (64) pass. `docs/SETTINGS.md` regenerated (`UPDATE_SETTINGS_DOC=1`).
 - sssr-core parity at occupancy 0, `maxCandidates` 1 / 4 / 8 on its scene: the two variants agree on every list and 0 px of radiance and hit differ (misses 4210 / 3380 / 3320, so the restart does run there).
-- `REFLECTIONS_PORT=5449 pnpm check`: see HANDOFF.
+- `REFLECTIONS_PORT=5449 pnpm check` (full run stopped by hand after 196 PASS, 0 FAIL, through bc6h, scenes, regressions, sssr-core, ssr, hybrid, ssr-rt and the start of the probe layouts; the shared GPU made it slow): `--only bench` and `--only ssr-rt` rerun: all pass.
 
 ## Not done
 
