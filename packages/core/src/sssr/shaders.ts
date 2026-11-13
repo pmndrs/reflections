@@ -1228,9 +1228,14 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
   var sum_hit_w = 0.0;
   var sum_t = 0.0;
   var sum_length = 0.0;
+  // W72 (D5023): with mirrorBiasCompensate the rays were sampled at alpha x sampleAlphaScale (sqrt(1 - f))
+  // and each ray's value already carries the cone / lobe filter's alpha x sqrt(f). The target lobe is the
+  // sample's too, so the resolve doesn't re-widen: its spread plus the filters' adds up to alpha. Both
+  // scales are exactly 1 without compensation.
+  let alpha_s = alpha * P.sampleAlphaScale;
   // The pixel's own ray: w = brdfCos / pdf = G1(L).
   if (own.valid && dot(N, own.dir) > 0.0) {
-    let w = brdfCos(N, V, own.dir, alpha) / max(vndfPdf(N, V, own.dir, alpha), 1e-12);
+    let w = brdfCos(N, V, own.dir, alpha_s) / max(vndfPdf(N, V, own.dir, alpha_s), 1e-12);
     sum_w += w; sum_value += w * own.value; sum_confidence += w * own.confidence;
     sum_length += w * own.t;
     if (own.confidence > 0.0) { sum_hit_w += w * own.confidence; sum_t += w * own.confidence * own.t; }
@@ -1283,9 +1288,9 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
       L = (H - X) / max(t, 1e-6);
     }
     if (dot(N, L) <= 0.0) { continue; }
-    let pdf = vndfPdf(Nq, normalize(cam - Xq), rec.dir, aq);
+    let pdf = vndfPdf(Nq, normalize(cam - Xq), rec.dir, aq * P.sampleAlphaScale);
     if (!(pdf > 0.0)) { continue; }
-    let w = brdfCos(N, V, L, alpha) / pdf;
+    let w = brdfCos(N, V, L, alpha_s) / pdf;
     if (!(w > 0.0) || w > 3.0e38) { continue; }
     sum_w += w; sum_value += w * rec.value; sum_confidence += w * rec.confidence;
     sum_length += w * t;
