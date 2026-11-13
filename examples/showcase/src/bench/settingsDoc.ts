@@ -1,6 +1,6 @@
 // docs/SETTINGS.md, rendered from the bench's schema (W51). `pnpm settings:doc` writes it;
 // test/settings-doc.test.ts fails when the checked-in file and the schema differ.
-import { ALL, GROUPS, NOT_EXPOSED, OURS, OURS_DN, OURS_SSR, RASTER, SETTINGS, THREE, type Setting, type Value } from './schema';
+import { ALL, GROUPS, NOT_EXPOSED, OURS, OURS_DN, OURS_SSR, RASTER, RT_BEHAVIOUR, SETTINGS, THREE, type Setting, type Value } from './schema';
 
 const SETS: [readonly string[], string][] = [[ALL, 'every method'], [RASTER, 'ours + three SSR'], [OURS, 'ours (incl. probes only)'], [OURS_SSR, 'ours'], [OURS_DN, 'ours denoised, ours + RT'], [THREE, 'three SSR']];
 /** A method list in words where it is one of the schema's sets. */
@@ -14,6 +14,7 @@ function defaults(s: Setting) {
   if (s.default !== null) parts.push(fmt(s.default));
   if (s.pageDefault !== undefined && s.pageDefault !== s.default) parts.push(`examples: ${fmt(s.pageDefault)}`);
   if (s.defaultNote) parts.push(s.defaultNote);
+  if (s.rtDefault !== undefined && !(s.defaultNote ?? '').includes('RT')) parts.push(`with RT: ${fmt(s.rtDefault)}`);
   return parts.join('; ') || 'none';
 }
 function range(s: Setting) {
@@ -52,6 +53,21 @@ export function renderSettingsMarkdown(): string {
     }
     out.push('');
   }
+  // W76: every default that differs with ray tracing on, so users know RT changes settings
+  out.push('## What changes when ray tracing is on');
+  out.push('');
+  out.push('Turning the ray-traced fallback on (`ScreenSpaceReflectionsPass({ trace })`, `setTraceProvider()`, `rayTracing`; in core, `missesTraced: true` on the tracer\'s dispatch) changes these defaults. **An explicit value always wins**: set the field to keep the RT-off value. The bench shows the effective value of an unset field.');
+  out.push('');
+  out.push('| Setting | URL key | Default | With RT | Why |');
+  out.push('|---|---|---|---|---|');
+  for (const s of SETTINGS.filter((x) => x.rtDefault !== undefined)) out.push(`| ${cell(s.label)} | \`${s.id}\` | ${fmt(s.default)} | ${fmt(s.rtDefault)} | ${cell(s.rtWhy ?? '')} |`);
+  out.push('');
+  out.push('Behaviour of the RT path that differs from RT off (no setting to miss, listed for completeness):');
+  out.push('');
+  out.push('| What | Why |');
+  out.push('|---|---|');
+  for (const b of RT_BEHAVIOUR) out.push(`| ${cell(b.what)} | ${cell(b.why)} |`);
+  out.push('');
   out.push('## Not exposed');
   out.push('');
   out.push('| Option | Why |');

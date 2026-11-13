@@ -106,12 +106,7 @@ export interface ScreenSpaceCompositeOptions {
    */
   upsampled?: {
     residual: THREE.Texture; confidence: THREE.Texture; hitDistance: THREE.Texture; source: THREE.Texture;
-    /**
-     * W75 (X5 step 2, D5084): the full-res mirror path (`ScreenSpaceReflectionsPass.mirrorTargets()`).
-     * Pixels whose G-buffer roughness is below `minRoughness` (a float node) composite it with the
-     * full-res formula (raw: no denoiser), the rest the upsampled half-res path.
-     */
-    mirror?: { radiance: THREE.Texture; confidence: THREE.Texture; hitDistance: THREE.Texture; source: THREE.Texture; minRoughness: N } | null;
+    // (W75's `mirror`, X5 step 2's full-res mirror path, was removed by W76: D5084)
   } | null;
 }
 
@@ -226,13 +221,10 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
   }
   probeSpecular = probeSpecular.mul(scale).toVar();
 
-  // W75 (X5): the half-res path's upsampled targets, and the full-res mirror path below a roughness (step 2)
+  // W75 (X5): the half-res path's upsampled targets
   const up = options.upsampled ?? null;
-  const mirror = up?.mirror ?? null;
-  const mirrorPx: N = mirror ? float(nr.w).lessThan(mirror.minRoughness) : null;
-  const own = mirror ?? { radiance: ssr.radiance, confidence: ssr.confidence, hitDistance: ssr.hitDistance, source: ssr.source };
-  const sourceAt = (): N => (!up ? texture(ssr.source, at).x
-    : mirror ? mirrorPx.select(texture(mirror.source, at).x, texture(up.source, at).x) : texture(up.source, at).x);
+  const own = { radiance: ssr.radiance, confidence: ssr.confidence, hitDistance: ssr.hitDistance, source: ssr.source };
+  const sourceAt = (): N => (!up ? texture(ssr.source, at).x : texture(up.source, at).x);
 
   // Lagarde 2014 computeSpecOcclusion, a = perceptual^2 (same as core's probeSpecularOcclusion, D66)
   let specularOcclusion: N = float(1);
@@ -251,8 +243,8 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
   // final = lit + amount x weight x (specular - probeSpecular): three's own IBL term swapped for ours
   const amount: N = uniform(1);
   const ssrRadiance: N = texture(own.radiance, at).rgb;
-  const confidence: N = texture(up && !mirror ? up.confidence : own.confidence, at).x.toVar();
-  const hitDistance: N = texture(up && !mirror ? up.hitDistance : own.hitDistance, at).x.toVar();
+  const confidence: N = texture(up ? up.confidence : own.confidence, at).x.toVar();
+  const hitDistance: N = texture(up ? up.hitDistance : own.hitDistance, at).x.toVar();
 
   // Depth-aware blend (W22, DIVERGES D2400). FFX's confidence is one number for two things: the
   // screen-edge fade (vignette: the hit is real but about to leave the screen) and the thickness
@@ -290,15 +282,12 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
     // W75: the half-res hit part, upsampled, plus this pixel's own probe part (D5081)
     const residual: N = texture(up.residual, at).toVar();
     const upWeight: N = float(residual.a).clamp(0, 1).toVar();
-    let upSpecular: N = residual.rgb.add(upWeight.oneMinus().mul(specularOcclusion).mul(probeSpecular)).toVar();
-    // step 2 (D5084): the mirror path's pixels take the full-res formula on its raw signal
-    if (mirror) upSpecular = mirrorPx.select(signal, upSpecular).toVar();
+    const upSpecular: N = residual.rgb.add(upWeight.oneMinus().mul(specularOcclusion).mul(probeSpecular)).toVar();
     const final: N = vec4(geometry.select(lit.add(weight.mul(upSpecular.sub(probeSpecular)).mul(amount)).max(0), lit), 1);
-    const pick = (m: N, u: N): N => (mirror ? mirrorPx.select(m, u) : u);
     return {
       final, lit, weight, scale, exact: float(exact ? 1 : 0), probeSpecular, specular: upSpecular, signal: upSpecular, denoised: upSpecular, denoise, specularOcclusion, coverage, roughness: float(nr.w),
-      confidence: mirror ? pick(confidence, texture(up.confidence, at).x) : confidence, ssrWeight: pick(ssrWeight, upWeight), hitFade, probeConsistency, depthAware, ssr: ssrRadiance, geometry, amount,
-      hitDistance: mirror ? pick(hitDistance, texture(up.hitDistance, at).x) : hitDistance,
+      confidence, ssrWeight: upWeight, hitFade, probeConsistency, depthAware, ssr: ssrRadiance, geometry, amount,
+      hitDistance,
       source: sourceAt(),
     };
   }

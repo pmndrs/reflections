@@ -273,14 +273,35 @@ async function sssrCoreChecks(pages) {
  * images bit for bit as the setting absent; the rotated quad bases keep the variants' parity.
  */
 async function x1CoreChecks(s, hasSubgroups) {
-  const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitLobeFilterGrazing: 0, historyEdgeConfidence: false };
+  // (W76 removed historyEdgeConfidence, D5003)
+  const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitLobeFilterGrazing: 0 };
   // 'relative' at k 0 is off (review: thickness 0 would make smoothstep(0, 0, d) undefined)
-  for (const [name, def] of [...Object.entries(X1_DEFAULTS), ['all four', X1_DEFAULTS], ['relative at k 0', { thicknessDepthMode: 'relative', thicknessDepthFactor: 0 }]]) {
+  for (const [name, def] of [...Object.entries(X1_DEFAULTS), ['all of them', X1_DEFAULTS], ['relative at k 0', { thicknessDepthMode: 'relative', thicknessDepthFactor: 0 }]]) {
     const r = await s.T(`window.__p.identity({}, ${JSON.stringify(typeof def === 'object' ? def : { [name]: def })})`);
     check(`sssr X1 ${name}: default ${JSON.stringify(def)} = absent, bit for bit`, r.listsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
       `rays ${r.rays.join(' / ')}, misses ${r.misses.join(' / ')}, differing px radiance ${r.radianceDiffPixels}, hit ${r.hitDiffPixels}`);
   }
-  // the settings act (no history input here, so not historyEdgeConfidence; the grazing filter on the ?env page,
+  // W76: the new defaults resolve as documented (core resolveScreenSpaceSettings): absent = the explicit cone +
+  // compensation at 0.5; hitColorFilter 'off' alone = the explicit pre-W76 path; with missesTraced (RT on) an unset
+  // thickness = 'relative' 0.02, and an explicit 'add' (or factor 0) = the pre-W76 test
+  const W76_CASES = [
+    ['absent = cone + compensate + bias 0.5', {}, { hitColorFilter: 'cone', mirrorBiasCompensate: true, mirrorBias: 0.5 }],
+    ["hitColorFilter 'off' = the pre-W76 explicit path", { hitColorFilter: 'off' }, { hitColorFilter: 'off', mirrorBiasCompensate: false, mirrorBias: 0 }],
+    ["missesTraced: unset thickness = 'relative' 0.02", { missesTraced: true }, { missesTraced: true, thicknessDepthMode: 'relative', thicknessDepthFactor: 0.02 }],
+    ["missesTraced + thicknessDepthMode 'add' = RT off's thickness", { missesTraced: true, thicknessDepthMode: 'add' }, {}],
+    ['missesTraced + thicknessDepthFactor 0 = RT off\'s thickness', { missesTraced: true, thicknessDepthFactor: 0 }, {}],
+  ];
+  for (const [name, a, b] of W76_CASES) {
+    const r = await s.T(`window.__p.identity(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
+    check(`sssr W76 defaults: ${name}, bit for bit`, r.listsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
+      `rays ${r.rays.join(' / ')}, misses ${r.misses.join(' / ')}, differing px radiance ${r.radianceDiffPixels}, hit ${r.hitDiffPixels}`);
+  }
+  const rtThick = await s.T('window.__p.identity({}, { missesTraced: true })');
+  const cone = await s.T("window.__p.identity({ hitColorFilter: 'off' }, {})");
+  check('sssr W76 defaults act: RT on changes the thickness (more misses), the cone default changes the hits vs off',
+    rtThick.misses[1] > rtThick.misses[0] && cone.radianceDiffPixels > 1000,
+    `misses ${rtThick.misses.join(' to ')} with missesTraced; off vs default: ${cone.radianceDiffPixels} px differ, misses ${cone.misses.join(' / ')}`);
+  // the settings act (the grazing filter on the ?env page,
   // since the constant fallback looks the same at every roughness)
   const thick = await s.T('window.__p.identity({}, { thicknessDepthFactor: 0.05 })');
   const rel = await s.T("window.__p.identity({}, { thicknessDepthFactor: 0.001, thicknessDepthMode: 'relative' })");

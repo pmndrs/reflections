@@ -45,6 +45,7 @@ import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type 
 import { ScreenSpaceAO } from '../../shared/ao';
 import { canvasReader, createMetrics } from '../../shared/metrics/run';
 import { gbufferGlossyMask, hybridReaders } from '../../shared/metrics/three';
+import { ssrSettingsFromQuery } from '../../shared/ssrQuery';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -210,8 +211,7 @@ async function main() {
     gbufferOptions: { width: W, height: H }, missList: true, timestamps: q.has('timing') || layoutMode,
     subgroups: q.get('variant') !== 'workgroup',
     // W75 (X5, D5080): ?res=half traces, denoises at half res and upsamples
-    // (?res=mixed: mirrors below ?halfResMin= (default 0.05) on a full-res path, step 2)
-    ...(q.get('res') === 'half' || q.get('res') === 'mixed' ? { settings: { reflectionResolution: 'half' as const, halfResMinRoughness: q.get('res') === 'mixed' ? Number(q.get('halfResMin') ?? 0.05) : 0 } } : {}),
+    ...(q.get('res') === 'half' ? { settings: { reflectionResolution: 'half' as const } } : {}),
   });
   const device = ssr.device;
   // hybrid resolve + denoise seam (phase 5)
@@ -231,6 +231,7 @@ async function main() {
   };
   hybrid.denoise = wantDenoise && !!denoiser;
   if (q.has('mirrorBias')) ssr.settings.mirrorBias = Number(q.get('mirrorBias'));
+  Object.assign(ssr.settings, ssrSettingsFromQuery(q)); // W76: ?s.<field>=<value> from the first frame
   const gpuErrors: string[] = [];
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });
   // With the loop stopped, three renders each shadow map once per camera per frame: advance it ourselves.
@@ -782,13 +783,9 @@ async function main() {
       assets: async () => { const dirs = new Set((await availableAssets()).map((a) => a.dir)); return Object.entries(ASSET_SCENES).filter(([dir]) => dirs.has(dir)).map(([, a]) => a.id); },
       load: (id: string) => load(id),
       setPose, setView: (v: View) => setView(v),
-      /**
-       * W75 (X5): reflection resolution, rebuilding the composites ('mixed' = half with the full-res mirror
-       * path below `minRoughness`, step 2).
-       */
-      async setResolution(r: 'full' | 'half' | 'mixed', minRoughness = 0.05) {
-        ssr.settings.reflectionResolution = r === 'full' ? 'full' : 'half';
-        ssr.settings.halfResMinRoughness = r === 'mixed' ? minRoughness : 0;
+      /** W75 (X5): reflection resolution, rebuilding the composites (W76 removed step 2's 'mixed', D5084). */
+      async setResolution(r: 'full' | 'half') {
+        ssr.settings.reflectionResolution = r;
         hybrid.rebuild(); buildDisplay();
         ssr.resetHistory(); hybrid.resetHistory();
       },

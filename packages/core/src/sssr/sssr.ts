@@ -132,12 +132,58 @@ export const HIT_COLOR_PYRAMID_LEVELS = 8;
  * filters alpha x sqrt(f), f = mirrorBias, and the bias truncates nothing. Otherwise the sample is
  * the full lobe truncated by `mirrorBias` (D49) and the filters keep their full widths (1).
  */
-export function mirrorBiasSplit(s: Pick<ScreenSpaceReflectionsSettings, 'mirrorBias' | 'mirrorBiasCompensate' | 'hitColorFilter'>): { sample: number; filter: number; compensated: boolean } {
+export function mirrorBiasSplit(s0: Pick<ScreenSpaceReflectionsSettings, 'mirrorBias' | 'mirrorBiasCompensate' | 'hitColorFilter'>): { sample: number; filter: number; compensated: boolean } {
+  const s = resolveScreenSpaceSettings(s0);
   // compensated, f stops at MAX_COMPENSATED_BIAS: at f 1 the sample's alpha is 0, and a blue-noise U1 of
   // 1.0 (unorm8) puts the VNDF's normal in the tangent plane, normalize(vec3f(0)) = NaN (W72 review)
   const f = Math.min(s.mirrorBiasCompensate ? MAX_COMPENSATED_BIAS : 1, Math.max(0, s.mirrorBias ?? 0));
-  const compensated = !!s.mirrorBiasCompensate && (s.hitColorFilter ?? 'off') === 'cone';
+  const compensated = !!s.mirrorBiasCompensate && s.hitColorFilter === 'cone';
   return compensated ? { sample: Math.sqrt(1 - f), filter: Math.sqrt(f), compensated } : { sample: 1, filter: 1, compensated };
+}
+
+/**
+ * W76 (the maintainer's call on X2, 2026-11-13): `hitColorFilter` when unset. 'cone' + compensation at
+ * `mirrorBias` 0.5 was the only setting that kept a thin r 0.15 reflection the defaults lost (line
+ * spread x1.00 of the path tracer's width). **The old path is one switch away: `hitColorFilter: 'off'`**
+ * (compensation then has no filter to hand the bias to, and `mirrorBias` falls back to 0: FFX's full
+ * lobe, bit for bit what the tracer did before W76).
+ */
+export const DEFAULT_HIT_COLOR_FILTER: 'off' | 'cone' = 'cone';
+/** W76: `mirrorBiasCompensate` when unset (it acts only with `hitColorFilter: 'cone'`). */
+export const DEFAULT_MIRROR_BIAS_COMPENSATE = true;
+/** W76: `mirrorBias` when unset and compensation is on (cone + `mirrorBiasCompensate`); 0 otherwise (D49's truncation stays opt-in). */
+export const DEFAULT_COMPENSATED_MIRROR_BIAS = 0.5;
+/**
+ * W76 (the maintainer's call on X1 #2): with a ray-traced pass over the miss list (`missesTraced`), an
+ * unset thickness becomes Diligent's relative test, `thicknessDepthMode: 'relative'` at this
+ * `thicknessDepthFactor` (thickness = 0.02 x the hit's view depth): it fixes thin geometry turning into
+ * a slab (lineSpreadThin x4.25 -> x1.45..x2.2 of the PT's width), and the rays it rejects go to the RT
+ * pass. Without RT those rays would take the probe, so the default stays 'add' / 0 there.
+ */
+export const RT_THICKNESS_DEPTH_FACTOR = 0.02;
+
+/**
+ * The settings a dispatch runs with: every W76 default resolved (W76, `docs/SETTINGS.md` "What
+ * changes when ray tracing is on"). An explicit value always wins.
+ * - `hitColorFilter` {@link DEFAULT_HIT_COLOR_FILTER}, `mirrorBiasCompensate`
+ *   {@link DEFAULT_MIRROR_BIAS_COMPENSATE}; `mirrorBias` {@link DEFAULT_COMPENSATED_MIRROR_BIAS} when
+ *   both are on, else 0.
+ * - With `missesTraced` (ray tracing on): `thicknessDepthMode` 'relative' and, only when the mode
+ *   resolves to 'relative', `thicknessDepthFactor` {@link RT_THICKNESS_DEPTH_FACTOR}. So
+ *   `thicknessDepthMode: 'add'` or `thicknessDepthFactor: 0` alone gives the pre-W76 thickness.
+ * Idempotent; the dispatch calls it, and `outputs.settings` holds what the frame actually ran.
+ */
+export function resolveScreenSpaceSettings<T extends Partial<ScreenSpaceReflectionsSettings>>(s: T): T {
+  const hitColorFilter = s.hitColorFilter ?? DEFAULT_HIT_COLOR_FILTER;
+  const mirrorBiasCompensate = s.mirrorBiasCompensate ?? DEFAULT_MIRROR_BIAS_COMPENSATE;
+  const compensated = mirrorBiasCompensate && hitColorFilter === 'cone';
+  const out: T = { ...s, hitColorFilter, mirrorBiasCompensate, mirrorBias: s.mirrorBias ?? (compensated ? DEFAULT_COMPENSATED_MIRROR_BIAS : 0) };
+  if (s.missesTraced) {
+    const mode = s.thicknessDepthMode ?? 'relative';
+    out.thicknessDepthMode = mode;
+    out.thicknessDepthFactor = s.thicknessDepthFactor ?? (mode === 'relative' ? RT_THICKNESS_DEPTH_FACTOR : 0);
+  }
+  return out;
 }
 
 /**
@@ -223,7 +269,9 @@ export interface ScreenSpaceReflectionsSettings {
   /**
    * Bias of the glossy ray sample toward the mirror direction, 0..1 (SSSR 2015, PICA; D49). The
    * VNDF's radial random number is scaled by `1 - mirrorBias`, which truncates the lobe: less noise,
-   * a sharper (biased) reflection. Default 0: FFX SSSR's full lobe, bit for bit. 1 = mirror.
+   * a sharper (biased) reflection. 1 = mirror. With `mirrorBiasCompensate` (and the cone) it narrows
+   * the lobe instead, and the filters put the width back (D5022). Default (W76): 0.5 when compensation
+   * is on (the default), else 0 (FFX SSSR's full lobe, bit for bit).
    */
   mirrorBias?: number;
   /** Override the frame index (blue-noise rotation). Default: increments per dispatch. */
@@ -280,6 +328,8 @@ export interface ScreenSpaceReflectionsSettings {
    * per-stage limits leave no room for the pyramid's sampled texture (warned once), frames run as 'off'.
    * The pyramid is freed on the next 'off' frame. The cone stands for the lobe's spread the sample leaves out: the whole lobe (a double
    * blur, as `hitLobeFilter` 1), or sqrt(mirrorBias) of it with `mirrorBiasCompensate`.
+   * Default (W76) {@link DEFAULT_HIT_COLOR_FILTER} ('cone', with compensation at mirrorBias 0.5);
+   * **'off' is the one switch back to the pre-W76 tracer** (FFX's hit texel, the full lobe).
    */
   hitColorFilter?: 'off' | 'cone';
   /** W72 (D5020): scales the cone's width (1 = the reflected lobe's full width at half maximum). Default 1. */
@@ -288,7 +338,8 @@ export interface ScreenSpaceReflectionsSettings {
    * W72 (X2 #6, D5022; needs `hitColorFilter: 'cone'`, ignored without): `mirrorBias` f narrows the
    * sampled lobe to alpha x sqrt(1 - f) instead of truncating it, and the cone and `hitLobeFilter`
    * supply alpha x sqrt(f), so the blur the bias removes comes back as filtering (less noise, the same
-   * total lobe width; SSSR 2015 shipped f 0.7 with its cone). See {@link mirrorBiasSplit}. Default false.
+   * total lobe width; SSSR 2015 shipped f 0.7 with its cone). See {@link mirrorBiasSplit}. Default
+   * (W76) true; false keeps the cone with D49's truncation (and `mirrorBias` 0 unless set).
    */
   mirrorBiasCompensate?: boolean;
   /**
@@ -314,7 +365,8 @@ export interface ScreenSpaceReflectionsSettings {
    * A ray-traced pass overwrites the miss list's pixels (and their quad copies) after this dispatch
    * (the three adapter sets it while its traced pass runs). The 'ratio' resolve then leaves those
    * pixels to it and doesn't reuse their screen-space rays elsewhere, so screen and traced hits
-   * don't mix (D3660). Default false.
+   * don't mix (D3660). W76: it also switches the ray-tracing defaults on (an unset thickness becomes
+   * 'relative' at {@link RT_THICKNESS_DEPTH_FACTOR}; see {@link resolveScreenSpaceSettings}). Default false.
    */
   missesTraced?: boolean;
   /**
@@ -332,12 +384,6 @@ export interface ScreenSpaceReflectionsSettings {
    */
   rayReusePattern?: 'frame' | 'pixel';
   /**
-   * W75 (plan X5 step 2, D5084): perceptual roughness below which this tracer traces nothing: those
-   * pixels take the path of pixels above `roughnessThreshold` (the radiance fallback, confidence 0),
-   * left to another tracer (three's half-res reflections hand them to a full-res one). Default 0.
-   */
-  minRoughness?: number;
-  /**
    * W71 (X1 #1, D5000): which pixel of a 2x2 quad traces when `samplesPerQuad` < 4 (the others take
    * its ray). 'fixed' (default, FFX): the top-left, every frame, so the copy's 2x2 grid stays put under
    * TAA / an upscaler. 'frame': the corner cycles with the frame index (diagonal first). 'pattern': a
@@ -349,11 +395,12 @@ export interface ScreenSpaceReflectionsSettings {
    * W71 (X1 #2, D5001): thickness that scales with depth. With `thicknessDepthMode` 'add' (default)
    * the hit acceptance thickness gains `thicknessDepthFactor x |view z of the hit|`; with 'relative'
    * it is that term alone (Diligent's `distance / viewZ < 0.025`: this at 0.025), so one value serves
-   * every scene scale. Default 0 (no change). 0 is off in both modes: 'relative' takes effect only
-   * once the factor is above 0 (a zero thickness would make the hit test undefined).
+   * every scene scale. 0 is off in both modes: 'relative' takes effect only once the factor is above 0
+   * (a zero thickness would make the hit test undefined). Default 0; W76: with `missesTraced` (ray
+   * tracing on) and the mode 'relative', {@link RT_THICKNESS_DEPTH_FACTOR}. 0 restores the pre-W76 test.
    */
   thicknessDepthFactor?: number;
-  /** See {@link thicknessDepthFactor}. Default 'add'; 'relative' with a factor of 0 is the same as 'add' (off). */
+  /** See {@link thicknessDepthFactor}. Default 'add'; W76: 'relative' with `missesTraced`. 'relative' with a factor of 0 is the same as 'add' (off). */
   thicknessDepthMode?: 'add' | 'relative';
   /**
    * W71 (X1 #3, D5002): shrink the lobe filter's spread (`hitLobeFilter`) at grazing angles by
@@ -362,16 +409,6 @@ export interface ScreenSpaceReflectionsSettings {
    * adapter passes it to the ray-traced pass unless `traceSettings` sets its own.
    */
   hitLobeFilterGrazing?: number;
-  /**
-   * W71 (X1 #4, D5003): with `hitColor: 'history'` (and `hitShading: 'off'`, where a hit's colour is
-   * read from last frame), the screen-edge fade becomes min(this frame's, the previous position's),
-   * and a hit whose previous position was off screen gets confidence 0 (it goes to the probe or the
-   * miss list) instead of this frame's colour without specular. More misses near the edges while
-   * the camera moves: more traced rays with RT on. Default false. Screen-space hits only: the
-   * ray-traced pass's on-screen hit reuse from history (D906) keeps its fallback to this frame's
-   * colour, so a traced hit can still pop at the edge.
-   */
-  historyEdgeConfidence?: boolean;
   /**
    * W74 (plan X4, D5060): which glossy misses go to the ray-traced pass. 'full' (default): every
    * miss (FFX's hybrid sample). 'half': of the glossy misses at perceptual roughness >=
@@ -504,6 +541,13 @@ export interface ScreenSpaceReflectionsOutputs {
   hitColorPyramid?: GPUTexture;
   /** W72: this frame ran `hitColorFilter: 'cone'` (false while its pipelines build, or where it is unavailable). */
   hitColorFilterActive?: boolean;
+  /**
+   * W76: the settings the last dispatch ran with, every default resolved ({@link resolveScreenSpaceSettings})
+   * and the cone's fallback applied (while 'cone' builds: 'off', and a compensated bias 0). The
+   * ray-traced pass takes its lobe split from here unless its own settings give one; the bench shows
+   * the effective thickness from it.
+   */
+  settings?: Readonly<ScreenSpaceReflectionsSettings>;
 }
 
 export interface ScreenSpaceReflections {
@@ -862,13 +906,13 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[141] = QUAD_BASE_ROTATION[s.quadBaseRotation ?? 'fixed'] ?? 0;
     f[142] = Math.max(0, s.thicknessDepthFactor ?? 0);
     f[143] = Math.min(1, Math.max(0, s.hitLobeFilterGrazing ?? 0));
-    u[144] = (s.historyEdgeConfidence ? 1 : 0) | ((s.thicknessDepthMode ?? 'add') === 'relative' ? 2 : 0);
+    // bit 0 was historyEdgeConfidence (W71, X1 #4; removed by W76: no measurable effect, D5003), kept 0
+    u[144] = (s.thicknessDepthMode ?? 'add') === 'relative' ? 2 : 0;
     // 154-156: W74 (X4)
     u[154] = useMissList && s.tracedMissRate === 'half' ? 1 : 0;
     f[155] = Math.max(0, s.tracedHalfRateMinRoughness ?? DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS) ** 2;
     u[156] = missFillCapacity;
-    // 157: W75 (X5 step 2)
-    f[157] = Math.max(0, s.minRoughness ?? 0) ** 2;
+    // 157: was W75's minRoughness (X5 step 2, the full-res mirror path; removed by W76, D5084): padding
     // W72 (X2, D5020-D5022): 145-149
     const split = mirrorBiasSplit(s);
     u[145] = (s.hitColorFilter ?? 'off') === 'cone' ? 1 : 0;
@@ -879,7 +923,8 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     device.queue.writeBuffer(params, 0, data);
   }
 
-  function dispatch(cmd: GPUCommandEncoder, inputs: ScreenSpaceReflectionsInputs, settings: ScreenSpaceReflectionsSettings = {}) {
+  function dispatch(cmd: GPUCommandEncoder, inputs: ScreenSpaceReflectionsInputs, settings0: ScreenSpaceReflectionsSettings = {}) {
+    const settings = resolveScreenSpaceSettings(settings0); // W76: the cone / compensation / RT-thickness defaults
     for (const [k, t] of [['depth', inputs.depth], ['normal', inputs.normal], ['roughness', inputs.roughness], ['color', inputs.color]] as const) {
       if (t.width !== W || t.height !== H) throw new Error(`ssr: ${k} is ${t.width}x${t.height}, expected ${W}x${H}`);
     }
@@ -899,13 +944,15 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     // W72 (D5020): the hit-colour source (last frame's where 'off' hits read it, else this frame's scene
     // colour, the re-shade's diffuse) and the cone variant; not ready = this frame runs as 'off'
     const coneSource = useHistory && (settings.hitShading ?? 'reshade') === 'off' ? inputs.history! : inputs.color;
-    const K = (settings.hitColorFilter ?? 'off') === 'cone' ? ensureCone(!!R, coneSource.format) : null;
+    const K = settings.hitColorFilter === 'cone' ? ensureCone(!!R, coneSource.format) : null;
     if (!K && hitColorPyramid) { downsamplerFor(device).release(hitColorPyramid); hitColorPyramid.destroy(); hitColorPyramid = null; }
     outputs.hitColorPyramid = K && coneSource === inputs.color ? hitColorPyramid! : undefined;
     outputs.hitColorFilterActive = !!K;
     // without the cone (building, or unavailable) compensation has no filter to hand the bias to: the full lobe
     // (mirrorBias 0), not D49's truncation, so a compensated setting never turns into a sharper one
-    writeParams(inputs, K ? settings : { ...settings, hitColorFilter: 'off', ...(settings.mirrorBiasCompensate && settings.hitColorFilter === 'cone' ? { mirrorBias: 0 } : {}) }, useHistory);
+    const ran: ScreenSpaceReflectionsSettings = K ? settings : { ...settings, hitColorFilter: 'off', ...(settings.mirrorBiasCompensate && settings.hitColorFilter === 'cone' ? { mirrorBias: 0 } : {}) };
+    outputs.settings = ran;
+    writeParams(inputs, ran, useHistory);
     const classifyGroup = device.createBindGroup({
       label: 'ssr classify', layout: classifyBgl,
       entries: [P(0),

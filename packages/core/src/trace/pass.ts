@@ -115,15 +115,16 @@ export interface TracedReflectionsSettings {
    */
   hitLobeFilterGrazing?: number;
   /**
-   * W72 (X2 #6, D5021): the SSSR tracer's `mirrorBias`, `mirrorBiasCompensate` and `hitColorFilter`
-   * (pass the tracer's). With compensation the traced directions come from the narrowed lobe
-   * (alpha x sqrt(1 - mirrorBias)), so the lobe filter here widens by hitLobeFilter x sqrt(mirrorBias)
-   * of the pixel's alpha (`mirrorBiasSplit`). Defaults 0 / false / 'off' (no change).
+   * W72 (X2 #6, D5021): the SSSR tracer's `mirrorBias`, `mirrorBiasCompensate` and `hitColorFilter`.
+   * With compensation the traced directions come from the narrowed lobe (alpha x sqrt(1 - mirrorBias)),
+   * so the lobe filter here widens by hitLobeFilter x sqrt(mirrorBias) of the pixel's alpha
+   * (`mirrorBiasSplit`). Default (W76): what the tracer's last dispatch ran (`outputs.settings`), so the
+   * split always matches the rays; set them only to override.
    */
   mirrorBias?: number;
   mirrorBiasCompensate?: boolean;
   hitColorFilter?: 'off' | 'cone';
-  /** W72 (D5024): the SSSR tracer's `hitColorConeScale` (pass the tracer's). Default 1. */
+  /** W72 (D5024): the SSSR tracer's `hitColorConeScale`. Default (W76): the tracer's last dispatch's. */
   hitColorConeScale?: number;
   /** The SSSR tracer's `roughnessThreshold` (perceptual; pass the tracer's), read by `hitLobeFilterMixed` only. Default 0.447. */
   roughnessThreshold?: number;
@@ -450,9 +451,16 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     device.queue.writeBuffer(params, 0, data);
   }
 
-  function dispatch(cmd: GPUCommandEncoder, frame: TracedReflectionsDispatch, settings: TracedReflectionsSettings = {}) {
+  function dispatch(cmd: GPUCommandEncoder, frame: TracedReflectionsDispatch, settings0: TracedReflectionsSettings = {}) {
     const { tracer, inputs } = frame;
     const out = tracer.outputs;
+    // W76: the lobe split (and the cone) follow what the tracer ran unless given here
+    const ran = out.settings ?? {};
+    const settings: TracedReflectionsSettings = {
+      ...settings0,
+      mirrorBias: settings0.mirrorBias ?? ran.mirrorBias, mirrorBiasCompensate: settings0.mirrorBiasCompensate ?? ran.mirrorBiasCompensate,
+      hitColorFilter: settings0.hitColorFilter ?? ran.hitColorFilter, hitColorConeScale: settings0.hitColorConeScale ?? ran.hitColorConeScale,
+    };
     if (tracer.width !== W || tracer.height !== H) throw new Error(`rt: tracer is ${tracer.width}x${tracer.height}, pass is ${W}x${H}`);
     if (!out.missList || !out.missCounter || !out.missArgs) throw new Error('rt: the SSSR tracer was created without `missList: true`');
     if (fallback.layout && !frame.fallbackBindGroup) throw new Error('rt: the radiance fallback needs fallbackBindGroup');

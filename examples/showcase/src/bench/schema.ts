@@ -54,6 +54,14 @@ export interface Setting {
   tradeoff: string;
   /** Measured GPU cost with its source, where one exists. */
   cost?: string;
+  /**
+   * W76: the package's default when ray tracing is on (the three adapter's `trace` / `rayTracing`; core
+   * `missesTraced`), where it differs from `default`. Listed in docs/SETTINGS.md "What changes when ray
+   * tracing is on". An explicit value always wins.
+   */
+  rtDefault?: Value;
+  /** W76: one line on why the RT default differs (for that section). */
+  rtWhy?: string;
   /** Where it lives in the package (for "Copy as code" and the doc). */
   api?: string;
   /** Planned, not built yet: shown greyed out with this note (no URL key acts on it). */
@@ -156,11 +164,6 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W75 (X5, D5080): \'half\' point-samples the G-buffer at one pixel per 2x2 quad, traces (SSR + RT) and denoises there, and upsamples the residual (denoised - probe) with a joint bilateral filter (plane distance, normal, roughness). Fewer rays and a quarter of the denoiser\'s pixels; mirrors and thin edges lose resolution (step 1: everything at half res). carConcept w50 MAD vs PT denoised: band 30.6 -> 58.3, lip 41.5 -> 50.5 (raw +0.4..+2.4).',
     cost: '1080p, AA off, rt (W75 phase 2): carConcept frame sum 14.0 -> 10.6 ms (rt trace 2.53 -> 0.89, denoise 1.94 -> 0.51, upsample +0.37, half-res sample +0.16); contact 11.2 -> 9.0; mirrorWall 8.2 -> 6.6',
   }),
-  num('s.halfResMinRoughness', 'sssr', 'Half res: full-res path below roughness', 0, 1, 0.01, 0, {
-    apply: 'rebuild', appliesTo: OURS_SSR, api: 'settings.halfResMinRoughness',
-    tradeoff: 'W75 (X5 step 2, D5084): with half-res reflections, pixels below this perceptual roughness (mirrors, near-mirrors) are traced by a second full-res tracer (every pixel its own ray, its own RT pass, no denoiser) and composited at full res. 0 = every pixel at half res (step 1). At 0.05 carConcept\'s 0.03 floor goes to the full-res path.',
-    cost: 'a second full-res tracer + RT pass: at 0.01, 1080p sum carConcept 11.6 (half 10.6, full 14.0), mirrorWall 8.4 (full 8.2); at 0.05 carConcept 28.0 vs full 23.1 (W75)',
-  }),
   sel('s.rayReuse', 'sssr', 'Ray reuse', [['copy', 'copy (FFX quad copy)'], ['ratio', 'ratio estimator (BRDF / pdf-weighted neighbours)']], 'copy', {
     appliesTo: OURS_SSR, api: 'settings.rayReuse',
     tradeoff: 'W73 (X3, D5040): what a glossy px without its own ray gets. \'copy\' pastes its quad\'s ray (FFX). \'ratio\' resolves every glossy px from its own ray, its quad\'s and s.rayReuseTaps neighbours within s.rayReuseRadius, weighted by its own BRDF along the direction to each neighbour\'s hit over that ray\'s pdf (SSSR 2015, DiligentFX); same surface only. The target: ratio at spq 1 about as quiet as copy at spq 4. Experiment; the FFX denoiser still runs after it.',
@@ -196,23 +199,22 @@ export const SETTINGS: Setting[] = [
   num('s.thicknessRoughnessFactor', 'sssr', 'Thickness per alpha', 0, 20, 0.1, 10, { defaultNote: 'showcase scenes set their own', appliesTo: OURS_SSR, api: 'settings.thicknessRoughnessFactor', tradeoff: 'Thickness added per unit of the pixel\'s alpha: rough rays need less precision (D1001).' }),
   num('s.thicknessLengthFactor', 'sssr', 'Thickness per ray length', 0, 0.1, 0.001, 0.01, { appliesTo: OURS_SSR, api: 'settings.thicknessLengthFactor', tradeoff: 'Thickness added per world unit of ray length: far hits are coarser (D1001).' }),
   num('s.thicknessDepthFactor', 'sssr', 'Thickness per view depth', 0, 0.1, 0.001, 0, {
-    appliesTo: OURS_SSR, api: 'settings.thicknessDepthFactor',
+    appliesTo: OURS_SSR, api: 'settings.thicknessDepthFactor (RT_THICKNESS_DEPTH_FACTOR)',
+    rtDefault: 0.02, defaultNote: 'with RT on and the mode \'relative\': 0.02 (W76)',
+    rtWhy: 'W76 (maintainer\'s call on X1 #2, D5001): the relative test at 0.02 x view depth stops thin geometry turning into a slab (lineSpreadThin x4.25 -> x1.45..x2.2 of the PT\'s width) and is flat on carConcept, toyCar, chess, Sponza with RT (within 0.15 MAD); the rays it rejects go to the RT pass. Without RT they would take the probe (Sponza +1 %, more misses), so the default stays 0 there. `thicknessDepthFactor: 0` (or mode \'add\') restores the old test.',
     cost: 'intersect +0.008 ms at 1080p (add, k 0.01); relative: none measured (contact + RT, W71). Relative 0.01 sends 9-13 % more rays to the miss list',
     tradeoff: 'W71 (X1 #2, D5001): thickness += k x the hit\'s view depth, so one value scales from a toy car to a hall (with mode \'relative\' it is the whole thickness: Diligent\'s distance / viewZ < 0.025 is k 0.025). 0 = off.',
   }),
   sel('s.thicknessDepthMode', 'sssr', 'Thickness depth mode', [['add', 'add (to the constant, alpha and length terms)'], ['relative', 'relative (k x view depth alone, Diligent)']], 'add', {
     appliesTo: OURS_SSR, api: 'settings.thicknessDepthMode',
+    rtDefault: 'relative', defaultNote: 'with RT on: `relative` (W76)',
+    rtWhy: 'W76: with Thickness per view depth, the RT default (relative 0.02). An explicit \'add\' keeps the pre-W76 thickness with RT on (the factor then defaults to 0).',
     tradeoff: 'W71 (X1 #2, D5001): how Thickness per view depth combines. \'relative\' drops the constant, per-alpha and per-length terms; it takes effect only once Thickness per view depth is above 0 (k 0 = off in both modes).',
   }),
   num('s.mostDetailedMip', 'sssr', 'Most detailed mip', 0, 4, 1, 0, { appliesTo: OURS_SSR, api: 'settings.mostDetailedMip', tradeoff: 'Pyramid mip glossy rays start on: higher is cheaper and coarser. Mirrors always use 0.' }),
   sel('hit', 'sssr', 'Hit colour', [['final', 'last frame\'s image'], ['lit', 'last frame\'s lit (no SSR)'], ['current', 'this frame, no specular (FFX)']], 'current', {
     pageDefault: 'final', appliesTo: OURS_SSR, api: 'settings.hitColor (+ historySource)',
     tradeoff: '`current` (FFX, the package default) has no reflections in reflections: a mirror seen in a mirror is black (W9: 99.6% px). `final` reprojects last frame\'s final image (D69, D1002): mirror-in-mirror, one frame late, can ghost.',
-  }),
-  bool('s.historyEdgeConfidence', 'sssr', 'History edge confidence', false, {
-    appliesTo: OURS_SSR, api: 'settings.historyEdgeConfidence',
-    cost: 'intersect +0.01, rt trace +0.005 ms at 1080p at rest (mirrorWall, hit final, re-shade off); traced rays +0.03-0.16 % while panning (W71)',
-    tradeoff: 'W71 (X1 #4, D5003): with Hit colour from last frame and Hit specular \'off\' (the only case a hit reads last frame\'s colour), the edge fade is min(now, previous) and a hit that was off screen last frame gets confidence 0 (probe / RT) instead of this frame\'s colour without specular: no lit / unlit pops at the screen edge while panning. Screen-space hits only: the RT pass\'s on-screen history reuse (D906) keeps the edge pop. More misses near the edges: more traced rays with RT. No effect with the re-shade (default).',
   }),
   sel('reshade', 'sssr', 'Hit specular (re-shade)', [['reshade', 'specular along the ray (re-shade)'], ['off', 'screen colour as is (FFX)']], 'reshade', {
     appliesTo: OURS_SSR, api: 'settings.hitShading',
@@ -239,13 +241,15 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W52 (D3642): a re-shaded hit marches the depth buffer along R and darkens where blocked (the re-shade had no occlusion, W44). Wheel 43 -> 37 (PT 26); works without RT. Untuned.',
     cost: 'intersect +0.04 ms (W52)',
   }),
-  num('s.mirrorBias', 'sssr', 'Mirror bias', 0, 0.99, 0.01, 0, { // W72: capped (compensated, f stops at 0.99: MAX_COMPENSATED_BIAS)
-    appliesTo: OURS_SSR, api: 'settings.mirrorBias',
+  num('s.mirrorBias', 'sssr', 'Mirror bias', 0, 0.99, 0.01, 0.5, { // W72: capped (compensated, f stops at 0.99: MAX_COMPENSATED_BIAS)
+    appliesTo: OURS_SSR, api: 'settings.mirrorBias (DEFAULT_COMPENSATED_MIRROR_BIAS)',
+    defaultNote: 'W76: 0.5 with the cone + compensation (the defaults), else 0',
     tradeoff: 'D49: truncates the GGX lobe toward the mirror direction: less noise, a sharper (biased) reflection. W32 / W39: no gain with the denoiser on a still or orbiting camera; W40: 0.7 halves rest shimmer on the carConcept floor (0.31 -> 0.14/255).',
     cost: 'free (one multiply in the sample)',
   }),
-  sel('s.hitColorFilter', 'sssr', 'Hit colour filter', [['off', 'off (the hit texel, FFX)'], ['cone', 'cone (pre-filtered pyramid by the lobe cone at the hit)']], 'off', {
-    appliesTo: OURS_SSR, api: 'settings.hitColorFilter (the tracer builds its variant async on the first \'cone\' frame)',
+  sel('s.hitColorFilter', 'sssr', 'Hit colour filter', [['off', 'off (the hit texel, FFX; the pre-W76 default)'], ['cone', 'cone (pre-filtered pyramid by the lobe cone at the hit)']], 'cone', {
+    appliesTo: OURS_SSR, api: 'settings.hitColorFilter (DEFAULT_HIT_COLOR_FILTER; the tracer builds its variant async on the first \'cone\' frame)',
+    defaultNote: 'W76: `cone` with compensation at mirror bias 0.5; `off` is the one switch back to the pre-W76 tracer (bit for bit)',
     tradeoff: 'W72 (X2 #5, D5020): a screen-space hit reads its screen colour (the re-shade\'s diffuse) from an 8-level pyramid at log2 of the lobe cone\'s width in px where the ray hits: long rays blur, contacts stay sharp (SSSR 2015). Raw fireflies go (r 0.35 sphere p999 23.9 -> 3.2 x mean, grazing emissive wall raw MAD 32 -> 8 at 5 deg); no widening on the line spread (r 0.05 x1.24 -> 1.22) and no leakage at silhouettes, but alone it brings no lost glossy reflection back and the denoised grazing floor gets blurrier (gradient x0.79 -> 0.40). Use it with Compensate mirror bias.',
     cost: '1080p (mirrorWall, glossy floor, shared GPU, A/B): pyramid pass +0.24-0.26 ms, intersect within noise (W72)',
   }),
@@ -254,8 +258,8 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W72 (D5020): scales the cone of Hit colour filter (1 = the reflected GGX lobe\'s full width at half maximum, 2.57 alpha). Only with the cone on. 2 widens the line spread (r 0.05 x1.22 -> 1.33): keep 1.',
     cost: 'free',
   }),
-  bool('s.mirrorBiasCompensate', 'sssr', 'Compensate mirror bias', false, {
-    appliesTo: OURS_SSR, api: 'settings.mirrorBiasCompensate (+ traceSettings, mirrorBiasSplit)',
+  bool('s.mirrorBiasCompensate', 'sssr', 'Compensate mirror bias', true, {
+    appliesTo: OURS_SSR, api: 'settings.mirrorBiasCompensate (DEFAULT_MIRROR_BIAS_COMPENSATE; the RT pass follows the tracer, mirrorBiasSplit)',
     tradeoff: 'W72 (X2 #6, D5021-D5022; needs Hit colour filter cone): Mirror bias f narrows the sampled lobe to alpha sqrt(1 - f) instead of truncating it, and the cone and the lobe filter (SSR and RT) supply alpha sqrt(f): less noise at the same total width. At f 0.5 the line spread\'s r 0.15 reflection, lost at the defaults, comes back at x0.99 of the PT (AA off x0.95) and r 0.05 narrows x1.24 -> 1.18; truncation (no compensation) brings it back at x0.55 (too sharp). Grazing denoised MAD -0.7..-1.0 at 5-15 deg but blurrier. f 0.7 x0.93 (AA off x0.88).',
     cost: 'free on top of the cone (scales in the sample and the lobe filter)',
   }),
@@ -425,6 +429,19 @@ export const SETTINGS: Setting[] = [
   num('ptBounces', 'pathtracer', 'Bounces', 1, 16, 1, 8, { apply: 'rebuild', appliesTo: ['pathtraced'], api: 'WebGPUPathTracer.maxBounces', tradeoff: 'Light bounces of the reference.' }),
   bool('ptDenoise', 'pathtracer', 'OIDN', true, { apply: 'rebuild', appliesTo: ['pathtraced'], tradeoff: 'Off: never load OIDN (raw accumulation only).' }),
   bool('ptClearcoat', 'pathtracer', 'Clear coat', true, { apply: 'rebuild', appliesTo: ['pathtraced'], tradeoff: 'Off drops the clear-coat layer (the old WebGL tracer rendered it black, D2303).' }),
+];
+
+/**
+ * W76: what else behaves differently with ray tracing on, besides the `rtDefault` settings (docs/SETTINGS.md
+ * "What changes when ray tracing is on"). Behaviour of the RT path itself, not a default a user can miss.
+ */
+export const RT_BEHAVIOUR: { what: string; why: string }[] = [
+  { what: 'The tracer runs with `missesTraced: true`', why: 'The three adapter sets it while its traced pass runs; it is what switches the RT defaults above on in core (`resolveScreenSpaceSettings`). A direct core user sets it on the tracer\'s dispatch.' },
+  { what: 'On-screen traced hits are re-shaded without a visibility ray', why: 'D3542: as the screen-space re-shade (no BVH there); with the ray a mirror seen in a mirror went black in stripes. `traceSettings.hitShadeVisibility: \'all\'` adds it (D3640). Off-screen traced hits keep D3513\'s ray.' },
+  { what: 'Specular occlusion skips traced misses', why: 'W45 (D3551, D4513): a traced miss left the scene unblocked, so Lagarde\'s AO guess would occlude it twice. Untraced pixels keep it (`specOcc`).' },
+  { what: 'Lobe filter where hits mix (`s.hitLobeFilterMixed` < 1) acts', why: 'D3641: it reads last frame\'s hit source, which only the traced pass writes; without RT it changes nothing.' },
+  { what: '`rayReuse: \'ratio\'` leaves traced pixels alone', why: 'D5043: the resolve runs before the traced pass, which overwrites the miss list\'s pixels; screen and traced hits never mix in it.' },
+  { what: 'The traced lobe filter follows the tracer\'s lobe split', why: 'D5021 / W76: with the cone + compensation defaults a traced hit\'s specular is filtered by hitLobeFilter x alpha x sqrt(mirrorBias) (the share the narrowed sample leaves out); `traceSettings` can override it.' },
 ];
 
 /** What the schema can't reach without a package change (listed in docs/SETTINGS.md). */
