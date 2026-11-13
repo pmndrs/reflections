@@ -1174,6 +1174,19 @@ async function halfRateChecks(p) {
   check("rt tracedMissRate 'half': fewer traced rays, the skipped quads filled from their traced neighbours, no validation errors",
     errs.length === 0 && half.halfRateSkipped > 0 && half.traced < full.traced && half.filled > 0 && half.filled > 4 * half.fillFallbacks && half.fillOverflow === 0,
     errs.length ? errs.slice(0, 2).join(' | ') : `traced ${full.traced} -> ${half.traced}, ${half.halfRateSkipped} quads on the fill list, ${half.filled} px filled, ${half.fillFallbacks} kept the probe, overflow ${half.fillOverflow}`);
+  // W74 review fix 6: content. A still frame (frameIndex fixed, no occupancy exit, AA off) at full and at half rate:
+  // only the filled px differ. Per px a fill vs that px's own full-rate ray is sample noise (~1x the mean), so the
+  // check reads means: the signed radiance bias over the changed px and the 8x8 block means (docs/research/w74/scripts/content.js).
+  // W74 contact: bias -0.18 (fallback and miss-class px are black in three's radiance; the composite adds their probe),
+  // blocks 0.14, confidence 0.64 vs 0.75 (the confidence-0 bug of 4e7e6dd would read ~0).
+  const aaMode = await p.T('window.__p.aa.mode');
+  await p.T("window.__p.setAA('off')");
+  const body = fs.readFileSync(path.join(ROOT, 'docs/research/w74/scripts/content.js'), 'utf8');
+  const c = await p.T(`(async () => { const P = window.__p; const SCENE = 'contact'; ${body} })()`);
+  await p.T(`window.__p.setAA(${JSON.stringify(aaMode)})`);
+  check("rt tracedMissRate 'half': filled px match full-rate tracing on average (contact, still frame: radiance bias and 8x8 block means)",
+    c.changed > 1000 && c.bias > -0.3 && c.bias < 0.3 && c.blockErr < 0.3 && c.confHalf > 0.7 * c.confFull,
+    `${c.changed} px changed (${c.filled} filled, ${c.fallbacks} kept the probe): bias ${(c.bias * 100).toFixed(1)} %, 8x8 block mean error ${(c.blockErr * 100).toFixed(1)} % over ${c.blocks} blocks, confidence ${c.confHalf.toFixed(3)} vs ${c.confFull.toFixed(3)}`);
 }
 
 async function ssrRtChecks(pages) {
