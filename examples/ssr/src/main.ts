@@ -43,6 +43,8 @@ import { SHOWCASE } from '../../showcase/src/scenes';
 import { createReflectionDenoiser, denoiserAvailable, denoiserSource } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
+import { canvasReader, createMetrics } from '../../shared/metrics/run';
+import { gbufferGlossyMask, hybridReaders } from '../../shared/metrics/three';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -753,8 +755,23 @@ async function main() {
 
   // ---- headless hooks ----------------------------------------------------------------------------
   const idle = () => device.queue.onSubmittedWorkDone();
+  // X0 (W70): the experiment plan's flicker / firefly metrics (../../shared/metrics/README.md), loop stopped
+  const readCanvas = canvasReader(DW, DH);
+  const metrics = createMetrics({
+    width: DW, height: DH,
+    async step(n = 1) { stopLoop(); for (let i = 0; i < n; i++) frame(); await idle(); },
+    async grab() { stopLoop(); frame(); const d = readCanvas(canvas); await idle(); return d; },
+    reset() { ssr.resetHistory(); hybrid.resetHistory(); ssr.gbuffer.resetHistory(); aa.reset(); },
+    async reflectionMask() { stopLoop(); frame(); await idle(); return gbufferGlossyMask(ssr, DW, DH); },
+    getView: () => ({ pos: kit!.camera.position.toArray() as [number, number, number], target: controls.target.toArray() as [number, number, number] }),
+    setView(pos, target) { kit!.camera.position.set(...pos); controls.target.set(...target); kit!.camera.lookAt(controls.target); kit!.camera.updateMatrixWorld(); },
+    ...hybridReaders(renderer, ssr, hybrid),
+    setDenoise(on) { const was = hybrid.denoise; hybrid.denoise = on && !!denoiser; denoiseBox.checked = hybrid.denoise; return was; },
+    describe: () => ({ page: 'ssr', scene: kit?.id, aa: aa.mode, ratio: aa.ratio, render: [W, H], display: [DW, DH], denoiser: hybrid.denoise ? denoiser?.name ?? null : null, rt: ssr.rayTracing, hit: hitMode }),
+  });
   Object.assign(window, {
     __p: {
+      metrics,
       THREE, renderer, ssr, controls, get kit() { return kit; }, gpuErrors, get variant() { return ssr.variant; },
       scenes: () => Object.keys(SCENES),
       /** Ids of the downloaded asset scenes `load()` takes (W49's material survey). */
