@@ -45,6 +45,7 @@ const SSSR_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   missConfidenceThreshold: 'n', missRoughnessThreshold: 'n', fallbackRoughness: 's', mirrorBias: 'n', frameIndex: 'n',
   hitLobeFilterMixed: 'n', hitShadeOcclusion: 's', // W52 (D3641, D3642)
   quadCopy: 's', // W58 (D3740)
+  maxCandidates: 'n', // W77 (D5120)
 };
 /** `ScreenSpaceReflectionsPass.traceSettings` fields the bench sets as `t.<field>`. */
 const TRACE_FIELDS: Record<string, 'n' | 'b' | 's'> = {
@@ -466,6 +467,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
       if (aa && aa.mode === 'upscaler') for (const [k, v] of aa.timings) out.set(`upscaler ${k}`, v);
       return out;
     },
+    traceStats: () => (ssr.rayTracing ? ssr.readTraceStats() : Promise.resolve(null)),
     gpuErrors: () => errors,
     dispose() {
       provider?.destroy();

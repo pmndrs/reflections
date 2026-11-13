@@ -99,6 +99,8 @@ export interface CompareMethod {
   get?(key: string): string | undefined;
   /** W51: GPU ms per pass of the last timed frame (ours with `timestamps=1`). */
   timings?(): ReadonlyMap<string, number>;
+  /** W77: the traced pass's counters for the last frame (miss list size, traced, capped); null without ray tracing. */
+  traceStats?(): Promise<{ misses: number; traced: number; capped: number; hits: number } | null>;
   gpuErrors(): string[];
   dispose(): void;
 }

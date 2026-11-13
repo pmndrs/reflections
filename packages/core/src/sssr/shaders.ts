@@ -55,7 +55,7 @@
 import { SCREEN_VISIBILITY_WGSL } from '../trace/hitShading';
 
 /** Byte size of the uniform block (struct Params below). */
-export const PARAMS_SIZE = 576;
+export const PARAMS_SIZE = 640;
 
 export const PARAMS_WGSL = /* wgsl */ `
 struct Params {
@@ -104,6 +104,25 @@ struct Params {
   hitShadeOcclusion: u32,
   hasHitSource: u32,
   quadCopySameSurface: u32,
+  // words 141-157 belong to other workstreams (W70-W74); W77's maxCandidates is word 158.
+  _r141: u32,
+  _r142: u32,
+  _r143: u32,
+  _r144: u32,
+  _r145: u32,
+  _r146: u32,
+  _r147: u32,
+  _r148: u32,
+  _r149: u32,
+  _r150: u32,
+  _r151: u32,
+  _r152: u32,
+  _r153: u32,
+  _r154: u32,
+  _r155: u32,
+  _r156: u32,
+  _r157: u32,
+  maxCandidates: u32,
 };
 @group(0) @binding(0) var<uniform> P: Params;
 `;
@@ -775,8 +794,8 @@ fn setupRay(ray_index: u32) -> Ray {
   return r;
 }
 
-// Shade the march result; returns true when the ray goes to the miss list.
-fn finishRay(r: ptr<function, Ray>) -> bool {
+// The hit's confidence (validateHit with the ray's thickness): shared by finishRay and the W77 candidate test.
+fn rayConfidence(r: ptr<function, Ray>) -> f32 {
   let screen_size = vec2f(P.renderSize);
   let hit = (*r).march.position;
   let valid_hit = (*r).march.i <= P.maxTraversalIntersections;
@@ -788,6 +807,44 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   let thickness = P.depthBufferThickness + (*r).roughness * P.thicknessRoughnessFactor + world_ray_length * P.thicknessLengthFactor;
   var confidence = 0.0;
   if (valid_hit) { confidence = validateHit(hit, (*r).uv, world_space_ray, screen_size, thickness, (*r).march.most_detailed_mip); }
+  return confidence;
+}
+
+// W77 (D5120), maxCandidates > 1: the march ended on a hit (not the budget, not low occupancy) that
+// validateHit rejects while the hit is on screen and not background (those ends stay misses). Restart the
+// march just past that leaf cell: the exit plane of the cell at the most detailed mip plus uv_offset
+// (AdvanceRay's step), back at the most detailed mip. The shared maxTraversalIntersections still bounds
+// the total, candidates counts the hits tried. Returns true when the march was restarted.
+fn tryRestart(r: ptr<function, Ray>, candidates: ptr<function, u32>) -> bool {
+  if (*candidates >= P.maxCandidates) { return false; }
+  let m = &(*r).march;
+  if ((*m).i >= P.maxTraversalIntersections || (*m).exit_due_to_low_occupancy || (*m).current_mip >= (*m).most_detailed_mip) { return false; }
+  let hit = (*m).position;
+  if (hit.x < 0.0 || hit.y < 0.0 || hit.x > 1.0 || hit.y > 1.0) { return false; }
+  let screen_size = vec2f(P.renderSize);
+  if (loadDepth(vec2i(screen_size * hit.xy) / 2, 1) == FAR_PLANE) { return false; }
+  if (rayConfidence(r) > 0.0) { return false; }
+  let res = getMipResolution(screen_size, (*m).most_detailed_mip);
+  var xy_plane = floor(res * hit.xy) + (*m).floor_offset;
+  xy_plane = xy_plane / res + (*m).uv_offset;
+  let t = xy_plane * (*m).inv_direction.xy - (*m).origin.xy * (*m).inv_direction.xy;
+  (*m).current_t = max((*m).current_t, min(t.x, t.y));
+  (*m).position = (*m).origin + (*m).current_t * (*m).direction;
+  (*m).current_mip = (*m).most_detailed_mip;
+  (*m).current_mip_resolution = res;
+  (*m).current_mip_resolution_inv = 1.0 / res;
+  *candidates += 1u;
+  return true;
+}
+
+// Shade the march result; returns true when the ray goes to the miss list.
+fn finishRay(r: ptr<function, Ray>) -> bool {
+  let hit = (*r).march.position;
+  let world_space_origin = screenSpaceToWorldSpace((*r).origin_ss);
+  let world_space_hit = screenSpaceToWorldSpace(hit);
+  let world_space_ray = world_space_hit - world_space_origin;
+  let world_ray_length = max(0.0, length(world_space_ray));
+  let confidence = rayConfidence(r);
   var hit_radiance = vec3f(0.0);
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
   if (confidence > 0.0) {
@@ -824,10 +881,14 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
 ${sg ? `
   if (ray_index >= rayCounter[1]) { return; }
   var r = setupRay(ray_index);
-  while (marchRunning(&r.march)) {
-    let ballot = subgroupBallot(true);
-    let occupancy = countOneBits(ballot.x) + countOneBits(ballot.y) + countOneBits(ballot.z) + countOneBits(ballot.w);
-    marchStep(&r.march, occupancy);
+  var candidates = 1u;
+  loop {
+    while (marchRunning(&r.march)) {
+      let ballot = subgroupBallot(true);
+      let occupancy = countOneBits(ballot.x) + countOneBits(ballot.y) + countOneBits(ballot.z) + countOneBits(ballot.w);
+      marchStep(&r.march, occupancy);
+    }
+    if (!tryRestart(&r, &candidates)) { break; }
   }
   let miss = finishRay(&r);
   ${missList ? `
@@ -847,8 +908,9 @@ ${sg ? `
   let has_ray = ray_index < rayCounter[1];
   var r = setupRay(ray_index);
   var running = has_ray;
+  var candidates = 1u;
   for (var k = 0u; k < P.maxTraversalIntersections; k++) {
-    running = running && marchRunning(&r.march);
+    running = running && (marchRunning(&r.march) || tryRestart(&r, &candidates));
     if (gi == 0u) { atomicStore(&wgActive, 0u); }
     workgroupBarrier();
     if (running) { atomicAdd(&wgActive, 1u); }

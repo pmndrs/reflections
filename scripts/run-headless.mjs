@@ -197,9 +197,11 @@ async function sssrCoreChecks(pages) {
   const hasSubgroups = await s.T('window.__p.hasSubgroups');
   if (!hasSubgroups) console.log('  device has no subgroups: parity skipped');
   else {
-    for (const cfg of [{ minTraversalOccupancy: 0, samplesPerQuad: 1 }, { minTraversalOccupancy: 0, samplesPerQuad: 2 }, { minTraversalOccupancy: 0, samplesPerQuad: 4 }]) {
+    for (const cfg of [{ minTraversalOccupancy: 0, samplesPerQuad: 1 }, { minTraversalOccupancy: 0, samplesPerQuad: 2 }, { minTraversalOccupancy: 0, samplesPerQuad: 4 },
+      // W77 (D5120): the candidate restart is in both variants' loops
+      { minTraversalOccupancy: 0, samplesPerQuad: 1, maxCandidates: 4 }, { minTraversalOccupancy: 0, samplesPerQuad: 4, maxCandidates: 8 }]) {
       const r = await s.T(`window.__p.parity(${JSON.stringify(cfg)})`);
-      const tag = `occupancy 0, ${cfg.samplesPerQuad} spq`;
+      const tag = `occupancy 0, ${cfg.samplesPerQuad} spq${cfg.maxCandidates ? `, maxCandidates ${cfg.maxCandidates}` : ''}`;
       check(`sssr parity (${tag}): ray, tile, miss lists and tile flags`, r.rayListSame && r.tileListSame && r.missListSame && r.tileFlagsSame,
         `rays ${r.rays}, tiles ${r.tiles}, misses ${r.misses}`);
       check(`sssr parity (${tag}): radiance, hit distance, roughness, pyramid bit for bit`,

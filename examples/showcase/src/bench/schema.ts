@@ -151,6 +151,11 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W58 (D3740): with samplesPerQuad < 4 a quad shares one ray. \'always\' copies it to every glossy px of the quad, across a silhouette too: on carConcept the skirt\'s reflection lands on the mirror floor below it (bright 2x2 dashes, raw) and the floor\'s on the skirt, the stair-stepped raw edge the denoiser then spreads. \'sameSurface\' gives px on another surface (depth > 5 %, normal > ~25 deg) their own ray. carConcept w50 960x540, lip / band MAD vs PT raw 18.6 / 14.0 -> 11.5 / 12.2, denoised 41.5 / 30.6 -> 34.4 / 26.9 (spq 4: 11.2 / 13.5, 34.3 / 27.7).',
     cost: '1080p: classify +0.02, intersect +0.02, rt trace ~+0.2 ms (carConcept w50, W58)',
   }),
+  num('s.maxCandidates', 'sssr', 'Max candidates', 1, 8, 1, 1, {
+    appliesTo: OURS_SSR, api: 'settings.maxCandidates',
+    tradeoff: 'W77 (D5120): hits tried per ray. 1 = FFX (the first hit is validated once, a reject is a miss). More restarts the march past a rejected leaf cell (a thin foreground object, a back face) and keeps going, sharing the march-step budget; every leaf cell behind an object is another candidate, so it only gets through overlaps a few px wide, and it cannot find a surface the camera does not see. A 6 cm post in front of a wall (examples/ssr scene thinPost, 960x540): nothing changes up to 4, at 8 the wall class 0.944 -> 0.988 confident and misses -27 % at 1080p; the other examples scenes and carConcept do not move (lip / band MAD vs PT unchanged).',
+    cost: '1080p, intersect: mirrorWall 0.93 -> 1.06 / 1.16 / 1.21 ms at 2 / 4 / 8, thinPost 0.96 -> 1.25 at 8 (about +0.25 ms at 8); carConcept w50 within noise (W77)',
+  }),
   num('s.maxTraversalIntersections', 'sssr', 'Max march steps', 0, 256, 1, 128, { appliesTo: OURS_SSR, api: 'settings.maxTraversalIntersections', tradeoff: 'Hi-Z march steps per ray: fewer is cheaper and sends long rays to the miss list (probe or RT); 0 = SSR off.' }),
   num('s.minTraversalOccupancy', 'sssr', 'Min occupancy', 0, 64, 1, 4, { appliesTo: OURS_SSR, api: 'settings.minTraversalOccupancy', tradeoff: 'Glossy rays stop once this few lanes of their subgroup still march (FFX): higher ends long tails earlier (cheaper, more misses). Mirrors ignore it.' }),
   num('s.depthBufferThickness', 'sssr', 'Thickness', 0, 0.5, 0.001, 0.2, {
