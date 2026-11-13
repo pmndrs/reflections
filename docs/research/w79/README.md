@@ -1,4 +1,4 @@
-# W76: the march's depth lookup past the last whole texel (D5100)
+# W79: the march's depth lookup past the last whole texel (D5160)
 
 **Verdict: real, small, reverse-Z only. Fixed in `marchStep` (clamp on screen); forward-Z unchanged within the run-to-run noise.**
 

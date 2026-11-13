@@ -642,7 +642,7 @@ fn marchRunning(m: ptr<function, March>) -> bool {
 // One iteration of the traversal loop; \`occupancy\` = active invocations (ffxWaveActiveCountBits(true)).
 fn marchStep(m: ptr<function, March>, occupancy: u32) {
   let current_mip_position = (*m).current_mip_resolution * (*m).position.xy;
-  // D5100: the pyramid's mips are floor-sized and the last texel of an odd level also covers the leftover
+  // D5160: the pyramid's mips are floor-sized and the last texel of an odd level also covers the leftover
   // row / column, so on screen the strip past the last whole texel maps one texel out of range; D303's 0 there
   // is 'nearest' for forward-Z (the march steps down a mip, still correct) but 'farthest' for reverse-Z (the cell
   // reads empty and the ray skips the strip). Clamp to the last texel for positions on screen.

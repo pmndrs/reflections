@@ -761,7 +761,7 @@ async function main() {
       assets: async () => { const dirs = new Set((await availableAssets()).map((a) => a.dir)); return Object.entries(ASSET_SCENES).filter(([dir]) => dirs.has(dir)).map(([, a]) => a.id); },
       load: (id: string) => load(id),
       setPose, setView: (v: View) => setView(v),
-      /** W76 (D5100): per-row traced profile of the last `rows` rows: px with confidence > 0.01, mean confidence, geometry px. */
+      /** W79 (D5160): per-row traced profile of the last `rows` rows: px with confidence > 0.01, mean confidence, geometry px. */
       async bandProfile(rows = 64, frames = 4) {
         stopLoop(); for (let i = 0; i < frames; i++) { frame(); await idle(); }
         const core = ssr.tracer!, t = ssr.gbuffer.gpuTextures();
@@ -776,7 +776,7 @@ async function main() {
         let mask = ''; { const u = new Uint8Array(W * H); for (let i = 0; i < u.length; i++) u[i] = conf[i] > 0.01 ? 1 : 0; for (let i = 0; i < u.length; i += 0x8000) mask += String.fromCharCode(...u.subarray(i, i + 0x8000)); }
         return { W, H, inverted, rows: out, totalHit: conf.reduce((a, c) => a + (c > 0.01 ? 1 : 0), 0), mask: btoa(mask) };
       },
-      /** W76: camera pose with a roll (up = -y) so reflected rays travel down the screen; lookAt direct (no controls). */
+      /** W79: camera pose with a roll (up = -y) so reflected rays travel down the screen; lookAt direct (no controls). */
       setFlipped(pos: [number, number, number], target: [number, number, number], flip: boolean) {
         const c = kit!.camera; c.position.set(...pos); c.up.set(0, flip ? -1 : 1, 0); c.lookAt(...target); c.updateMatrixWorld(); aa.reset();
       },
