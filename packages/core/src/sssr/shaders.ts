@@ -115,7 +115,7 @@ struct Params {
   _pad148: u32,
   _pad149: u32,
   // W73 (X3, D5040): ratio-estimator ray reuse. Flags bit 0 = 'ratio', bit 1 = misses are traced after
-  // this dispatch, bit 2 = mix hits and misses; taps; radius in px (before the roughness scale); the
+  // this dispatch, bit 2 = mix hits and misses, bit 3 = tap pattern fixed per pixel; taps; radius in px (before the roughness scale); the
   // record stamp of this dispatch.
   rayReuseFlags: u32,
   rayReuseTaps: u32,
@@ -1071,7 +1071,9 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
   // rayReuseRadius x sat(5 r) (Diligent's 4 sat(5 r), r perceptual), rotated per pixel and frame,
   // each snapped to the traced pixel of its quad.
   let radius = P.rayReuseRadius * saturate(5.0 * sqrt(alpha));
-  let rotation = f32(pcg(c.x + c.y * 65521u + P.frameIndex * 2654435769u) >> 8u) * (2.0 * M_PI / 16777216.0);
+  // 'frame': re-rotated every frame (the error moves); 'pixel' (flag bit 3): fixed per pixel (D5046)
+  let frame_seed = select(P.frameIndex * 2654435769u, 0u, (P.rayReuseFlags & 8u) != 0u);
+  let rotation = f32(pcg(c.x + c.y * 65521u + frame_seed) >> 8u) * (2.0 * M_PI / 16777216.0);
   let taps = min(P.rayReuseTaps, 8u);
   var seen: array<vec2i, 9>;
   var n_seen = 0u;

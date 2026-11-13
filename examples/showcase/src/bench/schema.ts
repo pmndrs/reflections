@@ -164,6 +164,10 @@ export const SETTINGS: Setting[] = [
     appliesTo: OURS_SSR, api: 'settings.rayReuseRadius',
     tradeoff: 'W73: tap radius in px at perceptual roughness >= 0.2, x sat(5 r) below (DiligentFX\'s 4 sat(5 r)). Wider is quieter and blurs more (the line-spread gate). Only with s.rayReuse ratio.',
   }),
+  sel('s.rayReusePattern', 'sssr', 'Ray reuse tap pattern', [['frame', 'rotated per frame'], ['pixel', 'fixed per pixel']], 'frame', {
+    appliesTo: OURS_SSR, api: 'settings.rayReusePattern',
+    tradeoff: 'W73 (D5046): the ratio taps re-rotated per pixel and frame (the resolve\'s error moves every frame) or fixed per pixel (it stays put, for the denoiser\'s temporal pass). Only with s.rayReuse ratio.',
+  }),
   bool('s.rayReuseMixSources', 'sssr', 'Ray reuse: mix hits and misses', false, {
     appliesTo: OURS_SSR, api: 'settings.rayReuseMixSources',
     tradeoff: 'W73 (D5047): off (default), the ratio resolve reuses only rays of the px\'s own hit source (screen hit vs miss, D3660). On, it also averages the hit / miss pattern, but the confidence then is a share of hits and the depth-aware blend (h.depthAware, D2400) hands the hits the whole weight: carConcept door raw 1.04 -> 1.38 linear (SSR only). Use with h.depthAware 0.',

@@ -1,0 +1,52 @@
+roughnessRamp None
+  copy@1           raw r0.1 std  0.86 fl  0.83 sgn   0.07 r0.2 std  9.79 fl 12.19 sgn  -0.14 r0.3 std 11.51 fl 12.49 sgn  -0.01 r0.4 std  9.31 fl  8.56 sgn   0.03
+  copy@4           raw r0.1 std  0.90 fl  0.90 sgn   0.00 r0.2 std 10.01 fl 12.53 sgn   0.00 r0.3 std 11.57 fl 12.64 sgn  -0.01 r0.4 std  9.31 fl  8.58 sgn   0.00
+  ratio frame r4   raw r0.1 std  1.02 fl  1.01 sgn   0.12 r0.2 std  7.90 fl  8.55 sgn   0.47 r0.3 std  8.52 fl  8.76 sgn   0.51 r0.4 std  7.48 fl  6.84 sgn   0.18
+  ratio pixel r4   raw r0.1 std  1.06 fl  1.00 sgn   0.15 r0.2 std  7.88 fl  8.60 sgn   0.47 r0.3 std  8.57 fl  8.85 sgn   0.48 r0.4 std  7.54 fl  6.86 sgn   0.18
+  ratio frame r2   raw r0.1 std  1.01 fl  0.99 sgn   0.14 r0.2 std  8.30 fl  9.19 sgn   0.36 r0.3 std  9.47 fl  9.75 sgn   0.29 r0.4 std  8.26 fl  7.44 sgn   0.10
+  ratio pixel r2   raw r0.1 std  1.01 fl  0.97 sgn   0.14 r0.2 std  8.27 fl  9.20 sgn   0.30 r0.3 std  9.45 fl  9.78 sgn   0.30 r0.4 std  8.18 fl  7.41 sgn   0.09
+  copy@1           den r0.1 std  0.16 fl  0.03 sgn   0.18 r0.2 std  0.32 fl  0.13 sgn   1.91 r0.3 std  0.26 fl  0.11 sgn   1.76 r0.4 std  0.23 fl  0.08 sgn   1.26
+  copy@4           den r0.1 std  0.13 fl  0.02 sgn   0.10 r0.2 std  0.27 fl  0.10 sgn   2.00 r0.3 std  0.20 fl  0.08 sgn   1.80 r0.4 std  0.17 fl  0.06 sgn   1.25
+  ratio frame r4   den r0.1 std  0.18 fl  0.04 sgn   0.23 r0.2 std  0.35 fl  0.12 sgn   2.07 r0.3 std  0.28 fl  0.11 sgn   1.54 r0.4 std  0.24 fl  0.08 sgn   1.04
+  ratio pixel r4   den r0.1 std  0.18 fl  0.04 sgn   0.22 r0.2 std  0.33 fl  0.12 sgn   2.06 r0.3 std  0.27 fl  0.11 sgn   1.54 r0.4 std  0.24 fl  0.08 sgn   1.06
+  ratio frame r2   den r0.1 std  0.18 fl  0.04 sgn   0.24 r0.2 std  0.36 fl  0.13 sgn   2.00 r0.3 std  0.29 fl  0.11 sgn   1.57 r0.4 std  0.25 fl  0.08 sgn   1.07
+  ratio pixel r2   den r0.1 std  0.18 fl  0.04 sgn   0.23 r0.2 std  0.33 fl  0.12 sgn   1.98 r0.3 std  0.28 fl  0.11 sgn   1.56 r0.4 std  0.24 fl  0.08 sgn   1.06
+mirrorWall 0.2
+  copy@1           raw r0.2 std 20.86 fl 23.01 sgn   0.05
+  copy@4           raw r0.2 std 20.89 fl 23.04 sgn   0.00
+  ratio frame r4   raw r0.2 std 11.12 fl 12.14 sgn   5.42
+  ratio pixel r4   raw r0.2 std 11.02 fl 12.26 sgn   5.42
+  ratio frame r2   raw r0.2 std 12.29 fl 13.78 sgn   4.75
+  ratio pixel r2   raw r0.2 std 12.26 fl 13.83 sgn   4.75
+  copy@1           den r0.2 std  0.39 fl  0.18 sgn   4.76
+  copy@4           den r0.2 std  0.29 fl  0.13 sgn   4.65
+  ratio frame r4   den r0.2 std  0.53 fl  0.19 sgn   6.62
+  ratio pixel r4   den r0.2 std  0.50 fl  0.19 sgn   6.60
+  ratio frame r2   den r0.2 std  0.50 fl  0.19 sgn   6.37
+  ratio pixel r2   den r0.2 std  0.47 fl  0.19 sgn   6.37
+mirrorWall 0.3
+  copy@1           raw r0.3 std 22.66 fl 25.13 sgn   0.01
+  copy@4           raw r0.3 std 22.60 fl 25.10 sgn   0.00
+  ratio frame r4   raw r0.3 std 14.23 fl 16.00 sgn   5.71
+  ratio pixel r4   raw r0.3 std 14.14 fl 16.06 sgn   5.71
+  ratio frame r2   raw r0.3 std 15.42 fl 17.44 sgn   4.74
+  ratio pixel r2   raw r0.3 std 15.37 fl 17.50 sgn   4.73
+  copy@1           den r0.3 std  0.45 fl  0.21 sgn   4.06
+  copy@4           den r0.3 std  0.34 fl  0.15 sgn   3.82
+  ratio frame r4   den r0.3 std  0.64 fl  0.22 sgn   7.32
+  ratio pixel r4   den r0.3 std  0.62 fl  0.22 sgn   7.35
+  ratio frame r2   den r0.3 std  0.60 fl  0.23 sgn   6.79
+  ratio pixel r2   den r0.3 std  0.59 fl  0.23 sgn   6.78
+mirrorWall 0.4
+  copy@1           raw r0.4 std 20.80 fl 22.06 sgn   0.00
+  copy@4           raw r0.4 std 20.82 fl 22.07 sgn   0.00
+  ratio frame r4   raw r0.4 std 15.11 fl 16.27 sgn   4.33
+  ratio pixel r4   raw r0.4 std 15.02 fl 16.29 sgn   4.30
+  ratio frame r2   raw r0.4 std 16.04 fl 17.26 sgn   3.38
+  ratio pixel r2   raw r0.4 std 16.04 fl 17.28 sgn   3.37
+  copy@1           den r0.4 std  0.45 fl  0.19 sgn   2.18
+  copy@4           den r0.4 std  0.34 fl  0.14 sgn   1.99
+  ratio frame r4   den r0.4 std  0.65 fl  0.22 sgn   5.53
+  ratio pixel r4   den r0.4 std  0.63 fl  0.22 sgn   5.49
+  ratio frame r2   den r0.4 std  0.61 fl  0.22 sgn   4.76
+  ratio pixel r2   den r0.4 std  0.62 fl  0.22 sgn   4.77

@@ -280,6 +280,12 @@ export interface ScreenSpaceReflectionsSettings {
    * 1.04 -> 1.38): mix only with `depthAware` 0 or a composite that is linear in confidence. Default false.
    */
   rayReuseMixSources?: boolean;
+  /**
+   * The 'ratio' taps' rotation: 'frame' (default) re-rotates them per pixel and frame, so the
+   * resolve's error moves every frame; 'pixel' fixes them per pixel, so the error stays put for the
+   * denoiser's temporal pass to treat as bias (W73 phase 2, D5046).
+   */
+  rayReusePattern?: 'frame' | 'pixel';
 }
 
 export interface ScreenSpaceCamera {
@@ -641,7 +647,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[139] = useHitSource && inputs.hitSource ? 1 : 0;
     u[140] = (s.quadCopy ?? 'always') === 'sameSurface' ? 1 : 0;
     // words 141-149: other X streams; 150-153: W73 ray reuse (D5040)
-    u[150] = (s.rayReuse === 'ratio' ? 1 : 0) | (s.missesTraced ? 2 : 0) | (s.rayReuseMixSources ? 4 : 0);
+    u[150] = (s.rayReuse === 'ratio' ? 1 : 0) | (s.missesTraced ? 2 : 0) | (s.rayReuseMixSources ? 4 : 0) | (s.rayReusePattern === 'pixel' ? 8 : 0);
     u[151] = s.rayReuseTaps === 4 ? 4 : 8;
     f[152] = Math.max(0, s.rayReuseRadius ?? 4);
     u[153] = reuseStamp;
