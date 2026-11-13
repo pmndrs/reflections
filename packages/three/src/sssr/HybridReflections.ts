@@ -337,6 +337,7 @@ export class HybridReflections {
       radiance: getGPUTexture(renderer, this.residualTarget.texture),
       hitDistance: getGPUTexture(renderer, this.ssr.hitDistance),
       confidence: getGPUTexture(renderer, this.ssr.confidence),
+      weightInAlpha: true, // the residual's alpha is ssrWeight (D5081): a plain weighted mean, not a ray length
       source: this.ssr.rayTracing && this.ssr.traced ? getGPUTexture(renderer, this.ssr.source) : null,
       targets: {
         radiance: getGPUTexture(renderer, up.residual), confidence: getGPUTexture(renderer, up.confidence),

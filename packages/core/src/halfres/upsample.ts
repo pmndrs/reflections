@@ -44,6 +44,13 @@ export interface ReflectionUpsampleInputs {
   /** Half-res source codes in .r (RT_SOURCE), for `sourceMask`; none: every sample is code 0. */
   source?: GPUTexture | null;
   /**
+   * `radiance.a` is a blend weight (X5: the composite's ssrWeight), not FFX's ray length: it is upsampled
+   * in the confidence's place (bilateralFill's plain weighted mean; the ray length is confidence-weighted
+   * since W74's review), written to both the output's alpha and `confidence`, and `confidence` above is
+   * not read. Default false.
+   */
+  weightInAlpha?: boolean;
+  /**
    * Write into these full-res textures (formats as `ReflectionUpsampleOutputs`, STORAGE_BINDING) instead
    * of the upsample's own, e.g. an engine's textures its shaders sample. All four, or none.
    */
@@ -81,7 +88,7 @@ struct U {
   // BilateralWeights flattened (words 32-36): a struct member of a uniform struct must be followed by a
   // 16-byte-rounded gap in core WGSL (without uniform_buffer_standard_layout), so no struct here
   wPlaneTolerance: f32, wNormalPower: f32, wRoughnessTolerance: f32, wSourceMask: u32,
-  wMinWeightSum: f32, tapMinRoughness: f32,
+  wMinWeightSum: f32, tapMinRoughness: f32, weightInAlpha: u32,
 };
 fn upsampleWeights() -> BilateralWeights {
   return BilateralWeights(u.wPlaneTolerance, u.wNormalPower, u.wRoughnessTolerance, u.wSourceMask, u.wMinWeightSum);
@@ -127,8 +134,9 @@ fn bilateralTap(cell: vec2i, pixel: vec2i) -> BilateralTap {
   t.surface = surfaceAt(min(cell * 2, vec2i(u.fullSize) - 1));
   if (t.surface.roughness < u.tapMinRoughness) { t.spatial = 0.0; return t; }
   t.radiance = textureLoad(tRadiance, cell, 0);
+  if (u.weightInAlpha != 0u) { t.confidence = t.radiance.a; t.radiance.a = 0.0; }
   t.hitDistance = textureLoad(tHit, cell, 0).x;
-  t.confidence = textureLoad(tConfidence, cell, 0).x;
+  if (u.weightInAlpha == 0u) { t.confidence = textureLoad(tConfidence, cell, 0).x; }
   t.source = select(0u, u32(textureLoad(tSource, cell, 0).x + 0.5), u.hasSource != 0u);
   return t;
 }
@@ -150,7 +158,7 @@ fn bilateralTap(cell: vec2i, pixel: vec2i) -> BilateralTap {
     }
     if (r.weightSum < w.minWeightSum) { r = BilateralResult(); }
   }
-  textureStore(oRadiance, p, r.radiance);
+  textureStore(oRadiance, p, select(r.radiance, vec4f(r.radiance.rgb, r.confidence), u.weightInAlpha != 0u));
   textureStore(oHit, p, vec4f(r.hitDistance, 0.0, 0.0, 0.0));
   textureStore(oConfidence, p, vec4f(r.confidence, 0.0, 0.0, 0.0));
   textureStore(oSource, p, vec4f(f32(r.source), 0.0, 0.0, 0.0));
@@ -224,6 +232,7 @@ export function createReflectionUpsample(device: GPUDevice, options: { width: nu
       u[30] = inputs.source ? 1 : 0; u[31] = settings.wideFallback ?? true ? 1 : 0;
       bilateralFillWeightWords(w, f, u, 32);
       f[37] = Math.max(0, settings.minRoughness ?? 0);
+      u[38] = inputs.weightInAlpha ? 1 : 0;
       device.queue.writeBuffer(uniforms, 0, data);
       const depth = frame.textures.depth;
       const isDepth = depth.format.startsWith('depth');
