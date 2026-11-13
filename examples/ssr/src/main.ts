@@ -18,6 +18,11 @@
 // hands the specular signal to denoiser/ffx's FfxReflectionDenoiser through the denoise seam. The
 // denoiser comes from the sibling Denoiser repo's source (examples/vite.config.ts) when present.
 //
+// `?brdf=replace|combine` (W78, X3 phase B, default off): BRDF / pdf weights in the FFX denoiser's prefilter
+// (the tracer hands each pixel's sample direction and pdf through the seam). Also the example-only key
+// `settings.denoiserBrdf` ('off' | 'replace' | 'combine'), read every frame, so `__p.configStats` configs can set it.
+// `?keepBlack=0` (or `settings.denoiserKeepBlack: false`): FFX's own black handling; on by default (HybridReflections.denoiserKeepHistoryOnBlack, D5145).
+// `?keepSample=1` keeps the tracer's sample output on in every mode (A/B runs without a tracer rebuild).
 // `?mirrorBias=0..1` (default 0, FFX): the tracer's bias of glossy rays toward the mirror direction
 // (core `settings.mirrorBias`, SSSR 2015 / PICA, D49); also a slider. `__p.mirrorBiasStats()` measures it.
 //
@@ -40,7 +45,7 @@ import {
 } from '../../shared';
 import { HEAT_LEGEND, ProbeVolumesOverlay, gbufferWorldPosition, heatColor, probeColor, probeWeights } from '../../shared/probeDebug';
 import { SHOWCASE } from '../../showcase/src/scenes';
-import { createReflectionDenoiser, denoiserAvailable, denoiserSource, hitSourceDenoiserOptions, hitSourceFromQuery } from '../../shared/denoiser';
+import { brdfFromQuery, createReflectionDenoiser, denoiserAvailable, denoiserSource, hitSourceDenoiserOptions, hitSourceFromQuery, syncDenoiserBrdf, type DenoiserBrdf } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
 import { canvasReader, createMetrics } from '../../shared/metrics/run';
@@ -241,6 +246,17 @@ async function main() {
     denoiserGate = t;
   };
   hybrid.denoise = wantDenoise && !!denoiser;
+  // W78 (D5140): the page's BRDF mode; `settings.denoiserBrdf` (example-only) overrides it per frame
+  const brdfMode = brdfFromQuery(q);
+  let brdfApplied = 'off' + false;
+  const syncBrdf = () => {
+    const mode = ((ssr.settings as N).denoiserBrdf as DenoiserBrdf | undefined) ?? brdfMode;
+    const keepBlack = ((ssr.settings as N).denoiserKeepBlack as boolean | undefined) ?? q.get('keepBlack') !== '0';
+    const brdfMin = ((ssr.settings as N).denoiserBrdfMin as number | undefined) ?? (q.has('brdfMin') ? Number(q.get('brdfMin')) : undefined);
+    syncDenoiserBrdf(ssr, hybrid, mode, keepBlack, brdfMin);
+    if (q.get('keepSample') === '1') ssr.settings.sampleDirection = true; // A/B runs: no tracer rebuild between modes
+    if (mode + keepBlack !== brdfApplied) { hybrid.resetHistory(); brdfApplied = mode + keepBlack; }
+  };
   if (q.has('mirrorBias')) ssr.settings.mirrorBias = Number(q.get('mirrorBias'));
   Object.assign(ssr.settings, ssrSettingsFromQuery(q)); // W76: ?s.<field>=<value> from the first frame
   const gpuErrors: string[] = [];
@@ -612,6 +628,7 @@ async function main() {
     if (manual || !looping) nextNodeFrame();
     kit.camera.aspect = W / H; kit.camera.updateProjectionMatrix(); kit.camera.updateMatrixWorld();
     if (provider && kit.update) { kit.scene.updateMatrixWorld(); refitProvider(); }
+    syncBrdf();
     ssr.render(kit.scene, kit.camera, aa.begin(kit.camera));
     aa.end(kit.camera);
     syncDenoiserGate();

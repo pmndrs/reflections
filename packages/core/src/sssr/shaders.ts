@@ -475,8 +475,18 @@ fn main() {
  * re-shade (W44, D3540); see `screenSpaceHitShadingWgsl` in ./sssr.ts. `hitSource`: bind last
  * frame's per-pixel hit source at binding 18 (W52, D3641).
  */
-export function intersectWgsl(variant: Variant, inverted: boolean, fallbackWgsl: string, missList: boolean, hitShadingWgsl: string, hitSource = false, rayReuse = false, hitColorPyramid = false): string {
+export function intersectWgsl(variant: Variant, inverted: boolean, fallbackWgsl: string, missList: boolean, hitShadingWgsl: string, hitSource = false, rayReuse = false, hitColorPyramid = false, sampleDirection = false): string {
   const sg = variant === 'subgroups';
+  // W78 (X3 phase B, D5140): the variant that also writes each pixel's sample direction and pdf for the
+  // denoiser (binding 22). With sampleDirection false the generated WGSL is today's, character for character.
+  const sampleDecl = sampleDirection ? `\n@group(0) @binding(22) var o_sample: texture_storage_2d<rgba32float, write>;\n${SAMPLE_DIRECTION_WGSL}` : '';
+  const sampleStore = sampleDirection ? '\n  textureStore(o_sample, c, g_sample);' : '';
+  // W78 review fix: a miss tracedMissRate 'half' sends to the fill list gets its traced neighbours' radiance and
+  // distance, not its own ray's, so it carries no sample (pdf 0). The same predicate as main's fill decision; an
+  // entry past the fill list's capacity, traced after all, also stays at 0 (the denoiser then skips it).
+  const sampleFill = missList ? `
+  if (P.tracedHalfRate != 0u && confidence < P.missConfidenceThreshold && !isBackground(hit.z) && (*r).roughness <= P.missRoughnessThreshold && halfRateFill(r)) { g_sample = vec4f(0.0); }` : '';
+  const sampleSet = sampleDirection ? `\n  g_sample = sampleDirectionPdf(r, world_space_reflected_direction);${sampleFill}` : '';
   const pyr = hitColorPyramid; // W72 (D5020): bindings 20-21
   // W73 (rayReuse 'ratio', D5040): the variant that also stores each ray's record for the resolve. With
   // rayReuse false the generated WGSL is today's, character for character.
@@ -507,7 +517,7 @@ ${missList ? `@group(0) @binding(11) var<storage, read_write> missList: array<ve
 @group(0) @binding(15) var t_albedo: texture_2d<f32>;
 @group(0) @binding(16) var t_metalness: texture_2d<f32>;
 @group(0) @binding(17) var t_clearcoat: texture_2d<f32>;
-${hitSource ? '@group(0) @binding(18) var t_hit_source: texture_2d<f32>;' : ''}${reuseDecl}
+${hitSource ? '@group(0) @binding(18) var t_hit_source: texture_2d<f32>;' : ''}${reuseDecl}${sampleDecl}
 ${pyr ? '@group(0) @binding(20) var t_hit_color_pyramid: texture_2d<f32>;\n@group(0) @binding(21) var s_hit_color: sampler;' : ''}
 ${fallbackWgsl}
 ${hitShadingWgsl}
@@ -823,7 +833,7 @@ fn octEncode(n: vec3f) -> vec2f {
 fn storePixel(c: vec2u, value: vec4f, hit_distance: f32, confidence: f32) {
   textureStore(o_radiance, c, value);
   textureStore(o_hit, c, vec4f(hit_distance));
-  textureStore(o_confidence, c, vec4f(confidence));
+  textureStore(o_confidence, c, vec4f(confidence));${sampleStore}
 }
 fn storeRadiance(packed: u32, coords: vec2u, value: vec4f, hit_distance: f32, confidence: f32) {
   let copy_target = coords ^ vec2u(1u);
@@ -975,7 +985,7 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
       hit_radiance = loadHitColor(hit.xy, cone_mip);
     }
   }
-  let hit_distance = select(0.0, world_ray_length, confidence > 0.0);${reuseInit}
+  let hit_distance = select(0.0, world_ray_length, confidence > 0.0);${reuseInit}${sampleSet}
   // fallbackRoughness 'surface' (default, D1806): each pixel's own rough-pixel lookup, quad copies
   // included. 'mirror' (FFX): the sampled direction at roughness 0, left for the denoiser to blur.
   if (P.fallbackRoughnessSurface != 0u) {
@@ -1121,6 +1131,31 @@ ${sg ? `
 //         1 - confidence), or the ray's whole radiance mix(fallback, hit, confidence) with 'mirror'
 //   z     pack2x16snorm(octEncode(world direction))
 //   w     f16 bits of the world ray length (a hit when confidence > 0) | stamp (15 bits) << 16 | miss-listed << 31
+
+// W78 (X3 phase B, D5140-D5141): the denoiser's per-pixel sample (SpecularInputs.direction): the ray's
+// world direction in .xyz and the pdf it was drawn with in .w (Heitz 2018's visible-normal pdf,
+// G1(V) D(h) / (4 N.V), at the sample's alpha = alpha x sampleAlphaScale; D49's truncation is ignored,
+// a constant factor the denoiser's normalised weights cancel). The quad copies carry their ray's. 0 for
+// mirrors (a delta pdf) and every pixel no ray reaches (the texture is cleared each frame).
+const SAMPLE_DIRECTION_WGSL = /* wgsl */ `
+var<private> g_sample: vec4f;
+fn sampleDirectionPdf(r: ptr<function, Ray>, world_dir: vec3f) -> vec4f {
+  if (isMirrorReflection((*r).roughness)) { return vec4f(0.0); }
+  let N = (P.viewMatrix * vec4f(loadWorldSpaceNormal(vec2i((*r).coords)), 0.0)).xyz;
+  let V = -normalize((*r).view_space_ray);
+  let L = normalize((*r).view_space_reflected_direction);
+  let NdotV = max(dot(N, V), 1e-4);
+  let a = (*r).roughness * P.sampleAlphaScale;
+  let a2 = a * a;
+  let NdotH = max(dot(N, normalize(V + L)), 0.0);
+  let d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+  let D = a2 / (M_PI * d * d);
+  let G1 = 2.0 * NdotV / (NdotV + sqrt(a2 + (1.0 - a2) * NdotV * NdotV));
+  let pdf = G1 * D / (4.0 * NdotV);
+  if (!(pdf > 0.0) || pdf > 3.0e38) { return vec4f(0.0); }
+  return vec4f(normalize(world_dir), pdf);
+}
+`;
 
 const RAY_RECORD_STORE_WGSL = /* wgsl */ `
 fn storeRayRecord(c: vec2u, value: vec3f, confidence: f32, dir: vec3f, t: f32, miss: bool) {

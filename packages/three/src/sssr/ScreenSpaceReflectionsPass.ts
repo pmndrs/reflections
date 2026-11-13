@@ -46,6 +46,14 @@ export interface ScreenSpaceReflectionsPassSettings extends ScreenSpaceReflectio
   reflectionResolution?: ReflectionResolution;
   // W75's `halfResMinRoughness` (X5 step 2: a full-res mirror path under half res) was removed by W76:
   // it restored mirror sharpness but doubled orbit flicker at full res's cost (D5084).
+  /**
+   * W78 (X3 phase B, D5140): the tracer also writes each pixel's sample direction and pdf (core
+   * `options.sampleDirection`, `tracer.outputs.sampleDirection`), for a denoiser that weights
+   * samples by BRDF / pdf (`HybridReflections.denoiserSampleDirection`, FFX `brdfWeights`). Taken at
+   * the tracer's creation: a flip rebuilds the tracer (history drops). Full resolution only (the
+   * half-res path doesn't hand it on). Default false.
+   */
+  sampleDirection?: boolean;
 }
 
 export interface ScreenSpaceReflectionsPassOptions {
@@ -183,6 +191,7 @@ export class ScreenSpaceReflectionsPass {
   private sourceDirty = false;
   /** The core tracer binds last frame's hit source (W52, D3641): only while `settings.hitLobeFilterMixed` < 1 with `trace`. */
   private coreHitSource = false;
+  private coreSample = false;
   private traceOptions: ScreenSpaceTraceOptions | null;
   /** W75: the half-res frame (made on the first 'half' frame) and the frame the last trace ran on. */
   private half: HalfResolutionFrame | null = null;
@@ -448,6 +457,9 @@ export class ScreenSpaceReflectionsPass {
     // W52 (D3641): the lobe filter where hits mix binds one more texture in intersect: rebuild on a flip
     const wantHitSource = !!trace && (this.settings.hitLobeFilterMixed ?? 1) < 1;
     if (this.core && wantHitSource !== this.coreHitSource) { this.rt?.destroy(); this.rt = null; this.core.destroy(); this.core = null; }
+    // W78 (D5140): the sample-direction output is one more storage texture in intersect: rebuild on a flip
+    const wantSample = !!this.settings.sampleDirection;
+    if (this.core && wantSample !== this.coreSample) { this.rt?.destroy(); this.rt = null; this.core.destroy(); this.core = null; }
     const c = this.core;
     if (c && c.width === w && c.height === h && c.depthInverted === inverted) {
       if (trace && !this.rt) this.createTraced(w, h);
@@ -460,9 +472,10 @@ export class ScreenSpaceReflectionsPass {
     this.core = createScreenSpaceReflections(device, {
       width: w, height: h, depthInverted: inverted, variant: sub ? 'subgroups' : 'workgroup',
       missList: (this.options.missList ?? false) || !!this.options.trace || !!trace, timestamps: this.options.timestamps ?? false,
-      hitSpecularShading: this.hitShading.shading, hitSource: wantHitSource,
+      hitSpecularShading: this.hitShading.shading, hitSource: wantHitSource, sampleDirection: wantSample,
     });
     this.coreHitSource = wantHitSource;
+    this.coreSample = wantSample;
     if (trace) this.createTraced(w, h);
     for (const t of [this.radiance, this.hitDistance, this.confidence, this.source]) (t as unknown as { setSize(w: number, h: number): void }).setSize(w, h);
   }
