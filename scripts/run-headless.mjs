@@ -1158,6 +1158,16 @@ async function mirrorBiasChecks(pages) {
   await p.T('(delete window.__p.ssr.settings.hitColorFilter, true)');
   check("ssr mirrorBias 0.5 (hitColorFilter 'off', D49): less raw noise on the roughnessRamp strips (r 0.2-0.4)", ratio.every((r) => r < 0.9) && b0.bins.every((b) => b.px > 1000),
     b0.bins.map((b, k) => `r ${b.roughness}: std ${b.std.toFixed(2)} -> ${b5.bins[k].std.toFixed(2)} (${b.px} px)`).join('; '));
+  // W76 review 5: compensation away from f 0.5, where the split is symmetric (sample sqrt(1 - f), filter sqrt(f)):
+  // a larger f narrows the sample, so raw noise must fall from 0.3 to 0.7; a swapped split would invert that
+  await p.T("(window.__p.setSettings({ minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false, mirrorBiasCompensate: true }), true)");
+  await p.T(CONE_READY);
+  const qc = await p.T('window.__p.mirrorBiasStats({ biases: [0.3, 0.7], bins: [0.2, 0.3, 0.4], frames: 16, refFrames: 32, denoise: [false] })');
+  await p.T('(["mirrorBiasCompensate", "minTraversalOccupancy", "temporalVarianceGuidedTracing"].forEach((k) => delete window.__p.ssr.settings[k]), true)');
+  const [c3, c7] = qc.results;
+  check('ssr mirrorBiasCompensate at f 0.3 vs 0.7 (cone): raw noise falls with f on the roughnessRamp strips (sample alpha sqrt(1 - f); a swapped split would raise it)',
+    c3.bins.every((b, k) => c7.bins[k].std < 0.95 * b.std) && c3.bins.every((b) => b.px > 1000),
+    c3.bins.map((b, k) => `r ${b.roughness}: std ${b.std.toFixed(2)} -> ${c7.bins[k].std.toFixed(2)}`).join('; '));
   if (!mirrorBiasFull) return;
   const all = [];
   const cases = [
