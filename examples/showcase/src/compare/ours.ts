@@ -27,6 +27,7 @@ import { probeLayout, type ProbeLayoutName } from '../../../shared/probeLayouts'
 import { setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } from '../specAA';
 import type { FloorKind } from '../scenes';
 import { carInteriorProbes, carWheels, type CarProbesMode } from '../carProbes';
+import { hybridReaders } from '../../../shared/metrics/three';
 import {
   type CompareMethod, type MethodContext, type MethodId, type SetResult, destroyWebGPU, applySceneParams, applySpecAA, applyGeometryRoughness, freshEnvironment, mergedParams, newCanvas, sceneInfo, syncCamera,
 } from './method';
@@ -435,6 +436,10 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
       if (authored) setSpecularAA(kit.scene, true);
     },
     idle: () => device.queue.onSubmittedWorkDone(),
+    // X0 (W70): linear readbacks for examples/shared/metrics (energy, raw speckle, the raw 2x2 energy)
+    ...hybridReaders(renderer, ssr, hybrid),
+    setDenoise(on) { const was = hybrid.denoise; hybrid.denoise = on && !!denoiser; return was; },
+    jitterPhases: () => (aa && aa.mode === 'upscaler' ? aa.upscaler.jitterPhaseCount : null),
     reset: resetAll,
     setExposure(e) { renderer.toneMappingExposure = e; },
     status: () => (denoiser ? 'denoiser ffx-reflections' : wantDenoise ? 'no denoiser found' : '') + (providerInfo ? ` | ${providerInfo.kind} ${providerInfo.triangles.toLocaleString()} tris` : '') +

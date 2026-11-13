@@ -5,6 +5,7 @@
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | bench | probe-layouts)
+//   pnpm check -- --only ssr-exp-metrics         # X0 (W70): the experiment metrics smoke (examples/shared/metrics); ssr-exp-baseline = the full baseline (scripts/ssr-exp.mjs)
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
 //   pnpm check -- --only hit-source              # W53: the denoiser's hit source through the seam (needs the Denoiser repo's W53 branch)
 //   pnpm check -- --only probe-bindings          # W62: Sponza's three-size probe set at the default 16 sampled textures
@@ -28,6 +29,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ssrExpBaseline, ssrExpMetricsSmoke, ssrExpRun } from './ssr-exp.mjs'; // X0 (W70)
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -2649,7 +2651,7 @@ async function pixi3dChecks(pages) {
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' ? 3_600_000 : 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' || only === 'ssr-exp-baseline' ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -2973,6 +2975,9 @@ async function main() {
     if (runs('showcase')) await showcaseChecks(pages);
     if (runs('showcase-compare')) await showcaseCompareChecks(pages);
     if (runs('bench')) await benchChecks(pages); // W51: the tuning bench
+    if (only === 'ssr-exp-metrics') await ssrExpMetricsSmoke({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)
+    if (only === 'ssr-exp-baseline') await ssrExpBaseline({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)
+    if (only === 'ssr-exp-run') await ssrExpRun({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70): one metric call on one page (SSR_EXP_URL, SSR_EXP_EVAL)
 
     if (runs('probe-core')) {
       // examples/probe-core: the phase 2 probe core on a bare device (layouts x formats, CPU weights,
