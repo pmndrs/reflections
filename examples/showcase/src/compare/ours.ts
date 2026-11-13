@@ -28,6 +28,7 @@ import { setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } fro
 import type { FloorKind } from '../scenes';
 import { carInteriorProbes, carWheels, type CarProbesMode } from '../carProbes';
 import { hybridReaders } from '../../../shared/metrics/three';
+import { presetUrlKeys } from '../bench/schema';
 import {
   type CompareMethod, type MethodContext, type MethodId, type SetResult, destroyWebGPU, applySceneParams, applySpecAA, applyGeometryRoughness, freshEnvironment, mergedParams, newCanvas, sceneInfo, syncCamera,
 } from './method';
@@ -66,6 +67,9 @@ const parse = (t: 'n' | 'b' | 's', v: string) => (t === 'n' ? Number(v) : t === 
 export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denoised' | 'ours-rt' | 'probes'>, ctx: MethodContext): Promise<CompareMethod> {
   const { width: W, height: H } = ctx;
   const params = mergedParams(ctx);
+  // W77: ?preset=<name> sets the URL keys it names wherever the URL doesn't (explicit keys win; clearing one returns it to the preset's)
+  const presetKeys = presetUrlKeys(params.get('preset'));
+  for (const [k, v] of Object.entries(presetKeys)) if (!params.has(k)) params.set(k, v);
   const canvas = newCanvas(W, H);
   const adapter = await navigator.gpu.requestAdapter();
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
@@ -350,7 +354,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     old?.dispose?.();
     resetAll();
   };
-  const setParam = (k: string, v: string | null) => { if (v === null) params.delete(k); else params.set(k, v); };
+  const setParam = (k: string, v: string | null) => { if (v !== null) params.set(k, v); else if (presetKeys[k] !== undefined) params.set(k, presetKeys[k]); else params.delete(k); };
   const setW53 = () => {
     const hs = hitSourceFromQuery(params);
     hybrid.denoiserHitSource = hs.hitSource;
@@ -429,7 +433,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   /** Keys read only at creation (a Rebuild applies them). */
   const REBUILD = new Set(['bvh', 'bvhBuilder', 'rtShadingNormals', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
     'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity', 'envLight', 'background', 'timestamps', 'shim',
-    's.reflectionResolution', 's.halfResMinRoughness']);
+    's.reflectionResolution', 's.halfResMinRoughness', 'preset']);
 
   return {
     id, canvas, scene: sceneInfo(kit),

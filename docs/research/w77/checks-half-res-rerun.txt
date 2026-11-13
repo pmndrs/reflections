@@ -1,0 +1,12 @@
+  [PASS] half-res mirrorWall: traced and denoised at half size, the upsampled residual carries the reflection and stays near full res - 132529 reflection px: full vs probe-only 51.18, this vs probe-on
+  [PASS] half-res mirrorWall 'mixed' (halfResMinRoughness 0.01 at runtime, composite built for half): mirror path on, reflection carried - 132529 reflection px: full vs probe-only 51.18, this vs probe
+  [PASS] half-res contact: traced and denoised at half size, the upsampled residual carries the reflection and stays near full res - 203962 reflection px: full vs probe-only 54.58, this vs probe-only 
+  [PASS] half-res contact 'mixed' (halfResMinRoughness 0.01 at runtime, composite built for half): mirror path on, reflection carried - 203962 reflection px: full vs probe-only 54.58, this vs probe-on
+  [PASS] half-res + rayReuse 'ratio' + tracedMissRate 'half' (contact, rt): all finite, the fill ran, no validation errors - non-finite 0; traced 5120, half-rate skipped 940, filled 3594; residual non
+  [PASS] half-res odd size 961x541 contact: tracer 481x271, reflection carried, near full - 216018 reflection px: full vs probe-only 56.11, this vs probe-only 54.80, this vs full 7.59 (max 198); trace
+  [PASS] half-res runtime switch full -> half -> full ends identical to full, half-res targets released - final after the switch back vs before: mean 0.000, max 0/255; upsampled targets 961 px wide at
+  [PASS] preset 'performance' (?preset=): half-res trace, the denoiser keeps hit sources apart, same frame as setting both by hand - preset: half 480/960 px, hit source hits (true), FFX true/true; by 
+  [PASS] preset 'performance' + explicit ?res=full&hitSource=off: the explicit settings win - full 960/960 px, hit source off (false), FFX false/false
+  [PASS] applyReflectionsPreset at runtime: 'default' restores full + no hit source, an override wins, 'performance' again is half - default: full 960/960 px, hit source off (false), FFX false/false; 
+  [PASS] no WebGPU validation errors or exceptions
+all checks passed

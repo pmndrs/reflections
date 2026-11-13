@@ -41,6 +41,11 @@ export * from './trace';
 export * from './bilateral';
 // Half-resolution reflections (W75, X5): the point-sampled half frame and the joint bilateral upsample.
 export * from './halfres';
+// Named settings bundles (W77): 'default' and 'performance' (half-res + the denoiser's hit source), applied by adapters.
+export {
+  REFLECTION_PRESETS, REFLECTION_PRESET_NAMES, REFLECTION_PRESET_KEYS, isReflectionsPresetName, reflectionsPreset, denoiserHitSourceOptions, denoiserHitSourceModeOf,
+  type ReflectionsPreset, type ReflectionsPresetName, type ReflectionsPresetTracer, type ReflectionsPresetDenoiser, type ReflectionResolution, type DenoiserHitSourceMode,
+} from './presets';
 
 // Denoise seam (SPEC "Denoise seam"): any denoiser-core-shaped TemporalDenoiser<SpecularInputs>, fed from the frame contract.
 export {
