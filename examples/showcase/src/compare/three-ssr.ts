@@ -222,7 +222,7 @@ export async function createThreeSSR(id: Extract<MethodId, 'three-raw' | 'three-
   if (tr) for (const [k, d] of Object.entries(REPROJECT)) live[`th.rp.${k}`] = (v) => { tr[k].value = v === null ? d : parseTh(d, v); };
   if (dn) for (const [k, d] of Object.entries(DENOISE)) live[`th.dn.${k}`] = (v) => { dn[k].value = v === null ? d : parseTh(d, v); };
   const REBUILD = new Set(['th.stepExponent', 'th.resolutionScale', 'th.binaryRefine', 'th.screenEdgeFadeBlack', 'th.ffx.tsf', 'th.ffx.roughnessThreshold', 'tone',
-    'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity']);
+    'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity', 'envLight', 'background']);
 
   return {
     id, canvas, scene: sceneInfo(kit),

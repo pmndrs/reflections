@@ -127,6 +127,8 @@ export const SETTINGS: Setting[] = [
   num('floorRoughness', 'scene', 'Floor roughness', 0, 0.6, 0.01, null, { defaultNote: 'per scene (stages 0.03)', appliesTo: ALL, tradeoff: 'Floor roughness, every method; ours re-bakes its probes. The path tracer rebuilds.' }),
   bool('floorPolish', 'scene', 'Polished floor (Sponza)', null, { pageDefault: true, appliesTo: ALL, tradeoff: 'Sponza\'s polished override of its `Floors` material; off = the asset\'s rough stone.' }),
   num('bgBlur', 'scene', 'Background blur', 0, 1, 0.05, null, { pageDefault: 0, apply: 'rebuild', appliesTo: ALL, tradeoff: 'Backdrop blur (display only; lighting unchanged). The compare / bench show it sharp so every method shows the same backdrop (the PT blurs differently); the showcase uses 0.35.' }),
+  num('envLight', 'scene', 'Environment light scale', 0, 3, 0.05, null, { pageDefault: 1, apply: 'rebuild', appliesTo: ALL, tradeoff: 'W58: scales the image-based light (scene.environmentIntensity): three\'s IBL, the probe bake and the path tracer\'s environment. 0 leaves the key light alone (with keyLight: what share of a look is the HDRI).' }),
+  sel('background', 'scene', 'Background', [['hdri', 'HDRI'], ['black', 'black (camera rays only)']], null, { pageDefault: 'hdri', apply: 'rebuild', appliesTo: ALL, tradeoff: 'W58: black hides the backdrop the camera sees (backgroundIntensity 0); lighting and reflections keep the environment.' }),
   num('keyLight', 'scene', 'Key light scale', 0, 3, 0.05, null, { pageDefault: 1, apply: 'rebuild', appliesTo: ALL, tradeoff: 'Scales every directional / spot / point light (W45: what share of a reference is the key light).' }),
 
   // ---- screen-space ----------------------------------------------------------------------------------------

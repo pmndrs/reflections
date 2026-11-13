@@ -155,6 +155,11 @@ export function applySceneParams(kit: ShowcaseScene, params: URLSearchParams) {
   // like-for-like reflections of it; ?bgBlur=0.35 restores the showcase look. Lighting is never affected.
   kit.scene.backgroundBlurriness = Number(params.get('bgBlur') ?? 0);
   if (params.has('bgIntensity')) kit.scene.backgroundIntensity = Number(params.get('bgIntensity'));
+  // W58: ?envLight=<scale> scales the image-based light (scene.environmentIntensity: three's IBL, the probe bake
+  // and the path tracer's environment) every method alike; ?background=black shows a black backdrop (camera rays
+  // only: reflections and lighting keep the environment).
+  if (params.has('envLight')) kit.scene.environmentIntensity *= Number(params.get('envLight'));
+  if (params.get('background') === 'black') kit.scene.backgroundIntensity = 0;
   // ?keyLight=<scale> scales every directional / spot / point light, every method alike (W45: what share of
   // a reference's brightness is the key light, e.g. its glint in a mirror floor seen in the car's paint)
   if (params.has('keyLight')) {
