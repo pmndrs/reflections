@@ -32,7 +32,7 @@ export { sceneColorNoSpecular, gbufferRoughness, gbufferMetalness } from './fram
 
 // Screen-space reflections: G-buffer + core tracer on the renderer's device, outputs as three
 // textures; first-cut hybrid composite (SSR -> probes by coverage -> environment) in TSL.
-export { ScreenSpaceReflectionsPass, type ScreenSpaceReflectionsPassOptions } from './sssr/ScreenSpaceReflectionsPass';
+export { ScreenSpaceReflectionsPass, type ScreenSpaceReflectionsPassOptions, type ScreenSpaceReflectionsPassSettings } from './sssr/ScreenSpaceReflectionsPass';
 export { screenSpaceComposite, type ScreenSpaceComposite, type ScreenSpaceCompositeOptions } from './sssr/composite';
 
 // Ray-traced fallback: three-mesh-bvh behind core's trace seam (the stopgap until @pmndrs/bvh).

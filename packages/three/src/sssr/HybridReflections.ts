@@ -20,7 +20,8 @@
 import * as THREE from 'three/webgpu';
 import { float, uniform, uv, vec3, vec4 } from 'three/tsl';
 import {
-  createReflectionDenoiseSeam, type ReflectionDenoiseSeam, type SpecularInputs, type TemporalDenoiser,
+  createReflectionDenoiseSeam, createReflectionUpsample, PassTimer,
+  type FrameInputs, type ReflectionDenoiseSeam, type ReflectionUpsample, type ReflectionUpsampleSettings, type SpecularInputs, type TemporalDenoiser,
 } from '@pmndrs/reflections-core';
 import { getGPUTexture } from '../frame/FrameGBuffer';
 import { screenSpaceComposite, type ScreenSpaceComposite, type ScreenSpaceCompositeOptions } from './composite';
@@ -43,6 +44,19 @@ export interface HybridReflectionsOptions extends Omit<ScreenSpaceCompositeOptio
   /** Initial value of `HybridReflections.denoiserHitSource`. Default false. */
   denoiserHitSource?: boolean;
 }
+
+/** A three StorageTexture for the upsample's full-res outputs (W75). */
+const storage = (name: string, w: number, h: number, type: THREE.TextureDataType, format: THREE.AnyPixelFormat) => {
+  const t = new THREE.StorageTexture(w, h);
+  t.name = name;
+  t.type = type;
+  t.format = format;
+  t.minFilter = t.magFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  return t;
+};
+
+type Upsampled = { residual: THREE.StorageTexture; confidence: THREE.StorageTexture; hitDistance: THREE.StorageTexture; source: THREE.StorageTexture };
 
 /** Source codes of `sourceIndex()` (debug view): what filled each pixel's reflection. */
 export const HYBRID_SOURCE = {
@@ -74,10 +88,35 @@ export class HybridReflections {
    * the denoiser itself). Default false: the denoiser gets what it got before.
    */
   denoiserHitSource = false;
+  /**
+   * W75 (X5): the joint bilateral upsample's weights (core `ReflectionUpsampleSettings`: plane
+   * tolerance, normal power, roughness tolerance, source mask, min weight sum, wide fallback), read
+   * every frame with `ssr.settings.reflectionResolution: 'half'`.
+   */
+  upsampleSettings: ReflectionUpsampleSettings = {};
+  /**
+   * W75: the half-res path's full-res targets (null until a composite is built in 'half' mode): the
+   * upsampled residual (rgba16float, rgb = specular - (1 - ssrWeight) x SO x probeSpecular of the
+   * half-res samples, a = their ssrWeight; D5081),
+   * confidence, hit distance and source (r32float), read by composites built in 'half' mode.
+   */
+  get upsampled(): Upsampled | null { return this.up; }
   private seam: ReflectionDenoiseSeam | null = null;
   private readonly quad: THREE.QuadMesh;
   private readonly signalMaterial = new THREE.NodeMaterial();
   private ran = false;
+  /** W75: the mode the signal material was built for; the half-res residual pass and its targets. */
+  private builtHalf = false;
+  private up: Upsampled | null = null;
+  private upsample: ReflectionUpsample | null = null;
+  private residualTarget: THREE.RenderTarget | null = null;
+  private readonly residualMaterial = new THREE.NodeMaterial();
+  private residualQuad: THREE.QuadMesh | null = null;
+  /** Maps a half-res target's uv to the full-res uv of its sample pixel (2x, 2y): uv x scale - offset. */
+  private readonly halfUVScale = uniform(new THREE.Vector2(1, 1));
+  private readonly halfUVOffset = uniform(new THREE.Vector2(0, 0));
+  private timer: PassTimer | null = null;
+  private timerDone: (() => void) | undefined;
 
   constructor(ssr: ScreenSpaceReflectionsPass, options: HybridReflectionsOptions = {}) {
     this.ssr = ssr;
@@ -114,22 +153,63 @@ export class HybridReflections {
    * switch); composites built before keep their old sources, so rebuild those too. Drops history.
    */
   rebuild() {
-    // the signal as rendered: full screen, no denoised input
-    this.signalMaterial.fragmentNode = vec4(this.composite({ signalOnly: true }).signal, 1);
+    this.builtHalf = this.wantHalf;
+    if (this.builtHalf) {
+      // W75 (X5): at half res, each texel composites its sample pixel (2x, 2y) of the full-res G-buffer
+      const at = uv().mul(this.halfUVScale).sub(this.halfUVOffset);
+      this.signalMaterial.fragmentNode = vec4(this.compositeAt({ uv: at, signalOnly: true }).signal, 1);
+      const c = this.compositeAt({ uv: at });
+      // the hit part of the half-res specular and its weight (D5081): the probe part is redone per full-res pixel
+      this.residualMaterial.fragmentNode = vec4(c.specular.sub(c.ssrWeight.oneMinus().mul(c.specularOcclusion).mul(c.probeSpecular)), c.ssrWeight);
+      this.residualMaterial.needsUpdate = true;
+    } else {
+      // the signal as rendered: full screen, no denoised input
+      this.signalMaterial.fragmentNode = vec4(this.composite({ signalOnly: true }).signal, 1);
+    }
     this.signalMaterial.needsUpdate = true;
     this.ran = false;
   }
+
+  /** W75: the tracer's settings ask for half-res reflections. */
+  private get wantHalf(): boolean { return (this.ssr.settings.reflectionResolution ?? 'full') === 'half'; }
 
   /**
    * Build a composite (TSL nodes) that uses the denoised radiance while the denoiser runs. Pass a
    * `uv` to composite at another screen uv (e.g. a debug grid cell).
    */
   composite(opts: { uv?: N; signalOnly?: boolean } = {}): ScreenSpaceComposite {
+    // W75: in 'half' mode composites read the upsampled residual (the mode at call time is built in)
+    if (this.wantHalf && !opts.signalOnly) return this.compositeAt({ uv: opts.uv ?? uv(), upsampled: this.ensureUpsampled() });
+    return this.compositeAt(opts);
+  }
+
+  private compositeAt(opts: { uv?: N; signalOnly?: boolean; upsampled?: Upsampled }): ScreenSpaceComposite {
     const { denoiser: _d, denoiserMotion: _m, denoiserRoughness: _r, denoiserHitSource: _h, ...rest } = this.options;
     return screenSpaceComposite(this.ssr, {
       ...rest, uv: opts.uv ?? uv(),
       denoised: opts.signalOnly ? null : this.denoised, denoise: this.denoiseActive, depthAware: this.depthAware,
+      ...(opts.upsampled ? { upsampled: opts.upsampled } : {}),
     });
+  }
+
+  /** W75: the upsample's full-res three targets, sized to the G-buffer. */
+  private ensureUpsampled(): Upsampled {
+    const { width: w, height: h } = this.ssr.gbuffer;
+    this.up ??= {
+      residual: storage('hybrid upsampled residual', w, h, THREE.HalfFloatType, THREE.RGBAFormat),
+      confidence: storage('hybrid upsampled confidence', w, h, THREE.FloatType, THREE.RedFormat),
+      hitDistance: storage('hybrid upsampled hit distance', w, h, THREE.FloatType, THREE.RedFormat),
+      source: storage('hybrid upsampled source', w, h, THREE.FloatType, THREE.RedFormat),
+    };
+    return this.up;
+  }
+
+  /** With the pass's `timestamps`: GPU ms of the last half-res frame's upsample ('upsample'); empty in 'full' mode. */
+  async readTimings(): Promise<ReadonlyMap<string, number>> {
+    if (!this.timer || !this.builtHalf) return new Map();
+    this.timerDone?.(); this.timerDone = undefined;
+    await this.timer.read();
+    return new Map(this.timer.timings);
   }
 
   /** Per frame, after `ssr.render()` (or `ssr.trace()`): render the signal and denoise it. */
@@ -137,6 +217,9 @@ export class HybridReflections {
     const frame = this.ssr.gbuffer.frame;
     const tracer = this.ssr.tracer;
     this.roughnessThreshold.value = this.ssr.settings.roughnessThreshold ?? 0.447;
+    // W75: a mode change rebuilds the signal pass; composites the app built keep theirs (rebuild them)
+    if (this.wantHalf !== this.builtHalf) this.rebuild();
+    if (this.builtHalf && frame && tracer && this.ssr.resolution === 'half') { this.updateHalf(frame); return; }
     if (!this.seam || !this.denoise || !frame || !tracer) { this.denoiseActive.value = 0; this.ran = false; return; }
     const { renderer } = this.ssr;
     const { width: w, height: h } = frame;
@@ -163,6 +246,78 @@ export class HybridReflections {
     device.queue.submit([enc.finish()]);
     this.denoiseActive.value = 1;
     this.ran = true;
+  }
+
+  /**
+   * W75 (X5) 'half': the signal at half res (each texel at its sample pixel), the seam on the half
+   * frame, the hit part `specular - (1 - ssrWeight) SO probeSpecular` and ssrWeight at half res (D5081), then core's joint bilateral upsample
+   * of the residual, confidence, hit distance and source into the full-res targets composites read.
+   */
+  private updateHalf(frame: FrameInputs) {
+    const { renderer } = this.ssr;
+    const device = this.ssr.device;
+    const half = this.ssr.traceFrame!;
+    const { width: hw, height: hh } = half;
+    const { width: w, height: h } = frame;
+    this.halfUVScale.value.set(2 * hw / w, 2 * hh / h);
+    this.halfUVOffset.value.set(0.5 / w, 0.5 / h);
+    const sizeTo = (t: { width: number; height: number }, x: number, y: number) => {
+      if (t.width !== x || t.height !== y) (t as unknown as { setSize(w: number, h: number): void }).setSize(x, y);
+    };
+    const init = (t: THREE.Texture) => { if (!(renderer as N).backend.get(t)?.texture) renderer.initTexture(t); };
+    sizeTo(this.signalTarget, hw, hh);
+    sizeTo(this.denoised, hw, hh);
+    this.residualTarget ??= new THREE.RenderTarget(hw, hh, { type: THREE.HalfFloatType, depthBuffer: false });
+    this.residualTarget.texture.name = 'hybrid half-res residual';
+    sizeTo(this.residualTarget, hw, hh);
+    const up = this.ensureUpsampled();
+    for (const t of Object.values(up)) sizeTo(t, w, h);
+    const prev = renderer.getRenderTarget();
+    const denoising = !!this.seam && this.denoise;
+    if (denoising) {
+      if (!this.ran) this.seam!.resetHistory();
+      renderer.setRenderTarget(this.signalTarget);
+      this.quad.render(renderer);
+      const out = this.seam!.dispatch(half, {
+        radiance: getGPUTexture(renderer, this.signalTarget.texture),
+        hitDistance: this.ssr.tracer!.outputs.hitDistance,
+      }, this.denoiserHitSource ? {
+        confidence: this.ssr.tracer!.outputs.confidence,
+        traceSource: this.ssr.rayTracing ? getGPUTexture(renderer, this.ssr.source) : null,
+      } : null);
+      init(this.denoised);
+      const enc = device.createCommandEncoder({ label: 'hybrid denoised copy (half)' });
+      enc.copyTextureToTexture({ texture: out }, { texture: getGPUTexture(renderer, this.denoised) }, [hw, hh]);
+      device.queue.submit([enc.finish()]);
+    } else init(this.denoised);
+    this.denoiseActive.value = denoising ? 1 : 0;
+    this.ran = denoising;
+    // the residual of the half-res samples (denoised, or the raw signal without the denoiser)
+    this.residualQuad ??= new THREE.QuadMesh(this.residualMaterial);
+    renderer.setRenderTarget(this.residualTarget);
+    this.residualQuad.render(renderer);
+    renderer.setRenderTarget(prev);
+    if (!this.upsample || this.upsample.width !== w || this.upsample.height !== h) {
+      this.upsample?.destroy();
+      this.upsample = createReflectionUpsample(device, { width: w, height: h });
+    }
+    for (const t of Object.values(up)) init(t);
+    if (this.ssr.timestamps && !this.timer && PassTimer.supported(device)) this.timer = new PassTimer(device, 2);
+    const enc = device.createCommandEncoder({ label: 'hybrid upsample' });
+    this.timer?.begin();
+    this.upsample.dispatch(enc, {
+      frame,
+      radiance: getGPUTexture(renderer, this.residualTarget.texture),
+      hitDistance: getGPUTexture(renderer, this.ssr.hitDistance),
+      confidence: getGPUTexture(renderer, this.ssr.confidence),
+      source: this.ssr.rayTracing && this.ssr.traced ? getGPUTexture(renderer, this.ssr.source) : null,
+      targets: {
+        radiance: getGPUTexture(renderer, up.residual), confidence: getGPUTexture(renderer, up.confidence),
+        hitDistance: getGPUTexture(renderer, up.hitDistance), source: getGPUTexture(renderer, up.source),
+      },
+    }, this.upsampleSettings, this.timer?.pass('upsample'));
+    this.timerDone = this.timer?.end(enc);
+    device.queue.submit([enc.finish()]);
   }
 
   /** Drop the denoiser's history (camera cut, scene switch). */
@@ -198,6 +353,11 @@ export class HybridReflections {
   dispose() {
     this.seam?.destroy();
     this.seam = null;
+    this.upsample?.destroy();
+    this.residualTarget?.dispose();
+    this.residualMaterial.dispose();
+    if (this.up) for (const t of Object.values(this.up)) t.dispose();
+    this.timer?.destroy();
     this.denoised.dispose();
     this.signalTarget.dispose();
     this.signalMaterial.dispose();

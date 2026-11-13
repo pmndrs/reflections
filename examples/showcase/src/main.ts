@@ -83,7 +83,8 @@ async function main() {
   // cube arrays on stock r187 (W20 shim, self-tested; patches nothing and probes keep the 2D array if it fails). ?shim=0 opts out.
   if (q.get('shim') !== '0') await installCubeArraySupport(renderer);
 
-  const ssr = new ScreenSpaceReflectionsPass(renderer, { missList: true, timestamps: true, gbufferOptions: { width: RW, height: RH } });
+  // W75 (X5, D5080): ?res=half traces, denoises at half res and upsamples
+  const ssr = new ScreenSpaceReflectionsPass(renderer, { missList: true, timestamps: true, gbufferOptions: { width: RW, height: RH }, ...(q.get('res') === 'half' ? { settings: { reflectionResolution: 'half' as const } } : {}) });
   const device = ssr.device;
   const gpuErrors: string[] = [];
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });

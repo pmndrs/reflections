@@ -207,6 +207,8 @@ async function main() {
   const ssr = new ScreenSpaceReflectionsPass(renderer, {
     gbufferOptions: { width: W, height: H }, missList: true, timestamps: q.has('timing') || layoutMode,
     subgroups: q.get('variant') !== 'workgroup',
+    // W75 (X5, D5080): ?res=half traces, denoises at half res and upsamples
+    ...(q.get('res') === 'half' ? { settings: { reflectionResolution: 'half' as const } } : {}),
   });
   const device = ssr.device;
   // hybrid resolve + denoise seam (phase 5)

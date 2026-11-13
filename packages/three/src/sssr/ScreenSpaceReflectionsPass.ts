@@ -18,8 +18,8 @@
 import * as THREE from 'three/webgpu';
 import { uniform } from 'three/tsl';
 import {
-  createScreenSpaceReflections, createTracedReflections, screenSpaceInputsFromFrame,
-  type FrameInputs, type HitLights, type ScreenSpaceReflections as CoreTracer,
+  createHalfResolutionFrame, createScreenSpaceReflections, createTracedReflections, halfResolutionSize, PassTimer, screenSpaceInputsFromFrame,
+  type FrameInputs, type HalfResolutionFrame, type HitLights, type ScreenSpaceReflections as CoreTracer,
   type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant, type TraceProvider, type TracedReflections,
   type TracedReflectionsSettings, type TracedReflectionsStats,
 } from '@pmndrs/reflections-core';
@@ -29,6 +29,22 @@ import { ThreeHitShading, sceneLightingProbes } from '../trace/hitShading';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
+
+/**
+ * The pass's settings: core's tracer settings plus where the reflections run (W75, plan X5).
+ */
+export interface ScreenSpaceReflectionsPassSettings extends ScreenSpaceReflectionsSettings {
+  /**
+   * W75 (plan X5, D5080): the resolution the tracer, the ray-traced pass and (through
+   * `HybridReflections`) the denoiser run at. 'full' (default): the G-buffer's size. 'half':
+   * ceil(w / 2) x ceil(h / 2), from a half-size frame point-sampled at one pixel per 2x2 quad (core
+   * `createHalfResolutionFrame`); `HybridReflections` denoises there and upsamples the residual
+   * (`denoised - probeEnv`) with a joint bilateral filter (core `createReflectionUpsample`). The
+   * pass's `radiance` / `hitDistance` / `confidence` / `source` are then half size. Composites are
+   * built for one mode: after a change, rebuild them (`hybrid.rebuild()` and your `composite()` calls).
+   */
+  reflectionResolution?: 'full' | 'half';
+}
 
 export interface ScreenSpaceReflectionsPassOptions {
   /** Share an existing G-buffer (it must be rendered by this pass's `render()`, or by you before `trace()`). Default: a new one. */
@@ -46,7 +62,7 @@ export interface ScreenSpaceReflectionsPassOptions {
   /** Per-pass GPU timestamps (`readTimings()`); needs 'timestamp-query'. Default false. */
   timestamps?: boolean;
   /** Tracer settings (perceptual `roughnessThreshold`, default 0.447). `fallbackColor` is forced to black, see `radiance`. */
-  settings?: ScreenSpaceReflectionsSettings;
+  settings?: ScreenSpaceReflectionsPassSettings;
   /** Trace rays for the screen-space misses. Off unless given (D51). */
   trace?: ScreenSpaceTraceOptions;
 }
@@ -98,7 +114,7 @@ export class ScreenSpaceReflectionsPass {
   readonly renderer: THREE.WebGPURenderer;
   readonly gbuffer: FrameGBuffer;
   /** Tracer settings, read every frame. */
-  settings: ScreenSpaceReflectionsSettings;
+  settings: ScreenSpaceReflectionsPassSettings;
   /**
    * rgba16float. rgb: confidence x hit radiance (the tracer's fallback is black, so a miss is 0 and
    * the composite adds its own probe / environment term for `1 - confidence`); w: world ray length.
@@ -154,6 +170,11 @@ export class ScreenSpaceReflectionsPass {
   /** The core tracer binds last frame's hit source (W52, D3641): only while `settings.hitLobeFilterMixed` < 1 with `trace`. */
   private coreHitSource = false;
   private traceOptions: ScreenSpaceTraceOptions | null;
+  /** W75: the half-res frame (made on the first 'half' frame) and the frame the last trace ran on. */
+  private half: HalfResolutionFrame | null = null;
+  private halfTimer: PassTimer | null = null;
+  private halfTimerDone: (() => void) | undefined;
+  private lastTraceFrame: FrameInputs | null = null;
 
   constructor(renderer: THREE.WebGPURenderer, options: ScreenSpaceReflectionsPassOptions = {}) {
     this.renderer = renderer;
@@ -178,6 +199,15 @@ export class ScreenSpaceReflectionsPass {
   /** What traced hits are lit with this frame: the probes at the hit (D901) or the environment mean; null before the first traced frame. */
   get hitShadingSource(): 'probes' | 'environment' | null { return this.rt && this.hitShading ? this.hitShading.kind : null; }
   get device(): GPUDevice { return getDevice(this.renderer); }
+  /**
+   * W75: the frame the last trace ran on: the G-buffer's frame, or with `reflectionResolution: 'half'`
+   * its half-size point-sampled copy (what the denoise seam must be given). Null before the first trace.
+   */
+  get traceFrame(): FrameInputs | null { return this.lastTraceFrame; }
+  /** W75: the resolution the last trace ran at. */
+  get resolution(): 'full' | 'half' { return this.lastTraceFrame && this.gbuffer.frame && this.lastTraceFrame !== this.gbuffer.frame ? 'half' : 'full'; }
+  /** Per-pass GPU timestamps were asked for (`options.timestamps`). */
+  get timestamps(): boolean { return this.options.timestamps ?? false; }
   /** 'subgroups' or 'workgroup' once the first frame ran. */
   get variant(): ScreenSpaceVariant | null { return this.core?.variant ?? null; }
 
@@ -213,18 +243,31 @@ export class ScreenSpaceReflectionsPass {
   }
 
   /** Trace a frame the G-buffer already rendered (when you call `gbuffer.render()` yourself). */
-  trace(frame: FrameInputs, camera: THREE.Camera) {
+  trace(fullFrame: FrameInputs, camera: THREE.Camera) {
     const device = this.device;
-    this.ensure(frame.width, frame.height, frame.conventions.depthInverted);
+    // W75 (X5): 'half' traces a point-sampled half-size copy of the frame
+    const half = (this.settings.reflectionResolution ?? 'full') === 'half';
+    const [tw, th] = half ? halfResolutionSize(fullFrame.width, fullFrame.height) : [fullFrame.width, fullFrame.height];
+    this.ensure(tw, th, fullFrame.conventions.depthInverted);
     const core = this.core!;
-    const size = [frame.width, frame.height];
+    const size = [tw, th];
     const cmd = device.createCommandEncoder({ label: 'ssr (three)' });
+    let frame = fullFrame;
+    if (half) {
+      if (this.timestamps && !this.halfTimer && PassTimer.supported(device)) this.halfTimer = new PassTimer(device, 2);
+      this.half ??= createHalfResolutionFrame(device, { timestampWrites: () => this.halfTimer?.pass('half-res sample') });
+      this.halfTimer?.begin();
+      frame = this.half.build(cmd, fullFrame);
+      this.halfTimerDone = this.halfTimer?.end(cmd);
+    } else if (this.half) { this.half.destroy(); this.half = null; }
+    this.lastTraceFrame = frame;
     // Hit colour from last frame (D69): an app texture is copied before the trace (it still holds
     // last frame's image); the G-buffer's lit target after it (it already holds this frame's).
     const wantHistory = this.settings.hitColor === 'history';
-    const source = wantHistory ? (this.historySource ? this.gpu(this.historySource) : frame.textures.lit) : undefined;
+    const appHistory = this.historySource ? this.gpu(this.historySource) : undefined;
+    const source = wantHistory ? (appHistory ? (half ? this.half!.sample(cmd, appHistory) : appHistory) : frame.textures.lit) : undefined;
     if (wantHistory && !source) throw new Error("ScreenSpaceReflectionsPass: hitColor 'history' needs historySource or the G-buffer's lit target");
-    const history = source ? this.historyTexture(source.format, frame.width, frame.height) : undefined;
+    const history = source ? this.historyTexture(source.format, tw, th) : undefined;
     // Valid only if the previous frame ran in the same mode from the same source and nothing reset
     // it. The app texture is valid from the frame after the first one (the app draws it after each
     // frame); the copy below never makes the frame that does it valid.
@@ -289,6 +332,12 @@ export class ScreenSpaceReflectionsPass {
   /** With `timestamps`: ms per core pass for the last traced frame ('rt begin', 'rt trace' with `trace`; 'total' sums all). */
   async readTimings(): Promise<ReadonlyMap<string, number>> {
     const t = new Map(await (this.core?.readTimings() ?? Promise.resolve(new Map<string, number>())));
+    if (this.halfTimer && this.resolution === 'half') {
+      this.halfTimerDone?.(); this.halfTimerDone = undefined;
+      await this.halfTimer.read();
+      const ms = this.halfTimer.timings.get('half-res sample');
+      if (ms !== undefined) { t.set('half-res sample', ms); if (t.has('total')) t.set('total', t.get('total')! + ms); }
+    }
     if (this.rt && this.rayTracing) {
       const r = await this.rt.readTimings();
       for (const [k, v] of r) if (k !== 'total') t.set(k, v);
@@ -385,6 +434,8 @@ export class ScreenSpaceReflectionsPass {
     this.rt?.destroy();
     this.rt = null;
     this.hitShading?.destroy();
+    this.half?.destroy();
+    this.halfTimer?.destroy();
     this.blackEnvironment?.dispose();
     for (const t of [this.radiance, this.hitDistance, this.confidence, this.source]) t.dispose();
     if (this.ownsGBuffer) this.gbuffer.dispose();

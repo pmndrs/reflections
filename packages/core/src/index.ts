@@ -39,6 +39,8 @@ export {
 export * from './trace';
 // Joint bilateral gather of a sparse reflection signal (W74: the RT layer's half-rate fill; X5's upsample).
 export * from './bilateral';
+// Half-resolution reflections (W75, X5): the point-sampled half frame and the joint bilateral upsample.
+export * from './halfres';
 
 // Denoise seam (SPEC "Denoise seam"): any denoiser-core-shaped TemporalDenoiser<SpecularInputs>, fed from the frame contract.
 export {
