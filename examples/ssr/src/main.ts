@@ -40,7 +40,7 @@ import {
 } from '../../shared';
 import { HEAT_LEGEND, ProbeVolumesOverlay, gbufferWorldPosition, heatColor, probeColor, probeWeights } from '../../shared/probeDebug';
 import { SHOWCASE } from '../../showcase/src/scenes';
-import { createReflectionDenoiser, denoiserAvailable, denoiserSource } from '../../shared/denoiser';
+import { createReflectionDenoiser, denoiserAvailable, denoiserSource, hitSourceDenoiserOptions, hitSourceFromQuery } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
 import { canvasReader, createMetrics } from '../../shared/metrics/run';
@@ -74,6 +74,7 @@ type RayKind = 'camera' | 'scene';
 const HIT_MODES: HitColorMode[] = ['current', 'lit', 'final'];
 const useRT = q.get('rt') === '1';
 /** W77: ?preset=performance|default (core REFLECTION_PRESETS, through the three adapter's `preset` options). */
+// an unknown name is passed on: the pass and the hybrid warn once and ignore it
 const presetName = (q.get('preset') as ReflectionsPresetName | null) ?? null;
 /** Which BVH the ray-traced fallback uses: core's @pmndrs/bvh (default since W51, the maintainer's call on D1705) or three-mesh-bvh (`?bvh=three-mesh-bvh`, the stopgap). */
 type BvhKind = 'three-mesh-bvh' | 'pmndrs';
@@ -220,10 +221,13 @@ async function main() {
   });
   const device = ssr.device;
   // hybrid resolve + denoise seam (phase 5)
-  let denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, q.has('timing')) : null;
-  const hybrid = new HybridReflections(ssr, { denoiser, ...(presetName ? { preset: presetName } : {}) });
-  // W77: ?hitSource=off|hits|all (W53: what the denoiser keeps apart); explicit, so it wins over ?preset=
-  if (q.has('hitSource')) hybrid.setDenoiserHitSource((q.get('hitSource') === '1' ? 'all' : q.get('hitSource')) as DenoiserHitSourceMode);
+  // W77: ?hitSource=0|hits|all|1 (W53: what the denoiser keeps apart), read as the bench and the showcase read it
+  // (hitSourceFromQuery: 0 / off = off, 1 = all) and set at construction like an app would: the page's own
+  // setting, which wins over ?preset= and which a preset change returns to
+  const hitSourceQ = q.has('hitSource') ? hitSourceFromQuery(q) : null;
+  const denoiserExtra = hitSourceQ ? hitSourceDenoiserOptions(hitSourceQ) : {};
+  let denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, q.has('timing'), denoiserExtra) : null;
+  const hybrid = new HybridReflections(ssr, { denoiser, ...(hitSourceQ ? { denoiserHitSource: hitSourceQ.hitSource } : {}), ...(presetName ? { preset: presetName } : {}) });
   // FFX's options are constructor-only, so the denoiser follows the tracer's roughness threshold by
   // being rebuilt when it changes (D1402); checked once per frame, so a slider drag rebuilds at most per frame.
   let denoiserGate = 0.447;
@@ -231,7 +235,7 @@ async function main() {
     const t = ssr.settings.roughnessThreshold ?? 0.447;
     if (!denoiser || t === denoiserGate) return;
     const old = denoiser;
-    denoiser = createReflectionDenoiser(device, t, q.has('timing'))!;
+    denoiser = createReflectionDenoiser(device, t, q.has('timing'), denoiserExtra)!;
     hybrid.setDenoiser(denoiser); // new seam: history starts over
     old.dispose();
     denoiserGate = t;
