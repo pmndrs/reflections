@@ -102,7 +102,7 @@ async function main() {
   let brdfApplied = 'off' + false;
   const syncBrdf = () => {
     const mode = ((ssr.settings as N).denoiserBrdf as DenoiserBrdf | undefined) ?? brdfMode;
-    const keepBlack = ((ssr.settings as N).denoiserKeepBlack as boolean | undefined) ?? q.get('keepBlack') === '1';
+    const keepBlack = ((ssr.settings as N).denoiserKeepBlack as boolean | undefined) ?? q.get('keepBlack') !== '0';
     const brdfMin = ((ssr.settings as N).denoiserBrdfMin as number | undefined) ?? (q.has('brdfMin') ? Number(q.get('brdfMin')) : undefined);
     syncDenoiserBrdf(ssr, hybrid, mode, keepBlack, brdfMin);
     if (q.get('keepSample') === '1') ssr.settings.sampleDirection = true;

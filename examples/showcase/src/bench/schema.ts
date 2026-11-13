@@ -357,8 +357,8 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'Neighbours weighted by relative hit distance, exp(-k |t_p - t_q| / (t_p + t_q)); no extra input. 8 separates the lip as well as the source (50.6) but boils everywhere the hit distance varies (std p99 x5-10). 0 = off.',
     cost: '+1.3 ms at 1080p for k 8 (W53)',
   }),
-  sel('keepBlack', 'denoiser', 'Black samples keep the history', [['0', 'off (FFX: output 0, history dropped)'], ['1', 'on']], '0', {
-    appliesTo: OURS_DN, api: 'FfxReflectionDenoiser({ keepHistoryOnBlack })',
+  sel('keepBlack', 'denoiser', 'Black samples keep the history', [['0', 'off (FFX: output 0, history dropped)'], ['1', 'on (HybridReflections default)']], '1', {
+    appliesTo: OURS_DN, api: 'HybridReflections.denoiserKeepHistoryOnBlack (default true) -> FfxReflectionDenoiser({ keepHistoryOnBlack })',
     tradeoff: 'W78 (D5145): FFX\'s resolve writes 0 to the output and the history wherever a frame\'s prefiltered radiance is black, so a sparse glossy reflection over a dark environment never builds up (the line-spread gate\'s r 0.15 / 0.3 losses). On, black samples accumulate like any other.',
   }),
   num('brdfMin', 'denoiser', 'BRDF weights from roughness', 0, 0.447, 0.01, 0.1, {

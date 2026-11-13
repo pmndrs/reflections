@@ -61,7 +61,8 @@ export function brdfFromQuery(q: URLSearchParams): DenoiserBrdf {
  * `minRoughness` (W78, `?brdfMin=<perceptual>`): the BRDF weights only from this perceptual roughness up
  * (FFX `brdfMinAlpha` = its square); smoother pixels keep FFX's weights. Default 0.1 (FFX's own default,
  * `brdfMinAlpha` 0.01).
- * `keepBlack` (W78, `?keepBlack=1`): FFX's `keepHistoryOnBlack`, black samples accumulate instead of
+ * `keepBlack` (W78, on by default, `?keepBlack=0` turns it off): `HybridReflections.denoiserKeepHistoryOnBlack`
+ * (FFX's `keepHistoryOnBlack`), black samples accumulate instead of
  * dropping the resolve's history (a dark environment, sparse glossy hits).
  *
  * Apply a BRDF mode on a page: the tracer writes its sample directions (`settings.sampleDirection`, a
@@ -71,9 +72,9 @@ export function brdfFromQuery(q: URLSearchParams): DenoiserBrdf {
  */
 export function syncDenoiserBrdf(
   ssr: { settings: ScreenSpaceReflectionsSettings & { sampleDirection?: boolean } },
-  hybrid: { denoiserSampleDirection: boolean; denoiser: unknown },
+  hybrid: { denoiserSampleDirection: boolean; denoiserKeepHistoryOnBlack: boolean; denoiser: unknown },
   mode: DenoiserBrdf,
-  keepBlack = false,
+  keepBlack = true,
   minRoughness = 0.1,
 ): boolean {
   const on = mode !== 'off';
@@ -81,6 +82,7 @@ export function syncDenoiserBrdf(
   if (on) ssr.settings.sampleDirection = true; else delete ssr.settings.sampleDirection;
   hybrid.denoiserSampleDirection = on;
   const d = hybrid.denoiser as { setOptions?: (o: FfxReflectionDenoiserOptions) => void } | null;
-  d?.setOptions?.({ brdfWeights: mode, brdfMinAlpha: minRoughness * minRoughness, keepHistoryOnBlack: keepBlack });
+  d?.setOptions?.({ brdfWeights: mode, brdfMinAlpha: minRoughness * minRoughness });
+  hybrid.denoiserKeepHistoryOnBlack = keepBlack;
   return flipped;
 }

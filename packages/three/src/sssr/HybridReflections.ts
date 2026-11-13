@@ -45,6 +45,8 @@ export interface HybridReflectionsOptions extends Omit<ScreenSpaceCompositeOptio
   denoiserHitSource?: boolean;
   /** Initial value of `HybridReflections.denoiserSampleDirection`. Default false. */
   denoiserSampleDirection?: boolean;
+  /** Initial value of `HybridReflections.denoiserKeepHistoryOnBlack`. Default true. */
+  denoiserKeepHistoryOnBlack?: boolean;
 }
 
 /** A three StorageTexture for the upsample's full-res outputs (W75). */
@@ -100,6 +102,15 @@ export class HybridReflections {
   denoiserSampleDirection = false;
   private warnedSample: 'ratio' | 'half' | null = null;
   /**
+   * W78 (D5145): let black samples keep the denoiser's history, on denoisers that have the option (FFX
+   * `keepHistoryOnBlack`; set through `setOptions` each frame, nothing happens on others). FFX's resolve otherwise writes
+   * 0 to its output and history wherever a frame's filtered reflection is black, so a sparse glossy reflection over a
+   * dark environment never builds up (the line-spread gate's r 0.15 strip: lost -> x0.95-1.06 of the path tracer's
+   * width). Flicker-neutral in W78's measurements (orbit / rest drift within 1 % on mirrorWall, contact, facingMirrors,
+   * chess, carConcept). Default true; false gives FFX's behaviour.
+   */
+  denoiserKeepHistoryOnBlack = true;
+  /**
    * W75 (X5): the joint bilateral upsample's weights (core `ReflectionUpsampleSettings`: plane
    * tolerance, normal power, roughness tolerance, source mask, min weight sum, wide fallback), read
    * every frame with `ssr.settings.reflectionResolution: 'half'`.
@@ -154,6 +165,7 @@ export class HybridReflections {
     this.quad = new THREE.QuadMesh(this.signalMaterial);
     this.denoiserHitSource = options.denoiserHitSource ?? false;
     this.denoiserSampleDirection = options.denoiserSampleDirection ?? false;
+    this.denoiserKeepHistoryOnBlack = options.denoiserKeepHistoryOnBlack ?? true;
     this.setDenoiser(options.denoiser ?? null);
   }
 
@@ -215,7 +227,7 @@ export class HybridReflections {
   }
 
   private compositeAt(opts: { uv?: N; signalOnly?: boolean; upsampled?: ScreenSpaceCompositeOptions['upsampled'] }): ScreenSpaceComposite {
-    const { denoiser: _d, denoiserMotion: _m, denoiserRoughness: _r, denoiserHitSource: _h, denoiserSampleDirection: _s, ...rest } = this.options;
+    const { denoiser: _d, denoiserMotion: _m, denoiserRoughness: _r, denoiserHitSource: _h, denoiserSampleDirection: _s, denoiserKeepHistoryOnBlack: _k, ...rest } = this.options;
     return screenSpaceComposite(this.ssr, {
       ...rest, uv: opts.uv ?? uv(),
       denoised: opts.signalOnly ? null : this.denoised, denoise: this.denoiseActive, depthAware: this.depthAware,
@@ -257,6 +269,7 @@ export class HybridReflections {
       this.warnedStale = family;
       console.warn(`HybridReflections: the pass now traces at ${family} resolution but the last composite() was built for ${this.appFamily}; rebuild the composites, or reflections are wrong`);
     }
+    this.syncKeepHistoryOnBlack();
     if (family === 'full') this.releaseHalf();
     if (family === 'half' && frame && tracer) { this.updateHalf(frame); return; }
     if (!this.seam || !this.denoise || !frame || !tracer) { this.denoiseActive.value = 0; this.ran = false; return; }
@@ -287,6 +300,13 @@ export class HybridReflections {
     device.queue.submit([enc.finish()]);
     this.denoiseActive.value = 1;
     this.ran = true;
+  }
+
+  /** W78 (D5145): `denoiserKeepHistoryOnBlack` onto a denoiser that has the option. */
+  private syncKeepHistoryOnBlack() {
+    const d = this.seam?.denoiser as { options?: Record<string, unknown>; setOptions?: (o: Record<string, unknown>) => void } | undefined;
+    if (!d?.setOptions || !d.options || !('keepHistoryOnBlack' in d.options)) return;
+    if (d.options.keepHistoryOnBlack !== this.denoiserKeepHistoryOnBlack) d.setOptions({ keepHistoryOnBlack: this.denoiserKeepHistoryOnBlack });
   }
 
   /**
