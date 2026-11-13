@@ -10,17 +10,31 @@ Branch `worktree-agent-a236ab3f3d4eb74e3`, from main `62f7162`. Every number bel
 
 ## The preset (what was built)
 
-- **Core** (`packages/core/src/presets.ts`, plain data, engine-agnostic): `REFLECTION_PRESETS` (`default`, `performance`), `reflectionsPreset(name, overrides)` (explicit settings win key by key; `undefined` is ignored), `denoiserHitSourceOptions(mode)` (FFX's option names), types `ReflectionResolution`, `DenoiserHitSourceMode`.
-  - `performance` = `{ tracer: { reflectionResolution: 'half' }, denoiser: { hitSource: 'hits' } }`.
-  - `default` spells out the package defaults of every key another preset sets (`full`, `off`), so applying it undoes one.
+- **Core** (`packages/core/src/presets.ts`, plain data, engine-agnostic):
+  - `REFLECTION_PRESETS` (`default`, `performance`), `REFLECTION_PRESET_KEYS` (every key any preset names), `isReflectionsPresetName`;
+  - `reflectionsPreset(name, overrides)`: explicit settings win key by key; `undefined` is ignored;
+  - `denoiserHitSourceOptions(mode)` / `denoiserHitSourceModeOf(options)` (FFX's option names);
+  - types `ReflectionResolution`, `DenoiserHitSourceMode`.
+  - `performance` = `{ tracer: { reflectionResolution: 'half' }, denoiser: {} }` (half only, the maintainer's call).
+  - `default` = `{ tracer: {}, denoiser: {} }`: the package defaults (`?? default`) stay the only source of truth.
 - **three**:
-  - `new ScreenSpaceReflectionsPass(renderer, { preset: 'performance', settings })`: `settings` override the preset.
-  - `new HybridReflections(ssr, { preset: 'performance', denoiser })`: sets `denoiserHitSource` and the denoiser's own options through its `setOptions` (FFX: `separateHitSources` + `missesMatchAnySource`); an explicit `denoiserHitSource` wins. It warns once if the denoiser can't take a hit source (no silent no-op).
-  - `hybrid.setDenoiserHitSource('off' | 'hits' | 'all')`, also kept for a denoiser attached later.
-  - `applyReflectionsPreset({ ssr, hybrid }, name, overrides)` at runtime; returns `resolutionChanged` (the app rebuilds its composites, as for any `reflectionResolution` change).
-- **Pages**: `?preset=` and `__p.setPreset(name, overrides)` on examples/ssr and the showcase; `?hitSource=` on examples/ssr. **Bench**: a `preset` select (first group): it sets the URL keys the preset names wherever the URL doesn't, and clearing one of them returns it to the preset's value.
-- **Docs**: docs/SETTINGS.md has a generated "Presets" section (cost, trade-offs, when not to use it, with the upscaler), from `PRESET_DOCS` in the bench schema.
-- **Checks**: `pnpm check -- --only preset` (also in `half-res` and `hybrid`): `?preset=performance` traces at half size with FFX's hit-source options on, and renders bit for bit what `?res=half&hitSource=hits` renders; explicit `?res=full&hitSource=off` wins over the preset; at runtime `default` undoes it and an override wins. `test/presets.test.ts`: the merge rules, `default` covers every key, FFX's options, and the bench's URL-key mapping against its schema.
+  - `new ScreenSpaceReflectionsPass(renderer, { preset: 'performance', settings })`: `settings` override the preset and are kept as `presetBase`.
+  - `new HybridReflections(ssr, { preset, denoiser })`: applies a preset's hit source, if one ever has it, unless the app set its own. Its own means `denoiserHitSource`, or hit-source options already on the denoiser (FFX's public `options`).
+  - `hybrid.setDenoiserHitSource(mode)` and `restoreDenoiserHitSource()`. `hitSourceUnsupported` is set (and a warning logged once) when a mode can't reach a denoiser without `setOptions`.
+  - `applyReflectionsPreset({ ssr, hybrid }, name, overrides)` at runtime. It rebuilds every preset key from layers, lowest first: the app's construction settings, the package default, the preset, the overrides. So 'performance' -> 'default' returns to where the app started.
+    - It returns `resolutionChanged` and warns once when it is true (the app rebuilds its composites).
+    - The hybrid's own passes rebuild on `update()`.
+  - Unknown preset names warn once and are ignored.
+- **Pages**: `?preset=` and `__p.setPreset(name, overrides)` on examples/ssr and the showcase. On examples/ssr, `?hitSource=0|hits|all|1` is read like the bench reads it and is set at construction. **Bench**: a `preset` select (first group): it sets the URL keys the preset names wherever the URL doesn't, and clearing one of them returns it to the preset's value.
+- **Docs**: docs/SETTINGS.md has a generated "Presets" section (cost, trade-offs, when not to use it, with the upscaler), from `PRESET_DOCS` in the bench schema. The `hitSource` row says it lowers silhouette error with RT but raises flicker there.
+- **Checks**: `pnpm check -- --only preset` (also in `half-res` and `hybrid`), 5 checks:
+  - `?preset=performance` = `?res=half`, bit for bit, with the denoiser's options untouched; the check fails without FFX's public `options`;
+  - explicit `?res=full` wins;
+  - an unknown `?preset=` warns and renders as no preset;
+  - at runtime, 'default' returns to the page's own half + 'hits';
+  - the no-`setOptions` flag.
+  
+  `test/presets.test.ts` (7 tests). No preset = main HEAD bit for bit ([identical.md](identical.md)).
 - Babylon and pixi: not wired. Neither adapter has half-res reflections yet. They can read the same `reflectionsPreset()` data once they do.
 
 ## Method
@@ -143,7 +157,7 @@ Frame = the whole 1080p frame (G-buffer and lighting at the render size, reflect
 - If the app can choose, upscale 1.5 first and keep full-res reflections.
 - It is wrong for mirror close-ups (jagged reflected edges, W75) and for neon or specular strips on glossy floors.
 
-## Finding for the maintainer: the hit source trades error for flicker on carConcept
+## Finding for the maintainer: the hit source trades error for flicker on carConcept (decided: dropped from the preset)
 
 - **Error:** the preset's `hitSource: 'hits'` brings carConcept's band from 57.9 to 39.3 and the lip from 50.0 to 36.7 at half res (W75's reason to pair them).
 - **Flicker:** it also triples the band's orbit flicker (1.16 -> 2.94) and raises the reflection region's from 0.41 to 0.51 (+24 %, against half without it). At full res it does the same, more mildly: band 0.90 -> 1.32.
@@ -152,7 +166,11 @@ Frame = the whole 1080p frame (G-buffer and lighting at the render size, reflect
 - **The question:** flicker ranks above accuracy in TRIAGE. Should `performance` drop the hit source (band 58, flicker as full) or keep it (band 39, carConcept +24 % orbit)?
 - The preset ships as decided (with 'hits'). This is a proposed decision-page question, not a change made here.
 
-## Checks (after merging main 22adc27)
+## Checks after the review fixes
+
+`3c91933` + docs: typecheck; test (19 files, 75 tests); `pnpm check` preset, ssr, hybrid, half-res, showcase, bench, regressions: 142 PASS, 0 FAIL ([checks-review.txt](checks-review.txt)). No preset = main 22adc27 bit for bit ([identical.md](identical.md)).
+
+## Checks (after merging main 22adc27, before the review fixes)
 
 - `pnpm typecheck` and `pnpm test` (19 files, 75 tests) pass.
 - `pnpm check` preset, ssr, hybrid, half-res, showcase, bench, regressions: 135 PASS, 1 FAIL ([checks.txt](checks.txt)).
