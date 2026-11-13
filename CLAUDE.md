@@ -1,6 +1,6 @@
 # @pmndrs/reflections — agent notes
 
-Reflections for WebGPU: probes, screen-space (FFX SSSR port, planned), and ray-traced fallback, with a hybrid resolve. The core is engine-agnostic, and three.js is the first adapter. **Read `docs/SPEC.md` first.** It holds the plan, the phases and their gates, and what moved here from the denoiser repo. Then `docs/HANDOFF.md` (who is on what, the agreed seams between workstreams, where each stopped) and `docs/DIVERGES.md` (every knowing difference from the sources, and when to revisit it).
+Reflections for WebGPU: probes, screen-space (FFX SSSR port, planned), and ray-traced fallback, with a hybrid resolve. The core is engine-agnostic, and three.js is the first adapter. **Read `docs/SPEC.md` first.** It holds the plan, the phases and their gates, and what moved here from the denoiser repo. Then `docs/HANDOFF.md` (who is on what, the agreed seams between workstreams, where each stopped) and `docs/DIVERGES.md` (every knowing difference from the sources, and when to revisit it). What to pick up next is ranked in `docs/TRIAGE.md`; the maintainer's past calls are in `docs/DECISIONS.md`.
 
 ## Commands
 

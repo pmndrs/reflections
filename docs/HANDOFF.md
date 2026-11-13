@@ -4,6 +4,7 @@ The working state of the project: who is on what, which interfaces the workstrea
 
 ## How we work (agents read this first)
 
+- **Where things are.** What to work on next, ranked by impact and effort: [`TRIAGE.md`](TRIAGE.md). Every call the maintainer made, with the options and outcomes: [`DECISIONS.md`](DECISIONS.md) (exported from the Decisions page, https://claude.ai/artifact/E8qHQUAKxkGbW6wQ2F2sCX, where new open questions go). The details behind each row stay here (backlog, log) and in `DIVERGES.md`. When you finish a triage row, delete it from TRIAGE.md and log the W id below.
 - **Build features first.** Get a pass working end to end on a real GPU (`pnpm check`), commit, move on. Don't sink time into squeezing milliseconds or making a test match an expectation. If a number is off, write it down (row below, or `DIVERGES.md` if it's a divergence) and keep going. Measurement is for the **gates** in SPEC's roadmap and for big decisions, not for every step.
 - **Time-box.** If something fights you for more than ~30 minutes of attempts, record what you tried in your row's "stuck on" and move to the next part of your scope.
 - **Diverging from a source is fine. Hiding it isn't.** Every knowing difference from FFX, idTech, three, Lagarde, etc. goes in `docs/DIVERGES.md`.
@@ -91,6 +92,8 @@ The working state of the project: who is on what, which interfaces the workstrea
 - **three floor: r187** (raised from r186 on 2026-11-10; `three@^0.187.0`, peer `>=0.187.0`). r187 still can't bind `texture_cube_array` in TSL. Its PMREMGenerator writes cube mips (#34585). In r187 a render target's cube texture lists every level in `mipmaps`, base included; r186 listed only the levels past 0.
 
 ## Fine-tune backlog
+
+Ranked view: [`TRIAGE.md`](TRIAGE.md). This section keeps the detail behind each row.
 
 For the fine-tune pass once the phases are built and running. Nothing here blocks a phase or a decision; if one starts to, promote it. One line each, with a pointer.
 
