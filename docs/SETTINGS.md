@@ -254,7 +254,7 @@ Turning the ray-traced fallback on (`ScreenSpaceReflectionsPass({ trace })`, `se
 | Setting | URL key | Default | With RT | Why |
 |---|---|---|---|---|
 | Thickness per view depth | `s.thicknessDepthFactor` | 0 | 0.02 | W76 (maintainer's call on X1 #2, D5001): the relative test at 0.02 x view depth stops thin geometry turning into a slab (lineSpreadThin x4.25 -> x1.45..x2.2 of the PT's width) and is flat on carConcept, toyCar, chess, Sponza with RT (within 0.15 MAD); the rays it rejects go to the RT pass. Without RT they would take the probe (Sponza +1 %, more misses), so the default stays 0 there. `thicknessDepthFactor: 0` (or mode 'add') restores the old test. |
-| Thickness depth mode | `s.thicknessDepthMode` | `add` | `relative` | W76: with Thickness per view depth, the RT default (relative 0.02). An explicit 'add' keeps the pre-W76 thickness with RT on (the factor then defaults to 0). |
+| Thickness depth mode | `s.thicknessDepthMode` | `add` | `relative` | W76: with Thickness per view depth, the RT default (relative 0.02), only while both are unset. An explicit 'add' keeps the pre-W76 thickness with RT on (the factor then defaults to 0); an explicit factor alone keeps 'add' too. |
 
 Behaviour of the RT path that differs from RT off (no setting to miss, listed for completeness):
 

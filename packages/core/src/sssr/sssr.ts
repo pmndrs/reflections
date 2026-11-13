@@ -194,9 +194,10 @@ export const RT_THICKNESS_DEPTH_FACTOR = 0.02;
  *   {@link DEFAULT_COMPENSATED_MIRROR_BIAS} (with the cone; else bias 0). `mirrorBias` set alone ->
  *   compensation off (D49's truncation, its pre-W76 meaning). `mirrorBiasCompensate` set alone -> that,
  *   with the bias at 0.5 when compensating, else 0. A bias of 0 is never compensated (`mirrorBiasSplit`).
- * - With `missesTraced` (ray tracing on): `thicknessDepthMode` 'relative' and, only when the mode
- *   resolves to 'relative', `thicknessDepthFactor` {@link RT_THICKNESS_DEPTH_FACTOR}. So
- *   `thicknessDepthMode: 'add'` or `thicknessDepthFactor: 0` alone gives the pre-W76 thickness.
+ * - With `missesTraced` (ray tracing on), the thickness fields as a pair: both unset -> 'relative' at
+ *   {@link RT_THICKNESS_DEPTH_FACTOR}; `thicknessDepthFactor` set alone -> 'add' (its pre-W76 meaning);
+ *   `thicknessDepthMode: 'relative'` alone -> that at 0.02; `thicknessDepthMode: 'add'` alone -> factor 0.
+ *   So `thicknessDepthMode: 'add'` or `thicknessDepthFactor: 0` alone gives the pre-W76 thickness.
  * Idempotent; the dispatch calls it, and `outputs.settings` holds what the frame actually ran.
  */
 export function resolveScreenSpaceSettings<T extends Partial<ScreenSpaceReflectionsSettings>>(s: T): T {
@@ -205,7 +206,8 @@ export function resolveScreenSpaceSettings<T extends Partial<ScreenSpaceReflecti
   const compensated = mirrorBiasCompensate && hitColorFilter === 'cone';
   const out: T = { ...s, hitColorFilter, mirrorBiasCompensate, mirrorBias: s.mirrorBias ?? (compensated ? DEFAULT_COMPENSATED_MIRROR_BIAS : 0) };
   if (s.missesTraced) {
-    const mode = s.thicknessDepthMode ?? 'relative';
+    // review: 'relative' only when the factor is unset too; an explicit factor keeps 'add' (its pre-W76 meaning)
+    const mode = s.thicknessDepthMode ?? (s.thicknessDepthFactor === undefined ? 'relative' : 'add');
     out.thicknessDepthMode = mode;
     out.thicknessDepthFactor = s.thicknessDepthFactor ?? (mode === 'relative' ? RT_THICKNESS_DEPTH_FACTOR : 0);
   }
@@ -424,10 +426,11 @@ export interface ScreenSpaceReflectionsSettings {
    * it is that term alone (Diligent's `distance / viewZ < 0.025`: this at 0.025), so one value serves
    * every scene scale. 0 is off in both modes: 'relative' takes effect only once the factor is above 0
    * (a zero thickness would make the hit test undefined). Default 0; W76: with `missesTraced` (ray
-   * tracing on) and the mode 'relative', {@link RT_THICKNESS_DEPTH_FACTOR}. 0 restores the pre-W76 test.
+   * tracing on) and the mode 'relative' (or unset), {@link RT_THICKNESS_DEPTH_FACTOR}. 0 restores the
+   * pre-W76 test; a factor set without a mode keeps 'add'.
    */
   thicknessDepthFactor?: number;
-  /** See {@link thicknessDepthFactor}. Default 'add'; W76: 'relative' with `missesTraced`. 'relative' with a factor of 0 is the same as 'add' (off). */
+  /** See {@link thicknessDepthFactor}. Default 'add'; W76: 'relative' with `missesTraced` when the factor is unset too. 'relative' with a factor of 0 is the same as 'add' (off). */
   thicknessDepthMode?: 'add' | 'relative';
   /**
    * W76 (X1 #3 folded into X2's cone, D5002 / D5100): SSSR 2015 slide 85's grazing shrink of the

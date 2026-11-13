@@ -221,7 +221,7 @@ export const SETTINGS: Setting[] = [
   sel('s.thicknessDepthMode', 'sssr', 'Thickness depth mode', [['add', 'add (to the constant, alpha and length terms)'], ['relative', 'relative (k x view depth alone, Diligent)']], 'add', {
     appliesTo: OURS_SSR, api: 'settings.thicknessDepthMode',
     rtDefault: 'relative', defaultNote: 'with RT on: `relative` (W76)',
-    rtWhy: 'W76: with Thickness per view depth, the RT default (relative 0.02). An explicit \'add\' keeps the pre-W76 thickness with RT on (the factor then defaults to 0).',
+    rtWhy: 'W76: with Thickness per view depth, the RT default (relative 0.02), only while both are unset. An explicit \'add\' keeps the pre-W76 thickness with RT on (the factor then defaults to 0); an explicit factor alone keeps \'add\' too.',
     tradeoff: 'W71 (X1 #2, D5001): how Thickness per view depth combines. \'relative\' drops the constant, per-alpha and per-length terms; it takes effect only once Thickness per view depth is above 0 (k 0 = off in both modes).',
   }),
   num('s.mostDetailedMip', 'sssr', 'Most detailed mip', 0, 4, 1, 0, { appliesTo: OURS_SSR, api: 'settings.mostDetailedMip', tradeoff: 'Pyramid mip glossy rays start on: higher is cheaper and coarser. Mirrors always use 0.' }),

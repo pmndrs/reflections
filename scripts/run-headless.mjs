@@ -297,6 +297,7 @@ async function x1CoreChecks(s, hasSubgroups) {
     ["missesTraced: unset thickness = 'relative' 0.02", { missesTraced: true }, { missesTraced: true, thicknessDepthMode: 'relative', thicknessDepthFactor: 0.02 }],
     ["missesTraced + thicknessDepthMode 'add' = RT off's thickness", { missesTraced: true, thicknessDepthMode: 'add' }, {}],
     ['missesTraced + thicknessDepthFactor 0 = RT off\'s thickness', { missesTraced: true, thicknessDepthFactor: 0 }, {}],
+    ["missesTraced + explicit thicknessDepthFactor 0.01 keeps 'add' (review)", { missesTraced: true, thicknessDepthFactor: 0.01 }, { thicknessDepthFactor: 0.01 }],
   ];
   for (const [name, a, b] of W76_CASES) {
     const r = await s.T(`window.__p.identity(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
