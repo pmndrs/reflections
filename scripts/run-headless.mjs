@@ -533,6 +533,7 @@ async function ssrChecks(pages) {
   const t = await big.T('window.__p.time(30)');
   console.log(`  GPU ms ${t.size.join('x')} through the three adapter (${t.variant}, mirrorWall, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
   await mirrorBiasChecks(pages);
+  await hitColorFilterChecks(pages); // W72
   await denoiserGateChecks(pages);
   await specOccChecks(pages);
 }
@@ -601,6 +602,35 @@ async function denoiserGateChecks(pages) {
  * roughnessRamp strips (r 0.2-0.4). `--mirror-bias` runs the full sweep (roughnessRamp strips and
  * the mirrorWall floor at r 0.2 / 0.3 / 0.4, bias 0 / 0.25 / 0.5 / 0.75, denoise off and on) into out/mirror-bias.json.
  */
+/**
+ * W72 (X2, D5020-D5022): hitColorFilter / mirrorBiasCompensate. Unset, 'off', compensate without the
+ * cone (ignored) and back to unset after a 'cone' rebuild give the same radiance bit for bit; 'cone'
+ * and 'cone' + compensate change it; no GPU errors. roughnessRamp strips, raw, occupancy 0 (D301).
+ */
+async function hitColorFilterChecks(pages) {
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=current`);
+  pages.push(p);
+  await p.T("window.__p.load('roughnessRamp')");
+  await p.T("window.__p.setPose('strips')");
+  await p.T('window.__p.setSettings({ minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false })');
+  await p.T('window.__p.step(4)');
+  const keys = ['hitColorFilter', 'hitColorConeScale', 'mirrorBias', 'mirrorBiasCompensate'];
+  const h = {};
+  for (const [k, s] of [['unset', {}], ['off', { hitColorFilter: 'off' }], ['compensate, no cone', { mirrorBiasCompensate: true }],
+    ['bias 0.5', { mirrorBias: 0.5 }], ['bias 0.5 + compensate, no cone', { mirrorBias: 0.5, mirrorBiasCompensate: true }],
+    ['cone', { hitColorFilter: 'cone' }], ['cone + compensate 0.5', { hitColorFilter: 'cone', mirrorBias: 0.5, mirrorBiasCompensate: true }], ['unset again', {}]]) {
+    await p.T(`(${JSON.stringify(keys)}.forEach((k) => delete window.__p.ssr.settings[k]), window.__p.setSettings(${JSON.stringify(s)}), true)`);
+    await p.T('window.__p.step(1)'); // a flip of 'cone' rebuilds the tracer at the next frame
+    h[k] = await p.T('window.__p.radianceHash(7)');
+  }
+  const errors = await p.T('window.__p.gpuErrors.length');
+  await p.T(`(${JSON.stringify([...keys, 'minTraversalOccupancy', 'temporalVarianceGuidedTracing'])}.forEach((k) => delete window.__p.ssr.settings[k]), true)`);
+  check('ssr hitColorFilter / mirrorBiasCompensate (W72): defaults are the old path bit for bit, cone changes the hits, no GPU errors',
+    h.unset === h.off && h.unset === h['compensate, no cone'] && h.unset === h['unset again'] && h['bias 0.5'] === h['bias 0.5 + compensate, no cone']
+    && h.cone !== h.unset && h['cone + compensate 0.5'] !== h.cone && h['cone + compensate 0.5'] !== h['bias 0.5'] && errors === 0,
+    `${JSON.stringify(h)}; GPU errors ${errors}`);
+}
+
 async function mirrorBiasChecks(pages) {
   const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0`);
   pages.push(p);
@@ -2921,6 +2951,7 @@ async function main() {
     if (runs('sssr-core')) await sssrCoreChecks(pages);
     if (runs('ssr')) await ssrChecks(pages);
     if (runs('hybrid')) await hybridChecks(pages);
+    if (only === 'hit-color-filter') await hitColorFilterChecks(pages); // W72: hitColorFilter / mirrorBiasCompensate alone (also part of ssr)
     if (only === 'mirror-bias') await mirrorBiasChecks(pages); // W32: the mirrorBias check alone (also part of ssr)
     if (only === 'denoiser-gate') await denoiserGateChecks(pages); // W34: the D1402 check alone (also part of ssr)
     if (only === 'spec-occ') await specOccChecks(pages); // W39: the specOcc toggle alone (also part of ssr)
