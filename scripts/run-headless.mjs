@@ -9,6 +9,7 @@
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
 //   pnpm check -- --only ssr-exp-x1              # W71 (X1): each X1 setting at its default = absent on examples/ssr; historyEdgeConfidence at rest / panning
 //   pnpm check -- --only ssr-exp-grazing         # W71 (X1 #3): grazing sweep 5/15/30/60 deg vs the path tracer, hitLobeFilterGrazing 0 / 0.5 / 1 (minutes)
+//   pnpm check -- --only brdf-prefilter          # W78: the tracer's sample direction + pdf and FFX's BRDF prefilter weights (needs the Denoiser repo's W78 branch)
 //   pnpm check -- --only hit-source              # W53: the denoiser's hit source through the seam (needs the Denoiser repo's W53 branch)
 //   pnpm check -- --only probe-bindings          # W62: Sponza's three-size probe set at the default 16 sampled textures
 //   pnpm check -- --only probe-bindings-measure  # W62: Sponza with fewer probe sizes vs the path tracer (MAD, PSNR), lookup ms; out/w62-probe-bindings.json
@@ -1642,6 +1643,62 @@ async function hitSourceChecks(pages) {
   check('hit source (W53): off, the seam hands the denoiser none; on, screen-space and traced codes and the frame changes; off again clears the FFX option and the input',
     !r.offSource && r.counts[1] > 0.01 * n && r.counts[2] > 0.01 * n && r.counts[3] === 0 && r.opts.separateHitSources === false && !r.offAgain && r.changed > 0.001 && r.errors === 0,
     `codes miss ${(r.counts[0] / n * 100).toFixed(1)}% / screen ${(r.counts[1] / n * 100).toFixed(1)}% / traced ${(r.counts[2] / n * 100).toFixed(1)}%; px changed > 2/255: ${(r.changed * 100).toFixed(2)}%; errors ${r.errors}`);
+}
+
+/**
+ * `--only brdf-prefilter` (W78, D5140-D5146): examples/ssr mirrorWall, floor r 0.3, AA off, denoiser on. Off, the
+ * tracer writes no sample direction; with `denoiserBrdf: 'replace'` (and the gate at 0, so every glossy px takes the
+ * weights) most glossy px carry a sample (pdf > 0, unit direction) and the denoised output changes; at
+ * reflectionResolution 'half' the hybrid warns once that it doesn't hand the direction on. No validation errors.
+ * Skipped (a note) when the denoiser has no `brdfWeights` option (Denoiser repo before W78).
+ */
+async function brdfPrefilterChecks(pages) {
+  const pg = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&aa=off`);
+  pages.push(pg);
+  const r = await pg.T(`(async () => {
+    const p = window.__p;
+    if (!p.hybrid.denoiser || !('brdfWeights' in p.hybrid.denoiser.options)) return { skip: true };
+    const half = (h) => { const e = (h >> 10) & 31, m = h & 1023, s = (h & 0x8000) ? -1 : 1; return e === 0 ? s * m * 2 ** -24 : e === 31 ? NaN : s * (1 + m / 1024) * 2 ** (e - 15); };
+    const read = async (tex) => {
+      const dev = p.ssr.device, bytes = tex.format === 'rgba16float' ? 8 : tex.format === 'rgba32float' ? 16 : 4, ch = bytes === 4 ? 1 : 4;
+      const bpr = Math.ceil(tex.width * bytes / 256) * 256;
+      const buf = dev.createBuffer({ size: bpr * tex.height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+      const enc = dev.createCommandEncoder(); enc.copyTextureToBuffer({ texture: tex, aspect: tex.format.startsWith('depth') ? 'depth-only' : 'all' }, { buffer: buf, bytesPerRow: bpr }, [tex.width, tex.height]); dev.queue.submit([enc.finish()]);
+      await buf.mapAsync(GPUMapMode.READ);
+      const dv = new DataView(buf.getMappedRange()), out = new Float32Array(tex.width * tex.height * ch);
+      for (let y = 0; y < tex.height; y++) for (let x = 0; x < tex.width; x++) for (let c = 0; c < ch; c++) { const o = y * bpr + x * bytes; out[(y * tex.width + x) * ch + c] = bytes === 8 ? half(dv.getUint16(o + c * 2, true)) : dv.getFloat32(o + c * 4, true); }
+      buf.unmap(); buf.destroy(); return out;
+    };
+    const warns = []; const warn0 = console.warn; console.warn = (...a) => { warns.push(String(a[0])); warn0(...a); };
+    await p.load('mirrorWall'); p.setFloorRoughness(0.3);
+    const keep = { ...p.ssr.settings };
+    p.ssr.settings = { ...keep, denoiserBrdf: 'off' }; p.ssr.resetHistory(); p.hybrid.resetHistory(); await p.step(40);
+    const offSample = !!p.ssr.tracer.outputs.sampleDirection;
+    const A = await read(p.renderer.backend.get(p.hybrid.denoised).texture);
+    const t = p.ssr.gbuffer.gpuTextures(); const [dep, nr] = [await read(t.depth), await read(t.normal)];
+    const inv = p.ssr.gbuffer.conventions.depthInverted;
+    p.ssr.settings = { ...keep, denoiserBrdf: 'replace', denoiserBrdfMin: 0 }; p.ssr.resetHistory(); p.hybrid.resetHistory(); await p.step(40);
+    const S = p.ssr.tracer.outputs.sampleDirection; const sm = S ? await read(S) : null;
+    const B = await read(p.renderer.backend.get(p.hybrid.denoised).texture);
+    let glossy = 0, withPdf = 0, unit = 0, changed = 0, nonFinite = 0;
+    const lum = (f, i) => 0.2126 * f[i * 4] + 0.7152 * f[i * 4 + 1] + 0.0722 * f[i * 4 + 2];
+    for (let i = 0; i < dep.length; i++) {
+      if ((inv ? dep[i] <= 0 : dep[i] >= 1) || !(nr[i * 4 + 3] < 0.447)) continue;
+      glossy++;
+      if (sm && sm[i * 4 + 3] > 0) { withPdf++; if (Math.abs(Math.hypot(sm[i * 4], sm[i * 4 + 1], sm[i * 4 + 2]) - 1) < 1e-3) unit++; }
+      const b = lum(B, i); if (!Number.isFinite(b)) nonFinite++; else if (Math.abs(b - lum(A, i)) > 0.01 * Math.max(lum(A, i), 0.05)) changed++;
+    }
+    await p.setResolution('half'); await p.step(4);
+    const halfWarned = warns.some((w) => w.includes("isn't handed on at reflectionResolution 'half'"));
+    await p.setResolution('full'); p.ssr.settings = keep; await p.step(2);
+    console.warn = warn0;
+    return { offSample, hasSample: !!S, glossy, withPdf, unit, changed, nonFinite, halfWarned, errors: p.gpuErrors.length };
+  })()`);
+  if (r.skip) { console.log('  note: brdf-prefilter skipped (the denoiser has no brdfWeights: point DENOISER_REPO at the W78 branch)'); return; }
+  check('BRDF prefilter (W78): off, no sample direction; on, most glossy px carry a unit direction and pdf > 0, and the denoised output changes; no NaN, no validation errors',
+    !r.offSample && r.hasSample && r.withPdf > 0.8 * r.glossy && r.unit === r.withPdf && r.changed > 0.05 * r.glossy && r.nonFinite === 0 && r.errors === 0,
+    `glossy px ${r.glossy}: with pdf ${(r.withPdf / r.glossy * 100).toFixed(1)}%, unit ${r.unit === r.withPdf}; denoised changed > 1%: ${(r.changed / r.glossy * 100).toFixed(1)}%; non-finite ${r.nonFinite}; errors ${r.errors}`);
+  check("BRDF prefilter (W78): at reflectionResolution 'half' the hybrid warns that the direction isn't handed on", r.halfWarned && r.errors === 0, `warned ${r.halfWarned}`);
 }
 
 /** D4301: limits for {@link missFillChecks}, from W37's measurement (see DIVERGES D4301). */
@@ -3386,6 +3443,7 @@ async function main() {
     if (only === 'ssr-exp-x1') await x1Checks(pages); // W71 (X1, D5000-D5003): defaults identical on examples/ssr
     if (only === 'ssr-exp-grazing') await grazingSweep(pages); // W71 (X1 #3): grazing sweep vs the path tracer (minutes), JSON to out/w71-grazing.json
     if (only === 'hit-source') await hitSourceChecks(pages); // W53 (D3660-D3662)
+    if (only === 'brdf-prefilter') await brdfPrefilterChecks(pages); // W78 (D5140-D5146)
     if (only === 'half-res') await halfResChecks(pages); // W75 (X5, D5080): also part of hybrid
     if (runs('probe-layouts')) await probeLayoutChecks(pages); // W61
     if (runs('probe-bindings')) await probeBindingChecks(pages); // W62
