@@ -58,6 +58,8 @@ export function brdfFromQuery(q: URLSearchParams): DenoiserBrdf {
 }
 
 /**
+ * `minRoughness` (W78, `?brdfMin=<perceptual>`): the BRDF weights only from this perceptual roughness up
+ * (FFX `brdfMinAlpha` = its square); smoother pixels keep FFX's weights.
  * `keepBlack` (W78, `?keepBlack=1`): FFX's `keepHistoryOnBlack`, black samples accumulate instead of
  * dropping the resolve's history (a dark environment, sparse glossy hits).
  *
@@ -72,12 +74,13 @@ export function syncDenoiserBrdf(
   hybrid: { denoiserSampleDirection: boolean; denoiser: unknown },
   mode: DenoiserBrdf,
   keepBlack = false,
+  minRoughness = 0,
 ): boolean {
   const on = mode !== 'off';
   const flipped = !!ssr.settings.sampleDirection !== on;
   if (on) ssr.settings.sampleDirection = true; else delete ssr.settings.sampleDirection;
   hybrid.denoiserSampleDirection = on;
   const d = hybrid.denoiser as { setOptions?: (o: FfxReflectionDenoiserOptions) => void } | null;
-  d?.setOptions?.({ brdfWeights: mode, brdfAlphaScale: on ? mirrorBiasSplit(ssr.settings).sample : 1, keepHistoryOnBlack: keepBlack });
+  d?.setOptions?.({ brdfWeights: mode, brdfAlphaScale: on ? mirrorBiasSplit(ssr.settings).sample : 1, brdfMinAlpha: minRoughness * minRoughness, keepHistoryOnBlack: keepBlack });
   return flipped;
 }
