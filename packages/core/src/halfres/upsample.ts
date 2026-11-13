@@ -78,9 +78,14 @@ struct U {
   fullSize: vec2u, halfSize: vec2u,
   normalMul: f32, normalAdd: f32, roughChannel: u32, roughPerceptual: u32,
   roughMul: f32, roughAdd: f32, hasSource: u32, wideFallback: u32,
-  w: BilateralWeights,
-  tapMinRoughness: f32,
+  // BilateralWeights flattened (words 32-36): a struct member of a uniform struct must be followed by a
+  // 16-byte-rounded gap in core WGSL (without uniform_buffer_standard_layout), so no struct here
+  wPlaneTolerance: f32, wNormalPower: f32, wRoughnessTolerance: f32, wSourceMask: u32,
+  wMinWeightSum: f32, tapMinRoughness: f32,
 };
+fn upsampleWeights() -> BilateralWeights {
+  return BilateralWeights(u.wPlaneTolerance, u.wNormalPower, u.wRoughnessTolerance, u.wSourceMask, u.wMinWeightSum);
+}
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var tDepth: ${depthType};
 @group(0) @binding(2) var tNormal: texture_2d<f32>;
@@ -137,12 +142,13 @@ fn bilateralTap(cell: vec2i, pixel: vec2i) -> BilateralTap {
     gS = vec2f(p) * 0.5;
     let origin = p / 2;
     gWide = false;
-    r = bilateralFill(s, u.cameraPosition, p, origin, 2u, u.w);
-    if (r.weightSum < u.w.minWeightSum && u.wideFallback != 0u) {
+    let w = upsampleWeights();
+    r = bilateralFill(s, u.cameraPosition, p, origin, 2u, w);
+    if (r.weightSum < w.minWeightSum && u.wideFallback != 0u) {
       gWide = true;
-      r = bilateralFill(s, u.cameraPosition, p, origin, 4u, u.w);
+      r = bilateralFill(s, u.cameraPosition, p, origin, 4u, w);
     }
-    if (r.weightSum < u.w.minWeightSum) { r = BilateralResult(); }
+    if (r.weightSum < w.minWeightSum) { r = BilateralResult(); }
   }
   textureStore(oRadiance, p, r.radiance);
   textureStore(oHit, p, vec4f(r.hitDistance, 0.0, 0.0, 0.0));
