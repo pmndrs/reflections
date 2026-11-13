@@ -12,6 +12,7 @@
 //   pnpm check -- --only probe-layouts-measure   # W61: probe layouts at equal memory, error vs RT / path tracer, seams, timing (minutes); out/w61-probe-layouts.json
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p: core on the 2D array (warp), core on the cube array, the pre-phase-2 TSL node
 //   pnpm check -- --only mirror-bias --mirror-bias   # W32 / D49: mirrorBias noise / bias sweep (minutes), JSON to out/mirror-bias.json
+//   pnpm check -- --only ray-reuse                    # W73 / D5040: rayReuse 'copy' is the default path, 'ratio' runs and lowers raw noise
 //   pnpm check -- --only seam        # W26 / D53: the SSR-to-probe seam sweep (Lagarde's options off / on), JSON to out/seam.json (SEAM_SHOTS=1: images)
 //   pnpm check -- --only probes --probes-layout cube2d   # run the probe feature checks on the 2D array (default: 'auto', a cube array through the shim)
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
@@ -533,8 +534,37 @@ async function ssrChecks(pages) {
   const t = await big.T('window.__p.time(30)');
   console.log(`  GPU ms ${t.size.join('x')} through the three adapter (${t.variant}, mirrorWall, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
   await mirrorBiasChecks(pages);
+  await rayReuseChecks(pages);
   await denoiserGateChecks(pages);
   await specOccChecks(pages);
+}
+
+/**
+ * W73 (X3, D5040): `settings.rayReuse`. 'copy' (and unset) is FFX's quad copy bit for bit; 'ratio' runs the
+ * resolve (no validation error), changes the radiance, and lowers the raw temporal std on the roughnessRamp
+ * strips (examples/ssr `mirrorBiasStats` at bias 0: 8-bit luma of the final image, denoiser off).
+ */
+async function rayReuseChecks(pages) {
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0`);
+  pages.push(p);
+  await p.T("window.__p.load('roughnessRamp')");
+  await p.T("window.__p.setPose('strips')");
+  await p.T('window.__p.setSettings({ minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false })');
+  await p.T('window.__p.step(4)');
+  const h = {};
+  for (const [k, v] of [['unset', null], ['copy', "'copy'"], ['ratio', "'ratio'"], ['copy again', "'copy'"]]) {
+    await p.T(v === null ? '(delete window.__p.ssr.settings.rayReuse, true)' : `window.__p.setSettings({ rayReuse: ${v} })`);
+    h[k] = await p.T('window.__p.radianceHash(7)');
+  }
+  check("ssr rayReuse: 'copy' is the default path, 'ratio' changes the radiance", h.unset === h.copy && h.copy === h['copy again'] && h.copy !== h.ratio, JSON.stringify(h));
+  const std = {};
+  for (const m of ['copy', 'ratio']) {
+    await p.T(`window.__p.setSettings({ rayReuse: '${m}' })`);
+    std[m] = (await p.T('window.__p.mirrorBiasStats({ biases: [0], bins: [0.2, 0.3, 0.4], frames: 16, refFrames: 2, denoise: [false] })')).results[0].bins;
+  }
+  await p.T('(["rayReuse", "minTraversalOccupancy", "temporalVarianceGuidedTracing"].forEach((k) => delete window.__p.ssr.settings[k]), true)');
+  check("ssr rayReuse 'ratio': less raw noise on the roughnessRamp strips (r 0.2-0.4)", std.copy.every((b, k) => b.px > 1000 && std.ratio[k].std < b.std),
+    std.copy.map((b, k) => `r ${b.roughness}: std ${b.std.toFixed(2)} -> ${std.ratio[k].std.toFixed(2)} (${b.px} px)`).join('; '));
 }
 
 /**
@@ -2922,6 +2952,7 @@ async function main() {
     if (runs('ssr')) await ssrChecks(pages);
     if (runs('hybrid')) await hybridChecks(pages);
     if (only === 'mirror-bias') await mirrorBiasChecks(pages); // W32: the mirrorBias check alone (also part of ssr)
+    if (only === 'ray-reuse') await rayReuseChecks(pages); // W73: the rayReuse check alone (also part of ssr)
     if (only === 'denoiser-gate') await denoiserGateChecks(pages); // W34: the D1402 check alone (also part of ssr)
     if (only === 'spec-occ') await specOccChecks(pages); // W39: the specOcc toggle alone (also part of ssr)
     if (only === 'seam') {
