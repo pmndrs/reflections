@@ -106,7 +106,7 @@ export const SETTINGS: Setting[] = [
   bool('aa.detectShadingChanges', 'aa', 'Detect shading changes', true, { appliesTo: RASTER, api: '@pmndrs/upscaler settings.detectShadingChanges', tradeoff: 'Ages the history where shading really changed (a light, a bake) so it re-converges instead of ghosting.' }),
 
   // ---- scene -----------------------------------------------------------------------------------------------
-  sel('scene', 'scene', 'Scene', [['carConcept', 'Car concept'], ['toyCar', 'Toy car'], ['chess', 'Chess set'], ['sponza', 'Sponza'], ['lineSpread', 'Line spread (X0: emissive strip over a glossy floor)'], ['grazing', 'Grazing sweep (X0: checker wall over a glossy floor)']], null, {
+  sel('scene', 'scene', 'Scene', [['carConcept', 'Car concept'], ['toyCar', 'Toy car'], ['chess', 'Chess set'], ['sponza', 'Sponza'], ['lineSpread', 'Line spread (X0: emissive strip over a glossy floor)'], ['lineSpreadThin', 'Line spread, thin strip (X0: SSR thickness case)'], ['grazing', 'Grazing sweep (X0: checker wall over a glossy floor)']], null, {
     pageDefault: 'carConcept', apply: 'rebuild', appliesTo: 'page', tradeoff: 'Reloads every method on the new scene (downloaded assets; X0\'s lineSpread / grazing are procedural, W70).',
   }),
   sel('pose', 'scene', 'Camera', [['hero', 'hero'], ['low', 'low'], ['front', 'front'], ['close', 'close'], ['top', 'top'], ['w50', 'w50 (carConcept: W50\'s view, the Measure regions)'], ['e5', 'e5 (X0 scenes: 5 deg elevation)'], ['e15', 'e15 (X0: 15 deg, the line-spread gate)'], ['e30', 'e30 (X0: 30 deg)'], ['e60', 'e60 (X0: 60 deg)']], null, {

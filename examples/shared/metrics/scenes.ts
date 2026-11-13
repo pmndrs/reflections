@@ -3,10 +3,16 @@
 // Procedural (no asset download); they use the studio HDRI file only so the bench's environment plumbing holds
 // (lineSpread turns it to black).
 //
-// - lineSpread: a thin emissive strip (8 m long, 1.5 cm square, 30 cm above the floor, 4 m ahead) over a large
+// - lineSpread: a thin emissive strip (8 m long, 1.5 cm tall, 30 cm above the floor, 4 m ahead) over a large
 //   metal floor (white, `floorRoughness`), black environment and background, no lights. Poses e5 / e15 / e30 /
 //   e60: the camera sees the strip's reflection point at that elevation (the double-blur gate runs at e15).
 //   The reflected strip is a horizontal line; its vertical FWHM is the line spread (metrics.lineSpread).
+//   The strip is painted on a black wall (10 m x 3 m, standing on the floor), 1 mm in front of it, so a
+//   screen-space ray that passes above or below the strip meets the wall in the depth buffer as it does in the
+//   PT: the scene measures blur, not thickness.
+// - lineSpreadThin: the same strip floating free (no wall). W70's baseline: SSR's depth thickness (0.2 m +
+//   10 alpha) accepts hits behind it, so it reflects as a slab (r 0.05: 14 px vs the PT's 3.6; r 0.3: ~70x the
+//   PT's peak); ours + RT matches the PT. The thin-geometry / thickness case (X1 #2), not the blur gate.
 // - grazing: a metal floor (roughness 0.15 by default) in front of an emissive checker wall (25 cm squares,
 //   12 x 4 m, 1.5 m behind the target point), studio HDRI at intensity 1 around it. Poses e5 / e15 / e30 / e60:
 //   4 m from the target point at that elevation. The floor reflects the checker at every elevation.
@@ -35,7 +41,7 @@ function cameraFor(view: CameraView, aspect: number) {
 }
 
 /** The strip's geometry (exported for the metric's window). */
-export const STRIP = { distance: 4, height: 0.3, size: 0.015, length: 8, emissive: 0.65 } as const;
+export const STRIP = { distance: 4, height: 0.3, size: 0.015, length: 8, emissive: 0.65, wallWidth: 10, wallHeight: 3 } as const;
 
 /** Camera for line spread at elevation `e`: the strip's mirror point seen `e` degrees below the horizon. */
 export function lineSpreadView(e: number): CameraView {
@@ -45,22 +51,27 @@ export function lineSpreadView(e: number): CameraView {
   return { pos: [0, c, d], target: [0, 0, d - zr], fov: 40 };
 }
 
-async function lineSpread(aspect: number): Promise<ShowcaseScene> {
+async function lineSpread(aspect: number, thin = false): Promise<ShowcaseScene> {
   const scene = new THREE.Scene();
   scene.environmentIntensity = 0; // black: the strip is the only light (freshEnvironment() sets the HDRI texture)
   scene.backgroundIntensity = 0;
   const { mesh, floor } = floorOf(0.15);
   scene.add(mesh);
-  const strip = new THREE.Mesh(
-    new THREE.BoxGeometry(STRIP.length, STRIP.size, STRIP.size),
-    new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 1, emissive: 0xffffff, emissiveIntensity: STRIP.emissive }),
-  );
+  const glow = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 1, emissive: 0xffffff, emissiveIntensity: STRIP.emissive });
+  const strip = new THREE.Mesh(new THREE.BoxGeometry(STRIP.length, STRIP.size, STRIP.size), glow);
   strip.position.set(0, STRIP.height, 0);
   strip.name = 'strip';
   scene.add(strip);
+  if (!thin) {
+    // the black wall the strip is painted on (just behind it)
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(STRIP.wallWidth, STRIP.wallHeight), new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 1 }));
+    wall.position.set(0, STRIP.wallHeight / 2, -STRIP.size / 2 - 1e-3);
+    wall.name = 'stripWall';
+    scene.add(wall);
+  }
   const views = Object.fromEntries(ELEVATIONS.map((e) => [`e${e}`, lineSpreadView(e)]));
   return {
-    id: 'lineSpread', title: 'Line spread (X0)', credit: 'procedural (W70)', scene, views, floor,
+    id: thin ? 'lineSpreadThin' : 'lineSpread', title: thin ? 'Line spread, thin strip (X0)' : 'Line spread (X0)', credit: 'procedural (W70)', scene, views, floor,
     camera: cameraFor(views.e15, aspect), exposure: 1,
     probes: [{ position: [0, 1.5, 2], influenceSize: [60, 6, 60] as Vec3, originOffset: [0, -0.9, 0] as Vec3, blendDistance: 0.5 }],
     bake: { near: 0.02, far: 100 },
@@ -112,6 +123,7 @@ async function grazing(aspect: number): Promise<ShowcaseScene> {
 
 /** The bench's procedural scenes (no asset download; they need the studio HDRI file only). */
 export const METRIC_SCENES: ShowcaseEntry[] = [
-  { id: 'lineSpread', title: 'Line spread (X0)', asset: '', hdri: STUDIO_HDRI, build: lineSpread },
+  { id: 'lineSpread', title: 'Line spread (X0)', asset: '', hdri: STUDIO_HDRI, build: (a) => lineSpread(a) },
+  { id: 'lineSpreadThin', title: 'Line spread, thin strip (X0)', asset: '', hdri: STUDIO_HDRI, build: (a) => lineSpread(a, true) },
   { id: 'grazing', title: 'Grazing sweep (X0)', asset: '', hdri: STUDIO_HDRI, build: grazing },
 ];

@@ -60,7 +60,7 @@ export async function ssrExpMetricsSmoke(ctx, pages) {
   const lr = ls.rows[0], gr = gz.rows[0];
   check('ssr-exp metrics: the bench line spread, grazing sweep, Measure X0 columns and page metrics return finite numbers, no GPU errors',
     bad.length === 0 && errs.length === 0 && lr?.pt > 0 && lr.methods['ours-denoised']?.width > 0 && gr?.px > 1000 && cols.every((c) => Number.isFinite(c.std)) && !!pm.energy,
-    `line spread r 0.15 @ e15: PT ${lr?.pt} px, ours ${lr?.methods['ours-denoised']?.width} px (${lr?.methods['ours-denoised']?.columns} columns); grazing e15: ${gr?.px} glossy px, MAD ${gr?.methods['ours-denoised']?.mad}, gradient ratio ${gr?.methods['ours-denoised']?.gradientRatio}; glossy std ${cols.find((c) => c.region === 'glossy')?.std}, quad ${cols.find((c) => c.region === 'glossy')?.quad}; bench energy loss ${pm.energy?.regions?.reflection?.loss}${bad.length ? '; non-finite ' + bad.slice(0, 3).join(', ') : ''}${errs.length ? '; ' + errs[0] : ''}`);
+    `line spread r 0.15 @ e15: PT ${lr?.pt} px, ours ${lr?.methods['ours-denoised']?.width} px (median column ${lr?.methods['ours-denoised']?.medianColumn}); grazing e15: ${gr?.px} glossy px, MAD ${gr?.methods['ours-denoised']?.mad}, gradient ratio ${gr?.methods['ours-denoised']?.gradientRatio}; glossy std ${cols.find((c) => c.region === 'glossy')?.std}, quad ${cols.find((c) => c.region === 'glossy')?.quad}; bench energy loss ${pm.energy?.regions?.reflection?.loss}${bad.length ? '; non-finite ' + bad.slice(0, 3).join(', ') : ''}${errs.length ? '; ' + errs[0] : ''}`);
   return { ssr: r, lineSpread: ls, grazing: gz, measure: cols, bench: pm };
 }
 
@@ -148,12 +148,16 @@ export async function ssrExpBaseline(ctx, pages) {
     const before = ctx.results.logs.length;
     const b = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual&scene=lineSpread&pose=e15&left=ours-denoised&right=ours-denoised`);
     pages.push(b);
-    out.lineSpread = await b.T(`window.__p.metrics.lineSpread({ methods: ${JSON.stringify(methods)}, samples: 256, warmup: 64, frames: 16 })`);
+    out.lineSpread = await b.T(`window.__p.metrics.lineSpread({ methods: ${JSON.stringify(methods)}, samples: 512, warmup: 64, frames: 16 })`);
     ctx.savePng('ssr-exp-lineSpread-r0.5.png', await b.T('window.__p.shot()'));
+    // AA off: the upscaler's clamp removes the sparse glossy hits on the strip (W70)
+    out.lineSpreadAAOff = await b.T(`window.__p.metrics.lineSpread({ settings: { aa: 'off' }, methods: ${JSON.stringify(methods)}, samples: 512, warmup: 64, frames: 32 })`);
+    // the thin strip (no wall): SSR's depth thickness makes it a slab (the X1 #2 case)
+    out.lineSpreadThin = await b.T(`window.__p.metrics.lineSpread({ scene: 'lineSpreadThin', settings: { aa: null }, roughness: [0.05, 0.15, 0.3], methods: ${JSON.stringify(methods)}, samples: 512, warmup: 64, frames: 16 })`);
     errors.push(...(await b.T('window.__p.gpuErrors()')), ...errsSince(ctx, before));
     close(b);
     save();
-    for (const row of out.lineSpread.rows) say(`line spread r ${row.roughness}: PT ${row.pt} px; ${methods.map((id) => `${id} ${row.methods[id]?.width} (${row.methods[id]?.ratio})`).join(', ')}`);
+    for (const [k, v] of [['', out.lineSpread], [' AA off', out.lineSpreadAAOff], [' thin', out.lineSpreadThin]]) for (const row of v.rows) say(`line spread${k} r ${row.roughness}: PT ${row.pt} px (peak ${row.ptPeak}); ${methods.map((id) => `${id} ${row.methods[id]?.width} (x${row.methods[id]?.ratio}, peak x${row.methods[id]?.peakRatio})`).join(', ')}`);
   }
   if (parts.includes('grazing')) {
     const before = ctx.results.logs.length;

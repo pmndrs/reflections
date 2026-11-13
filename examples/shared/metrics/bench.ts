@@ -20,9 +20,10 @@ export interface BenchApi {
   lastImages(): { ref: Uint8ClampedArray; means: Map<string, Float32Array>; masks: Map<string, Uint8Array> } | null;
 }
 
-export interface LineSpreadOptions { roughness?: number[]; pose?: string; methods?: string[]; samples?: number; warmup?: number; frames?: number; tolerance?: number }
-export interface LineSpreadRow { roughness: number; pt: number | null; methods: Record<string, { width: number | null; ratio: number | null; pass: boolean | null; columns: number; peak: number }>; ptPeak: number; ptColumns: number; window: [number, number, number, number] }
-export interface GrazingOptions { elevations?: number[]; methods?: string[]; samples?: number; warmup?: number; frames?: number; floorRoughness?: number }
+type Settings = Record<string, string | number | null>;
+export interface LineSpreadOptions { /** 'lineSpread' (default, the blur gate) or 'lineSpreadThin' (the thickness case). */ scene?: string; /** Bench settings by URL key for the run (e.g. `{ aa: 'off' }`, a stream's new setting); null = back to the default. */ settings?: Settings; /** Peak below this share of the PT's = the reflection is lost: no width, fails (default 0.1). */ minPeak?: number; roughness?: number[]; pose?: string; methods?: string[]; samples?: number; warmup?: number; frames?: number; tolerance?: number }
+export interface LineSpreadRow { roughness: number; pt: number | null; ptPeak: number; ptAt: number | null; methods: Record<string, { width: number | null; ratio: number | null; pass: boolean | null; lost: boolean; peak: number; peakRatio: number | null; at: number | null; medianColumn: number | null }>; window: [number, number, number, number] }
+export interface GrazingOptions { settings?: Settings; elevations?: number[]; methods?: string[]; samples?: number; warmup?: number; frames?: number; floorRoughness?: number }
 export interface GrazingRow { elevation: number; px: number; ptGradient: number; methods: Record<string, { mad: number; bias: number; gradient: number; gradientRatio: number }> }
 
 export interface BenchPTMetrics {
@@ -52,18 +53,20 @@ export function benchPTMetrics(b: BenchApi): BenchPTMetrics {
 
   /**
    * The double-blur gate (plan, X0 and X2): the lineSpread scene at pose e15 (default), floor roughness 0.05 /
-   * 0.15 / 0.3 / 0.5, Neutral tone mapping (near linear under its knee) and the display decoded from sRGB, so
+   * 0.15 / 0.3 / 0.5, the PT raw (no OIDN), Neutral tone mapping (near linear under its knee) and the display decoded from sRGB, so
    * half maximum is half the radiance. Per roughness: the PT reference and each method's mean, then per column of
-   * the middle 60 % of the screen the vertical FWHM of the reflected strip (window: from halfway between the strip
-   * and its mirror point down to the bottom), median over the columns. `ratio` = ours / PT; `pass` = within
-   * `tolerance` (0.1) of 1.
+   * the middle 60 % of the screen the vertical profile of the reflected strip (window: from just under the strip to
+   * the bottom), averaged over the columns, and its FWHM. `ratio` = ours / PT; `pass` = within `tolerance` (0.1) of
+   * 1; `lost` (and a fail) when the method's peak is under `minPeak` (0.1) of the PT's: the reflection is gone
+   * (W70: the upscaler's clamp and the FFX denoiser remove the sparse hits on a small emitter at r >= 0.15).
    */
   async function lineSpread(o: LineSpreadOptions = {}) {
-    const roughness = o.roughness ?? [0.05, 0.15, 0.3, 0.5], pose = o.pose ?? 'e15', methods = o.methods ?? ['ours-denoised'];
-    const samples = o.samples ?? 256, warmup = o.warmup ?? 48, frames = o.frames ?? 16, tol = o.tolerance ?? 0.1;
+    const scene = o.scene ?? 'lineSpread', roughness = o.roughness ?? [0.05, 0.15, 0.3, 0.5], pose = o.pose ?? 'e15', methods = o.methods ?? ['ours-denoised'];
+    const samples = o.samples ?? 512, warmup = o.warmup ?? 48, frames = o.frames ?? 16, tol = o.tolerance ?? 0.1;
     const rows: LineSpreadRow[] = [];
     for (const r of roughness) {
-      await ensure('lineSpread', { tone: 'neutral', floorRoughness: r });
+      // the PT raw (OIDN removes a glossy reflection of a small emitter, which is all fireflies; the column mean denoises)
+      await ensure(scene, { tone: 'neutral', floorRoughness: r, ptDenoise: 0, ...(o.settings ?? {}) });
       b.setPose(pose);
       await b.measure({ samples, warmup, frames, methods });
       const img = b.lastImages();
@@ -72,19 +75,23 @@ export function benchPTMetrics(b: BenchApi): BenchPTMetrics {
       const cam = b.camera.position;
       const zMirror = cam.z * STRIP.height / (cam.y + STRIP.height); // the mirror point, strip at z = 0
       const yMirror = rowOf(new THREE.Vector3(0, 0, zMirror));
-      const win: [number, number, number, number] = [Math.round(W * 0.2), Math.max(0, Math.round((yStrip + yMirror) / 2)), Math.round(W * 0.8), H];
+      // from just under the strip's image (its ~3 px plus a quarter of the way to the mirror point) to the bottom
+      const win: [number, number, number, number] = [Math.round(W * 0.2), Math.max(0, Math.round(yStrip + Math.max(4, (yMirror - yStrip) / 4))), Math.round(W * 0.8), H];
       const pt = spread(linearLuma(img.ref, 4, W * H), W, win);
-      const row: LineSpreadRow = { roughness: r, pt: r4(pt.width), ptPeak: r4(pt.peak)!, ptColumns: pt.columns, window: win, methods: {} };
+      const row: LineSpreadRow = { roughness: r, pt: r4(pt.width), ptPeak: r4(pt.peak)!, ptAt: pt.at, window: win, methods: {} };
       for (const id of methods) {
         const mean = img.means.get(id);
         if (!mean) continue;
         const s = spread(linearLuma(mean, 3, W * H), W, win);
-        const ratio = s.width !== null && pt.width ? s.width / pt.width : null;
-        row.methods[id] = { width: r4(s.width), ratio: r4(ratio), pass: ratio === null ? null : Math.abs(ratio - 1) <= tol, columns: s.columns, peak: r4(s.peak)! };
+        const peakRatio = pt.peak > 0 ? s.peak / pt.peak : null;
+        const lost = peakRatio !== null && peakRatio < (o.minPeak ?? 0.1);
+        const width = lost ? null : s.width;
+        const ratio = width !== null && pt.width ? width / pt.width : null;
+        row.methods[id] = { width: r4(width), ratio: r4(ratio), pass: lost ? false : ratio === null ? null : Math.abs(ratio - 1) <= tol, lost, peak: r4(s.peak)!, peakRatio: r4(peakRatio), at: s.at, medianColumn: r4(s.medianColumn) };
       }
       rows.push(row);
     }
-    return { scene: 'lineSpread', pose, tone: 'neutral', samples, frames, tolerance: tol, rows };
+    return { scene, pose, tone: 'neutral', samples, frames, tolerance: tol, rows };
   }
 
   /**
@@ -96,7 +103,7 @@ export function benchPTMetrics(b: BenchApi): BenchPTMetrics {
   async function grazing(o: GrazingOptions = {}) {
     const elevations = o.elevations ?? [...ELEVATIONS], methods = o.methods ?? ['ours-denoised'];
     const samples = o.samples ?? 256, warmup = o.warmup ?? 48, frames = o.frames ?? 16;
-    await ensure('grazing', { floorRoughness: o.floorRoughness ?? null });
+    await ensure('grazing', { floorRoughness: o.floorRoughness ?? null, ...(o.settings ?? {}) });
     const rows: GrazingRow[] = [];
     for (const e of elevations) {
       b.setPose(`e${e}`);

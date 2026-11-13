@@ -249,19 +249,21 @@ export function fwhm(p: ArrayLike<number>, base?: number, minContrast = 1e-6): {
 }
 
 /**
- * Line spread across a horizontal line in an image: for each column of the rect, the vertical profile's FWHM;
- * returns the median width (px) over the columns where it's defined, their count, and the median peak.
- * `l` should be linear (decode sRGB first: {@link srgbToLinear}) so half maximum means half the energy density.
+ * Line spread across a horizontal line in an image. `width`: the FWHM (px) of the vertical profile averaged over
+ * the rect's columns (robust to per-pixel noise: raw and RT frames); `medianColumn`: the median of the per-column
+ * FWHMs where defined (`columns` of them). `l` should be linear (decode sRGB first: {@link srgbToLinear}) so half
+ * maximum means half the radiance. Null widths: no peak above the profile's minimum, or a crossing off the rect.
  */
-export function lineSpread(l: ArrayLike<number>, w: number, rect: [number, number, number, number]): { width: number | null; columns: number; peak: number; widths: number[] } {
+export function lineSpread(l: ArrayLike<number>, w: number, rect: [number, number, number, number]): { width: number | null; peak: number; at: number | null; medianColumn: number | null; columns: number } {
   const [x0, y0, x1, y1] = rect;
-  const widths: number[] = [], peaks: number[] = [];
-  const prof = new Float32Array(y1 - y0);
+  const widths: number[] = [];
+  const prof = new Float32Array(y1 - y0), mean = new Float64Array(y1 - y0);
   for (let x = x0; x < x1; x++) {
-    for (let y = y0; y < y1; y++) prof[y - y0] = l[y * w + x];
+    for (let y = y0; y < y1; y++) { prof[y - y0] = l[y * w + x]; mean[y - y0] += l[y * w + x] / (x1 - x0); }
     const r = fwhm(prof);
-    if (r) { widths.push(r.width); peaks.push(r.peak); }
+    if (r) widths.push(r.width);
   }
-  const med = (a: number[]) => { if (!a.length) return null; const s = [...a].sort((p, q) => p - q); return s[s.length >> 1]; };
-  return { width: med(widths), columns: widths.length, peak: med(peaks) ?? 0, widths };
+  const s = [...widths].sort((p, q) => p - q);
+  const m = fwhm(mean);
+  return { width: m?.width ?? null, peak: m?.peak ?? 0, at: m ? m.at + y0 : null, medianColumn: s.length ? s[s.length >> 1] : null, columns: widths.length };
 }
