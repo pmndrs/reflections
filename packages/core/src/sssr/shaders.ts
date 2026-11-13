@@ -482,7 +482,12 @@ export function intersectWgsl(variant: Variant, inverted: boolean, fallbackWgsl:
   // denoiser (binding 22). With sampleDirection false the generated WGSL is today's, character for character.
   const sampleDecl = sampleDirection ? `\n@group(0) @binding(22) var o_sample: texture_storage_2d<rgba32float, write>;\n${SAMPLE_DIRECTION_WGSL}` : '';
   const sampleStore = sampleDirection ? '\n  textureStore(o_sample, c, g_sample);' : '';
-  const sampleSet = sampleDirection ? '\n  g_sample = sampleDirectionPdf(r, world_space_reflected_direction);' : '';
+  // W78 review fix: a miss tracedMissRate 'half' sends to the fill list gets its traced neighbours' radiance and
+  // distance, not its own ray's, so it carries no sample (pdf 0). The same predicate as main's fill decision; an
+  // entry past the fill list's capacity, traced after all, also stays at 0 (the denoiser then skips it).
+  const sampleFill = missList ? `
+  if (P.tracedHalfRate != 0u && confidence < P.missConfidenceThreshold && !isBackground(hit.z) && (*r).roughness <= P.missRoughnessThreshold && halfRateFill(r)) { g_sample = vec4f(0.0); }` : '';
+  const sampleSet = sampleDirection ? `\n  g_sample = sampleDirectionPdf(r, world_space_reflected_direction);${sampleFill}` : '';
   const pyr = hitColorPyramid; // W72 (D5020): bindings 20-21
   // W73 (rayReuse 'ratio', D5040): the variant that also stores each ray's record for the resolve. With
   // rayReuse false the generated WGSL is today's, character for character.
