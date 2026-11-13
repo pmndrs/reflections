@@ -164,6 +164,10 @@ export const SETTINGS: Setting[] = [
     appliesTo: OURS_SSR, api: 'settings.rayReuseRadius',
     tradeoff: 'W73: tap radius in px at perceptual roughness >= 0.2, x sat(5 r) below (DiligentFX\'s 4 sat(5 r)). Wider is quieter and blurs more (the line-spread gate). Only with s.rayReuse ratio.',
   }),
+  bool('s.rayReuseMixSources', 'sssr', 'Ray reuse: mix hits and misses', false, {
+    appliesTo: OURS_SSR, api: 'settings.rayReuseMixSources',
+    tradeoff: 'W73 (D5047): off (default), the ratio resolve reuses only rays of the px\'s own hit source (screen hit vs miss, D3660). On, it also averages the hit / miss pattern, but the confidence then is a share of hits and the depth-aware blend (h.depthAware, D2400) hands the hits the whole weight: carConcept door raw 1.04 -> 1.38 linear (SSR only). Use with h.depthAware 0.',
+  }),
   num('s.maxTraversalIntersections', 'sssr', 'Max march steps', 0, 256, 1, 128, { appliesTo: OURS_SSR, api: 'settings.maxTraversalIntersections', tradeoff: 'Hi-Z march steps per ray: fewer is cheaper and sends long rays to the miss list (probe or RT); 0 = SSR off.' }),
   num('s.minTraversalOccupancy', 'sssr', 'Min occupancy', 0, 64, 1, 4, { appliesTo: OURS_SSR, api: 'settings.minTraversalOccupancy', tradeoff: 'Glossy rays stop once this few lanes of their subgroup still march (FFX): higher ends long tails earlier (cheaper, more misses). Mirrors ignore it.' }),
   num('s.depthBufferThickness', 'sssr', 'Thickness', 0, 0.5, 0.001, 0.2, {

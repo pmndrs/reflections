@@ -272,6 +272,14 @@ export interface ScreenSpaceReflectionsSettings {
    * don't mix (D3660). Default false.
    */
   missesTraced?: boolean;
+  /**
+   * The 'ratio' resolve reuses only rays of the pixel's own hit source (screen-space hit vs miss: its
+   * own ray's, else its quad's; D3660) unless this is true. Mixed, a pixel's confidence becomes the
+   * share of hits around it, which the three composite's depth-aware blend (D2400) reads as one ray's
+   * thickness confidence and hands the hits the whole weight (carConcept's door, SSR only: raw signal
+   * 1.04 -> 1.38): mix only with `depthAware` 0 or a composite that is linear in confidence. Default false.
+   */
+  rayReuseMixSources?: boolean;
 }
 
 export interface ScreenSpaceCamera {
@@ -633,7 +641,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[139] = useHitSource && inputs.hitSource ? 1 : 0;
     u[140] = (s.quadCopy ?? 'always') === 'sameSurface' ? 1 : 0;
     // words 141-149: other X streams; 150-153: W73 ray reuse (D5040)
-    u[150] = (s.rayReuse === 'ratio' ? 1 : 0) | (s.missesTraced ? 2 : 0);
+    u[150] = (s.rayReuse === 'ratio' ? 1 : 0) | (s.missesTraced ? 2 : 0) | (s.rayReuseMixSources ? 4 : 0);
     u[151] = s.rayReuseTaps === 4 ? 4 : 8;
     f[152] = Math.max(0, s.rayReuseRadius ?? 4);
     u[153] = reuseStamp;

@@ -115,7 +115,8 @@ struct Params {
   _pad148: u32,
   _pad149: u32,
   // W73 (X3, D5040): ratio-estimator ray reuse. Flags bit 0 = 'ratio', bit 1 = misses are traced after
-  // this dispatch; taps; radius in px (before the roughness scale); the record stamp of this dispatch.
+  // this dispatch, bit 2 = mix hits and misses; taps; radius in px (before the roughness scale); the
+  // record stamp of this dispatch.
   rayReuseFlags: u32,
   rayReuseTaps: u32,
   rayReuseRadius: f32,
@@ -1036,13 +1037,20 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
   let z = textureLoad(t_depth_hierarchy, p, 0).x;
   if (!isSurface(z)) { return; }
   let traced_misses = (P.rayReuseFlags & 2u) != 0u;
+  let mix_sources = (P.rayReuseFlags & 4u) != 0u;
   let own = loadRecord(p);
   let base_px = tracedPixel(p);
+  let base = loadRecord(base_px);
   // A ray-traced pass overwrites the miss list's pixels and their quad copies: leave them to it (D5043).
   if (traced_misses) {
     if (own.valid && own.miss) { return; }
-    if (!own.valid) { let b = loadRecord(base_px); if (b.valid && b.miss) { return; } }
+    if (!own.valid && base.valid && base.miss) { return; }
   }
+  // The pixel's hit source (D3660, D5047): its own ray's, else the ray the copy would give it. Only
+  // rays of the same source are reused (a hit's confidence stays one ray's thickness confidence, which
+  // the three composite's depth-aware blend reads, D2400); unknown (no own or quad ray) takes any.
+  let known_source = !mix_sources && (own.valid || base.valid);
+  let own_hit = select(base.confidence > 0.0, own.confidence > 0.0, own.valid);
   let X = worldPosition(p, z);
   let N = loadWorldSpaceNormal(p);
   let cam = P.invView[3].xyz;
@@ -1083,6 +1091,7 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
     n_seen++;
     let rec = loadRecord(q);
     if (!rec.valid || (traced_misses && rec.miss)) { continue; }
+    if (known_source && (rec.confidence > 0.0) != own_hit) { continue; }
     let aq = textureLoad(t_roughness, q, 0).x;
     if (isMirrorReflection(aq)) { continue; }
     let zq = textureLoad(t_depth_hierarchy, q, 0).x;
