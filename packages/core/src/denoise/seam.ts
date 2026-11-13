@@ -24,17 +24,22 @@
 //    in an r32float) is built here from the tracer's confidence and the ray-traced pass's RT_SOURCE
 //    codes, when `dispatch` is given them. Denoisers that know it keep screen-space hits, traced hits
 //    and misses apart (FFX: `separateHitSources`).
+//  - sample direction (W78, optional, D5140): denoiser-core's `SpecularInputs.direction` with each
+//    sample's pdf in .a, for denoisers that weight samples by BRDF / pdf (FFX: `brdfWeights`). The
+//    tracer writes it (core `options.sampleDirection`); the seam passes `signal.direction` as is.
 import type { FrameInputs } from '../frame/contract';
 import { RT_SOURCE } from '../trace/shaders';
 
 /**
  * denoiser-core `SpecularInputs`: noisy reflected radiance (rgba16float), hit distance (0 = miss)
- * and, optionally, which pass produced each sample (`HIT_SOURCE` codes in .r).
+ * and, optionally, which pass produced each sample (`HIT_SOURCE` codes in .r) and each sample's
+ * world ray direction (.xyz) with the pdf it was drawn with (.a; <= 0: no sample this frame).
  */
 export interface SpecularInputs {
   radiance: GPUTexture;
   hitDistance: GPUTexture;
   hitSource?: GPUTexture;
+  direction?: GPUTexture;
 }
 
 /** denoiser-core `HIT_SOURCE`: the codes of `SpecularInputs.hitSource`. */

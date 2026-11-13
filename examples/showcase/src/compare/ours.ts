@@ -22,7 +22,7 @@ import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
 import { ScreenSpaceAO } from '../../../shared/ao';
 import { LINEAR_VIEWS, VIEW_IDS, buildDebugViews, type View } from '../debugViews';
 import { DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../../shared/antialias';
-import { hitSourceDenoiserOptions, hitSourceFromQuery } from '../../../shared/denoiser';
+import { brdfFromQuery, hitSourceDenoiserOptions, hitSourceFromQuery, syncDenoiserBrdf } from '../../../shared/denoiser';
 import { probeLayout, type ProbeLayoutName } from '../../../shared/probeLayouts';
 import { setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } from '../specAA';
 import type { FloorKind } from '../scenes';
@@ -311,8 +311,11 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   if (aaMode !== 'off' || aaQ.ratio > 1) await makeAA();
 
   const nextNodeFrame = () => (renderer as N)._nodes.nodeFrame.update();
+  // W78 (D5140): ?brdf=replace|combine, BRDF / pdf weights in FFX's prefilter (live key `brdf`)
+  let brdfMode = brdfFromQuery(params);
   const draw = (cam: THREE.PerspectiveCamera, useAA: boolean) => {
     nextNodeFrame();
+    syncDenoiserBrdf(ssr, hybrid, brdfMode);
     syncCamera(camera, cam);
     const a = useAA ? aa : null;
     const j = a ? a.begin(camera) : {};
@@ -376,6 +379,8 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     hitSource: () => setW53(),
     hitMissAny: () => setW53(),
     hitDistW: () => setW53(),
+    // W78 (D5140): the tracer rebuilds on an on / off flip (sampleDirection), the denoiser takes setOptions
+    brdf: (v) => { brdfMode = brdfFromQuery(new URLSearchParams(v === null ? {} : { brdf: v })); resetAll(); },
     'h.depthAware': (v) => { hybrid.depthAware.value = v === null ? 1 : Number(v); },
     'h.amount': (v) => { if (id === 'probes') return; amount = v === null ? 1 : Number(v); c.amount.value = h.amount.value = amount; },
     aa: (v) => {

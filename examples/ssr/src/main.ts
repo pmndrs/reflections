@@ -18,6 +18,9 @@
 // hands the specular signal to denoiser/ffx's FfxReflectionDenoiser through the denoise seam. The
 // denoiser comes from the sibling Denoiser repo's source (examples/vite.config.ts) when present.
 //
+// `?brdf=replace|combine` (W78, X3 phase B, default off): BRDF / pdf weights in the FFX denoiser's prefilter
+// (the tracer hands each pixel's sample direction and pdf through the seam). Also the example-only key
+// `settings.denoiserBrdf` ('off' | 'replace' | 'combine'), read every frame, so `__p.configStats` configs can set it.
 // `?mirrorBias=0..1` (default 0, FFX): the tracer's bias of glossy rays toward the mirror direction
 // (core `settings.mirrorBias`, SSSR 2015 / PICA, D49); also a slider. `__p.mirrorBiasStats()` measures it.
 //
@@ -40,7 +43,7 @@ import {
 } from '../../shared';
 import { HEAT_LEGEND, ProbeVolumesOverlay, gbufferWorldPosition, heatColor, probeColor, probeWeights } from '../../shared/probeDebug';
 import { SHOWCASE } from '../../showcase/src/scenes';
-import { createReflectionDenoiser, denoiserAvailable, denoiserSource } from '../../shared/denoiser';
+import { brdfFromQuery, createReflectionDenoiser, denoiserAvailable, denoiserSource, syncDenoiserBrdf, type DenoiserBrdf } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
 import { canvasReader, createMetrics } from '../../shared/metrics/run';
@@ -230,6 +233,14 @@ async function main() {
     denoiserGate = t;
   };
   hybrid.denoise = wantDenoise && !!denoiser;
+  // W78 (D5140): the page's BRDF mode; `settings.denoiserBrdf` (example-only) overrides it per frame
+  const brdfMode = brdfFromQuery(q);
+  let brdfApplied: DenoiserBrdf = 'off';
+  const syncBrdf = () => {
+    const mode = ((ssr.settings as N).denoiserBrdf as DenoiserBrdf | undefined) ?? brdfMode;
+    syncDenoiserBrdf(ssr, hybrid, mode);
+    if (mode !== brdfApplied) { hybrid.resetHistory(); brdfApplied = mode; }
+  };
   if (q.has('mirrorBias')) ssr.settings.mirrorBias = Number(q.get('mirrorBias'));
   const gpuErrors: string[] = [];
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });
@@ -600,6 +611,7 @@ async function main() {
     if (manual || !looping) nextNodeFrame();
     kit.camera.aspect = W / H; kit.camera.updateProjectionMatrix(); kit.camera.updateMatrixWorld();
     if (provider && kit.update) { kit.scene.updateMatrixWorld(); refitProvider(); }
+    syncBrdf();
     ssr.render(kit.scene, kit.camera, aa.begin(kit.camera));
     aa.end(kit.camera);
     syncDenoiserGate();
