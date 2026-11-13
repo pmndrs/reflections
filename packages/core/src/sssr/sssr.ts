@@ -387,6 +387,16 @@ export interface ScreenSpaceReflectionsSettings {
    * near-mirrors) every miss is traced. Default {@link DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS}.
    */
   tracedHalfRateMinRoughness?: number;
+  /**
+   * W80 (D5180): hits the march may try per ray, 1..8 (default 1 = FFX: the first place the ray goes
+   * behind the depth buffer is validated once, and a rejected one is a miss). With N > 1 a candidate
+   * that fails validation (thickness, back face, too near the origin) while on screen and not
+   * background restarts the march just past that leaf cell, so a ray that crosses a thin foreground
+   * object while behind it can still reach a surface the camera sees. Shares the
+   * `maxTraversalIntersections` budget; every leaf cell behind an object is another candidate, so it
+   * only gets through overlaps a few pixels wide. Cannot find surfaces hidden from the camera.
+   */
+  maxCandidates?: number;
 }
 
 /**
@@ -876,6 +886,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[147] = split.compensated ? 1 : 0;
     f[148] = split.sample;
     f[149] = split.filter;
+    u[158] = Math.min(8, Math.max(1, Math.round(s.maxCandidates ?? 1))); // W80 (D5180)
     device.queue.writeBuffer(params, 0, data);
   }
 

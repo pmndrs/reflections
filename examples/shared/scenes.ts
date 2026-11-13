@@ -325,3 +325,26 @@ export function multiMaterial(opts: SceneOptions = {}): KitScene {
     probes: [floorProbe({ position: [0, 2, 0], influenceSize: [16, 4.2, 16], projectionSize: [16, 4.2, 16] })],
   };
 }
+
+/**
+ * W80 (D5180): the case `maxCandidates` targets. A thin post (6 cm) and a thin rail (4 cm) stand in front of the
+ * patterned wall, over the mirror floor. A floor ray that goes up through the post's screen columns while it is
+ * behind the post first finds the post, fails the thickness test and takes the probe, though the wall
+ * behind is on screen. Not in `SCENES` (loadable by id: `examples/ssr?scene=thinPost`).
+ */
+export function thinPost(opts: SceneOptions = {}): KitScene {
+  const scene = newScene();
+  useSky(scene, new THREE.Vector3(3, 6, 6));
+  floor(scene, mirror(0), 16);
+  const wall = add(scene, new THREE.Mesh(new THREE.PlaneGeometry(10, 4), std(0xffffff, 0.75, 0, { map: patternTexture() })), [0, 2, -3]);
+  wall.castShadow = false;
+  add(scene, noProbe(new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.2, 0.06), std(0xd1495b, 0.5))), [0.3, 1.1, -1.2]);
+  add(scene, noProbe(new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.04, 0.06), std(0x00798c, 0.5))), [-1.2, 0.9, -1.2]);
+  studioLights(scene, [3, 6, 6], 2.2);
+  const views = { default: { pos: [0, 1.5, 5.5] as Vec3, target: [0, 1.0, -3] as Vec3 } };
+  return {
+    id: 'thinPost', title: 'A thin post and rail in front of a wall, over a mirror floor (maxCandidates)', scene, camera: makeCamera(views.default, opts.aspect),
+    target: new THREE.Vector3(...views.default.target), views,
+    probes: [floorProbe({ position: [0, 2, 0], influenceSize: [16, 4.2, 16], projectionSize: [16, 4.2, 12], projectionOffset: [0, 0, 3] })],
+  };
+}
