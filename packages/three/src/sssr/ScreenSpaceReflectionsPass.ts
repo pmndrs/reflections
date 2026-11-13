@@ -364,7 +364,7 @@ export class ScreenSpaceReflectionsPass {
         hitLobeFilterGrazing: this.traceSettings.hitLobeFilterGrazing ?? this.settings.hitLobeFilterGrazing, roughnessThreshold: this.settings.roughnessThreshold, fallbackColor: [0, 0, 0],
         tracedMissRate: halfRate ? 'half' : 'full', tracedHalfRateMinRoughness: halfRateMin,
         // W72 (D5021): the traced lobe filter follows the tracer's lobe split
-        mirrorBias: this.settings.mirrorBias, mirrorBiasCompensate: this.settings.mirrorBiasCompensate, hitColorFilter: this.settings.hitColorFilter });
+        mirrorBias: this.settings.mirrorBias, mirrorBiasCompensate: this.settings.mirrorBiasCompensate, hitColorFilter: this.settings.hitColorFilter, hitColorConeScale: this.settings.hitColorConeScale });
       cmd.copyTextureToTexture({ texture: this.rt.source }, { texture: this.gpu(this.source) }, size);
       this.sourceDirty = true;
     } else if (this.sourceDirty) {

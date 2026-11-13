@@ -123,6 +123,8 @@ export interface TracedReflectionsSettings {
   mirrorBias?: number;
   mirrorBiasCompensate?: boolean;
   hitColorFilter?: 'off' | 'cone';
+  /** W72 (D5024): the SSSR tracer's `hitColorConeScale` (pass the tracer's). Default 1. */
+  hitColorConeScale?: number;
   /** The SSSR tracer's `roughnessThreshold` (perceptual; pass the tracer's), read by `hitLobeFilterMixed` only. Default 0.447. */
   roughnessThreshold?: number;
   /** Relative view-distance tolerance for that test. Default 0.02. */
@@ -393,7 +395,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
 
   let afterSubmit: (() => void) | undefined;
 
-  function writeParams(frame: TracedReflectionsDispatch, s0: TracedReflectionsSettings) {
+  function writeParams(frame: TracedReflectionsDispatch, s0: TracedReflectionsSettings, cone: boolean) {
     // W72: the lobe split follows what the tracer ran this frame (its 'cone' runs as 'off' until built)
     const s = frame.tracer.outputs.hitColorFilterActive ? s0 : { ...s0, hitColorFilter: 'off' as const };
     const cam = frame.inputs.camera;
@@ -442,6 +444,9 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     u[75] = dispatches; // the stochastic fill's frame (W74 review)
     // W72 (X2 #6, D5021): 76
     f[76] = mirrorBiasSplit(s).filter;
+    // 77-78: W72 (D5024) the cone at on-screen reused hits, when the tracer built a pyramid of this frame's colour
+    f[77] = cone ? Math.max(0, s.hitColorConeScale ?? 1) * mirrorBiasSplit(s).filter : 0;
+    f[78] = 0.5 * H * frame.inputs.camera.projection[5];
     device.queue.writeBuffer(params, 0, data);
   }
 
@@ -456,7 +461,9 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     const useHistory = (settings.hitColor ?? 'current') === 'history';
     if (useHistory && (!inputs.history || !inputs.motion)) throw new Error("rt: hitColor 'history' needs inputs.history and inputs.motion");
     if (useHistory && (inputs.history!.width !== W || inputs.history!.height !== H)) throw new Error(`rt: history is ${inputs.history!.width}x${inputs.history!.height}, expected ${W}x${H}`);
-    writeParams(frame, settings);
+    // W72 (D5024): the tracer's hit-colour pyramid (of this frame's scene colour) replaces t_color for on-screen reused hits
+    const coneTexture = out.hitColorFilterActive && settings.hitColorFilter === 'cone' ? out.hitColorPyramid : undefined;
+    writeParams(frame, settings, !!coneTexture);
     const mixed = (settings.hitLobeFilterMixed ?? 1) < 1;
     if (mixed) prevSource ??= device.createTexture({ label: 'rt previous source', size: [W, H], format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
     const traceGroup = device.createBindGroup({
@@ -466,7 +473,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
         { binding: 1, resource: out.depthHierarchy.createView({ baseMipLevel: 0, mipLevelCount: 1 }) },
         { binding: 2, resource: inputs.normal.createView() },
         { binding: 3, resource: out.extractedRoughness.createView() },
-        { binding: 4, resource: inputs.color.createView() },
+        { binding: 4, resource: (coneTexture ?? inputs.color).createView() },
         { binding: 5, resource: { buffer: out.missList } },
         { binding: 6, resource: { buffer: out.missCounter } },
         { binding: 7, resource: { buffer: state } },
