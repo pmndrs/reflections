@@ -44,4 +44,62 @@ Hashes on main `0abd154` vs this branch with the settings unset (`parity-main-0a
 
 ## Phase 1 numbers
 
-(see below)
+No GPU timings (shared GPU, per the lead). Configurations: `default`; `cone` (scale 1); `cone x2`; D49's truncation at 0.5 (reference); `comp f` = cone + `mirrorBiasCompensate` at mirrorBias f.
+
+### Raw speckle (`speckle.js`)
+
+The tracer's radiance before denoise and composite, 32 frames with the frame index advancing, per mask px: temporal mean m_p and std s_p of luminance. relStd = mean s_p / mean m_p; fireflies = samples with L > m_p + 2 x the region's mean; p999 = 99.9th percentile of (L - m_p) / mean. (The plan's "> 3 sigma" with sigma = the median s_p is in the JSON as `speckle`; it degenerates where the median px is static, sigma 0 on the arcade floor.) X0's speckle count replaces this in phase 2.
+
+| region | metric | default | cone | cone x2 | trunc 0.5 | comp 0.3 | comp 0.5 | comp 0.7 |
+|---|---|---|---|---|---|---|---|---|
+| mirrorWall r 0.35 sphere (4834 px, raw, rt off) | relStd | 0.79 | 0.56 | 0.55 | 0.50 | 0.51 | 0.45 | 0.38 |
+| | fireflies | 2.38 % | 1.72 % | 1.67 % | 1.01 % | 1.52 % | 1.14 % | 0.88 % |
+| | p999 | 23.9 | 4.0 | 4.0 | 21.1 | 4.0 | 3.7 | 3.7 |
+| | mean | 0.136 | 0.132 | 0.134 | 0.147 | 0.136 | 0.139 | 0.142 |
+| pixi3d arcade floor r 0.06 (209k px) | relStd | 0.43 | 0.31 | 0.23 | 0.22 | 0.35 | 0.28 | 0.22 |
+| | fireflies | 2.70 % | 1.25 % | 0.52 % | 1.56 % | 1.75 % | 1.22 % | 0.78 % |
+| | p999 | 7.9 | 5.3 | 3.7 | 6.3 | 6.4 | 5.7 | 4.8 |
+| | mean | 0.195 | 0.196 | 0.198 | 0.196 | 0.196 | 0.197 | 0.197 |
+| carConcept paint r 0.33-0.42 (40k px, hero, rt off) | relStd | 1.36 | 1.36 | 1.36 | 0.79 | 1.58 | 1.33 | 1.08 |
+| | fireflies | 7.27 % | 7.26 % | 7.24 % | 5.41 % | 5.60 % | 5.75 % | 5.43 % |
+| | p999 | 17.2 | 17.1 | 17.2 | 10.9 | 28.3 | 23.6 | 19.6 |
+| | mean | 0.276 | 0.277 | 0.276 | 0.264 | 0.270 | 0.266 | 0.261 |
+
+Reading:
+- **Screen-colour fireflies go.** On the sphere the worst outliers drop 6x (p999 23.9 -> 4.0 x mean) and relStd 0.79 -> 0.56 at the same mean (-3 %); on the arcade floor fireflies halve (2.7 -> 1.25 %), mean +0.6 %. D49's truncation cuts relStd as much but keeps the outliers (p999 21) and adds +8 % mean on the sphere.
+- **cone x2 = cone on the sphere**: its cone is already at the 6-level cap (~39 px wanted at 960x540, 32 max). On the arcade (longer rays, smaller alpha) x2 still helps (fireflies 0.52 %).
+- **carConcept paint: the cone does nothing.** Paint rays hit the mirror floor, whose screen colour is dark; the variance is the re-shaded specular (the studio softboxes through the floor, W45). That part is `hitLobeFilter`'s, and compensation shrinks it by sqrt(f) while the sample narrows only by sqrt(1 - f): at f 0.3 the specular part gets 0.55 alpha of filter on a 0.84 alpha sample, so outliers rise (p999 17 -> 28) and fall again with f (19.6 at 0.7). That is the honest budget at work: today's k 1 over-filters (x1.41) and hides those samples.
+
+### Energy (W45's metric, `energy.js`)
+
+Showcase carConcept, hero, 1280x720, rt off, denoised; 64-frame linear means of the denoiser's input (`hybrid.signalTarget`) and output (`hybrid.denoised`) over W45's rows (x 560-720; door paint y 345-388, skirt y 396-438; `energy-regions.jpg`). loss = 1 - denoised / raw. (The absolute values are not W45's 0.35 / 0.027: different signal and many changes since; compare losses.)
+
+| config | door raw | door loss | skirt raw | skirt loss |
+|---|---|---|---|---|
+| default | 1.039 | 15.0 % | 1.045 | 18.5 % |
+| cone | 1.038 | 15.0 % | 1.045 | 18.5 % |
+| cone x2 | 1.038 | 15.0 % | 1.046 | 18.6 % |
+| trunc 0.5 | 0.954 | 5.5 % | 1.026 | 8.8 % |
+| comp 0.3 | 1.010 | 17.1 % | 0.948 | 26.4 % |
+| comp 0.5 | 0.991 | 13.3 % | 0.958 | 19.7 % |
+| comp 0.7 | 0.971 | 9.8 % | 0.956 | 13.8 % |
+
+### Bench Measure vs PT (`measure.js` + `measure-configs.js`)
+
+carConcept at W50's pose, 960x540, PT 16 spp, 48 warm-up + 8 measured frames; luma / MAD of the 8-frame mean vs the PT.
+
+**The stage's mirror floor (r 0.03)** (`measure-carConcept-w50-960.txt`): raw and denoised are unchanged by every config (frame 12.1 / 12.8, car 29.8 / 32.4, door 14.4 / 14.7, within 0.2): the floor's alpha 0.0009 puts every cone below one pixel, and the paint's variance is the specular part. ours-rt: 8.4 -> 7.7-7.9 (frame), door 11.8 -> 14.1, but that first row is an artefact: re-run alone (`-rt-order.txt`), default / cone / default / default give door 109.8 / 109.8 / 109.8 / 109.9 and lip 41.7 / 41.5 / 41.6 / 41.7, so ours-rt measured in the first config of a page with raw and denoised also live reads differently (not chased; noted for the lead).
+
+**A glossy floor, `floorRoughness=0.3`** (`measure-carConcept-w50-960-floor03.txt`; a discarded warm-up config first), MAD raw / denoised:
+
+| config | frame | car | wheel (PT 68.3) luma, MAD | door (PT 140.9) luma, MAD |
+|---|---|---|---|---|
+| default | 10.3 / 10.0 | 18.8 / 17.2 | 69.2 / 89.5 lum, 13.8 / 21.6 | 129.3 / 131.7 lum, 26.6 / 16.6 |
+| cone | 10.4 / 10.0 | 18.9 / 17.3 | 69.8 / 89.9, 14.0 / 22.0 | 129.2 / 131.6, 26.7 / 16.6 |
+| comp 0.5 | 10.4 / 9.8 | 19.2 / 15.7 | 62.1 / 78.7, 14.3 / 12.5 | 124.3 / 127.5, 26.3 / 16.9 |
+| comp 0.7 | 10.5 / 9.9 | 19.8 / 16.5 | 59.0 / 75.2, 15.8 / 12.3 | 123.8 / 126.3, 25.0 / 18.0 |
+| trunc 0.5 (D49) | 10.3 / 9.8 | 19.1 / 16.2 | 55.3 / 69.6, 16.4 / 11.8 | 125.3 / 127.3, 22.0 / 16.5 |
+
+Measure scores the mean, and the cone mostly moves variance, so 'cone' alone is within noise of the default (wheel 13.8 -> 14.0 raw). With the bias (either form) the denoised wheel reflection, too bright by 21 levels at the default, comes down (89.5 -> 78.7 comp 0.5, 69.6 trunc 0.5; PT 68.3) and the denoised car region improves 17.2 -> 15.7; the door darkens 4-5 levels away from the PT. Truncation and compensation are close on these means; they should differ in width, which is what the line-spread gate measures.
+
+The cone leaves the denoiser's loss where it is (that loss is the specular part's). Compensation at 0.7 lowers it (15 -> 10 %, 18.5 -> 14 %) but the raw mean drops 7-9 %, so the denoised value barely moves (door 0.882 -> 0.875, skirt 0.852 -> 0.824). Whether the drop is bias or truth needs the PT (phase 2 / the Measure below).
