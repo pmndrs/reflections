@@ -1,6 +1,6 @@
 // docs/SETTINGS.md, rendered from the bench's schema (W51). `pnpm settings:doc` writes it;
 // test/settings-doc.test.ts fails when the checked-in file and the schema differ.
-import { ALL, GROUPS, NOT_EXPOSED, OURS, OURS_DN, OURS_SSR, RASTER, RT_BEHAVIOUR, SETTINGS, THREE, type Setting, type Value } from './schema';
+import { ALL, GROUPS, NOT_EXPOSED, OURS, OURS_DN, OURS_SSR, PRESET_DOCS, RASTER, RT_BEHAVIOUR, SETTINGS, THREE, type Setting, type Value } from './schema';
 
 const SETS: [readonly string[], string][] = [[ALL, 'every method'], [RASTER, 'ours + three SSR'], [OURS, 'ours (incl. probes only)'], [OURS_SSR, 'ours'], [OURS_DN, 'ours denoised, ours + RT'], [THREE, 'three SSR']];
 /** A method list in words where it is one of the schema's sets. */
@@ -35,6 +35,15 @@ export function renderSettingsMarkdown(): string {
   out.push('- **Apply:** *live* changes without a reload; *rebuild* is taken at construction (on the bench: the Rebuild button).');
   out.push('- **Cost:** measured GPU time with its source (docs/HANDOFF.md, docs/DIVERGES.md). Blank: not measured on its own. Small costs add up; a later "fast" preset will need them.');
   out.push('- **Applies to:** the bench\'s methods (ours raw / denoised / + RT, probes only, three SSR raw / + denoise / + FFX, path traced).');
+  out.push('');
+  // W77: the named presets (core REFLECTION_PRESETS) before the knobs they set
+  out.push('## Presets');
+  out.push('');
+  out.push('Named bundles of the settings below, in core (`REFLECTION_PRESETS`, `reflectionsPreset(name, overrides)`): an adapter applies the tracer part to its pass and the denoiser part to its hybrid resolve, and settings you pass explicitly win key by key. three: `new ScreenSpaceReflectionsPass(renderer, { preset, settings })` and `new HybridReflections(ssr, { preset, denoiser })` at construction, `applyReflectionsPreset({ ssr, hybrid }, name, overrides)` at runtime (rebuild your composites when it returns `resolutionChanged`). Bench: `preset` (the first control). Measurements: docs/research/w77/.');
+  out.push('');
+  out.push('| Preset | Sets | GPU cost | Trade-offs | Don\'t use it when | With the upscaler |');
+  out.push('|---|---|---|---|---|---|');
+  for (const p of PRESET_DOCS) out.push(`| \`${p.name}\` | ${cell(p.sets)} | ${cell(p.cost)} | ${cell(p.tradeoffs)} | ${cell(p.avoid)} | ${cell(p.upscaler)} |`);
   out.push('');
   for (const g of GROUPS) {
     const rows = SETTINGS.filter((s) => s.group === g.id);

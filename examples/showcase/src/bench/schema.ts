@@ -13,10 +13,13 @@
 //
 // This module is plain data: no three, no DOM (vitest imports it for the doc).
 import type { MethodId } from '../compare/method';
+// W77: the package's named presets (plain data; core's presets.ts imports nothing at runtime)
+import { REFLECTION_PRESET_NAMES, reflectionsPreset, type ReflectionsPresetName } from '../../../../packages/core/src/presets';
 
-export type GroupId = 'aa' | 'scene' | 'sssr' | 'rt' | 'hybrid' | 'denoiser' | 'probes' | 'materials' | 'three' | 'pathtracer';
+export type GroupId = 'preset' | 'aa' | 'scene' | 'sssr' | 'rt' | 'hybrid' | 'denoiser' | 'probes' | 'materials' | 'three' | 'pathtracer';
 
 export const GROUPS: { id: GroupId; title: string; blurb: string }[] = [
+  { id: 'preset', title: 'Preset', blurb: 'A named bundle of the settings below (core `REFLECTION_PRESETS`, W77): see "Presets" above for what each one sets, costs and trades. Keys you set explicitly win over the preset.' },
   { id: 'aa', title: 'Anti-aliasing / upscaler', blurb: 'Display AA after the composite (examples/shared/antialias.ts, W36): @pmndrs/upscaler at ratio 1 acts as TAA and smooths the last fireflies. Same choice on ours and on three\'s SSR; the path tracer needs none.' },
   { id: 'scene', title: 'Scene', blurb: 'What every method renders: scene, camera, floor, tone mapping, exposure, size.' },
   { id: 'sssr', title: 'Screen-space (SSSR)', blurb: '`ScreenSpaceReflectionsPass.settings` (core `ScreenSpaceReflectionsSettings`), read every frame.' },
@@ -84,6 +87,11 @@ const sel = (id: string, group: GroupId, label: string, choices: readonly (reado
   ({ id, group, label, type: 'select', choices, default: def, apply: 'live', ...o });
 
 export const SETTINGS: Setting[] = [
+  // ---- preset (W77): first, since it sets keys of the groups below ------------------------------------------
+  sel('preset', 'preset', 'Preset', REFLECTION_PRESET_NAMES.map((n) => [n, n] as const), 'default', {
+    apply: 'rebuild', appliesTo: OURS_SSR, api: "ScreenSpaceReflectionsPass({ preset }) + HybridReflections({ preset }); applyReflectionsPreset() at runtime",
+    tradeoff: 'Sets the URL keys the preset names (performance: s.reflectionResolution half) wherever the URL doesn\'t set them; the controls of those keys keep showing their own value. Clearing a key returns it to the preset\'s value.',
+  }),
   // ---- anti-aliasing (top: the maintainer's ask, W51) -----------------------------------------------------
   sel('aa', 'aa', 'AA mode', [['upscaler', 'Upscaler (@pmndrs/upscaler, TAA at ratio 1)'], ['taa', 'TAA (W40 resolve)'], ['off', 'Off']], null, {
     pageDefault: 'upscaler', appliesTo: RASTER, api: 'examples DisplayAA (mode)',
@@ -353,7 +361,7 @@ export const SETTINGS: Setting[] = [
   // W53 (D3660-D3662): live (the denoiser's setOptions + HybridReflections.denoiserHitSource), no rebuild
   sel('hitSource', 'denoiser', 'Keep hit sources apart', [['0', 'off'], ['hits', 'screen vs traced hits'], ['all', 'hits and misses']], '0', {
     appliesTo: OURS_DN, api: 'hybrid.denoiserHitSource = true; FfxReflectionDenoiser({ separateHitSources, missesMatchAnySource })',
-    tradeoff: 'The denoiser stops blending bright screen-space hits into dark traced ones (the W50 halo: carConcept lip 80 -> 59 with hits, 52 with all, PT 48, at 960x540; at 1080p the halo is mostly gone anyway). hits: no regression on chess / toyCar / Sponza. all: boils where rays flip between hit and miss (std p99 x4-10). Both show a 2x2 stair step at source edges (D3663).',
+    tradeoff: 'W77 (maintainer: not in the performance preset): with RT it lowers silhouette error but raises flicker there. carConcept w50 sill band at half res MAD 57.9 -> 39.3, but the band\'s orbit flicker 1.16 -> 2.94 (reflection region 0.41 -> 0.51); at full res band 30.6 -> 23.2, band flicker 0.90 -> 1.32; chess, Sponza, the ssr scenes unchanged; no effect without RT. The denoiser stops blending bright screen-space hits into dark traced ones (the W50 halo: carConcept lip 80 -> 59 with hits, 52 with all, PT 48, at 960x540; at 1080p the halo is mostly gone anyway). hits: no regression on chess / toyCar / Sponza. all: boils where rays flip between hit and miss (std p99 x4-10). Both show a 2x2 stair step at source edges (D3663).',
     cost: '+0.35 ms (hits) / +0.51 ms (all) at 1080p, ~0 at 960x540 (W53)',
   }),
   num('hitDistW', 'denoiser', 'Hit-distance weight', 0, 16, 1, 0, {
@@ -449,6 +457,39 @@ export const RT_BEHAVIOUR: { what: string; why: string }[] = [
   { what: 'The traced lobe filter follows the tracer\'s lobe split', why: 'D5021 / W76: with the cone + compensation defaults a traced hit\'s specular is filtered by hitLobeFilter x alpha x sqrt(mirrorBias) (the share the narrowed sample leaves out); `traceSettings` can override it.' },
 ];
 
+/** W77: what docs/SETTINGS.md says about each named preset (core REFLECTION_PRESETS); one entry per preset. */
+export interface PresetDoc {
+  name: ReflectionsPresetName;
+  /** What it sets, in words. */
+  sets: string;
+  /** Measured GPU cost or saving, with its source. */
+  cost: string;
+  /** What it trades. */
+  tradeoffs: string;
+  /** When not to use it. */
+  avoid: string;
+  /** How it combines with the upscaler's render ratio. */
+  upscaler: string;
+}
+export const PRESET_DOCS: PresetDoc[] = [
+  {
+    name: 'default',
+    sets: 'Nothing: every key a preset names goes back to what the app passed at construction, else to the package default.',
+    cost: '',
+    tradeoffs: 'Full-resolution trace and denoise (the package defaults).',
+    avoid: '',
+    upscaler: 'At ratio 1.5 the reflections are already a small share of the frame (W77), so the upscaler is the bigger saving.',
+  },
+  {
+    name: 'performance',
+    sets: '`reflectionResolution: \'half\'`: trace, RT and denoise at half size in each axis, joint bilateral upsample. No denoiser hit source (maintainer, 2026-11-13: flicker first); that stays its own switch (Denoiser group, `hitSource`).',
+    cost: 'Relative only, re-time on a quiet machine (W77: 1080p, ratio 1, RT, cone defaults, GPU shared with other runs, least-contended page, measured with the hit source on, which W53 puts at +0.35 ms): reflection passes about halve, carConcept 6.0 -> 2.6 ms, chess 4.0 -> 1.6, Sponza 3.3 -> 2.4, mirrorWall 10.7 -> 5.0, contact 12.4 -> 7.4. At ratio 1.5 about -1 ms; at ratio 2 nothing (its half-res sample + upsample passes eat the saving).',
+    tradeoffs: 'W77 bench vs the path tracer (960x540, ours-rt, ratio 1): carConcept frame MAD 7.8 -> 8.9, lip 41.8 -> 50.0, sill band 30.6 -> 57.9 (the half-res denoiser covers twice the screen area); chess 6.9 -> 7.2; Sponza unchanged. Orbit flicker of the reflection: carConcept 0.36 -> 0.41, chess 0.23 -> 0.25, Sponza 0.53 -> 0.55. Mirrors: jagged reflected edges (W75). A thin bright reflection loses most of its peak at r 0.05 and is lost at r 0.15 (line spread).',
+    avoid: 'With an upscale ratio of 2 (no saving, thin features lost, carConcept door MAD +4); when the frame already upscales at 1.5 or more and reflections are a small share; mirror close-ups whose reflected edges must stay crisp; thin bright emitters (neon strips, specular lines) on glossy floors; RT scenes whose silhouettes over a mirror floor matter (the car sill: add hitSource \'hits\' if its flicker is acceptable).',
+    upscaler: 'Use it at ratio 1. At 1.5 it still saves ~1 ms but stacks: a thin strip at r 0.05 is lost, mirrorWall orbit flicker +17 %. Not at 2. Given the choice, upscale 1.5 first (the whole frame shrinks) and keep full-res reflections.',
+  },
+];
+
 /** What the schema can't reach without a package change (listed in docs/SETTINGS.md). */
 export const NOT_EXPOSED: { name: string; why: string }[] = [
   { name: 'settings.fallbackColor', why: 'The three adapter forces the tracer\'s constant fallback black (the composite adds the probe); a constant colour is meaningless there.' },
@@ -459,6 +500,19 @@ export const NOT_EXPOSED: { name: string; why: string }[] = [
 ];
 
 export const settingById = new Map(SETTINGS.map((s) => [s.id, s]));
+
+/**
+ * W77: the bench URL keys preset `name` sets (tracer settings as `s.<field>`, the denoiser's hit source as
+ * `hitSource`), as URL strings. Empty for an unknown name or null.
+ */
+export function presetUrlKeys(name: string | null): Record<string, string> {
+  if (!name || !(REFLECTION_PRESET_NAMES as string[]).includes(name)) return {};
+  const p = reflectionsPreset(name as ReflectionsPresetName);
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(p.tracer)) if (v !== undefined) out[`s.${k}`] = typeof v === 'boolean' ? (v ? '1' : '0') : String(v);
+  if (p.denoiser.hitSource !== undefined) out.hitSource = p.denoiser.hitSource === 'off' ? '0' : p.denoiser.hitSource;
+  return out;
+}
 
 /** A value as the URL carries it (booleans 1 / 0). */
 export const encodeValue = (s: Setting, v: Value): string => (s.type === 'bool' ? (v ? '1' : '0') : String(v));

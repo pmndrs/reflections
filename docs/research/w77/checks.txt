@@ -1,0 +1,152 @@
+=== preset 17:32:32
+  [PASS] preset 'performance' (?preset=): half-res trace, the denoiser keeps hit sources apart, same frame as setting both by hand - preset: half 480/960 px, hit source hits (true), FFX true/true; by hand: half 480/960 px, hit source hits (true), FFX true/true; frame vs by hand mean 0.000, max 0/255
+  [PASS] preset 'performance' + explicit ?res=full&hitSource=off: the explicit settings win - full 960/960 px, hit source off (false), FFX false/false
+  [PASS] applyReflectionsPreset at runtime: 'default' restores full + no hit source, an override wins, 'performance' again is half - default: full 960/960 px, hit source off (false), FFX false/false; performance + full: full 960/960 px, hit source hits (true), FFX true/true; performance: half 480/960 px, hit source hits (true), FFX true/true
+  [PASS] no WebGPU validation errors or exceptions
+all checks passed
+=== ssr 17:33:14
+  [PASS] ssr mirrorWall (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 197902 rays, 9645 misses, mean confidence 0.335 on geometry, mirror floor 0.651
+  [PASS] ssr mirrorWall (subgroups): mirror floor shows the wall - 97187 floor px reflect a visible wall point; 99.2% with confidence >= 0.9; luminance correlation 0.998, mean abs rel diff 0.018; hit distance median rel err 0.0001
+  [PASS] ssr mirrorWall (subgroups): reflected sphere and cube not striped - cube hf 0.033 vs direct 0.0190 (ratio 1.7), 97.7% of 6007 px confident; sphere hf 0.029 vs direct 0.0036 (ratio 7.9), 92.5% of 4616 px confident
+  [PASS] ssr offscreen (subgroups): renders, no validation errors, finite outputs - 3 probe(s), 103114 rays, 69346 misses, mean confidence 0.255 on geometry, mirror floor 0.427
+  [PASS] ssr offscreen (subgroups): low confidence where the reflection comes from behind the camera - wall mirror (38616 px, view 'mirror'): mean confidence 0.0314; floor reflecting above the frame (default view): 0.427
+  [PASS] ssr contact (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 69831 rays, 25121 misses, mean confidence 0.357 on geometry, mirror floor 0.696
+  [PASS] ssr roughnessRamp (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 19142 rays, 9398 misses, mean confidence 0.059 on geometry, mirror floor 0.075
+  [PASS] ssr boxRoom (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 42860 rays, 12476 misses, mean confidence 0.259 on geometry, mirror floor 0.000
+  [PASS] ssr moving (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 198000 rays, 34128 misses, mean confidence 0.293 on geometry, mirror floor 0.535
+  [PASS] ssr explainer (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 63518 rays, 40080 misses, mean confidence 0.201 on geometry, mirror floor 0.000
+  [PASS] ssr rooms (subgroups): renders, no validation errors, finite outputs - 3 probe(s), 41476 rays, 15644 misses, mean confidence 0.197 on geometry, mirror floor 0.900
+  [PASS] ssr facingMirrors (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 147042 rays, 33126 misses, mean confidence 0.312 on geometry, mirror floor 0.000
+  [PASS] ssr facingMirrors (subgroups): mirror seen in a mirror is not black with last frame's colour - 9938 left-mirror px reflect the right mirror (95.9% confident), hitShading 'off'; current: 99.6% black, mean lum 0.001; lit: 0.0% black, mean lum 0.171; final: 0.5% black, mean lum 0.173
+  [PASS] ssr facingMirrors (subgroups): mirror seen in a mirror is not black with the re-shade (this frame's colour) - hitShading 'reshade', hitColor 'current': reshade: 0.0% black, mean lum 0.242
+  [PASS] ssr mirrorWall (workgroup): renders, no validation errors, finite outputs - 1 probe(s), 197902 rays, 9621 misses, mean confidence 0.335 on geometry, mirror floor 0.651
+  [PASS] ssr mirrorWall (workgroup): mirror floor shows the wall - 97187 floor px reflect a visible wall point; 99.2% with confidence >= 0.9; luminance correlation 0.998, mean abs rel diff 0.018; hit distance median rel err 0.0001
+  [PASS] ssr mirrorWall (workgroup): reflected sphere and cube not striped - cube hf 0.033 vs direct 0.0190 (ratio 1.7), 97.7% of 6007 px confident; sphere hf 0.029 vs direct 0.0036 (ratio 7.9), 92.5% of 4616 px confident
+  [PASS] ssr offscreen (workgroup): renders, no validation errors, finite outputs - 3 probe(s), 103114 rays, 69265 misses, mean confidence 0.255 on geometry, mirror floor 0.428
+  [PASS] ssr offscreen (workgroup): low confidence where the reflection comes from behind the camera - wall mirror (38616 px, view 'mirror'): mean confidence 0.0314; floor reflecting above the frame (default view): 0.428
+  [PASS] ssr mirrorBias: 0 is the default path, 0.5 changes the rays - {"0":"a0fdeeab","unset":"a0fdeeab","unset again":"a0fdeeab","0.5":"db87c2e4"}
+  [PASS] ssr mirrorBias 0.5: less raw noise on the roughnessRamp strips (r 0.2-0.4) - r 0.2: std 9.82 -> 4.83 (15917 px); r 0.3: std 11.29 -> 8.47 (36891 px); r 0.4: std 8.77 -> 6.18 (49486 px)
+  [PASS] ssr rayReuse: 'copy' is the default path, 'ratio' copies until its pipelines are built, then changes the radiance - {"unset":"a0fdeeab","copy":"a0fdeeab","ratio (first frame)":"a0fdeeab","ratio":"1caa6e46","copy again":"a0fdeeab"}
+  [PASS] ssr rayReuse 'ratio': less raw noise on the roughnessRamp strips (r 0.2-0.4) - r 0.2: std 10.03 -> 7.58 (15917 px); r 0.3: std 11.80 -> 8.32 (36891 px); r 0.4: std 9.53 -> 7.51 (49486 px)
+  [PASS] ssr rayReuse 'ratio': mean luma within 1.5 / 255 of copy@4 on the same strips (no dimming, no bias) - r 0.2: copy -0.03, ratio 0.80 (copy@4 mean 90.7); r 0.3: copy 0.00, ratio 0.77 (copy@4 mean 115.3); r 0.4: copy 0.02, ratio 0.45 (copy@4 mean 122.5)
+  [PASS] ssr hitColorFilter / mirrorBiasCompensate (W72): defaults are the old path bit for bit, cone changes the hits, its mean stays within 10 % of off, no GPU errors - {"unset":"a0fdeeab","off":"a0fdeeab","compensate, no cone":"a0fdeeab","bias 0.5":"db87c2e4","bias 0.5 + compensate, no cone":"db87c2e4","cone":"e904c3f7","cone + compensate 0.5":"8b3c273d","unset again":"a0fdeeab","ratio":"1caa6e46","cone + ratio":"e5ba2a1c","comp + ratio":"7df9db4e"}; glossy mean cone / off 1.0029; GPU errors 0
+  [PASS] ssr hitColorFilter 'cone' with rayReuse 'ratio' (W72 + W73): the ratio intersect variant reads the pyramid - ratio 1caa6e46, cone + ratio e5ba2a1c, comp + ratio 7df9db4e
+  [PASS] ssr hitColorFilter 'cone' with hitColor 'history' and hitShading 'off' (the pyramid of last frame's colour) - off 2de1ba53 / cone 86a511fe, mean ratio 1.0234; GPU errors 0
+  [PASS] ssr hitColorFilter 'cone' with ?rt=1 (traced pass after the tracer): defaults unchanged, cone and compensation change the result - {"unset":"b5b271c1","cone":"6b99b74e","comp 0.5":"2c62ed77","unset again":"b5b271c1"}; GPU errors 0
+  [PASS] ssr hitColorFilter 'cone' on a 97x61 canvas (odd sizes, a short pyramid) - active true, GPU errors 0
+  [PASS] ssr denoiser gate follows the roughness threshold (D1402) - threshold 0.8: gate 0.8, denoised (output != input): glossy 92.6% of 111202 px, between 97.1% of 135175 px, above 0.0% of 99717 px; gate back to 0.447
+  [PASS] ssr specOcc (GTAO -> Lagarde, probe part): darkens the contact creases only, no GPU errors - 1.07% px darker > 4/255, 87% of them where AO < 0.95; mean |change| where AO > 0.97: 0.126; min AO 0.02, min factor 0.00; GPU errors 0
+  [PASS] no WebGPU validation errors or exceptions
+all checks passed
+=== hybrid 17:35:43
+  [PASS] hybrid: denoiser found - ffx-reflections
+  [PASS] hybrid rooms: denoised composite renders, no validation errors
+  [PASS] hybrid mirrorWall: denoised composite renders, no validation errors
+  [PASS] hybrid explainer: denoised composite renders, no validation errors
+  [PASS] hybrid mirrorWall low: the probe fallback behind the sphere is not dark - 2258 fallback px around the sphere's reflection: mean 152.4 / 255 (probes-only 151.6), wall 195.6
+  [PASS] hybrid mirrorWall lowSphere: the probe does not show through the reflected sphere - 41464 px reflect the sphere: probe weight 0.005 (FFX blend 0.048); 17669 px reflect the wall behind it: hit weight 0.095 (FFX 0.009)
+  [PASS] hybrid seam (D53): glossy mirrorWall floor, distance roughness (the default) narrows the SSR-to-probe step - step off 22.48 -> distanceRoughness 21.70 / 255 over 1968 blocks (run-to-run <= 0.15)
+  [PASS] half-res mirrorWall: traced and denoised at half size, the upsampled residual carries the reflection and stays near full res - 132529 reflection px: full vs probe-only 51.18, this vs probe-only 51.13, this vs full 6.13 (max 182); tracer 480x270 of 960x540, 2471 traced rays
+  [PASS] half-res mirrorWall 'mixed' (halfResMinRoughness 0.01 at runtime, composite built for half): mirror path on, reflection carried - 132529 reflection px: full vs probe-only 51.18, this vs probe-only 51.68, this vs full 3.15 (max 143); traceMode mixed
+  [PASS] half-res contact: traced and denoised at half size, the upsampled residual carries the reflection and stays near full res - 203962 reflection px: full vs probe-only 54.58, this vs probe-only 53.47, this vs full 7.58 (max 187); tracer 480x270 of 960x540, 6060 traced rays
+  [PASS] half-res contact 'mixed' (halfResMinRoughness 0.01 at runtime, composite built for half): mirror path on, reflection carried - 203962 reflection px: full vs probe-only 54.58, this vs probe-only 53.47, this vs full 7.58 (max 187); traceMode mixed
+  [PASS] half-res + rayReuse 'ratio' + tracedMissRate 'half' (contact, rt): all finite, the fill ran, no validation errors - non-finite 0; traced 5120, half-rate skipped 940, filled 3594; residual non-zero 1077355 of 2073600
+  [PASS] half-res odd size 961x541 contact: tracer 481x271, reflection carried, near full - 216018 reflection px: full vs probe-only 56.11, this vs probe-only 54.80, this vs full 7.59 (max 198); tracer 481x271
+  [PASS] half-res runtime switch full -> half -> full ends identical to full, half-res targets released - final after the switch back vs before: mean 0.000, max 0/255; upsampled targets 961 px wide at half, 1 after
+  [PASS] preset 'performance' (?preset=): half-res trace, the denoiser keeps hit sources apart, same frame as setting both by hand - preset: half 480/960 px, hit source hits (true), FFX true/true; by hand: half 480/960 px, hit source hits (true), FFX true/true; frame vs by hand mean 0.000, max 0/255
+  [PASS] preset 'performance' + explicit ?res=full&hitSource=off: the explicit settings win - full 960/960 px, hit source off (false), FFX false/false
+  [PASS] applyReflectionsPreset at runtime: 'default' restores full + no hit source, an override wins, 'performance' again is half - default: full 960/960 px, hit source off (false), FFX false/false; performance + full: full 960/960 px, hit source hits (true), FFX true/true; performance: half 480/960 px, hit source hits (true), FFX true/true
+  [PASS] no WebGPU validation errors or exceptions
+all checks passed
+=== half-res 17:37:26
+  [PASS] half-res mirrorWall: traced and denoised at half size, the upsampled residual carries the reflection and stays near full res - 132529 reflection px: full vs probe-only 51.18, this vs probe-only 51.13, this vs full 6.13 (max 182); tracer 480x270 of 960x540, 2471 traced rays
+  [PASS] half-res mirrorWall 'mixed' (halfResMinRoughness 0.01 at runtime, composite built for half): mirror path on, reflection carried - 132529 reflection px: full vs probe-only 51.18, this vs probe-only 51.68, this vs full 3.15 (max 143); traceMode mixed
+  [PASS] half-res contact: traced and denoised at half size, the upsampled residual carries the reflection and stays near full res - 203962 reflection px: full vs probe-only 54.58, this vs probe-only 53.47, this vs full 7.58 (max 187); tracer 480x270 of 960x540, 6060 traced rays
+  [PASS] half-res contact 'mixed' (halfResMinRoughness 0.01 at runtime, composite built for half): mirror path on, reflection carried - 203962 reflection px: full vs probe-only 54.58, this vs probe-only 53.47, this vs full 7.58 (max 187); traceMode mixed
+  [PASS] half-res + rayReuse 'ratio' + tracedMissRate 'half' (contact, rt): all finite, the fill ran, no validation errors - non-finite 0; traced 5120, half-rate skipped 940, filled 3594; residual non-zero 1077650 of 2073600
+  [PASS] half-res odd size 961x541 contact: tracer 481x271, reflection carried, near full - 216018 reflection px: full vs probe-only 56.11, this vs probe-only 54.80, this vs full 7.59 (max 198); tracer 481x271
+  [FAIL] half-res runtime switch full -> half -> full ends identical to full, half-res targets released - final after the switch back vs before: mean 0.000, max 1/255; upsampled targets 961 px wide at half, 1 after
+  [PASS] preset 'performance' (?preset=): half-res trace, the denoiser keeps hit sources apart, same frame as setting both by hand - preset: half 480/960 px, hit source hits (true), FFX true/true; by hand: half 480/960 px, hit source hits (true), FFX true/true; frame vs by hand mean 0.000, max 0/255
+  [PASS] preset 'performance' + explicit ?res=full&hitSource=off: the explicit settings win - full 960/960 px, hit source off (false), FFX false/false
+  [PASS] applyReflectionsPreset at runtime: 'default' restores full + no hit source, an override wins, 'performance' again is half - default: full 960/960 px, hit source off (false), FFX false/false; performance + full: full 960/960 px, hit source hits (true), FFX true/true; performance: half 480/960 px, hit source hits (true), FFX true/true
+  [PASS] no WebGPU validation errors or exceptions
+1 check(s) FAILED
+ ELIFECYCLE  Command failed with exit code 1.
+=== showcase 17:38:24
+  [PASS] showcase carConcept: renders on / off / rt, no GPU errors - 1 probes (cube-array, 306 ms), denoiser ffx-reflections, mean 151/255, BVH 463377 tris; reflections 5.83 ms
+  [PASS] showcase toyCar: renders on / off / rt, no GPU errors - 1 probes (cube-array, 63 ms), denoiser ffx-reflections, mean 156/255, BVH 109032 tris; reflections 29.01 ms
+  [PASS] showcase chess: renders on / off / rt, no GPU errors - 1 probes (cube-array, 384 ms), denoiser ffx-reflections, mean 161/255, BVH 1534496 tris; reflections 32.83 ms
+  [PASS] showcase sponza: renders on / off / rt, no GPU errors - 7 probes (cube-array, 394 ms), denoiser ffx-reflections, mean 61/255, BVH 262267 tris; reflections 11.97 ms
+  [PASS] showcase carConcept: still camera, reflections settle under anti-aliasing (upscaler; < 0.3% of pixels flicker > 1/255) - upscaler 0.00%, W40 TAA 0.01%, off 0.87% of pixels with mean |frame - previous| > 1/255
+  [PASS] showcase carConcept: ?upscale=performance renders (G-buffer at half size, upscaled) - render 640x360 -> 1280x720, mean 152/255
+  [PASS] showcase carConcept: roughness from normal variance (specAA) reaches the G-buffer and turns off cleanly - door G-buffer roughness off 0.250, on 0.350, off again 0.250
+  [PASS] no WebGPU validation errors or exceptions
+all checks passed
+=== bench 17:40:07
+  [PASS] bench: every live control moved and reset through the DOM, no GPU errors or exceptions - 110 live, 39 creation-time left set, planned: none
+  [PASS] bench: one Rebuild with every creation-time setting moved, then three SSR + FFX, PT, probes, ours denoised built with them - pending ours-rt, three-denoise; means 132 / 135 / 150/255
+  [PASS] bench: the scene control switches and comes back - toyCar -> carConcept
+  [PASS] bench: view modes render (split, side by side, |A - B| heat map with its stats) - means split 149, side 150, heat 72/255; |A - B| mean 18.77, p99 146
+  [PASS] bench: both sides follow the shared camera (pose hero -> w50 changes A and B, AA on) - mean |hero - w50| A 44.2, B 44.2/255
+  [PASS] bench: snapshot A as B, flip hitLobeFilter 1 -> 0, heat map shows the change - |live A - snapshot| mean 0.052 right after the snapshot, 1.636 with lobeFilter 0
+  [PASS] bench: Measure on carConcept (pose w50) vs the path tracer over frame, glossy, W50's regions and a dragged one - 16 spp; frame 518400 px MAD 8.1 (luma 150.8, PT 148.2); glossy 458630 px MAD 8.8 (luma 151.0, PT 148.2); lip 1440 px MAD 45.7 (luma 97.1, PT 74.0); band 4497 px MAD 34.0 (luma 38.9, PT 5.1); wheel 9900 px MAD 29.1 (luma 44.6, PT 24.6); door 8495 px MAD 14.1 (luma 110.4, PT 118.8); car 85400 px MAD 15.3 (luma 108.1, PT 104.8); underside 12480 px MAD 26.9 (luma 60.7, PT 50.2)
+  [PASS] bench: copy as code, URL state and presets - query 'scene=carConcept&pose=w50&lobeFilter=0', preset round trip ok, code 28 lines
+  [PASS] no WebGPU validation errors or exceptions
+all checks passed
+=== regressions 17:42:42
+  [PASS] ssr hitColor 'history': first frame with an app historySource reads no stale history - 0/3531 stale, 3527 current
+  [PASS] ssr hitColor 'history': resetHistory() with an app historySource reads no stale history - second frame (valid history) 3533/3533 stale, 0 current; after reset 0/3531 stale, 3527 current
+  [PASS] ssr hitColor 'history' -> 'current' -> 'history' reads no stale lit history - while stale 3529/3533 stale, 0 current; current 0/3531 stale, 3527 current; back to history 0/3538 stale, 3534 current
+  [PASS] ssrHistory: no WebGPU errors
+  [PASS] rt tile cap: budget 362 over 905 tiles is spread fairly over 4 frames - tiles traced in k of 4 frames [29,425,451,0,0]; never 29 (uniform 137.8 +- 10.8, bound 181.0), every frame 0 (uniform 18.0 +- 4.2, bound 34.7)
+  [PASS] rt tile cap: the frame budget holds and is used - traced per frame 356 362 342 348 (budget 362, floor 304), tile caps 1 1 1 1
+  [PASS] rtTiles: no WebGPU errors
+  [PASS] rt limits: 5-buffer provider + probe fallback throws a clear error (default 8 storage buffers) - threw "rt: the trace pipeline binds 9 storage buffers in the compute stage (pass 3, radiance fallback 1, provider 'fake-5b-0t' 5, hit shading 0); the device allows 8 ("
+  [PASS] rt limits: a storage texture in the provider throws a clear error (default 4 storage textures) - threw "rt: the trace pipeline binds 5 storage textures in the compute stage (pass 4, radiance fallback 0, provider 'fake-0b-1t' 1, hit shading 0); the device allows 4 "
+  [PASS] rt limits: 4-buffer provider + probe fallback (8) and a raised limit (9) build without errors - 4 + probes: built; raised: built
+  [PASS] sssr limits: a 4-size probe set as fallback + hit shading (18 sampled textures) throws a clear error at 16, builds without errors with reflectionsRequiredLimits (W62, D4900; W64, D4901) - default: threw "ssr: the intersect pipeline binds 18 sampled textures in the compute stage (pass 10, radiance fallback 4, hit shading 4); the device allows 16 (maxSampledTextur"; library limits (32): built
+  [PASS] gbuffer: the first frame's projection is the one three renders with (forward depth) - max diff 1.08e-8; [10], [14]: first frame -1.0010 -0.1001, rendered -1.0010 -0.1001
+  [PASS] gbuffer: the first frame's projection is the one three renders with (reversed depth) - max diff 1.08e-8; [10], [14]: first frame 0.0010 0.1001, rendered 0.0010 0.1001
+  [PASS] probes: dominant direction bends the environment sample too (inside, fade band, outside agree) - max |diff| vs the environment along the dominant direction: inside 0.00e+0, fade 0.00e+0, outside 0.00e+0; plain R vs dominant 2.37e-1
+  [PASS] probes: two computeIrradiance() calls in one encoder keep their own slots - slot 0 L00 3.5449 1.7724 0.8862 (expected 3.5449 1.7725 0.8862, rel err 1.11e-5); slot 1 0.8862 1.7724 7.0897 (expected 0.8862 1.7725 7.0898, rel err 1.11e-5)
+  [PASS] probes: a mirrored parent keeps a positive volume (scale -2, 1, 1) - coverage at the centre 1.000, 1.5 along x 1.000, 2.5 along x 0.000
+  [PASS] probes: a zero-scale parent gives a zero (disabled) volume - coverage at the centre 0.000, 0.3 off 0.000
+  [PASS] depth pyramid (forward Z, 1917x1079): same on 4 and 6 storage textures per stage; mip 0 a copy; mips = CPU fold incl. odd rows/columns - 7 mips: 0 texels differ between devices, copy 0, vs CPU fold 0; odd footprints change 342208 texels vs a plain 2x2
+  [PASS] depth pyramid (reverse Z, 1917x1079): same on 4 and 6 storage textures per stage; mip 0 a copy; mips = CPU fold incl. odd rows/columns - 7 mips: 0 texels differ between devices, copy 0, vs CPU fold 0; odd footprints change 343218 texels vs a plain 2x2
+  [PASS] probes: the documented minimum sourceSize (64) works; below it the error names the minimum - 64: ok; 32: "LayoutPrefilter: sourceSize must be a power of two >= 64, got 32."; 32: "LayoutPrefilter: sourceSize must be a power of two >= 64, got 32."; 64: ok
+  [PASS] probes: a bake that changes layout and environment lights its captures with the new environment - wall seen by probe a (rgb): env A 1.000 0.000 0.000; after env B + new probe 0.000 0.000 1.000; next bake 0.000 0.000 1.000
+  [PASS] rt on-screen reuse ignores inputs.history unless hitColor 'history' - current: 0/3569 on-screen hits from history; 'history': 3571/3571
+  [PASS] rt hitColor 'history' rejects a wrong-size or missing history like the tracer - wrong size: rt: history is 160x80, expected 320x160; missing: rt: hitColor 'history' needs inputs.history and inputs.motion
+  [PASS] rtHistory: no WebGPU errors
+  [PASS] specular swap: confidence 0 gives lit exactly (every term) - max |final - lit| 0, mask mismatch 0 px
+  [PASS] specular swap: control halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.037/0.06/0.227 (lin 0.00012 of T 0.0245), full 0.035/0.067/0.389; material roughness: blend 0.142/3.293/9.635 (lin 0.00062 of T 0.0245), full 0.236/6.181/19.012; estimate: blend 0.502/13.079/24.795 (lin 0.00211 of T 0.0245), full 1.012/20.894/40.941
+  [PASS] specular swap: specularIntensity halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.039/0.056/0.079 (lin 0.00012 of T 0.00763), full 0.037/0.056/0.107; material roughness: blend 0.067/0.813/2.695 (lin 0.00025 of T 0.00763), full 0.096/1.551/5.331; estimate: blend 2.677/27.516/48.273 (lin 0.01112 of T 0.00763), full 7.404/41.367/53.73
+  [PASS] specular swap: specularColor halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.036/0.058/0.28 (lin 0.00012 of T 0.01929), full 0.036/0.061/0.502; material roughness: blend 0.129/2.202/6.24 (lin 0.00049 of T 0.01929), full 0.21/3.862/12.338; estimate: blend 1.565/12.339/23.327 (lin 0.00488 of T 0.01929), full 5.522/22.897/49.759
+  [PASS] specular swap: ior halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.037/0.064/0.308 (lin 0.00012 of T 0.03803), full 0.035/0.075/0.56; material roughness: blend 0.144/2.288/5.022 (lin 0.0006 of T 0.03803), full 0.23/4.102/9.834; estimate: blend 1.447/6.444/24.004 (lin 0.00647 of T 0.03803), full 5.341/18.343/40.51
+  [PASS] specular swap: envMapIntensity halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.035/0.059/0.079 (lin 0.0001 of T 0.01502), full 0.036/0.06/0.081; material roughness: blend 0.09/1.198/2.691 (lin 0.00028 of T 0.01502), full 0.128/1.876/4.889; estimate: blend 1.826/15.795/29.479 (lin 0.00616 of T 0.01502), full 2.357/24.633/50.657
+  [PASS] specular swap: aoMap halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.035/0.058/0.167 (lin 0.00009 of T 0.01674), full 0.035/0.062/0.292; material roughness: blend 0.083/1.046/2.449 (lin 0.00029 of T 0.01674), full 0.119/1.872/4.932; estimate: blend 2.446/38.171/77.566 (lin 0.00504 of T 0.01674), full 2.35/20.085/56.934
+  [PASS] specular swap: metal halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.029/0.108/0.609 (lin 0.00009 of T 0.26253), full 0.047/0.169/1.19; material roughness: blend 0.45/5.134/18.025 (lin 0.00159 of T 0.26253), full 0.473/8.02/23.626; estimate: blend 0.742/9.313/39.276 (lin 0.00206 of T 0.26253), full 1.158/15.516/35.248
+  [PASS] specularSwap: no WebGPU errors
+  [PASS] specular swap carConcept: confidence 0 gives lit exactly; in-scope halo (c 0.5) mean < 0.25 /255 - census {"meshes":110,"outOfScope":21,"specular":0,"ior":0,"aoMap":101,"envMapIntensity":0}; blend mean/p99/max: inScope 0.035/0.082/19.157 (83424 px) [estimate 0.663/25.66/255 (83424 px)]; specularOrIor 0/0/0 (0 px) [estimate 0/0/0 (0 px)]; aoMap 0.098/2.043/19.157 (3418 px) [estimate 14.972/59.638/255 (3418 px)]; outOfScope 0.173/3.443/32.818 (9971 px) [estimate 7.875/96.056/255 (9971 px)]; all 0.05/0.259/32.818 (93395 px) [estimate 1.433/33.15/255 (93395 px)]
+  [PASS] specular swap toyCar: confidence 0 gives lit exactly; in-scope halo (c 0.5) mean < 0.25 /255 - census {"meshes":4,"outOfScope":3,"specular":0,"ior":0,"aoMap":2,"envMapIntensity":0}; blend mean/p99/max: inScope 0.033/0.082/0.378 (82216 px) [estimate 0.048/0.102/0.42 (82216 px)]; specularOrIor 0/0/0 (0 px) [estimate 0/0/0 (0 px)]; aoMap 0/0/0 (0 px) [estimate 0/0/0 (0 px)]; outOfScope 1.129/6.875/31.58 (10182 px) [estimate 5.229/55.525/255 (10182 px)]; all 0.154/2.535/31.58 (92398 px) [estimate 0.619/10.043/255 (92398 px)]
+  [PASS] specular swap chess: confidence 0 gives lit exactly; in-scope halo (c 0.5) mean < 0.25 /255 - census {"meshes":50,"outOfScope":16,"specular":0,"ior":0,"aoMap":33,"envMapIntensity":0}; blend mean/p99/max: inScope 0.033/0.081/1.828 (93395 px) [estimate 0.669/12.035/247.976 (93395 px)]; specularOrIor 0/0/0 (0 px) [estimate 0/0/0 (0 px)]; aoMap 0.032/0.154/1.828 (8304 px) [estimate 7.028/96.437/247.976 (8304 px)]; outOfScope 0.041/0.077/0.08 (241 px) [estimate 11.163/147.429/207.921 (241 px)]; all 0.033/0.081/1.828 (93636 px) [estimate 0.696/12.788/247.976 (93636 px)]
+  [PASS] specularSwapAssets: no WebGPU errors
+  [PASS] rt readStats() reports the last dispatched frame while an earlier read is pending - on-screen hits: A (reuse on) 3569, B (reuse off, read while A's was pending) 0, C (reuse on) 3569
+  [PASS] rtStats: no WebGPU errors
+  [PASS] gbuffer: static scene with instanced, skinned, batched meshes has no motion - max 0.00e+0, per column (plain, instanced, skinned, batched) 0.00e+0 0.00e+0 0.00e+0 0.00e+0
+  [PASS] gbuffer: moving one instance moves only it - 209 px inside, 0 outside (max 0.00e+0), next frame max 0.00e+0
+  [PASS] gbuffer: camera cut + resetHistory() gives no motion - max 0.00e+0, next frame 0.00e+0
+  [PASS] gbuffer: two render() calls in one frame = one per frame - {"maxDiff":0,"nonzero":5720,"cameraPrevIsLastRender":true}
+  [PASS] gbuffer: jittered frames with the unjittered projection have no motion - {"maxMotion":0,"projectionUnjitteredAndJitteredExposed":true}
+  [PASS] gbuffer: roughnessNode / metalnessNode reach the G-buffer - roughness 0.250, metalness 0.749
+  [PASS] gbuffer: MeshBasic env reflection stays out of scene colour - 0.0512 0.0512 0.0512 (diffuse 0.0513)
+  [PASS] gbuffer: glass refracts the metal behind it into lit as a plain render does (W42, D3520) - centre rgb lit 0.9995 0.9995 0.9995, plain 0.9995 0.9995 0.9995
+  [PASS] gbuffer: logarithmicDepthBuffer rejected - FrameGBuffer: logarithmicDepthBuffer is not supported (the contract has no log-depth convention; depth would not invert with the projection). Use reversedDepthBuffer for precision instead.
+  [PASS] gbuffer: no WebGPU errors
+  [PASS] bc6h procedural cube 256: no anchor index overflows its slot - two-subset 0 of 7313, one-subset 0; hardware log2 RMSE 0.0700, blocks off by > 1 stop 46 of 24576, non-finite 0
+  [PASS] bc6h two-subset random 512: no anchor index overflows its slot - two-subset 0 of 58173, one-subset 0; hardware log2 RMSE 0.0985, blocks off by > 1 stop 562 of 65536, non-finite 0
+  [PASS] bc6h: capped scratch gives the same bits - 0 of 542208 bytes differ
+  [PASS] bc6h: 144 MiB of blocks on default limits (binding 128 MiB) - ok; max rel err 0.0107
+  [PASS] no WebGPU validation errors or exceptions
+all checks passed
+=== end 17:44:08

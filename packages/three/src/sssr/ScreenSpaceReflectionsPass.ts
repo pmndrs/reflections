@@ -18,8 +18,8 @@
 import * as THREE from 'three/webgpu';
 import { uniform } from 'three/tsl';
 import {
-  createHalfResolutionFrame, createScreenSpaceReflections, createTracedReflections, halfResolutionSize, PassTimer, screenSpaceInputsFromFrame,
-  type FrameInputs, type HalfResolutionFrame, type HitLights, type ScreenSpaceReflections as CoreTracer,
+  createHalfResolutionFrame, createScreenSpaceReflections, createTracedReflections, halfResolutionSize, isReflectionsPresetName, PassTimer, REFLECTION_PRESET_NAMES, reflectionsPreset, screenSpaceInputsFromFrame,
+  type FrameInputs, type ReflectionResolution, type ReflectionsPresetName, type HalfResolutionFrame, type HitLights, type ScreenSpaceReflections as CoreTracer,
   type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant, type TraceProvider, type TracedReflections,
   type TracedReflectionsSettings, type TracedReflectionsStats,
 } from '@pmndrs/reflections-core';
@@ -43,7 +43,7 @@ export interface ScreenSpaceReflectionsPassSettings extends ScreenSpaceReflectio
    * pass's `radiance` / `hitDistance` / `confidence` / `source` are then half size. Composites are
    * built for one mode: after a change, rebuild them (`hybrid.rebuild()` and your `composite()` calls).
    */
-  reflectionResolution?: 'full' | 'half';
+  reflectionResolution?: ReflectionResolution;
   // W75's `halfResMinRoughness` (X5 step 2: a full-res mirror path under half res) was removed by W76:
   // it restored mirror sharpness but doubled orbit flicker at full res's cost (D5084).
 }
@@ -65,6 +65,13 @@ export interface ScreenSpaceReflectionsPassOptions {
   timestamps?: boolean;
   /** Tracer settings (perceptual `roughnessThreshold`, default 0.447). `fallbackColor` is forced to black, see `radiance`. */
   settings?: ScreenSpaceReflectionsPassSettings;
+  /**
+   * W77: start from a named preset's tracer settings (core `REFLECTION_PRESETS`; 'performance' =
+   * `reflectionResolution: 'half'`); `settings` win key by key. Pass the same preset to
+   * `HybridReflections` for its denoiser part. At runtime: `applyReflectionsPreset()`. An unknown name
+   * warns once and is ignored.
+   */
+  preset?: ReflectionsPresetName;
   /** Trace rays for the screen-space misses. Off unless given (D51). */
   trace?: ScreenSpaceTraceOptions;
 }
@@ -117,6 +124,11 @@ export class ScreenSpaceReflectionsPass {
   readonly gbuffer: FrameGBuffer;
   /** Tracer settings, read every frame. */
   settings: ScreenSpaceReflectionsPassSettings;
+  /**
+   * W77: the settings the app passed at construction (without the preset): `applyReflectionsPreset`
+   * returns every key a preset names to these, then to the package defaults, before applying one.
+   */
+  readonly presetBase: Readonly<ScreenSpaceReflectionsPassSettings>;
   /**
    * rgba16float. rgb: confidence x hit radiance (the tracer's fallback is black, so a miss is 0 and
    * the composite adds its own probe / environment term for `1 - confidence`); w: world ray length.
@@ -185,7 +197,14 @@ export class ScreenSpaceReflectionsPass {
     this.traceOptions = options.trace ? { ...options.trace } : null;
     this.ownsGBuffer = !options.gbuffer;
     this.gbuffer = options.gbuffer ?? new FrameGBuffer(renderer, { lit: 'auto', ...options.gbufferOptions });
-    this.settings = { ...options.settings };
+    // W77: the app's own settings are the base a runtime preset change rebuilds from (presetBase)
+    this.presetBase = Object.freeze({ ...options.settings });
+    let preset = options.preset;
+    if (preset !== undefined && !isReflectionsPresetName(preset)) {
+      console.warn(`ScreenSpaceReflectionsPass: unknown preset '${String(preset)}' (${REFLECTION_PRESET_NAMES.join(', ')}); ignored`);
+      preset = undefined;
+    }
+    this.settings = preset ? { ...reflectionsPreset(preset, { tracer: options.settings }).tracer } : { ...options.settings };
     const { width: w, height: h } = this.gbuffer;
     this.radiance = make('ssr radiance', w, h, THREE.HalfFloatType, THREE.RGBAFormat);
     this.hitDistance = make('ssr hit distance', w, h, THREE.FloatType, THREE.RedFormat);
