@@ -19,6 +19,7 @@ for (const [name, set] of CONFIGS) {
     for (const [k, v] of Object.entries({ ...set, denoise: dn ? null : false })) S.setSetting(k, v);
     if (S.pending().methods.length) await S.rebuild();
     S.setPose(pose);
+    await S.step(2); await new Promise((r) => setTimeout(r, 1500)); // W74 review fix 4: let the fill compile (async)
     const row = { name, denoise: dn };
     for (const m of metrics) {
       const r = await S.metrics[m]({ method: 'ours-rt', ...(opts[m] ?? {}) });

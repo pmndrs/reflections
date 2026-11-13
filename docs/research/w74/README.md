@@ -21,14 +21,21 @@ struct BilateralWeights { planeTolerance: f32, normalPower: f32, roughnessTolera
 struct BilateralResult { radiance: vec4f, hitDistance: f32, confidence: f32, source: u32 /* largest weight share */, weightSum: f32, taps: u32 }
 fn bilateralWeight(p: BilateralSurface, viewDistance: f32, q: BilateralTap, w: BilateralWeights) -> f32
 fn bilateralFill(p: BilateralSurface, cameraPosition: vec3f, pixel: vec2i, originCell: vec2i, footprint: u32, w: BilateralWeights) -> BilateralResult
+fn bilateralFillMajority(p: BilateralSurface, cameraPosition: vec3f, pixel: vec2i, originCell: vec2i, footprint: u32, w: BilateralWeights) -> BilateralResult  // review fix 1
 // the includer defines:
 fn bilateralTap(cell: vec2i, pixel: vec2i) -> BilateralTap
 ```
 
-- `cell` walks the caller's sample grid: footprint 2 = `originCell + {0,1}^2` (bilinear 2x2), 3 = `+ {-1,0,1}^2`, 4 = `+ {-1..2}^2`. X4's grid is 2x2 quads (`originCell = pixel >> 1`, footprint 3, tap = the quad's pixel nearest `pixel`); X5's would be the half-res texels with `spatial` = bilinear weights and footprint 2 (or 3/4).
+- `cell` walks the caller's sample grid: footprint 2 = `originCell + {0,1}^2` (bilinear 2x2), 3 = `+ {-1,0,1}^2`, 4 = `+ {-1..2}^2`.
+  - For footprint 3, pass the cell holding the pixel.
+  - For footprints 2 and 4, pass the lower cell of the bilinear pair, `floor(pixel position in cell units - 0.5)`. Otherwise the footprint leans toward +x / +y (review fix 2).
+  - X4's grid is 2x2 quads: `originCell = pixel >> 1` for 3, `(pixel - 1) >> 1` for 2 / 4; the tap is the quad's pixel nearest `pixel`.
+  - X5's grid would be the half-res texels, with `spatial` = bilinear weights and footprint 2 (or 3 / 4).
 - Weight = `spatial` x `saturate(1 - |dot(n_p, x_q - x_p)| / (planeTolerance x |x_p - camera|))` x `pow(saturate(dot(n_p, n_q)), normalPower)` x `saturate(1 - |r_p - r_q| / roughnessTolerance)` x (bit `source` of `sourceMask`). A tolerance / power of 0 turns its term off. Defaults 0.01 / 16 / 0.1 / RT_SOURCE {1, 2, 4} / min sum 0.01.
-- Radiance (all four channels), hit distance and confidence are normalised with the same weights (confidence is what the composite and D2400 read). For a residual upsample (X5 step 4), pass the residual in `radiance`.
+- **`bilateralFill` (linear).** Radiance rgb and confidence are the weighted means. Since review fix 1, ray length (`radiance.w`) and hit distance are confidence-weighted means, i.e. over the hits only: two hits and two misses give confidence 0.5 at the hits' t, not t/2. For a residual upsample (X5 step 4), pass the residual in `radiance.rgb`.
+- **`bilateralFillMajority` (X4 uses it).** The taps split into hits (confidence >= 0.5) and misses. The class with the larger weight wins and the result is that class alone: its rgb, confidence, t and dominant source. `weightSum` is the total over both classes (for the gate).
 - The caller compares `weightSum` with `minWeightSum` and decides the fallback (X4: keep intersect's probe term).
+- **Interface change since phase 1 (for X5):** structs and the `bilateralFill` signature are unchanged. Its `radiance.w` / `hitDistance` are now confidence-weighted, and there's a new sibling, `bilateralFillMajority`. Internal helpers `bilateralGatherClasses` / `bilateralResolve` / `BilateralClass` are new names in the module.
 
 ## Default-identical
 
@@ -119,12 +126,36 @@ Orbit d2 (denoised) moves less: carConcept 0.295 / 0.300 / 0.300 / 0.307 / 0.307
 
 - **Not the RT layer's default.** The plan's rule is to adopt only if the error rises less than the noise floor.
   - At the 0.05 default threshold, Measure stays within about 0.3 MAD (1080p) and 2x2 energy and thin geometry hold.
-  - But denoised orbit std rises +4.3 % on carConcept and +6.1 % on moving, against a ~2 % floor.
+  - But denoised orbit std rises +4.3 % on carConcept and +6.1 % on moving, against a ~2 % floor (+2.6 % / +4.8 % after the review fixes).
   - At 0.02 / 0.01 it rises +14-21 % on every showcase scene.
 - **Keep it as an option** (`tracedMissRate: 'half'`, `tracedHalfRateMinRoughness` 0.05).
   - **Where it pays:** at 0.05 (0.03 is the same on the car), where most glossy misses are above the threshold and traced rays are expensive. carConcept 1080p saves about 0.3 ms net (-0.42 trace, +0.12 fill) for +4 % denoised orbit flicker and ≤ 0.3 MAD.
   - **Where it doesn't pay:** at 0.02 / 0.01. The fill eats the trace saving (-0.9 vs +0.84 ms), and the flicker is well above the floor.
 - **SPEC open question 4 for the RT layer:** no. RT stays full rate by default; half rate is an option for scenes with costly glossy RT.
+
+## Review fixes (after main 2c3ec3a merged: W71's words 141-144 / RT 67 kept)
+
+1. **Coverage, not linear mixing (fix 1, with fix 5).**
+   - The problem: the fill averaged confidence and t linearly. Two hits and two misses gave confidence 0.5 at t/2. The composite's depth-aware blend (D2400) read that 0.5 as a thickness falloff and gave the hit full weight, so silhouettes on the fill side grew by about a quad and flipped every frame. t/2 also skewed probeConsistency and the denoiser's reprojection.
+   - **Choice:** X4 fills with `bilateralFillMajority`. A filled pixel is either a hit (the hit taps' radiance, confidence about 1, their confidence-weighted t, a hit source) or a miss (confidence 0, the miss source). Mixed coverage never reaches D2400 as a partial confidence: the edge falls where the weighted majority of neighbours puts it.
+   - **Source (fix 5):** it is the winning class's. A mostly-miss fill is RT_SOURCE traced miss with confidence 0, which is consistent with the composite's AO skip.
+   - **Bias:** the still-frame content check reads a radiance bias of -18.7 % on contact. The linear kernel reads -6.8 %, and the 8x8 block error is the same 14.5 % for both. The extra bias is in radiance only: a miss-class pixel is black in three's radiance, and the composite adds its probe.
+2. **Centred even footprints (fix 2).** For footprints 2 and 4, X4 passes `(c - 1) >> 1` (the lower cell of the bilinear pair). The kernel header states the convention. On contact, footprint 2 fills 13.8k px with 1358 fallbacks (a centred 2x2 of quads holds two traced quads); footprint 4 fills 14.8k with 331.
+3. **Settings precedence (fix 3).** The three adapter takes `traceSettings` first, then `settings`, and gives both passes the same value. Measured: settings only → 3794 quads on the fill list; traceSettings only → 3859; traceSettings 'full' over settings 'half' → 0.
+4. **Async pipelines (fix 4).** `prepareHalfRate()` uses `createComputePipelineAsync`, and `halfRateReady` reports when they're in. Until then a 'half' dispatch runs no fill, and the adapter keeps both passes at 'full'.
+5. See fix 1.
+6. **Content check (fix 6).** ssr-rt traces contact on a still frame at full and at half rate and compares the changed pixels.
+   - It reads means (a per-pixel comparison is ray-sample noise): radiance bias -18.7 % (|x| < 30 %), 8x8 block mean error 14.4 % (< 30 %), confidence 0.636 vs 0.754 (> 0.7x).
+   - The confidence-0 bug of `4e7e6dd` would fail it.
+7. **Failed fills (fix 7, backlog).** 3.9 % of fill pixels on contact find no usable neighbour. Their quad alternates between traced and probe each frame. A fill-time fix can't trace them (intersect decides before the trace). Backlog line in `handoff-row.md`.
+
+**After the fixes:**
+- **Default-identical vs main HEAD `2c3ec3a`:** all raw hashes equal, finals 0/255 (6 scenes, denoiser on and off).
+- **Checks:** ssr-rt (with the content check), ssr-rt-bvh, hybrid and regressions pass.
+- **Orbit flicker at 0.05, denoised (raw):**
+  - carConcept: 0.364 → 0.373, +2.6 % (raw +16 %); before the fixes +4.3 % (raw +32 %).
+  - moving: 0.546 → 0.572, +4.8 % (raw +6 %); before +6.1 %.
+  - Still over the ~2 % floor, so the verdict holds: an option, not the RT default.
 
 ## Notes
 

@@ -8,6 +8,7 @@ for (const [name, set] of CONFIGS) {
   for (const dn of [true, false]) {
     S.setTraceSettings(set);
     S.setDenoise(dn);
+    await S.ssr.traced?.prepareHalfRate(); // W74 review fix 4: the fill compiles asynchronously
     const row = { name, denoise: dn };
     for (const m of metrics) {
       const r = await S.metrics[m](opts[m] ?? {});
