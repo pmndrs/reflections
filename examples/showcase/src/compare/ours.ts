@@ -51,6 +51,7 @@ const SSSR_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   quadBaseRotation: 's', thicknessDepthFactor: 'n', thicknessDepthMode: 's', // W71 (X1, D5000-D5001; W76 removed hitLobeFilterGrazing and historyEdgeConfidence, D5002-D5003)
   hitColorConeGrazing: 'n', // W76 (D5100)
   hitColorFilter: 's', hitColorConeScale: 'n', mirrorBiasCompensate: 'b', // W72 (D5020-D5022)
+  maxCandidates: 'n', // W80 (D5180)
 };
 /** W76: the fields `resolveScreenSpaceSettings` fills (the bench shows their effective value). */
 const RESOLVED_KEYS = new Set(['hitColorFilter', 'mirrorBias', 'mirrorBiasCompensate', 'thicknessDepthMode', 'thicknessDepthFactor']);
@@ -492,6 +493,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
       if (aa && aa.mode === 'upscaler') for (const [k, v] of aa.timings) out.set(`upscaler ${k}`, v);
       return out;
     },
+    traceStats: () => (ssr.rayTracing ? ssr.readTraceStats() : Promise.resolve(null)),
     gpuErrors: () => errors,
     dispose() {
       provider?.destroy();

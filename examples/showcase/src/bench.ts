@@ -1101,6 +1101,8 @@ async function main() {
       metrics: benchMetrics, // X0 (W70): ../../shared/metrics/README.md
       get lastDiff() { return lastDiff; },
       timings: () => Object.fromEntries(sides.map((id) => [id, Object.fromEntries(live.get(id)?.timings?.() ?? [])])),
+      /** W80: the traced pass's counters per side (misses, traced, capped). */
+      traceStats: async () => Object.fromEntries(await Promise.all(sides.map(async (id) => [id, (await live.get(id)?.traceStats?.()) ?? null]))),
       info: () => ({ scene: entry.id, pose, sides: [...sides], mode, split, frozen, size: [W, H], live: [...live.keys()], status: Object.fromEntries([...live].map(([k, m]) => [k, m.status()])), info: Object.fromEntries([...live].map(([k, m]) => [k, m.info()])) }),
       gpuErrors: () => [...errors, ...[...live.values()].flatMap((m) => m.gpuErrors())],
       presets: { read: storage.read, write: storage.write },

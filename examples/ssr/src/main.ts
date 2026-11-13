@@ -199,7 +199,7 @@ async function main() {
   const adapter = await navigator.gpu.requestAdapter();
   // the composite needs the G-buffer's `lit` target: 36 bytes/sample
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, trackTimestamp: timingOn, requiredLimits: { ...(adapter ? reflectionsRequiredLimits(adapter) : {}), maxColorAttachmentBytesPerSample: maxBytes, ...texLimit(adapter) } } as N);
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, reversedDepthBuffer: q.get('reversedDepth') === '1', trackTimestamp: timingOn, requiredLimits: { ...(adapter ? reflectionsRequiredLimits(adapter) : {}), maxColorAttachmentBytesPerSample: maxBytes, ...texLimit(adapter) } } as N);
   renderer.setPixelRatio(1);
   renderer.setSize(DW, DH, false);
   renderer.shadowMap.enabled = true;
@@ -785,6 +785,25 @@ async function main() {
       assets: async () => { const dirs = new Set((await availableAssets()).map((a) => a.dir)); return Object.entries(ASSET_SCENES).filter(([dir]) => dirs.has(dir)).map(([, a]) => a.id); },
       load: (id: string) => load(id),
       setPose, setView: (v: View) => setView(v),
+      /** W79 (D5160): per-row traced profile of the last `rows` rows: px with confidence > 0.01, mean confidence, geometry px. */
+      async bandProfile(rows = 64, frames = 4) {
+        stopLoop(); for (let i = 0; i < frames; i++) { frame(); await idle(); }
+        const core = ssr.tracer!, t = ssr.gbuffer.gpuTextures();
+        const [depth, conf] = await Promise.all([readTexture(device, t.depth), readTexture(device, core.outputs.confidence)]);
+        const inverted = ssr.gbuffer.conventions.depthInverted;
+        const out: { y: number; hit: number; meanConf: number; geo: number }[] = [];
+        for (let y = H - rows; y < H; y++) {
+          let hit = 0, mc = 0, geo = 0;
+          for (let x = 0; x < W; x++) { const i = y * W + x; if (inverted ? depth[i] > 0 : depth[i] < 1) geo++; if (conf[i] > 0.01) hit++; mc += conf[i]; }
+          out.push({ y, hit, meanConf: mc / W, geo });
+        }
+        let mask = ''; { const u = new Uint8Array(W * H); for (let i = 0; i < u.length; i++) u[i] = conf[i] > 0.01 ? 1 : 0; for (let i = 0; i < u.length; i += 0x8000) mask += String.fromCharCode(...u.subarray(i, i + 0x8000)); }
+        return { W, H, inverted, rows: out, totalHit: conf.reduce((a, c) => a + (c > 0.01 ? 1 : 0), 0), mask: btoa(mask) };
+      },
+      /** W79: camera pose with a roll (up = -y) so reflected rays travel down the screen; lookAt direct (no controls). */
+      setFlipped(pos: [number, number, number], target: [number, number, number], flip: boolean) {
+        const c = kit!.camera; c.position.set(...pos); c.up.set(0, flip ? -1 : 1, 0); c.lookAt(...target); c.updateMatrixWorld(); aa.reset();
+      },
       /** W75 (X5): reflection resolution, rebuilding the composites (W76 removed step 2's 'mixed', D5084). */
       async setResolution(r: 'full' | 'half') {
         ssr.settings.reflectionResolution = r;
@@ -1439,7 +1458,7 @@ async function main() {
       }
       if (nr[i * 4 + 1] < 0.99) continue;
       floorPx++; floorConf += conf[i];
-      if (kit!.id !== 'mirrorWall') continue;
+      if (kit!.id !== 'mirrorWall' && kit!.id !== 'thinPost') continue; // W80: thinPost shares the wall (z = -3) and the mirror floor
       P.set(((x + 0.5) / W) * 2 - 1, 1 - ((y + 0.5) / H) * 2, depth[i]).applyMatrix4(invVP);
       d.copy(P).sub(eye).normalize(); d.y = -d.y; // planar mirror at y = 0
       if (d.z >= -1e-4) continue;
@@ -1491,7 +1510,7 @@ async function main() {
       geometry: geo / (W * H), meanConfidence: geo ? confSum / geo : 0, nonFinite,
       mirrorFloorPixels: floorPx, mirrorFloorConfidence: floorPx ? floorConf / floorPx : 0,
       facingPanelPixels: panel, facingPanelConfidence: panel ? panelConf / panel : 0,
-      wall: kit!.id === 'mirrorWall' ? {
+      wall: kit!.id === 'mirrorWall' || kit!.id === 'thinPost' ? {
         pixels: wallPx, confidentFraction: wallPx ? wallConfident / wallPx : 0, lumCorrelation: corr, meanAbsRelative: meanAbs,
         hitDistanceMedianRelErr: hitErr.length ? hitErr[hitErr.length >> 1] : NaN,
         behindPixels: behindPx, streakFraction: behindPx ? behindConfident / behindPx : NaN,
