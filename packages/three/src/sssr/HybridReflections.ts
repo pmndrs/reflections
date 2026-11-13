@@ -20,7 +20,7 @@
 import * as THREE from 'three/webgpu';
 import { float, uniform, uv, vec3, vec4 } from 'three/tsl';
 import {
-  createReflectionDenoiseSeam, createReflectionUpsample, PassTimer,
+  createReflectionDenoiseSeam, createReflectionUpsample, mirrorBiasSplit, PassTimer,
   type FrameInputs, type ReflectionDenoiseSeam, type ReflectionUpsample, type ReflectionUpsampleSettings, type SpecularInputs, type TemporalDenoiser,
 } from '@pmndrs/reflections-core';
 import { getGPUTexture } from '../frame/FrameGBuffer';
@@ -98,6 +98,7 @@ export class HybridReflections {
    * resolution only. Default false.
    */
   denoiserSampleDirection = false;
+  private warnedSample: 'half' | null = null;
   /**
    * W75 (X5): the joint bilateral upsample's weights (core `ReflectionUpsampleSettings`: plane
    * tolerance, normal power, roughness tolerance, source mask, min weight sum, wide fallback), read
@@ -270,7 +271,7 @@ export class HybridReflections {
     renderer.setRenderTarget(this.signalTarget);
     this.quad.render(renderer);
     renderer.setRenderTarget(prev);
-    const direction = this.denoiserSampleDirection ? tracer.outputs.sampleDirection : undefined;
+    const direction = this.sampleDirectionFor(tracer.outputs.sampleDirection);
     const out = this.seam.dispatch(frame, {
       radiance: getGPUTexture(renderer, this.signalTarget.texture),
       hitDistance: tracer.outputs.hitDistance,
@@ -289,11 +290,30 @@ export class HybridReflections {
   }
 
   /**
+   * W78 (D5140, review fixes): the sample direction to hand the denoiser this frame, or undefined. With it, the denoiser's target lobe follows the alpha the tracer actually sampled this frame
+   * (`brdfAlphaScale`, the sample share of `mirrorBiasSplit`): compensation counts only while the cone filter
+   * really ran (`outputs.hitColorFilterActive`; while its pipelines build, or where it is unavailable, the tracer
+   * samples the full lobe). Set on denoisers with a `setOptions` (FFX), so apps don't repeat that gating.
+   */
+  private sampleDirectionFor(t: GPUTexture | undefined): GPUTexture | undefined {
+    if (!this.denoiserSampleDirection || !t) return undefined;
+    const s = this.ssr.settings;
+    const active = !!this.ssr.tracer?.outputs.hitColorFilterActive;
+    const scale = mirrorBiasSplit({ ...s, hitColorFilter: active ? s.hitColorFilter : 'off' }).sample;
+    (this.seam?.denoiser as { setOptions?: (o: Record<string, unknown>) => void } | undefined)?.setOptions?.({ brdfAlphaScale: scale });
+    return t;
+  }
+
+  /**
    * W75 (X5) 'half': the signal at half res (each texel at its sample pixel), the seam on the half
    * frame, the hit part `specular - (1 - ssrWeight) SO probeSpecular` and ssrWeight at half res (D5081), then core's joint bilateral upsample
    * of the residual, confidence, hit distance and source into the full-res targets composites read.
    */
   private updateHalf(frame: FrameInputs) {
+    if (this.denoiserSampleDirection && this.warnedSample !== 'half') {
+      this.warnedSample = 'half';
+      console.warn("HybridReflections: denoiserSampleDirection isn't handed on at reflectionResolution 'half' (the denoiser runs without it)");
+    }
     const { renderer } = this.ssr;
     const device = this.ssr.device;
     const half = this.ssr.traceFrame!;

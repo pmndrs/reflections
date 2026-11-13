@@ -1,7 +1,7 @@
 // The examples' denoiser: denoiser/ffx's FfxReflectionDenoiser from the sibling Denoiser repo when
 // examples/vite.config.ts found one, else null (the hybrid resolve then runs undenoised).
 import { FfxReflectionDenoiser, type FfxReflectionDenoiserOptions } from '@pmndrs/denoiser-ffx';
-import { mirrorBiasSplit, type ScreenSpaceReflectionsSettings, type SpecularInputs, type TemporalDenoiser } from '@pmndrs/reflections/core';
+import { type ScreenSpaceReflectionsSettings, type SpecularInputs, type TemporalDenoiser } from '@pmndrs/reflections/core';
 
 export const denoiserAvailable = FfxReflectionDenoiser !== null;
 export const denoiserSource = __DENOISER_SOURCE__;
@@ -64,9 +64,8 @@ export function brdfFromQuery(q: URLSearchParams): DenoiserBrdf {
  * dropping the resolve's history (a dark environment, sparse glossy hits).
  *
  * Apply a BRDF mode on a page: the tracer writes its sample directions (`settings.sampleDirection`, a
- * tracer rebuild on a flip), the hybrid hands them to the denoiser, and FFX weights by them with the
- * target lobe at the tracer's sample alpha (`mirrorBiasSplit`: alpha x sqrt(1 - f) under
- * `mirrorBiasCompensate`, D5023's rule). Cheap: call it every frame before the tracer runs, so
+ * tracer rebuild on a flip), the hybrid hands them to the denoiser, and FFX weights by them; the hybrid
+ * also sets the target lobe to the alpha the tracer sampled (`brdfAlphaScale`, D5023's rule). Cheap: call it every frame before the tracer runs, so
  * settings changes (mirror bias, compensation) follow. Returns true when the mode flipped (reset history then).
  */
 export function syncDenoiserBrdf(
@@ -81,6 +80,6 @@ export function syncDenoiserBrdf(
   if (on) ssr.settings.sampleDirection = true; else delete ssr.settings.sampleDirection;
   hybrid.denoiserSampleDirection = on;
   const d = hybrid.denoiser as { setOptions?: (o: FfxReflectionDenoiserOptions) => void } | null;
-  d?.setOptions?.({ brdfWeights: mode, brdfAlphaScale: on ? mirrorBiasSplit(ssr.settings).sample : 1, brdfMinAlpha: minRoughness * minRoughness, keepHistoryOnBlack: keepBlack });
+  d?.setOptions?.({ brdfWeights: mode, brdfMinAlpha: minRoughness * minRoughness, keepHistoryOnBlack: keepBlack });
   return flipped;
 }
