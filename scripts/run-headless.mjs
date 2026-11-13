@@ -562,6 +562,7 @@ async function hybridChecks(pages) {
   await p.T('window.__p.setDepthAware(true)');
   await seamChecks(p);
   await halfResChecks(pages); // W75 (X5, D5080)
+  await coneCacheChecks(pages); // W76 review 3
   await presetChecks(pages); // W77
 }
 
@@ -595,6 +596,35 @@ const REGION_DELTA = `async (full, probe, test) => {
 /** W76: step the page until its tracer runs the cone (the default, built asynchronously), at most ~6 s; a no-op with it off. */
 // (a frame first: after a resolution switch the pass recreates its tracer on the next trace, and the old one's flag would pass)
 const CONE_READY = `(async () => { const p = window.__p; for (let i = 0; i < 60; i++) { await p.step(1); if ((p.ssr.settings.hitColorFilter ?? 'cone') !== 'cone' || p.ssr.tracer?.outputs.hitColorFilterActive) break; await new Promise((r) => setTimeout(r, 100)); } return true; })()`;
+/**
+ * W76 review 3: the cone's intersect variants are cached per device, so a tracer rebuilt after the cone was built
+ * once runs it from its first frame (no frame on the 'off' path, the pop the review found). examples/ssr contact
+ * with RT: a full -> half -> full switch (two resizes) and a hit-shading change (probes -> environment and back,
+ * which rebuilds the tracer like an environment re-bake; each variant built once first, since a first-ever WGSL
+ * still compiles); each first frame after the rebuild must run the cone.
+ */
+async function coneCacheChecks(pages) {
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1&scene=contact`);
+  pages.push(p);
+  const before = results.logs.length;
+  await p.T(CONE_READY);
+  // the environment-lit hit shading is another intersect WGSL: build it once first (a first-ever variant compiles)
+  await p.T('(window.__p.setHitProbes(false), true)'); await p.T(CONE_READY);
+  await p.T('(window.__p.setHitProbes(true), true)'); await p.T(CONE_READY);
+  const r = await p.T(`(async () => {
+    const P = window.__p, out = [];
+    const first = async (label, change) => { const t0 = P.ssr.tracer; await change(); await P.step(1);
+      out.push({ label, rebuilt: P.ssr.tracer !== t0, size: [P.ssr.tracer.width, P.ssr.tracer.height], cone: !!P.ssr.tracer.outputs.hitColorFilterActive }); };
+    await first('full -> half', () => P.setResolution('half'));
+    await first('half -> full', () => P.setResolution('full'));
+    await first('hit shading probes -> environment', () => P.setHitProbes(false));
+    await first('environment -> probes', () => P.setHitProbes(true));
+    return out; })()`);
+  const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+  check("W76 review 3: a rebuilt tracer runs the cone from its first frame (resize, full / half, hit-shading change): no frame on the 'off' path, no validation errors",
+    errs.length === 0 && r.every((x) => x.rebuilt && x.cone), errs.length ? errs.slice(0, 2).join(' | ') : JSON.stringify(r));
+  p.close();
+}
 async function halfResChecks(pages) {
   const full = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1`);
   const half = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1&res=half`);
@@ -3576,6 +3606,7 @@ async function main() {
     if (only === 'ssr-exp-grazing') await grazingSweep(pages); // W71 (X1 #3): grazing sweep vs the path tracer (minutes), JSON to out/w71-grazing.json
     if (only === 'hit-source') await hitSourceChecks(pages); // W53 (D3660-D3662)
     if (only === 'half-res') { await halfResChecks(pages); await presetChecks(pages); } // W75 (X5, D5080), W77: also part of hybrid
+    if (only === 'cone-cache') await coneCacheChecks(pages); // W76 review 3: also part of hybrid
     if (only === 'preset') await presetChecks(pages); // W77
     if (only === 'brdf-prefilter') await brdfPrefilterChecks(pages); // W78 (D5140-D5146)
     if (runs('probe-layouts')) await probeLayoutChecks(pages); // W61

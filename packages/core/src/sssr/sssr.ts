@@ -128,6 +128,17 @@ export interface ScreenSpaceReflectionsOptions {
   sampleDirection?: boolean;
 }
 
+/**
+ * W76 review: the cone's intersect variants, per device and per pipeline (WGSL + group 0 layout), shared by
+ * every tracer on the device. A tracer is rebuilt on a resize, a full / half switch, an environment or probe
+ * change, a `hitLobeFilterMixed` flip or the first 'ratio' frame; with this cache a rebuilt tracer runs the cone
+ * from its first frame once the variant was built once (before, its frames ran 'off' until its own async
+ * compile resolved: a visible pop with the history kept). Bind groups from a new tracer's group-equivalent
+ * layouts (same descriptors) are compatible with the cached pipeline (WebGPU group equivalence).
+ */
+type CachedConePipe = { bgl: GPUBindGroupLayout; pipe: GPUComputePipeline };
+const conePipeCache = new WeakMap<GPUDevice, Map<string, { promise: Promise<CachedConePipe>; value?: CachedConePipe }>>();
+
 /** The largest `mirrorBias` `mirrorBiasCompensate` uses (W72): the sample keeps alpha x 0.1. */
 export const MAX_COMPENSATED_BIAS = 0.99;
 
@@ -842,8 +853,20 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     if (!coneWarned) { coneWarned = true; console.warn("ssr: hitColorFilter 'cone' is unavailable; running as 'off'.", e); }
   };
   function startConeBuild(which: 'plain' | 'reuse', sourceFormat: GPUTextureFormat) {
-    coneState[which] = 'pending';
     const reuse = which === 'reuse';
+    const code = intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource, reuse, true, useSample);
+    const entries = [...intersectEntries, ...(reuse ? [bufEntry(19)] : []), ...coneEntries];
+    // W76 review: one compile per device and pipeline (conePipeCache); a hit already built is used this frame
+    const key = `${code}\n${JSON.stringify(entries)}\n${fallback.layout ? 'F' : '-'}${hitShading?.layout ? 'H' : '-'}`;
+    let cache = conePipeCache.get(device);
+    if (!cache) conePipeCache.set(device, (cache = new Map()));
+    const hit = cache.get(key);
+    if (hit?.value) { conePipes[which] = hit.value; coneState[which] = 'idle'; return; }
+    coneState[which] = 'pending';
+    if (hit) {
+      hit.promise.then((p) => { if (destroyed) return; conePipes[which] = p; coneState[which] = 'idle'; }).catch((e) => coneFail(which, e));
+      return;
+    }
     try {
       checkStageLimits(device, `ssr: the intersect pipeline with hitColorFilter 'cone'${reuse ? " and rayReuse 'ratio'" : ''}`, [
         ['pass', { storageBuffers: (useMissList ? 4 : 2) + (reuse ? 1 : 0), storageTextures: useSample ? 4 : 3, sampledTextures: (useHitSource ? 11 : 10) + 1 }],
@@ -851,24 +874,25 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
         ['hit shading', hitShadingCounts],
       ]);
     } catch (e) { coneFail(which, e); return; }
-    const bgl = device.createBindGroupLayout({ label: `ssr intersect (cone${reuse ? ', ray reuse' : ''})`, entries: [...intersectEntries, ...(reuse ? [bufEntry(19)] : []), ...coneEntries] });
+    const bgl = device.createBindGroupLayout({ label: `ssr intersect (cone${reuse ? ', ray reuse' : ''})`, entries });
     coneWarm ??= warmDownsampler(device, 'rgba16float', W, H, hitColorLevels, sourceFormat);
-    Promise.all([
-      device.createComputePipelineAsync(pipeDescriptor(`intersect (${variant}, cone${reuse ? ', ray reuse' : ''})`,
-        intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource, reuse, true, useSample), layoutsWith(bgl))),
-      coneWarm,
-    ]).then(([pipe]) => {
+    const entry: { promise: Promise<CachedConePipe>; value?: CachedConePipe } = {
+      promise: Promise.all([device.createComputePipelineAsync(pipeDescriptor(`intersect (${variant}, cone${reuse ? ', ray reuse' : ''})`, code, layoutsWith(bgl))), coneWarm])
+        .then(([pipe]) => (entry.value = { bgl, pipe })),
+    };
+    cache.set(key, entry);
+    entry.promise.then((p) => {
       if (destroyed) return;
-      conePipes[which] = { bgl, pipe };
+      conePipes[which] = p;
       coneState[which] = 'idle';
-    }).catch((e) => coneFail(which, e));
+    }).catch((e) => { cache!.delete(key); coneFail(which, e); });
   }
   /** The cone variant for this frame, or null (not built yet, or unavailable): run as 'off'. */
   function ensureCone(reuse: boolean, sourceFormat: GPUTextureFormat): ConePipe | null {
     const which = reuse ? 'reuse' : 'plain';
     if (!conePipes[which]) {
       if (coneState[which] === 'idle') startConeBuild(which, sourceFormat);
-      return null;
+      if (!conePipes[which]) return null; // W76 review: a cached variant is set synchronously
     }
     hitColorPyramid ??= tex('hit colour pyramid', 'rgba16float', W, H, hitColorLevels);
     hitColorSampler ??= device.createSampler({ label: 'ssr hit colour', magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear' });
