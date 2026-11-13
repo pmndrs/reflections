@@ -49,7 +49,7 @@ export async function ssrExpMetricsSmoke(ctx, pages) {
   pages.push(b);
   const ents = await b.T('window.__p.entries()');
   if (!ents.includes('lineSpread')) { console.log(`  (no studio HDRI: bench part skipped; entries ${ents.join(', ')}; ${await b.T("document.querySelector('#status')?.textContent")})`); return r; }
-  const ls = await b.T("window.__p.metrics.lineSpread({ roughness: [0.15], samples: 16, warmup: 8, frames: 2 })");
+  const ls = await b.T("window.__p.metrics.lineSpread({ roughness: [0.05], samples: 32, warmup: 8, frames: 2 })");
   ctx.savePng('ssr-exp-lineSpread.png', await b.T('window.__p.shot()'));
   const gz = await b.T("window.__p.metrics.grazing({ elevations: [15], samples: 16, warmup: 8, frames: 2 })");
   ctx.savePng('ssr-exp-grazing.png', await b.T('window.__p.shot()'));
@@ -60,7 +60,7 @@ export async function ssrExpMetricsSmoke(ctx, pages) {
   const lr = ls.rows[0], gr = gz.rows[0];
   check('ssr-exp metrics: the bench line spread, grazing sweep, Measure X0 columns and page metrics return finite numbers, no GPU errors',
     bad.length === 0 && errs.length === 0 && lr?.pt > 0 && lr.methods['ours-denoised']?.width > 0 && gr?.px > 1000 && cols.every((c) => Number.isFinite(c.std)) && !!pm.energy,
-    `line spread r 0.15 @ e15: PT ${lr?.pt} px, ours ${lr?.methods['ours-denoised']?.width} px (median column ${lr?.methods['ours-denoised']?.medianColumn}); grazing e15: ${gr?.px} glossy px, MAD ${gr?.methods['ours-denoised']?.mad}, gradient ratio ${gr?.methods['ours-denoised']?.gradientRatio}; glossy std ${cols.find((c) => c.region === 'glossy')?.std}, quad ${cols.find((c) => c.region === 'glossy')?.quad}; bench energy loss ${pm.energy?.regions?.reflection?.loss}${bad.length ? '; non-finite ' + bad.slice(0, 3).join(', ') : ''}${errs.length ? '; ' + errs[0] : ''}`);
+    `line spread r 0.05 @ e15: PT ${lr?.pt} px, ours ${lr?.methods['ours-denoised']?.width} px (median column ${lr?.methods['ours-denoised']?.medianColumn}); grazing e15: ${gr?.px} glossy px, MAD ${gr?.methods['ours-denoised']?.mad}, gradient ratio ${gr?.methods['ours-denoised']?.gradientRatio}; glossy std ${cols.find((c) => c.region === 'glossy')?.std}, quad ${cols.find((c) => c.region === 'glossy')?.quad}; bench energy loss ${pm.energy?.regions?.reflection?.loss}${bad.length ? '; non-finite ' + bad.slice(0, 3).join(', ') : ''}${errs.length ? '; ' + errs[0] : ''}`);
   return { ssr: r, lineSpread: ls, grazing: gz, measure: cols, bench: pm };
 }
 
