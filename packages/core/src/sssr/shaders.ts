@@ -1110,7 +1110,9 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
   let traced_misses = (P.rayReuseFlags & 2u) != 0u;
   let mix_sources = (P.rayReuseFlags & 4u) != 0u;
   let own = loadRecord(p);
-  let base_px = tracedPixel(p);
+  // clamped: at spq 2 the right column of an odd width has its partner at x = W (D5046)
+  let last = vec2i(P.renderSize) - 1;
+  let base_px = min(tracedPixel(p), last);
   let base = loadRecord(base_px);
   // A ray-traced pass overwrites the miss list's pixels and their quad copies: leave them to it (D5043).
   if (traced_misses) {
@@ -1156,7 +1158,7 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
       let k = f32(i - 1u);
       let r = radius * sqrt((k + 0.5) / f32(taps));
       let th = k * GOLDEN_ANGLE + rotation;
-      q = tracedPixel(clamp(p + vec2i(round(r * vec2f(cos(th), sin(th)))), vec2i(0), vec2i(P.renderSize) - 1));
+      q = min(tracedPixel(clamp(p + vec2i(round(r * vec2f(cos(th), sin(th)))), vec2i(0), last)), last);
     }
     if (all(q == p)) { continue; }
     var dup = false;
