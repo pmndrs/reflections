@@ -707,11 +707,14 @@ async function rayReuseChecks(pages) {
   await p.T('window.__p.setSettings({ minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false })');
   await p.T('window.__p.step(4)');
   const h = {};
-  for (const [k, v] of [['unset', null], ['copy', "'copy'"], ['ratio', "'ratio'"], ['copy again', "'copy'"]]) {
+  for (const [k, v] of [['unset', null], ['copy', "'copy'"], ['ratio (first frame)', "'ratio'"], ['ratio', "'ratio'"], ['copy again', "'copy'"]]) {
     await p.T(v === null ? '(delete window.__p.ssr.settings.rayReuse, true)' : `window.__p.setSettings({ rayReuse: ${v} })`);
     h[k] = await p.T('window.__p.radianceHash(7)');
+    // the 'ratio' pipelines build asynchronously from the first 'ratio' frame (it copies meanwhile)
+    if (k === 'ratio (first frame)') await p.T('new Promise((r) => setTimeout(r, 1500))');
   }
-  check("ssr rayReuse: 'copy' is the default path, 'ratio' changes the radiance", h.unset === h.copy && h.copy === h['copy again'] && h.copy !== h.ratio, JSON.stringify(h));
+  check("ssr rayReuse: 'copy' is the default path, 'ratio' copies until its pipelines are built, then changes the radiance",
+    h.unset === h.copy && h.copy === h['copy again'] && h['ratio (first frame)'] === h.copy && h.copy !== h.ratio, JSON.stringify(h));
   const std = {};
   for (const m of ['copy', 'ratio']) {
     await p.T(`window.__p.setSettings({ rayReuse: '${m}' })`);

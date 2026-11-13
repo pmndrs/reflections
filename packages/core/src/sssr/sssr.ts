@@ -528,11 +528,13 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const hierarchyView = depthHierarchy.createView();
 
   // ---- pipelines
-  const pipe = (label: string, code: string, layouts: GPUBindGroupLayout[]) => device.createComputePipeline({
+  const pipeDescriptor = (label: string, code: string, layouts: GPUBindGroupLayout[]): GPUComputePipelineDescriptor => ({
     label: `ssr ${label}`,
     layout: device.createPipelineLayout({ label: `ssr ${label}`, bindGroupLayouts: layouts }),
     compute: { module: device.createShaderModule({ label: `ssr ${label}`, code: dedupeWgslChunks(code) }), entryPoint: 'main' },
   });
+  const pipe = (label: string, code: string, layouts: GPUBindGroupLayout[]) => device.createComputePipeline(pipeDescriptor(label, code, layouts));
+  let destroyed = false;
   const withFallback = (bgl: GPUBindGroupLayout) => (fallback.layout ? [bgl, fallback.layout] : [bgl]);
 
   const classifyBgl = device.createBindGroupLayout({
@@ -581,35 +583,61 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const layoutsWith = (bgl: GPUBindGroupLayout) => (hitShading?.layout ? [bgl, fallback.layout ?? emptyBgl, emptyBgl, hitShading.layout] : withFallback(bgl));
   const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource), layoutsWith(intersectBgl));
 
-  // W73 (rayReuse 'ratio', D5040): the record buffer, intersect's storing variant and the resolve,
-  // built on the first 'ratio' frame so the default path allocates and compiles nothing new.
-  type RayReuse = { records: GPUBuffer; intersectBgl: GPUBindGroupLayout; intersectPipe: GPUComputePipeline; resolveBgl: GPUBindGroupLayout; resolvePipe: GPUComputePipeline };
-  let reuse: RayReuse | null = null;
+  // W73 (rayReuse 'ratio', D5040): intersect's storing variant and the resolve are built with
+  // createComputePipelineAsync on the first 'ratio' frame; the tracer keeps copying until both resolve, so
+  // no frame stalls on the compile (D3D12). The record buffer is allocated while 'ratio' runs and freed
+  // on the next 'copy' frame. A combination that can't run (record buffer over the binding limit, stage
+  // limits, a pipeline error) warns once and stays on 'copy'.
+  type ReusePipes = { intersectBgl: GPUBindGroupLayout; intersectPipe: GPUComputePipeline; resolveBgl: GPUBindGroupLayout; resolvePipe: GPUComputePipeline };
+  type RayReuse = ReusePipes & { records: GPUBuffer };
+  let reusePipes: ReusePipes | null = null;
+  let reuseState: 'idle' | 'pending' | 'failed' = 'idle';
+  let reuseRecords: GPUBuffer | null = null;
   let reuseStamp = 0;
-  function ensureReuse(): RayReuse {
-    if (reuse) return reuse;
-    if (W * H * 16 > maxBinding) throw new Error(`ssr: rayReuse 'ratio' at ${W}x${H} needs a ${W * H * 16} B record buffer; the device's maxStorageBufferBindingSize is ${maxBinding}`);
-    // intersect's group 0 plus the record buffer (binding 19), and the resolve's own group (D4900)
-    checkStageLimits(device, "ssr: the intersect pipeline with rayReuse 'ratio'", [
-      ['pass', { storageBuffers: (useMissList ? 4 : 2) + 1, storageTextures: 3, sampledTextures: useHitSource ? 11 : 10 }],
-      ['radiance fallback', fallbackCounts],
-      ['hit shading', hitShadingCounts],
-    ]);
-    checkStageLimits(device, 'ssr: the ray reuse resolve', [
-      ['pass', { storageBuffers: 3, storageTextures: 3, sampledTextures: 3 }],
-      ['radiance fallback', fallbackCounts],
-    ]);
-    const records = buf('ray records', W * H * 16);
-    const ibgl = device.createBindGroupLayout({ label: 'ssr intersect (ray reuse)', entries: [...intersectEntries, bufEntry(19)] });
-    const ipipe = pipe(`intersect (${variant}, ray reuse)`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource, true), layoutsWith(ibgl));
-    const rbgl = device.createBindGroupLayout({
+  const reuseFail = (e: unknown) => {
+    reuseState = 'failed';
+    console.warn("ssr: rayReuse 'ratio' is unavailable; staying on 'copy'.", e);
+  };
+  function startReuseBuild() {
+    reuseState = 'pending';
+    try {
+      if (W * H * 16 > maxBinding) throw new Error(`ssr: rayReuse 'ratio' at ${W}x${H} needs a ${W * H * 16} B record buffer; the device's maxStorageBufferBindingSize is ${maxBinding}`);
+      // intersect's group 0 plus the record buffer (binding 19), and the resolve's own group (D4900)
+      checkStageLimits(device, "ssr: the intersect pipeline with rayReuse 'ratio'", [
+        ['pass', { storageBuffers: (useMissList ? 4 : 2) + 1, storageTextures: 3, sampledTextures: useHitSource ? 11 : 10 }],
+        ['radiance fallback', fallbackCounts],
+        ['hit shading', hitShadingCounts],
+      ]);
+      checkStageLimits(device, 'ssr: the ray reuse resolve', [
+        ['pass', { storageBuffers: 3, storageTextures: 3, sampledTextures: 3 }],
+        ['radiance fallback', fallbackCounts],
+      ]);
+    } catch (e) { reuseFail(e); return; }
+    const intersectBgl = device.createBindGroupLayout({ label: 'ssr intersect (ray reuse)', entries: [...intersectEntries, bufEntry(19)] });
+    const resolveBgl = device.createBindGroupLayout({
       label: 'ssr ray reuse',
       entries: [uniformEntry(0), texEntry(1), texEntry(2), texEntry(3),
         bufEntry(4, 'read-only-storage'), bufEntry(5, 'read-only-storage'), bufEntry(6, 'read-only-storage'),
         storageTexEntry(7, 'rgba16float'), storageTexEntry(8, 'r32float'), storageTexEntry(9, 'r32float')],
     });
-    const rpipe = pipe('ray reuse', rayReuseResolveWgsl(inverted, fallback.wgsl), withFallback(rbgl));
-    return (reuse = { records, intersectBgl: ibgl, intersectPipe: ipipe, resolveBgl: rbgl, resolvePipe: rpipe });
+    Promise.all([
+      device.createComputePipelineAsync(pipeDescriptor(`intersect (${variant}, ray reuse)`,
+        intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource, true), layoutsWith(intersectBgl))),
+      device.createComputePipelineAsync(pipeDescriptor('ray reuse', rayReuseResolveWgsl(inverted, fallback.wgsl), withFallback(resolveBgl))),
+    ]).then(([intersectPipe, resolvePipe]) => {
+      if (destroyed) return;
+      reusePipes = { intersectBgl, intersectPipe, resolveBgl, resolvePipe };
+      reuseState = 'idle';
+    }).catch(reuseFail);
+  }
+  /** The 'ratio' resources for this frame, or null (not built yet, or unavailable): copy this frame. */
+  function ensureReuse(): RayReuse | null {
+    if (!reusePipes) {
+      if (reuseState === 'idle') startReuseBuild();
+      return null;
+    }
+    reuseRecords ??= buf('ray records', W * H * 16);
+    return { ...reusePipes, records: reuseRecords };
   }
 
   let missArgsPipe: GPUComputePipeline | undefined, missArgsGroup: GPUBindGroup | undefined;
@@ -812,7 +840,8 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     },
     destroy() {
       for (const t of [depthHierarchy, radiance, hitDistance, confidence, extractedRoughness, blueNoise, dummyVariance, dummyHistory, dummyMaterial]) t.destroy();
-      for (const b of [rayList, denoiserTileList, tileFlags, rayCounter, indirectArgs, missList, missCounter, missArgs, params, noiseTable, reuse?.records]) b?.destroy();
+      for (const b of [rayList, denoiserTileList, tileFlags, rayCounter, indirectArgs, missList, missCounter, missArgs, params, noiseTable, reuseRecords]) b?.destroy();
+      destroyed = true;
       timer?.destroy();
     },
   };
