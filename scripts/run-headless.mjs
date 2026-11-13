@@ -273,7 +273,8 @@ async function sssrCoreChecks(pages) {
  */
 async function x1CoreChecks(s, hasSubgroups) {
   const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitLobeFilterGrazing: 0, historyEdgeConfidence: false };
-  for (const [name, def] of [...Object.entries(X1_DEFAULTS), ['all four', X1_DEFAULTS]]) {
+  // 'relative' at k 0 is off (review: thickness 0 would make smoothstep(0, 0, d) undefined)
+  for (const [name, def] of [...Object.entries(X1_DEFAULTS), ['all four', X1_DEFAULTS], ['relative at k 0', { thicknessDepthMode: 'relative', thicknessDepthFactor: 0 }]]) {
     const r = await s.T(`window.__p.identity({}, ${JSON.stringify(typeof def === 'object' ? def : { [name]: def })})`);
     check(`sssr X1 ${name}: default ${JSON.stringify(def)} = absent, bit for bit`, r.listsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
       `rays ${r.rays.join(' / ')}, misses ${r.misses.join(' / ')}, differing px radiance ${r.radianceDiffPixels}, hit ${r.hitDiffPixels}`);
@@ -347,10 +348,14 @@ async function x1Checks(pages) {
     }
     if (scene === 'mirrorWall' && !rt) {
       const rest = await diff(await shot({ historyEdgeConfidence: true }), A);
-      const panOff = await shot({}, 8, 0.02), panOn = await shot({ historyEdgeConfidence: true }, 8, 0.02);
-      const pan = await diff(panOff, panOn);
-      check('X1 historyEdgeConfidence: no change at rest, a change while panning (mirrorWall, hit final, re-shade off)', rest.max <= floor.max && pan.mean > 0,
-        `at rest max ${rest.max}; panning 0.02 rad / frame: mean ${pan.mean.toFixed(4)}, max ${pan.max}`);
+      // while panning: X0's edgePan (second difference at the screen border, reflection px); on must not pop more
+      // than off, within the off runs' own spread + 5 % (W70's guess for d2)
+      const edge = async (on) => { await pg.T(`(() => { const p = window.__p; for (const k of ${JSON.stringify(X1_KEYS)}) delete p.ssr.settings[k]; p.setSettings({ historyEdgeConfidence: ${on} }); })()`);
+        return (await pg.T('window.__p.metrics.edgePan()')).regions.borderReflection.d2; };
+      const off1 = await edge(false), on = await edge(true), off2 = await edge(false);
+      check('X1 historyEdgeConfidence: no change at rest; panning, edge pops no worse than off (mirrorWall, hit final, re-shade off; X0 edgePan border-reflection d2)',
+        rest.max <= floor.max && on <= Math.max(off1, off2) * 1.05,
+        `at rest max ${rest.max}; edgePan d2 off ${off1} / ${off2}, on ${on}`);
     }
     pg.close();
   }
