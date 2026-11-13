@@ -47,6 +47,7 @@ const SSSR_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   hitLobeFilterMixed: 'n', hitShadeOcclusion: 's', // W52 (D3641, D3642)
   quadCopy: 's', // W58 (D3740)
   rayReuse: 's', rayReuseTaps: 'n', rayReuseRadius: 'n', rayReuseMixSources: 'b', rayReusePattern: 's', // W73 (D5040, D5047)
+  quadBaseRotation: 's', thicknessDepthFactor: 'n', thicknessDepthMode: 's', hitLobeFilterGrazing: 'n', historyEdgeConfidence: 'b', // W71 (X1, D5000-D5003)
 };
 /** `ScreenSpaceReflectionsPass.traceSettings` fields the bench sets as `t.<field>`. */
 const TRACE_FIELDS: Record<string, 'n' | 'b' | 's'> = {
