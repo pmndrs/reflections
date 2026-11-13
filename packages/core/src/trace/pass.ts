@@ -253,21 +253,32 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   });
   const empty = device.createBindGroupLayout({ label: 'rt empty', entries: [] });
   const emptyGroup = device.createBindGroup({ layout: empty, entries: [] });
-  const code = rtTraceWgsl({
-    fallbackWgsl: fallback.wgsl,
-    providerWgsl: provider.code({ group: 2, firstBinding: 0 }),
-    materialWgsl: (provider.capabilities.hitMaterial ? '' : DEFAULT_HIT_MATERIAL_WGSL) + (provider.capabilities.hitSpecular ? '' : DEFAULT_HIT_SPECULAR_WGSL),
-    anyHitWgsl: provider.capabilities.anyHit ? '' : DEFAULT_TRACE_ANY_WGSL,
-    shadingNormalWgsl: provider.capabilities.shadingNormal ? '' : DEFAULT_SHADING_NORMAL_WGSL,
-    hitShadingWgsl: shading.wgsl,
-  });
-  // the fallback and the hit shading may both carry the probe lookup's includes (D4901): keep one copy
-  const traceModule = device.createShaderModule({ label: `rt trace (${provider.name})`, code: dedupeWgslChunks(code) });
-  const tracePipe = device.createComputePipeline({
-    label: `rt trace (${provider.name})`,
-    layout: device.createPipelineLayout({ bindGroupLayouts: [traceBgl, fallback.layout ?? empty, providerBgl, shading.layout ?? empty] }),
-    compute: { module: traceModule, entryPoint: 'main' },
-  });
+  // W71 (X1 #3): a second pipeline with the grazing lobe-filter shrink, built on first use (hitLobeFilterGrazing > 0)
+  const tracePipes = new Map<boolean, GPUComputePipeline>();
+  const tracePipeFor = (lobeGrazing: boolean) => {
+    let pipe = tracePipes.get(lobeGrazing);
+    if (pipe) return pipe;
+    const code = rtTraceWgsl({
+      fallbackWgsl: fallback.wgsl,
+      providerWgsl: provider.code({ group: 2, firstBinding: 0 }),
+      materialWgsl: (provider.capabilities.hitMaterial ? '' : DEFAULT_HIT_MATERIAL_WGSL) + (provider.capabilities.hitSpecular ? '' : DEFAULT_HIT_SPECULAR_WGSL),
+      anyHitWgsl: provider.capabilities.anyHit ? '' : DEFAULT_TRACE_ANY_WGSL,
+      shadingNormalWgsl: provider.capabilities.shadingNormal ? '' : DEFAULT_SHADING_NORMAL_WGSL,
+      hitShadingWgsl: shading.wgsl,
+      lobeGrazing,
+    });
+    // the fallback and the hit shading may both carry the probe lookup's includes (D4901): keep one copy
+    const label = `rt trace (${provider.name}${lobeGrazing ? ', lobe grazing' : ''})`;
+    const traceModule = device.createShaderModule({ label, code: dedupeWgslChunks(code) });
+    pipe = device.createComputePipeline({
+      label,
+      layout: device.createPipelineLayout({ bindGroupLayouts: [traceBgl, fallback.layout ?? empty, providerBgl, shading.layout ?? empty] }),
+      compute: { module: traceModule, entryPoint: 'main' },
+    });
+    tracePipes.set(lobeGrazing, pipe);
+    return pipe;
+  };
+  tracePipeFor(false);
 
   let providerGroup: GPUBindGroup | null = null, providerVersion = -1;
   const providerBindGroup = () => {
@@ -366,7 +377,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     let p = cmd.beginComputePass({ label: 'rt begin', timestampWrites: timer?.pass('rt begin') });
     p.setPipeline(beginPipe); p.setBindGroup(0, beginGroup); p.dispatchWorkgroups(1); p.end();
     p = cmd.beginComputePass({ label: 'rt trace', timestampWrites: timer?.pass('rt trace') });
-    p.setPipeline(tracePipe);
+    p.setPipeline(tracePipeFor((settings.hitLobeFilterGrazing ?? 0) > 0));
     p.setBindGroup(0, traceGroup);
     p.setBindGroup(1, frame.fallbackBindGroup ?? emptyGroup);
     p.setBindGroup(2, providerBindGroup());
