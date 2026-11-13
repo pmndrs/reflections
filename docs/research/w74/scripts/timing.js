@@ -12,7 +12,7 @@ const base = { ...S.ssr.traceSettings };
 const per = Object.fromEntries(configs.map(([n]) => [n, {}]));
 const stats = Object.fromEntries(configs.map(([n]) => [n, []]));
 for (let k = 0; k < rounds; k++) {
-  for (const [name, set] of configs) {
+  for (const [name, set] of (k % 2 ? [...configs].reverse() : configs)) { // order alternates per round (clock drift)
     S.ssr.traceSettings = { ...base, ...set };
     S.ssr.resetHistory(); S.hybrid.resetHistory();
     await S.step(6);

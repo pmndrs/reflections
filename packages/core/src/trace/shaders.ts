@@ -413,7 +413,8 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
 //   scatter  writes the scratch to the targets (storage); no usable neighbour: source 'capped', the
 //            rest stays as intersect wrote it (its probe fallback, as an entry past the ray budget)
 // Two passes because a target can't be sampled and written in one dispatch, and only r32float
-// targets have read-write storage in core WebGPU.
+// targets have read-write storage in core WebGPU. One thread per (entry, quad pixel) slot: the
+// fill args (missArgs bytes 12-23) cover 4 x the fill entries.
 
 const FILL_COMMON_WGSL = /* wgsl */ `
 ${RT_PARAMS_WGSL}
@@ -425,7 +426,8 @@ fn fillPixel(packed: u32, k: u32) -> vec2i {
   return vec2i(select(select(select(t, vec2u(c0.x, t.y), k == 2u), vec2u(t.x, c0.y), k == 1u), c0, k == 0u));
 }
 fn fillHasPixel(packed: u32, k: u32) -> bool { return k == 0u || ((packed >> (28u + k)) & 1u) != 0u; }
-fn fillGroupIndex(gi: u32, wg: vec3u, nwg: vec3u) -> u32 { return (wg.y * nwg.x + wg.x) * 64u + gi; } // 2-D indirect groups (D601)
+// slot = entry * 4 + k over 2-D indirect groups (D601)
+fn fillSlot(gi: u32, wg: vec3u, nwg: vec3u) -> u32 { return (wg.y * nwg.x + wg.x) * 64u + gi; }
 `;
 
 export const RT_FILL_MARK_WGSL = /* wgsl */ `
@@ -435,12 +437,10 @@ ${FILL_COMMON_WGSL}
 @group(0) @binding(3) var o_source: texture_storage_2d<r32float, write>;
 @compute @workgroup_size(64)
 fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u) {
-  let index = fillGroupIndex(gi, wg, nwg);
-  if (index >= missCounter[5]) { return; }
-  let packed = missList[P.missCapacity + index].x;
-  for (var k = 0u; k < 4u; k++) {
-    if (fillHasPixel(packed, k)) { textureStore(o_source, fillPixel(packed, k), vec4f(${RT_SOURCE.fillPending}.0)); }
-  }
+  let slot = fillSlot(gi, wg, nwg);
+  if ((slot >> 2u) >= missCounter[5]) { return; }
+  let packed = missList[P.missCapacity + (slot >> 2u)].x;
+  if (fillHasPixel(packed, slot & 3u)) { textureStore(o_source, fillPixel(packed, slot & 3u), vec4f(${RT_SOURCE.fillPending}.0)); }
 }
 `;
 
@@ -478,16 +478,20 @@ fn fillSurface(c: vec2i) -> BilateralSurface {
   return s;
 }
 // X4's tap: of quad 'cell', the pixel nearest the one filled (a traced quad wrote its ray to each of
-// its glossy pixels; the nearest one's own depth and normal are what the weights compare).
+// its glossy pixels; the nearest one's own depth and normal are what the weights compare). The
+// source is read first: a tap the mask rejects (the checkerboard's own and diagonal quads are
+// fillPending) loads no geometry.
 fn bilateralTap(cell: vec2i, pixel: vec2i) -> BilateralTap {
   var t: BilateralTap;
   let c = clamp(pixel, cell * 2, cell * 2 + 1);
+  if (any(c < vec2i(0)) || any(c >= vec2i(P.renderSize))) { return t; }
+  t.source = u32(textureLoad(t_source, c, 0).x + 0.5);
+  if (t.source >= 32u || ((P.fillSourceMask >> t.source) & 1u) == 0u) { return t; }
   t.surface = fillSurface(c);
   if (!t.surface.valid) { return t; }
   t.radiance = textureLoad(t_radiance, c, 0);
   t.hitDistance = textureLoad(t_hit, c, 0).x;
   t.confidence = textureLoad(t_confidence, c, 0).x;
-  t.source = u32(textureLoad(t_source, c, 0).x + 0.5);
   t.spatial = 1.0;
   return t;
 }
@@ -500,12 +504,13 @@ var<workgroup> wgFallbacks: atomic<u32>;
 fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u) {
   if (gi == 0u) { atomicStore(&wgFilled, 0u); atomicStore(&wgFallbacks, 0u); }
   workgroupBarrier();
-  let index = fillGroupIndex(gi, wg, nwg);
+  let slot = fillSlot(gi, wg, nwg);
+  let index = slot >> 2u;
+  let k = slot & 3u;
   if (index < missCounter[5]) {
     let packed = missList[P.missCapacity + index].x;
-    let w = BilateralWeights(P.fillPlaneTolerance, P.fillNormalPower, P.fillRoughnessTolerance, P.fillSourceMask, P.fillMinWeightSum);
-    for (var k = 0u; k < 4u; k++) {
-      if (!fillHasPixel(packed, k)) { continue; }
+    if (fillHasPixel(packed, k)) {
+      let w = BilateralWeights(P.fillPlaneTolerance, P.fillNormalPower, P.fillRoughnessTolerance, P.fillSourceMask, P.fillMinWeightSum);
       let c = fillPixel(packed, k);
       let p = fillSurface(c);
       var out = vec4u(0u);
@@ -517,7 +522,7 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
         }
       }
       if ((out.w & FILL_FILLED) != 0u) { atomicAdd(&wgFilled, 1u); } else { atomicAdd(&wgFallbacks, 1u); }
-      scratch[index * 4u + k] = out;
+      scratch[slot] = out;
     }
   }
   workgroupBarrier();
@@ -541,21 +546,19 @@ ${FILL_COMMON_WGSL}
 @group(0) @binding(7) var o_source: texture_storage_2d<r32float, write>;
 @compute @workgroup_size(64)
 fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u) {
-  let index = fillGroupIndex(gi, wg, nwg);
-  if (index >= missCounter[5]) { return; }
-  let packed = missList[P.missCapacity + index].x;
-  for (var k = 0u; k < 4u; k++) {
-    if (!fillHasPixel(packed, k)) { continue; }
-    let c = fillPixel(packed, k);
-    let v = scratch[index * 4u + k];
-    if ((v.w & 0x80000000u) == 0u) {
-      textureStore(o_source, c, vec4f(${RT_SOURCE.capped}.0));
-      continue;
-    }
-    textureStore(o_radiance, c, vec4f(unpack2x16float(v.x), unpack2x16float(v.y)));
-    textureStore(o_hit, c, vec4f(bitcast<f32>(v.z)));
-    textureStore(o_confidence, c, vec4f(f32(v.w & 0xffffffu) / 16777215.0));
-    textureStore(o_source, c, vec4f(f32((v.w >> 24u) & 7u)));
+  let slot = fillSlot(gi, wg, nwg);
+  if ((slot >> 2u) >= missCounter[5]) { return; }
+  let packed = missList[P.missCapacity + (slot >> 2u)].x;
+  if (!fillHasPixel(packed, slot & 3u)) { return; }
+  let c = fillPixel(packed, slot & 3u);
+  let v = scratch[slot];
+  if ((v.w & 0x80000000u) == 0u) {
+    textureStore(o_source, c, vec4f(${RT_SOURCE.capped}.0));
+    return;
   }
+  textureStore(o_radiance, c, vec4f(unpack2x16float(v.x), unpack2x16float(v.y)));
+  textureStore(o_hit, c, vec4f(bitcast<f32>(v.z)));
+  textureStore(o_confidence, c, vec4f(f32(v.w & 0xffffffu) / 16777215.0));
+  textureStore(o_source, c, vec4f(f32((v.w >> 24u) & 7u)));
 }
 `;

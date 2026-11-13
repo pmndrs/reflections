@@ -411,7 +411,7 @@ fn main() {
  *  missCounter: [0] append counter, [1] this frame's count, [2] overflow append counter, [3] dropped this frame;
  *  W74 (X4) fill list: [4] append counter, [5] this frame's fill entries (at most fillCapacity), [6] unused, [7] fill
  *  entries past fillCapacity this frame (intersect sent those to the miss list instead).
- *  args: ceil(count / 64) groups of 64 in 2-D (see groups2d) for the ray-traced pass; [3..5] the same for the fill. */
+ *  args: ceil(count / 64) groups of 64 in 2-D (see groups2d) for the ray-traced pass; [3..5] the fill: 4 threads per entry. */
 export const missArgsWgsl = (capacity: number, fillCapacity = 0) => /* wgsl */ `${ARGS_2D_WGSL}
 const P_capacity: u32 = ${capacity}u;
 const P_fill_capacity: u32 = ${fillCapacity}u;
@@ -430,7 +430,7 @@ fn main() {
   missCounter[4] = 0u;
   missCounter[5] = min(fills, P_fill_capacity);
   missCounter[7] = fills - missCounter[5];
-  let f = groups2d((missCounter[5] + 63u) / 64u);
+  let f = groups2d((missCounter[5] * 4u + 63u) / 64u); // one thread per (entry, quad pixel)
   args[3] = f.x; args[4] = f.y; args[5] = 1u;
 }
 `;
