@@ -247,6 +247,41 @@ export interface ScreenSpaceReflectionsSettings {
    */
   quadCopy?: 'always' | 'sameSurface';
   /**
+   * W71 (X1 #1, D5000): which pixel of a 2x2 quad traces when `samplesPerQuad` < 4 (the others take
+   * its ray). 'fixed' (default, FFX): the top-left, every frame, so the copy's 2x2 grid stays put under
+   * TAA / an upscaler. 'frame': the corner cycles with the frame index (diagonal first). 'pattern': a
+   * 4x4 Latin square over quads, offset by the frame index, so neighbouring quads trace different
+   * corners. Composes with `quadCopy: 'sameSurface'` (the same-surface test is against the chosen base).
+   */
+  quadBaseRotation?: 'fixed' | 'frame' | 'pattern';
+  /**
+   * W71 (X1 #2, D5001): thickness that scales with depth. With `thicknessDepthMode` 'add' (default)
+   * the hit acceptance thickness gains `thicknessDepthFactor x |view z of the hit|`; with 'relative'
+   * it is that term alone (Diligent's `distance / viewZ < 0.025`: this at 0.025), so one value serves
+   * every scene scale. Default 0 (no change). 0 is off in both modes: 'relative' takes effect only
+   * once the factor is above 0 (a zero thickness would make the hit test undefined).
+   */
+  thicknessDepthFactor?: number;
+  /** See {@link thicknessDepthFactor}. Default 'add'; 'relative' with a factor of 0 is the same as 'add' (off). */
+  thicknessDepthMode?: 'add' | 'relative';
+  /**
+   * W71 (X1 #3, D5002): shrink the lobe filter's spread (`hitLobeFilter`) at grazing angles by
+   * `mix(1, mix(saturate(2 NdotV), 1, sqrt(perceptual roughness)), this)` (SSSR 2015 slide 85 at 1):
+   * a grazing view sees a narrower footprint of the lobe. 0..1, default 0 (no change). The three
+   * adapter passes it to the ray-traced pass unless `traceSettings` sets its own.
+   */
+  hitLobeFilterGrazing?: number;
+  /**
+   * W71 (X1 #4, D5003): with `hitColor: 'history'` (and `hitShading: 'off'`, where a hit's colour is
+   * read from last frame), the screen-edge fade becomes min(this frame's, the previous position's),
+   * and a hit whose previous position was off screen gets confidence 0 (it goes to the probe or the
+   * miss list) instead of this frame's colour without specular. More misses near the edges while
+   * the camera moves: more traced rays with RT on. Default false. Screen-space hits only: the
+   * ray-traced pass's on-screen hit reuse from history (D906) keeps its fallback to this frame's
+   * colour, so a traced hit can still pop at the edge.
+   */
+  historyEdgeConfidence?: boolean;
+  /**
    * W74 (plan X4, D5060): which glossy misses go to the ray-traced pass. 'full' (default): every
    * miss (FFX's hybrid sample). 'half': of the glossy misses at perceptual roughness >=
    * `tracedHalfRateMinRoughness`, only those of every other 2x2 quad (a checkerboard of quads that
@@ -262,6 +297,8 @@ export interface ScreenSpaceReflectionsSettings {
    */
   tracedHalfRateMinRoughness?: number;
 }
+
+const QUAD_BASE_ROTATION: Record<string, number> = { fixed: 0, frame: 1, pattern: 2 };
 
 /**
  * Default `tracedHalfRateMinRoughness` (W74): perceptual 0.05 (alpha 0.0025), near FFX's mirror
@@ -607,7 +644,12 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[138] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
     u[139] = useHitSource && inputs.hitSource ? 1 : 0;
     u[140] = (s.quadCopy ?? 'always') === 'sameSurface' ? 1 : 0;
-    // 141-153: other streams' words. 154-157: W74 (X4)
+    // W71 (X1): words 141-144
+    u[141] = QUAD_BASE_ROTATION[s.quadBaseRotation ?? 'fixed'] ?? 0;
+    f[142] = Math.max(0, s.thicknessDepthFactor ?? 0);
+    f[143] = Math.min(1, Math.max(0, s.hitLobeFilterGrazing ?? 0));
+    u[144] = (s.historyEdgeConfidence ? 1 : 0) | ((s.thicknessDepthMode ?? 'add') === 'relative' ? 2 : 0);
+    // 154-157: W74 (X4)
     u[154] = useMissList && s.tracedMissRate === 'half' ? 1 : 0;
     f[155] = Math.max(0, s.tracedHalfRateMinRoughness ?? DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS) ** 2;
     u[156] = missFillCapacity;

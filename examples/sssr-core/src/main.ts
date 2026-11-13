@@ -342,6 +342,46 @@ async function main() {
     return res;
   }
 
+  /**
+   * W71 (X1): the same frame dispatched with settings `a`, then with `b` (frameIndex 7, occupancy 0
+   * unless given), lists compared sorted and images bit for bit. A setting at its default must give
+   * no difference against the setting absent.
+   */
+  async function identity(a: ScreenSpaceReflectionsSettings = {}, b: ScreenSpaceReflectionsSettings = {}) {
+    const base = { ...settings, frameIndex: 7, minTraversalOccupancy: 0 };
+    const run = async (x: ScreenSpaceReflectionsSettings) => {
+      const enc = device.createCommandEncoder();
+      main.dispatch(enc, inputs, { ...base, ...x });
+      device.queue.submit([enc.finish()]);
+      return capture(main);
+    };
+    const A = await run(a), B = await run(b);
+    frame();
+    return {
+      rays: [A.counter[1], B.counter[1]], misses: [A.missCounter[1], B.missCounter[1]],
+      listsSame: A.counter[1] === B.counter[1] && sameSorted(A.rays, B.rays) && sameSorted(A.tiles, B.tiles) &&
+        A.misses.length === B.misses.length && [...A.misses].sort().join() === [...B.misses].sort().join(),
+      radianceDiffPixels: bytesDiff(A.radiance, B.radiance, 8), hitDiffPixels: bytesDiff(A.hit, B.hit, 4),
+    };
+  }
+  /** W71 (X1 #1): which quad corner the rays that carry copies trace from, as counts [tl, tr, bl, br], for one frame. */
+  async function quadCorners(extra: ScreenSpaceReflectionsSettings = {}) {
+    const enc = device.createCommandEncoder();
+    main.dispatch(enc, inputs, { ...settings, minTraversalOccupancy: 0, ...extra });
+    device.queue.submit([enc.finish()]);
+    const A = await capture(main);
+    const n = [0, 0, 0, 0];
+    let copies = 0;
+    for (const r of A.rays) {
+      const f = r >>> 29;
+      if (!f) continue;
+      copies += ((f & 1) + ((f >> 1) & 1) + ((f >> 2) & 1));
+      n[(r & 1) + 2 * ((r >>> 15) & 1)]++;
+    }
+    frame();
+    return { corners: n, copies, rays: A.counter[1] };
+  }
+
   /** Ray, tile and miss counts and the hit fraction on the mirror floor (id 1) for one frame. */
   async function stats(extra: ScreenSpaceReflectionsSettings = {}) {
     frame(extra);
@@ -481,7 +521,7 @@ async function main() {
     `rays ${st.rays}, denoiser tiles ${st.tiles}, misses ${st.misses}; mirror-floor hit fraction ${(st.mirrorHitFraction * 100).toFixed(1)}%`);
 
   (window as unknown as { __p: unknown }).__p = {
-    device, main, hasSubgroups, parity, stats, time, fallbackRoughness,
+    device, main, hasSubgroups, parity, stats, time, fallbackRoughness, identity, quadCorners,
     render: (s: ScreenSpaceReflectionsSettings = {}) => { settings = { ...baseSettings, ...s }; frame(); return true; },
     setView: (name: string) => { viewIndex = Math.max(0, VIEWS.indexOf(name)); frame(); return true; },
     setMip: (m: number) => { pyramidMip = m; frame(); return true; },

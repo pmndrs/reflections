@@ -109,6 +109,11 @@ export interface TracedReflectionsSettings {
    * the pass keeps a copy of last frame's `source` (r32float, render size). Default 1 (no change).
    */
   hitLobeFilterMixed?: number;
+  /**
+   * W71 (X1 #3, D5002), as the SSSR tracer's `hitLobeFilterGrazing` (pass the tracer's): the lobe
+   * filter's spread at a traced hit shrinks at grazing angles of the reflecting pixel. 0..1, default 0.
+   */
+  hitLobeFilterGrazing?: number;
   /** The SSSR tracer's `roughnessThreshold` (perceptual; pass the tracer's), read by `hitLobeFilterMixed` only. Default 0.447. */
   roughnessThreshold?: number;
   /** Relative view-distance tolerance for that test. Default 0.02. */
@@ -279,21 +284,41 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   });
   const empty = device.createBindGroupLayout({ label: 'rt empty', entries: [] });
   const emptyGroup = device.createBindGroup({ layout: empty, entries: [] });
-  const code = rtTraceWgsl({
-    fallbackWgsl: fallback.wgsl,
-    providerWgsl: provider.code({ group: 2, firstBinding: 0 }),
-    materialWgsl: (provider.capabilities.hitMaterial ? '' : DEFAULT_HIT_MATERIAL_WGSL) + (provider.capabilities.hitSpecular ? '' : DEFAULT_HIT_SPECULAR_WGSL),
-    anyHitWgsl: provider.capabilities.anyHit ? '' : DEFAULT_TRACE_ANY_WGSL,
-    shadingNormalWgsl: provider.capabilities.shadingNormal ? '' : DEFAULT_SHADING_NORMAL_WGSL,
-    hitShadingWgsl: shading.wgsl,
-  });
-  // the fallback and the hit shading may both carry the probe lookup's includes (D4901): keep one copy
-  const traceModule = device.createShaderModule({ label: `rt trace (${provider.name})`, code: dedupeWgslChunks(code) });
-  const tracePipe = device.createComputePipeline({
-    label: `rt trace (${provider.name})`,
-    layout: device.createPipelineLayout({ bindGroupLayouts: [traceBgl, fallback.layout ?? empty, providerBgl, shading.layout ?? empty] }),
-    compute: { module: traceModule, entryPoint: 'main' },
-  });
+  // W71 (X1 #3): the grazing lobe-filter shrink lives in a second pipeline (with the branch present the default
+  // shader's output moved, D5002). It is built with createComputePipelineAsync on first use
+  // (hitLobeFilterGrazing > 0), and the default pipeline keeps tracing until it resolves, so no frame stalls
+  // on the compile (D3D12 compiles slowly); the first few frames trace without the shrink.
+  const traceDescriptor = (lobeGrazing: boolean): GPUComputePipelineDescriptor => {
+    const code = rtTraceWgsl({
+      fallbackWgsl: fallback.wgsl,
+      providerWgsl: provider.code({ group: 2, firstBinding: 0 }),
+      materialWgsl: (provider.capabilities.hitMaterial ? '' : DEFAULT_HIT_MATERIAL_WGSL) + (provider.capabilities.hitSpecular ? '' : DEFAULT_HIT_SPECULAR_WGSL),
+      anyHitWgsl: provider.capabilities.anyHit ? '' : DEFAULT_TRACE_ANY_WGSL,
+      shadingNormalWgsl: provider.capabilities.shadingNormal ? '' : DEFAULT_SHADING_NORMAL_WGSL,
+      hitShadingWgsl: shading.wgsl,
+      lobeGrazing,
+    });
+    // the fallback and the hit shading may both carry the probe lookup's includes (D4901): keep one copy
+    const label = `rt trace (${provider.name}${lobeGrazing ? ', lobe grazing' : ''})`;
+    return {
+      label,
+      layout: device.createPipelineLayout({ bindGroupLayouts: [traceBgl, fallback.layout ?? empty, providerBgl, shading.layout ?? empty] }),
+      compute: { module: device.createShaderModule({ label, code: dedupeWgslChunks(code) }), entryPoint: 'main' },
+    };
+  };
+  const tracePipe = device.createComputePipeline(traceDescriptor(false));
+  let grazingPipe: GPUComputePipeline | null = null;
+  let grazingPending = false;
+  const tracePipeFor = (lobeGrazing: boolean) => {
+    if (!lobeGrazing) return tracePipe;
+    if (grazingPipe) return grazingPipe;
+    if (!grazingPending) {
+      grazingPending = true;
+      device.createComputePipelineAsync(traceDescriptor(true)).then((p) => { grazingPipe = p; })
+        .catch((e) => { console.error('rt trace: the lobe-grazing pipeline failed to build; tracing without it', e); });
+    }
+    return tracePipe;
+  };
 
   let providerGroup: GPUBindGroup | null = null, providerVersion = -1;
   const providerBindGroup = () => {
@@ -378,7 +403,8 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     u[64] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
     f[65] = Math.min(1, Math.max(0, s.hitLobeFilterMixed ?? 1));
     f[66] = (s.roughnessThreshold ?? 0.447) ** 2;
-    // 67: another stream's word. 68-75: W74 (X4) the half-rate fill
+    f[67] = Math.min(1, Math.max(0, s.hitLobeFilterGrazing ?? 0)); // W71 (X1 #3)
+    // 68-75: W74 (X4) the half-rate fill
     bilateralFillWeightWords(resolveBilateralFillWeights({
       planeTolerance: s.fillPlaneTolerance, normalPower: s.fillNormalPower, roughnessTolerance: s.fillRoughnessTolerance,
       sourceMask: s.fillSourceMask, minWeightSum: s.fillMinWeightSum,
@@ -431,7 +457,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     let p = cmd.beginComputePass({ label: 'rt begin', timestampWrites: timer?.pass('rt begin') });
     p.setPipeline(beginPipe); p.setBindGroup(0, beginGroup); p.dispatchWorkgroups(1); p.end();
     p = cmd.beginComputePass({ label: 'rt trace', timestampWrites: timer?.pass('rt trace') });
-    p.setPipeline(tracePipe);
+    p.setPipeline(tracePipeFor((settings.hitLobeFilterGrazing ?? 0) > 0));
     p.setBindGroup(0, traceGroup);
     p.setBindGroup(1, frame.fallbackBindGroup ?? emptyGroup);
     p.setBindGroup(2, providerBindGroup());
