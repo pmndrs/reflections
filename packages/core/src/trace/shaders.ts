@@ -518,7 +518,8 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
       let p = fillSurface(c);
       var out = vec4u(0u);
       if (p.valid) {
-        let r = bilateralFill(p, P.cameraPosition, c, c >> vec2u(1u), P.fillFootprint, w);
+        // one coverage class (W74 review): no partial confidence from mixing hits and misses, t from hits only
+        let r = bilateralFillMajority(p, P.cameraPosition, c, c >> vec2u(1u), P.fillFootprint, w);
         if (r.weightSum > 0.0 && r.weightSum >= w.minWeightSum) {
           let conf = min(u32(round(saturate(r.confidence) * 16777215.0)), 0xffffffu); // (x + 0.5 rounds to 2^24 in f32 at 1)
           out = vec4u(pack2x16float(r.radiance.xy), pack2x16float(r.radiance.zw), bitcast<u32>(r.hitDistance), FILL_FILLED | ((r.source & 7u) << 24u) | conf);

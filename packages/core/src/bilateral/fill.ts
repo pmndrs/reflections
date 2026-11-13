@@ -70,7 +70,8 @@ export const BILATERAL_SOURCE_CODES = 8;
 
 /**
  * The kernel. Defines `BilateralSurface`, `BilateralTap`, `BilateralWeights`, `BilateralResult`,
- * `bilateralWeight` and `bilateralFill`; needs the includer's `bilateralTap(cell, pixel)`.
+ * `bilateralWeight`, `bilateralFill` (linear) and `bilateralFillMajority` (one coverage class, W74 review); needs the
+ * includer's `bilateralTap(cell, pixel)`.
  */
 export const BILATERAL_FILL_WGSL = /* wgsl */ `
 // ---- bilateralFill (core/bilateral/fill.ts) ----
@@ -121,9 +122,23 @@ fn bilateralWeight(p: BilateralSurface, viewDistance: f32, q: BilateralTap, w: B
   return weight;
 }
 
-fn bilateralFill(p: BilateralSurface, cameraPosition: vec3f, pixel: vec2i, originCell: vec2i, footprint: u32, w: BilateralWeights) -> BilateralResult {
-  var r: BilateralResult;
-  var perSource: array<f32, ${BILATERAL_SOURCE_CODES}>;
+// The gather, split by coverage: class 1 = taps with confidence >= 0.5 (hits), class 0 = the rest
+// (misses). Per class: sum w, sum w x radiance.rgb, sum w x confidence, and confidence-weighted
+// sums of the ray length and hit distance (a miss's t is 0 by convention, not a distance).
+struct BilateralClass {
+  weight: f32,
+  rgb: vec3f,
+  confidence: f32,
+  tWeight: f32,       // sum w x confidence
+  rayLength: f32,     // sum w x confidence x radiance.w
+  hitDistance: f32,   // sum w x confidence x hitDistance
+  taps: u32,
+  perSource: array<f32, ${BILATERAL_SOURCE_CODES}>,
+};
+struct BilateralClasses { c: array<BilateralClass, 2> };
+
+fn bilateralGatherClasses(p: BilateralSurface, cameraPosition: vec3f, pixel: vec2i, originCell: vec2i, footprint: u32, w: BilateralWeights) -> BilateralClasses {
+  var g: BilateralClasses;
   let viewDistance = length(p.position - cameraPosition);
   let lo = select(-1, 0, footprint == 2u);
   let hi = select(1, 2, footprint == 4u);
@@ -132,25 +147,66 @@ fn bilateralFill(p: BilateralSurface, cameraPosition: vec3f, pixel: vec2i, origi
       let q = bilateralTap(originCell + vec2i(i, j), pixel);
       let wq = bilateralWeight(p, viewDistance, q, w);
       if (wq <= 0.0) { continue; }
-      r.radiance += wq * q.radiance;
-      r.hitDistance += wq * q.hitDistance;
-      r.confidence += wq * q.confidence;
-      r.weightSum += wq;
-      r.taps += 1u;
-      perSource[q.source] += wq;
+      let k = select(0u, 1u, q.confidence >= 0.5);
+      let wc = wq * q.confidence;
+      g.c[k].weight += wq;
+      g.c[k].rgb += wq * q.radiance.rgb;
+      g.c[k].confidence += wc;
+      g.c[k].tWeight += wc;
+      g.c[k].rayLength += wc * q.radiance.w;
+      g.c[k].hitDistance += wc * q.hitDistance;
+      g.c[k].taps += 1u;
+      g.c[k].perSource[q.source] += wq;
     }
   }
+  return g;
+}
+
+// One class (or both merged) to a result: rgb and confidence by weight, ray length and hit distance
+// by weight x confidence, the source with the largest weight share.
+fn bilateralResolve(a: BilateralClass, b: BilateralClass) -> BilateralResult {
+  var r: BilateralResult;
+  r.weightSum = a.weight + b.weight;
+  r.taps = a.taps + b.taps;
   if (r.weightSum > 0.0) {
-    let inv = 1.0 / r.weightSum;
-    r.radiance *= inv; r.hitDistance *= inv; r.confidence *= inv;
+    r.radiance = vec4f((a.rgb + b.rgb) / r.weightSum, 0.0);
+    r.confidence = (a.confidence + b.confidence) / r.weightSum;
+  }
+  let tw = a.tWeight + b.tWeight;
+  if (tw > 0.0) {
+    r.radiance.w = (a.rayLength + b.rayLength) / tw;
+    r.hitDistance = (a.hitDistance + b.hitDistance) / tw;
   }
   var best = 0.0;
   for (var s = 0u; s < ${BILATERAL_SOURCE_CODES}u; s++) {
-    if (perSource[s] > best) { best = perSource[s]; r.source = s; }
+    let v = a.perSource[s] + b.perSource[s];
+    if (v > best) { best = v; r.source = s; }
   }
   return r;
 }
+
+// Linear: every tap. Radiance and confidence are the weighted means; the ray length and hit distance
+// are means over the taps' hits (weighted by confidence), so two hits and two misses give confidence
+// 0.5 at the hits' distance, not at half of it.
+fn bilateralFill(p: BilateralSurface, cameraPosition: vec3f, pixel: vec2i, originCell: vec2i, footprint: u32, w: BilateralWeights) -> BilateralResult {
+  var g = bilateralGatherClasses(p, cameraPosition, pixel, originCell, footprint, w); // var: runtime class index
+  return bilateralResolve(g.c[0], g.c[1]);
+}
+
+// Majority coverage: the class (hits or misses) with the larger weight wins and the result is that
+// class alone, so mixed neighbours never produce a partial confidence (which a depth-aware blend
+// such as the three composite's D2400 reads as a thickness falloff) and the source is that class's.
+// weightSum is the total over both classes (the minWeightSum gate), taps the winner's.
+fn bilateralFillMajority(p: BilateralSurface, cameraPosition: vec3f, pixel: vec2i, originCell: vec2i, footprint: u32, w: BilateralWeights) -> BilateralResult {
+  var g = bilateralGatherClasses(p, cameraPosition, pixel, originCell, footprint, w); // var: runtime class index
+  var empty: BilateralClass;
+  let k = select(0u, 1u, g.c[1].weight >= g.c[0].weight);
+  var r = bilateralResolve(g.c[k], empty);
+  r.weightSum = g.c[0].weight + g.c[1].weight;
+  return r;
+}
 `;
+
 
 /** u32 words of `BilateralWeights` in a uniform block, in struct order (5 words). */
 export function bilateralFillWeightWords(w: BilateralFillWeights, f: Float32Array, u: Uint32Array, at: number): void {
