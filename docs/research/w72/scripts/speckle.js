@@ -4,7 +4,9 @@
 // Per mask px over N frames (frame index advancing): temporal mean m_p and std s_p of luminance. Reported:
 //   mean   = mean of m_p (energy; the cone should keep it),
 //   relStd = mean(s_p) / mean(m_p) (noise),
-//   speckle = share of samples with L > m_p + 3 sigma, sigma = the median s_p over the mask (bright outliers: heavy tails),
+//   speckle = share of samples with L > m_p + 3 sigma, sigma = the FIRST config's median s_p over the mask (fixed across configs:
+//             bright outliers, heavy tails),
+//   fireflies = share of samples with L > m_p + 2 x mean (an absolute outlier: twice the region's mean above the pixel's own),
 //   p999   = the 99.9th percentile of (L - m_p) / mean(m_p) (how bright the worst outliers are).
 const dev = PAGE === 'arcade' ? P.view.ssr.core.device : P.ssr.device;
 const tracer = () => (PAGE === 'arcade' ? P.view.ssr.core : P.ssr.tracer);
@@ -40,11 +42,12 @@ for (const [name, s] of CONFIGS) {
   const m = new Float32Array(M), sd = new Float32Array(M);
   for (let j = 0; j < M; j++) { let a = 0, b = 0; for (let f = 0; f < N; f++) { const v = L[f * M + j]; a += v; b += v * v; } m[j] = a / N; sd[j] = Math.sqrt(Math.max(0, b / N - m[j] * m[j])); }
   const mean = m.reduce((a, b) => a + b, 0) / M, msd = sd.reduce((a, b) => a + b, 0) / M;
-  const sigma = [...sd].sort((a, b) => a - b)[M >> 1];
-  let spk = 0; const dev2 = new Float32Array(M * N);
-  for (let f = 0; f < N; f++) for (let j = 0; j < M; j++) { const d = L[f * M + j] - m[j]; dev2[f * M + j] = d; if (d > 3 * sigma) spk++; }
+  const sigmaOwn = [...sd].sort((a, b) => a - b)[M >> 1];
+  const sigma = (globalThis.__w72sigma ??= sigmaOwn);
+  let spk = 0, ff = 0; const dev2 = new Float32Array(M * N);
+  for (let f = 0; f < N; f++) for (let j = 0; j < M; j++) { const d = L[f * M + j] - m[j]; dev2[f * M + j] = d; if (d > 3 * sigma) spk++; if (d > 2 * mean) ff++; }
   dev2.sort();
-  res[name] = { px: M, mean: +mean.toFixed(4), relStd: +(msd / mean).toFixed(3), speckle: +(spk / (M * N)).toFixed(4), p999: +(dev2[Math.floor(dev2.length * 0.999)] / mean).toFixed(2), sigma: +sigma.toFixed(4) };
+  res[name] = { px: M, mean: +mean.toFixed(4), relStd: +(msd / mean).toFixed(3), speckle: +(spk / (M * N)).toFixed(4), fireflies: +(ff / (M * N)).toFixed(4), p999: +(dev2[Math.floor(dev2.length * 0.999)] / mean).toFixed(2), sigma: +sigmaOwn.toFixed(4) };
   log({ name, ...res[name] });
 }
 for (const k of KEYS) delete settings()[k];
