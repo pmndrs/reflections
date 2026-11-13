@@ -11,7 +11,7 @@ for (const c of CONFIGS) {
   prev = c.set;
   await P.step(2);
   const m = await P.measure({ samples: SPP, warmup: WARMUP, frames: FRAMES, methods: METHODS });
-  const rows = Object.fromEntries(m.rows.map((r) => [r.region, { px: r.px, pt: +r.refLuma.toFixed(2), ...Object.fromEntries(Object.entries(r.methods).map(([id, v]) => [id, { mad: +v.mad.toFixed(2), luma: +v.luma.toFixed(2), frameMad: +v.frameMad.toFixed(2) }])) }]));
+  const rows = Object.fromEntries(m.rows.map((r) => [r.region, { px: r.px, pt: +r.refLuma.toFixed(2), ...Object.fromEntries(Object.entries(r.methods).map(([id, v]) => [id, Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === 'number' ? +x.toFixed(3) : x]))])) }]));
   log({ tag: TAG, config: c.name, spp: m.referenceSamples, rows });
   out.push({ config: c.name, set: c.set, spp: m.referenceSamples, rows });
 }
