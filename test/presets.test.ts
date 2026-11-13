@@ -1,6 +1,6 @@
 // W77: core's named presets (plain data) and the bench's mapping of them onto its URL keys.
 import { describe, expect, it } from 'vitest';
-import { REFLECTION_PRESETS, REFLECTION_PRESET_NAMES, denoiserHitSourceOptions, reflectionsPreset } from '../packages/core/src/presets';
+import { REFLECTION_PRESETS, REFLECTION_PRESET_KEYS, REFLECTION_PRESET_NAMES, denoiserHitSourceModeOf, denoiserHitSourceOptions, isReflectionsPresetName, reflectionsPreset } from '../packages/core/src/presets';
 import { PRESET_DOCS, SETTINGS, presetUrlKeys } from '../examples/showcase/src/bench/schema';
 
 describe('reflection presets', () => {
@@ -14,25 +14,30 @@ describe('reflection presets', () => {
     expect(p.denoiser).toEqual({ hitSource: 'hits' });
     p.tracer.reflectionResolution = 'half';
     expect(REFLECTION_PRESETS.performance.tracer.reflectionResolution).toBe('half');
-    expect(REFLECTION_PRESETS.default.tracer.reflectionResolution).toBe('full');
+    expect(REFLECTION_PRESETS.default).toEqual({ tracer: {}, denoiser: {} });
   });
 
-  it("'default' names every key another preset sets (so applying it undoes them)", () => {
-    const def = REFLECTION_PRESETS.default;
+  it("'default' is empty (the package defaults stay the only source of truth); the key list covers every preset", () => {
+    expect(reflectionsPreset('default')).toEqual({ tracer: {}, denoiser: {} });
     for (const n of REFLECTION_PRESET_NAMES) {
-      for (const k of Object.keys(REFLECTION_PRESETS[n].tracer)) expect(k in def.tracer, `${n}.tracer.${k}`).toBe(true);
-      for (const k of Object.keys(REFLECTION_PRESETS[n].denoiser)) expect(k in def.denoiser, `${n}.denoiser.${k}`).toBe(true);
+      for (const k of Object.keys(REFLECTION_PRESETS[n].tracer)) expect(REFLECTION_PRESET_KEYS.tracer, `${n}.tracer.${k}`).toContain(k);
+      for (const k of Object.keys(REFLECTION_PRESETS[n].denoiser)) expect(REFLECTION_PRESET_KEYS.denoiser, `${n}.denoiser.${k}`).toContain(k);
     }
+    expect(REFLECTION_PRESET_KEYS).toEqual({ tracer: ['reflectionResolution'], denoiser: ['hitSource'] });
   });
 
-  it('unknown names throw', () => {
+  it('unknown names throw; isReflectionsPresetName guards them', () => {
     expect(() => reflectionsPreset('fast' as never)).toThrow(/unknown preset/);
+    expect(isReflectionsPresetName('performance')).toBe(true);
+    for (const bad of ['fast', 'toString', '', null, 3]) expect(isReflectionsPresetName(bad), String(bad)).toBe(false);
   });
 
   it("FFX's options per hit-source mode", () => {
     expect(denoiserHitSourceOptions('off')).toEqual({ separateHitSources: false, missesMatchAnySource: false });
     expect(denoiserHitSourceOptions('hits')).toEqual({ separateHitSources: true, missesMatchAnySource: true });
     expect(denoiserHitSourceOptions('all')).toEqual({ separateHitSources: true, missesMatchAnySource: false });
+    for (const m of ['off', 'hits', 'all'] as const) expect(denoiserHitSourceModeOf(denoiserHitSourceOptions(m))).toBe(m);
+    expect(denoiserHitSourceModeOf(null)).toBe('off');
   });
 
   it('docs/SETTINGS.md documents every preset once', () => {
@@ -41,7 +46,7 @@ describe('reflection presets', () => {
 
   it('the bench maps every preset onto URL keys its schema has, with values the controls offer', () => {
     expect(presetUrlKeys('performance')).toEqual({ 's.reflectionResolution': 'half', hitSource: 'hits' });
-    expect(presetUrlKeys('default')).toEqual({ 's.reflectionResolution': 'full', hitSource: '0' });
+    expect(presetUrlKeys('default')).toEqual({});
     expect(presetUrlKeys(null)).toEqual({});
     const byId = new Map(SETTINGS.map((s) => [s.id, s]));
     expect(byId.get('preset')?.choices?.map(([v]) => v)).toEqual(REFLECTION_PRESET_NAMES);

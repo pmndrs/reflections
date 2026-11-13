@@ -43,7 +43,7 @@ export * from './bilateral';
 export * from './halfres';
 // Named settings bundles (W77): 'default' and 'performance' (half-res + the denoiser's hit source), applied by adapters.
 export {
-  REFLECTION_PRESETS, REFLECTION_PRESET_NAMES, reflectionsPreset, denoiserHitSourceOptions,
+  REFLECTION_PRESETS, REFLECTION_PRESET_NAMES, REFLECTION_PRESET_KEYS, isReflectionsPresetName, reflectionsPreset, denoiserHitSourceOptions, denoiserHitSourceModeOf,
   type ReflectionsPreset, type ReflectionsPresetName, type ReflectionsPresetTracer, type ReflectionsPresetDenoiser, type ReflectionResolution, type DenoiserHitSourceMode,
 } from './presets';
 

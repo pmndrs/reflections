@@ -38,21 +38,41 @@ export interface ReflectionsPreset {
 export type ReflectionsPresetName = 'default' | 'performance';
 
 /**
- * The named presets. 'default' spells out the package defaults of every key another preset sets, so
- * applying it undoes one. 'performance' (W77):
+ * The named presets. 'default' is empty: it sets nothing, so applying it leaves every key a preset names
+ * to the app's own settings and then to the package defaults (`?? default` in core and the adapters,
+ * the only source of truth for them). 'performance' (W77):
  * - `reflectionResolution: 'half'`: trace (SSR and RT) and denoise at half size, joint bilateral
  *   upsample. 1080p: -1.6 to -3.4 ms of the frame (W75), the most of any setting.
  * - `hitSource: 'hits'`: the half-res denoiser covers twice the screen area, so bright screen-space hits
  *   spread over dark traced ones at silhouettes (carConcept's sill band, MAD vs the path tracer 30.6 at
- *   full -> 58.3 at half); keeping the two hit sources apart brings it to 39.4. Needs a denoiser that
- *   takes a hit source (FFX: `separateHitSources` + `missesMatchAnySource`); a no-op without ray tracing.
+ *   full -> 58.3 at half); keeping the two hit sources apart brings it to 39.4, but the band's orbit
+ *   flicker goes x2.5 (W77). Needs a denoiser that takes a hit source (FFX: `separateHitSources` +
+ *   `missesMatchAnySource`); a no-op without ray tracing. Pending with the maintainer: to ship half res
+ *   alone, delete the one `denoiser:` line of 'performance' below (docs/SETTINGS.md, "Presets").
  */
 export const REFLECTION_PRESETS: Readonly<Record<ReflectionsPresetName, Readonly<ReflectionsPreset>>> = Object.freeze({
-  default: Object.freeze({ tracer: Object.freeze({ reflectionResolution: 'full' as const }), denoiser: Object.freeze({ hitSource: 'off' as const }) }),
-  performance: Object.freeze({ tracer: Object.freeze({ reflectionResolution: 'half' as const }), denoiser: Object.freeze({ hitSource: 'hits' as const }) }),
+  default: Object.freeze({ tracer: Object.freeze({}), denoiser: Object.freeze({}) }),
+  performance: Object.freeze({
+    tracer: Object.freeze({ reflectionResolution: 'half' as const }),
+    denoiser: Object.freeze({ hitSource: 'hits' as const }), // W77: the one line to drop for "half res alone"
+  }),
 });
 
 export const REFLECTION_PRESET_NAMES = Object.keys(REFLECTION_PRESETS) as ReflectionsPresetName[];
+
+/** Whether `name` is a known preset name (adapters warn once and fall back to no preset otherwise). */
+export function isReflectionsPresetName(name: unknown): name is ReflectionsPresetName {
+  return typeof name === 'string' && Object.prototype.hasOwnProperty.call(REFLECTION_PRESETS, name);
+}
+
+/**
+ * Every key any preset names, per part. Before applying a preset at runtime an adapter clears these
+ * (back to the app's own values, then the package defaults), so a preset never leaves keys behind.
+ */
+export const REFLECTION_PRESET_KEYS: Readonly<{ tracer: readonly string[]; denoiser: readonly string[] }> = Object.freeze({
+  tracer: Object.freeze([...new Set(REFLECTION_PRESET_NAMES.flatMap((n) => Object.keys(REFLECTION_PRESETS[n].tracer)))]),
+  denoiser: Object.freeze([...new Set(REFLECTION_PRESET_NAMES.flatMap((n) => Object.keys(REFLECTION_PRESETS[n].denoiser)))]),
+});
 
 /** Drop the keys whose value is undefined (an explicit `undefined` does not erase a preset's value). */
 const defined = <T extends object>(o: T | undefined): Partial<T> =>
@@ -74,4 +94,9 @@ export function reflectionsPreset(name: ReflectionsPresetName, overrides: { trac
  */
 export function denoiserHitSourceOptions(mode: DenoiserHitSourceMode): { separateHitSources: boolean; missesMatchAnySource: boolean } {
   return { separateHitSources: mode !== 'off', missesMatchAnySource: mode === 'hits' };
+}
+
+/** The mode FFX-shaped denoiser options amount to (the inverse of {@link denoiserHitSourceOptions}). */
+export function denoiserHitSourceModeOf(o: { separateHitSources?: boolean; missesMatchAnySource?: boolean } | null | undefined): DenoiserHitSourceMode {
+  return !o?.separateHitSources ? 'off' : o.missesMatchAnySource ? 'hits' : 'all';
 }

@@ -50,4 +50,4 @@ export {
 export { HybridReflections, HYBRID_SOURCE, type HybridReflectionsOptions } from './sssr/HybridReflections';
 // Named presets (W77): core's bundles ('default', 'performance') applied to a running pass + resolve.
 export { applyReflectionsPreset } from './sssr/presets';
-export { REFLECTION_PRESETS, REFLECTION_PRESET_NAMES, reflectionsPreset, denoiserHitSourceOptions, type ReflectionsPreset, type ReflectionsPresetName, type DenoiserHitSourceMode } from '@pmndrs/reflections-core';
+export { REFLECTION_PRESETS, REFLECTION_PRESET_NAMES, REFLECTION_PRESET_KEYS, isReflectionsPresetName, reflectionsPreset, denoiserHitSourceOptions, denoiserHitSourceModeOf, type ReflectionsPreset, type ReflectionsPresetName, type DenoiserHitSourceMode } from '@pmndrs/reflections-core';
