@@ -11,3 +11,5 @@ Setup (`scripts/identical.sh`, W74's): `frameIndex` 5, `minTraversalOccupancy` 0
 | showcase carConcept 960x540 | equal | 0/255, 0 px |
 
 Verdict: bit for bit at the default. 'full' builds no new node: `HybridReflections.composite()` adds the `upsampled` branch only when the setting is 'half' at build time, and the tracer path is unchanged (the half frame is only made in 'half').
+
+**Re-run after step 2** (`f01ed6d`: core `minRoughness` in classify, word 157; the mirror path): same 11 captures, raw-output hashes equal to main's, finals 0/255 (0 px). Still bit for bit.
