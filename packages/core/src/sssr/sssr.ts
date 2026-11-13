@@ -258,10 +258,11 @@ export interface ScreenSpaceReflectionsSettings {
    * W71 (X1 #2, D5001): thickness that scales with depth. With `thicknessDepthMode` 'add' (default)
    * the hit acceptance thickness gains `thicknessDepthFactor x |view z of the hit|`; with 'relative'
    * it is that term alone (Diligent's `distance / viewZ < 0.025`: this at 0.025), so one value serves
-   * every scene scale. Default 0 (no change).
+   * every scene scale. Default 0 (no change). 0 is off in both modes: 'relative' takes effect only
+   * once the factor is above 0 (a zero thickness would make the hit test undefined).
    */
   thicknessDepthFactor?: number;
-  /** See {@link thicknessDepthFactor}. Default 'add'. */
+  /** See {@link thicknessDepthFactor}. Default 'add'; 'relative' with a factor of 0 is the same as 'add' (off). */
   thicknessDepthMode?: 'add' | 'relative';
   /**
    * W71 (X1 #3, D5002): shrink the lobe filter's spread (`hitLobeFilter`) at grazing angles by

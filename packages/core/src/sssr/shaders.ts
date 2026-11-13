@@ -852,11 +852,13 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   // Thickness: a constant plus the hybrid sample's roughness and ray-length terms (D42, D1001).
   var thickness = P.depthBufferThickness + (*r).roughness * P.thicknessRoughnessFactor + world_ray_length * P.thicknessLengthFactor;
   // W71 (X1 #2, D5001): plus thicknessDepthFactor x the hit's view depth, or ('relative', Diligent's
-  // distance / viewZ test) that term alone, so one number serves a toy car and a hall.
+  // distance / viewZ test) that term alone, so one number serves a toy car and a hall. k 0 is off in
+  // both modes ('relative' at k 0 would be thickness 0, and smoothstep(0, 0, d) is undefined in WGSL),
+  // and the relative thickness is kept above 1e-6 for the same reason.
   let depth_relative = (P.x1Flags & X1_THICKNESS_RELATIVE) != 0u;
-  if (P.thicknessDepthFactor != 0.0 || depth_relative) {
+  if (P.thicknessDepthFactor > 0.0) {
     let depth_term = P.thicknessDepthFactor * abs(screenSpaceToViewSpace(hit).z);
-    thickness = select(thickness + depth_term, depth_term, depth_relative);
+    thickness = select(thickness + depth_term, max(depth_term, 1e-6), depth_relative);
   }
   var confidence = 0.0;
   if (valid_hit) { confidence = validateHit(hit, (*r).uv, world_space_ray, screen_size, thickness, (*r).march.most_detailed_mip); }
