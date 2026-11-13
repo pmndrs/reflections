@@ -1,0 +1,14 @@
+rt=0 {"name":"copy@1","raw door":[1.0417,0.6073],"raw skirt":[1.0559,0.7709],"den door":[0.8834,0.0067],"den skirt":[0.8693,0.0203],"door den/raw":0.848,"skirt den/raw":0.823}
+rt=0 {"name":"ratio@1","raw door":[1.0685,0.4826],"raw skirt":[1.0806,0.4398],"den door":[0.9533,0.0178],"den skirt":[1.0512,0.0609],"door den/raw":0.892,"skirt den/raw":0.973}
+rt=0 {"name":"copy@4","raw door":[1.0428,0.6059],"raw skirt":[1.0704,0.7758],"den door":[0.883,0.0044],"den skirt":[0.8679,0.0165],"door den/raw":0.847,"skirt den/raw":0.811}
+rt=0 {"name":"sameSurface@1","raw door":[1.0425,0.6079],"raw skirt":[1.0564,0.7756],"den door":[0.8836,0.0067],"den skirt":[0.8677,0.0207],"door den/raw":0.848,"skirt den/raw":0.821}
+rt=0 {"name":"ratio@1 + sameSurface","raw door":[1.0678,0.4803],"raw skirt":[1.081,0.4403],"den door":[0.9522,0.0168],"den skirt":[1.0524,0.0621],"door den/raw":0.892,"skirt den/raw":0.974}
+rt=0 {"name":"ratio@4","raw door":[1.057,0.4685],"raw skirt":[1.082,0.419],"den door":[0.9441,0.0059],"den skirt":[1.0535,0.0187],"door den/raw":0.893,"skirt den/raw":0.974}
+rt=0 {"name":"ratio@1 mixed","raw door":[1.3803,0.9824],"raw skirt":[1.0366,0.5708],"den door":[1.1556,0.1725],"den skirt":[0.958,0.1145],"door den/raw":0.837,"skirt den/raw":0.924}
+rt=1 {"name":"copy@1","raw door":[1.0525,0.7196],"raw skirt":[1.0296,0.8008],"den door":[0.8755,0.0089],"den skirt":[0.8459,0.0225],"door den/raw":0.832,"skirt den/raw":0.822}
+rt=1 {"name":"ratio@1","raw door":[1.0603,0.6215],"raw skirt":[1.0487,0.502],"den door":[0.9338,0.0151],"den skirt":[1.0201,0.0585],"door den/raw":0.881,"skirt den/raw":0.973}
+rt=1 {"name":"copy@4","raw door":[1.0568,0.7233],"raw skirt":[1.0551,0.8059],"den door":[0.8734,0.0053],"den skirt":[0.8518,0.0181],"door den/raw":0.826,"skirt den/raw":0.807}
+rt=1 {"name":"sameSurface@1","raw door":[1.0536,0.7206],"raw skirt":[1.0384,0.8039],"den door":[0.8755,0.0091],"den skirt":[0.8491,0.023],"door den/raw":0.831,"skirt den/raw":0.818}
+rt=1 {"name":"ratio@1 + sameSurface","raw door":[1.0593,0.6206],"raw skirt":[1.0574,0.4976],"den door":[0.9335,0.0145],"den skirt":[1.0252,0.0604],"door den/raw":0.881,"skirt den/raw":0.97}
+rt=1 {"name":"ratio@4","raw door":[1.0608,0.6048],"raw skirt":[1.0615,0.4783],"den door":[0.9365,0.0065],"den skirt":[1.0327,0.0205],"door den/raw":0.883,"skirt den/raw":0.973}
+rt=1 {"name":"ratio@1 mixed","raw door":[1.0622,0.6237],"raw skirt":[1.0478,0.5021],"den door":[0.9341,0.0148],"den skirt":[1.0211,0.0591],"door den/raw":0.879,"skirt den/raw":0.975}

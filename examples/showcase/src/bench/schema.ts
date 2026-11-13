@@ -151,6 +151,27 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W58 (D3740): with samplesPerQuad < 4 a quad shares one ray. \'always\' copies it to every glossy px of the quad, across a silhouette too: on carConcept the skirt\'s reflection lands on the mirror floor below it (bright 2x2 dashes, raw) and the floor\'s on the skirt, the stair-stepped raw edge the denoiser then spreads. \'sameSurface\' gives px on another surface (depth > 5 %, normal > ~25 deg) their own ray. carConcept w50 960x540, lip / band MAD vs PT raw 18.6 / 14.0 -> 11.5 / 12.2, denoised 41.5 / 30.6 -> 34.4 / 26.9 (spq 4: 11.2 / 13.5, 34.3 / 27.7).',
     cost: '1080p: classify +0.02, intersect +0.02, rt trace ~+0.2 ms (carConcept w50, W58)',
   }),
+  sel('s.rayReuse', 'sssr', 'Ray reuse', [['copy', 'copy (FFX quad copy)'], ['ratio', 'ratio estimator (BRDF / pdf-weighted neighbours)']], 'copy', {
+    appliesTo: OURS_SSR, api: 'settings.rayReuse',
+    tradeoff: 'W73 (X3, D5040): what a glossy px without its own ray gets. \'copy\' pastes its quad\'s ray (FFX). \'ratio\' resolves every glossy px from its own ray, its quad\'s and s.rayReuseTaps neighbours within s.rayReuseRadius, weighted by its own BRDF along the direction to each neighbour\'s hit over that ray\'s pdf (SSSR 2015, DiligentFX); same surface only. The target: ratio at spq 1 about as quiet as copy at spq 4. Experiment; the FFX denoiser still runs after it.',
+    cost: 'one extra pass + 16 B/px record buffer (not timed yet: shared GPU)',
+  }),
+  sel('s.rayReuseTaps', 'sssr', 'Ray reuse taps', [['4', '4'], ['8', '8']], 8, {
+    appliesTo: OURS_SSR, api: 'settings.rayReuseTaps',
+    tradeoff: 'W73: neighbour taps of the ratio resolve besides the px\'s own quad. Only with s.rayReuse ratio.',
+  }),
+  num('s.rayReuseRadius', 'sssr', 'Ray reuse radius', 0, 16, 0.5, 4, {
+    appliesTo: OURS_SSR, api: 'settings.rayReuseRadius',
+    tradeoff: 'W73: tap radius in px at perceptual roughness >= 0.2, x sat(5 r) below (DiligentFX\'s 4 sat(5 r)). Wider is quieter and blurs more (the line-spread gate). Only with s.rayReuse ratio.',
+  }),
+  sel('s.rayReusePattern', 'sssr', 'Ray reuse tap pattern', [['frame', 'rotated per frame'], ['pixel', 'fixed per pixel']], 'frame', {
+    appliesTo: OURS_SSR, api: 'settings.rayReusePattern',
+    tradeoff: 'W73 (D5046): the ratio taps re-rotated per pixel and frame (the resolve\'s error moves every frame) or fixed per pixel (it stays put, for the denoiser\'s temporal pass). Only with s.rayReuse ratio.',
+  }),
+  bool('s.rayReuseMixSources', 'sssr', 'Ray reuse: mix hits and misses', false, {
+    appliesTo: OURS_SSR, api: 'settings.rayReuseMixSources',
+    tradeoff: 'W73 (D5047): off (default), the ratio resolve reuses only rays of the px\'s own hit source (screen hit vs miss, D3660). On, it also averages the hit / miss pattern, but the confidence then is a share of hits and the depth-aware blend (h.depthAware, D2400) hands the hits the whole weight: carConcept door raw 1.04 -> 1.38 linear (SSR only). Use with h.depthAware 0.',
+  }),
   sel('s.quadBaseRotation', 'sssr', 'Quad base rotation', [['fixed', 'fixed (FFX: top-left)'], ['frame', 'frame (corner cycles per frame)'], ['pattern', 'pattern (4x4 Latin square, per frame)']], 'fixed', {
     appliesTo: OURS_SSR, api: 'settings.quadBaseRotation',
     tradeoff: 'W71 (X1 #1, D5000): which px of a 2x2 quad traces when samplesPerQuad < 4. \'fixed\' keeps the copy\'s 2x2 grid in place (it can show under TAA / the upscaler and drift in blocks at rest); \'frame\' / \'pattern\' move it every frame, so the history averages it out. Composes with Quad copy \'sameSurface\'.',

@@ -989,6 +989,8 @@ async function main() {
       },
       seamStats: (o?: SeamOptions) => seamStats(o),
       mirrorBiasStats: (o?: BiasOptions) => mirrorBiasStats(o),
+      /** W73: noise / bias of any tracer settings against one shared reference (spq 4 copy by default). */
+      configStats: (o: ConfigOptions) => configStats(o),
       radianceHash: (frameIndex?: number) => radianceHash(frameIndex),
     },
   });
@@ -1149,6 +1151,84 @@ async function main() {
     ssr.settings.mirrorBias = keepBias; if (keepBias === undefined) delete ssr.settings.mirrorBias;
     hybrid.denoise = keepDenoise; hybrid.resetHistory(); setView(keepView);
     return { scene: kit!.id, size: [W, H], frames, refFrames, warm, binPx, refStd: ref.per, results, seconds: (performance.now() - t0) / 1e3 };
+  }
+
+  /**
+   * W73 (X3): `mirrorBiasStats` for any tracer settings against one shared reference. The reference R
+   * is the mean of `refFrames` raw frames with `ref` settings (default spq 4, copy: the per-pixel
+   * unbiased trace). Per config x denoise mode: std, flicker, bias (noise-corrected RMS of m - R),
+   * signed, rmse, as mirrorBiasStats; settings are applied over the page's and removed after.
+   */
+  type ConfigOptions = { configs: { name: string; settings: N }[]; ref?: N; bins?: number[]; frames?: number; refFrames?: number; warm?: number; denoise?: boolean[] };
+  async function configStats(o: ConfigOptions) {
+    const { configs, ref: refSettings = { samplesPerQuad: 4 }, bins = [0.1, 0.2, 0.3, 0.4], frames = 64, refFrames = 256, warm = 32 } = o;
+    const denoiseModes = (o.denoise ?? [false, true]).filter((d) => !d || !!denoiser);
+    const keepDenoise = hybrid.denoise, keepView = viewSel.value as View;
+    const keep = { ...ssr.settings };
+    setView('final');
+    const c2 = new OffscreenCanvas(W, H); const g2 = c2.getContext('2d', { willReadFrequently: true })!;
+    const luma = new Float32Array(W * H);
+    const grab = async () => {
+      frame();
+      const u = canvas.toDataURL('image/png'); await idle();
+      const img = new Image(); img.src = u; await img.decode();
+      g2.drawImage(img, 0, 0);
+      const d = g2.getImageData(0, 0, W, H).data;
+      for (let i = 0; i < W * H; i++) luma[i] = 0.2126 * d[i * 4] + 0.7152 * d[i * 4 + 1] + 0.0722 * d[i * 4 + 2];
+      return luma;
+    };
+    frame(); await idle();
+    const t = ssr.gbuffer.gpuTextures();
+    const [depth, nr] = await Promise.all([readTexture(device, t.depth), readTexture(device, t.normal)]);
+    const inverted = ssr.gbuffer.conventions.depthInverted;
+    const bin = new Int8Array(W * H).fill(-1);
+    const binPx = bins.map(() => 0);
+    for (let i = 0; i < W * H; i++) {
+      if (inverted ? depth[i] <= 0 : depth[i] >= 1) continue;
+      const k = bins.findIndex((b) => Math.abs(nr[i * 4 + 3] - b) < 0.02);
+      if (k >= 0) { bin[i] = k; binPx[k]++; }
+    }
+    const run = async (settings: N, dn: boolean, n: number, R: { mean: Float64Array; varr: Float64Array } | null) => {
+      ssr.settings = { ...keep, ...settings };
+      hybrid.denoise = dn;
+      ssr.resetHistory(); hybrid.resetHistory();
+      for (let i = 0; i < (dn ? warm : 2); i++) frame();
+      await idle();
+      const sum = new Float64Array(W * H), sq = new Float64Array(W * H), prev = new Float32Array(W * H), fl = new Float64Array(W * H), se = new Float64Array(W * H);
+      for (let f = 0; f < n; f++) {
+        const x = await grab();
+        for (let i = 0; i < W * H; i++) {
+          if (bin[i] < 0) continue;
+          const v = x[i];
+          sum[i] += v; sq[i] += v * v;
+          if (f > 0) fl[i] += Math.abs(v - prev[i]);
+          prev[i] = v;
+          if (R) se[i] += (v - R.mean[i]) ** 2;
+        }
+      }
+      const mean = new Float64Array(W * H), varr = new Float64Array(W * H);
+      for (let i = 0; i < W * H; i++) if (bin[i] >= 0) { mean[i] = sum[i] / n; varr[i] = Math.max(0, sq[i] / n - mean[i] ** 2) * n / (n - 1); }
+      const per = bins.map((b, k) => {
+        let px = 0, std = 0, flick = 0, d2 = 0, vv = 0, vr = 0, sgn = 0, e2 = 0, m = 0;
+        for (let i = 0; i < W * H; i++) {
+          if (bin[i] !== k) continue;
+          px++; std += Math.sqrt(varr[i]); flick += fl[i] / (n - 1); vv += varr[i]; m += mean[i];
+          if (R) { const d = mean[i] - R.mean[i]; d2 += d * d; sgn += d; vr += R.varr[i]; e2 += se[i] / n; }
+        }
+        if (!px) return { roughness: b, px: 0 };
+        const out: N = { roughness: b, px, mean: m / px, std: std / px, flicker: flick / px };
+        if (R) Object.assign(out, { bias: Math.sqrt(Math.max(0, d2 / px - vv / px / n - vr / px / refFrames)), signed: sgn / px, rmse: Math.sqrt(e2 / px) });
+        return out;
+      });
+      return { mean, varr, per };
+    };
+    const t0 = performance.now();
+    const R = await run(refSettings, false, refFrames, null);
+    const results: N[] = [];
+    for (const dn of denoiseModes) for (const c of configs) results.push({ name: c.name, denoise: dn, bins: (await run(c.settings, dn, frames, R)).per });
+    ssr.settings = keep;
+    hybrid.denoise = keepDenoise; hybrid.resetHistory(); setView(keepView);
+    return { scene: kit!.id, size: [W, H], frames, refFrames, warm, binPx, ref: refSettings, refStats: R.per, results, seconds: (performance.now() - t0) / 1e3 };
   }
 
   /**

@@ -17,7 +17,7 @@ import { createDepthPyramidBuilder, createDepthPyramidTexture, depthPyramidMipCo
 import { mat4Invert, mat4Mul, type Mat4Like } from './math';
 import {
   BLUE_NOISE_WGSL, classifyWgsl, CONSTANT_FALLBACK_WGSL, ENVIRONMENT_FALLBACK_WGSL,
-  INDIRECT_ARGS_WGSL, intersectWgsl, missArgsWgsl, PARAMS_SIZE, type Variant,
+  INDIRECT_ARGS_WGSL, intersectWgsl, missArgsWgsl, PARAMS_SIZE, rayReuseResolveWgsl, type Variant,
 } from './shaders';
 import { PassTimer } from './timer';
 import type { FrameInputs } from '../frame/contract';
@@ -246,6 +246,46 @@ export interface ScreenSpaceReflectionsSettings {
    * traces its own ray (and goes to the miss list on its own). Costs a few more rays along edges.
    */
   quadCopy?: 'always' | 'sameSurface';
+  /**
+   * W73 (X3 phase A, D5040): what the glossy pixels without their own ray get when `samplesPerQuad` < 4.
+   * 'copy' (default, FFX): the quad's one ray, copied (see `quadCopy`). 'ratio': a resolve after
+   * intersect reuses the pixel's own ray, its quad's ray and `rayReuseTaps` traced neighbours within
+   * `rayReuseRadius`, each weighted by this pixel's GGX BRDF x cos along the direction from this
+   * pixel to the neighbour's hit over the pdf the neighbour sampled it with, normalised (the ratio
+   * estimator of SSSR 2015 and DiligentFX). Radiance, confidence and hit distance are all resolved
+   * with the same weights; neighbours on another surface (normal, plane distance) are skipped, and
+   * a pixel with nothing usable keeps the copy. Also smooths the pixels that have their own ray. The
+   * first 'ratio' frame allocates a 16 B/px record buffer and builds two pipelines.
+   */
+  rayReuse?: 'copy' | 'ratio';
+  /** Neighbour taps of the 'ratio' resolve besides the pixel's own quad: 4 or 8. Default 8. */
+  rayReuseTaps?: 4 | 8;
+  /**
+   * Radius of the 'ratio' taps in px at perceptual roughness >= 0.2, scaled by sat(5 r) below
+   * (DiligentFX's 4 sat(5 r)): near-mirrors reuse only their quad. Default 4.
+   */
+  rayReuseRadius?: number;
+  /**
+   * A ray-traced pass overwrites the miss list's pixels (and their quad copies) after this dispatch
+   * (the three adapter sets it while its traced pass runs). The 'ratio' resolve then leaves those
+   * pixels to it and doesn't reuse their screen-space rays elsewhere, so screen and traced hits
+   * don't mix (D3660). Default false.
+   */
+  missesTraced?: boolean;
+  /**
+   * The 'ratio' resolve reuses only rays of the pixel's own hit source (screen-space hit vs miss: its
+   * own ray's, else its quad's; D3660) unless this is true. Mixed, a pixel's confidence becomes the
+   * share of hits around it, which the three composite's depth-aware blend (D2400) reads as one ray's
+   * thickness confidence and hands the hits the whole weight (carConcept's door, SSR only: raw signal
+   * 1.04 -> 1.38): mix only with `depthAware` 0 or a composite that is linear in confidence. Default false.
+   */
+  rayReuseMixSources?: boolean;
+  /**
+   * The 'ratio' taps' rotation: 'frame' (default) re-rotates them per pixel and frame, so the
+   * resolve's error moves every frame; 'pixel' fixes them per pixel, so the error stays put for the
+   * denoiser's temporal pass to treat as bias (W73 phase 2, D5046).
+   */
+  rayReusePattern?: 'frame' | 'pixel';
   /**
    * W71 (X1 #1, D5000): which pixel of a 2x2 quad traces when `samplesPerQuad` < 4 (the others take
    * its ray). 'fixed' (default, FFX): the top-left, every frame, so the copy's 2x2 grid stays put under
@@ -488,11 +528,13 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const hierarchyView = depthHierarchy.createView();
 
   // ---- pipelines
-  const pipe = (label: string, code: string, layouts: GPUBindGroupLayout[]) => device.createComputePipeline({
+  const pipeDescriptor = (label: string, code: string, layouts: GPUBindGroupLayout[]): GPUComputePipelineDescriptor => ({
     label: `ssr ${label}`,
     layout: device.createPipelineLayout({ label: `ssr ${label}`, bindGroupLayouts: layouts }),
     compute: { module: device.createShaderModule({ label: `ssr ${label}`, code: dedupeWgslChunks(code) }), entryPoint: 'main' },
   });
+  const pipe = (label: string, code: string, layouts: GPUBindGroupLayout[]) => device.createComputePipeline(pipeDescriptor(label, code, layouts));
+  let destroyed = false;
   const withFallback = (bgl: GPUBindGroupLayout) => (fallback.layout ? [bgl, fallback.layout] : [bgl]);
 
   const classifyBgl = device.createBindGroupLayout({
@@ -519,27 +561,84 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     entries: [{ binding: 0, resource: { buffer: rayCounter } }, { binding: 1, resource: { buffer: indirectArgs } }],
   });
 
-  const intersectBgl = device.createBindGroupLayout({
-    label: 'ssr intersect',
-    entries: [uniformEntry(0), texEntry(1), texEntry(2), texEntry(3), texEntry(4), texEntry(5),
-      bufEntry(6, 'read-only-storage'), bufEntry(7, 'read-only-storage'),
-      storageTexEntry(8, 'rgba16float'), storageTexEntry(9, 'r32float'), storageTexEntry(10, 'r32float'),
-      ...(useMissList ? [bufEntry(11), bufEntry(12)] : []), texEntry(13), texEntry(14), texEntry(15), texEntry(16), texEntry(17),
-      ...(useHitSource ? [texEntry(18)] : [])],
-  });
+  const intersectEntries: GPUBindGroupLayoutEntry[] = [uniformEntry(0), texEntry(1), texEntry(2), texEntry(3), texEntry(4), texEntry(5),
+    bufEntry(6, 'read-only-storage'), bufEntry(7, 'read-only-storage'),
+    storageTexEntry(8, 'rgba16float'), storageTexEntry(9, 'r32float'), storageTexEntry(10, 'r32float'),
+    ...(useMissList ? [bufEntry(11), bufEntry(12)] : []), texEntry(13), texEntry(14), texEntry(15), texEntry(16), texEntry(17),
+    ...(useHitSource ? [texEntry(18)] : [])];
+  const intersectBgl = device.createBindGroupLayout({ label: 'ssr intersect', entries: intersectEntries });
   // the re-shade's radiance (W44): the hit shading's @group(3), groups 1-2 empty where unused
   const hitShading = options.hitSpecularShading;
   const emptyBgl = device.createBindGroupLayout({ label: 'ssr empty', entries: [] });
   const emptyGroup = device.createBindGroup({ label: 'ssr empty', layout: emptyBgl, entries: [] });
   // the intersect's own group 0 (sampled 1-5, 13-17, 18 with hitSource; storage textures 8-10; buffers 6, 7, and 11, 12 with the miss list)
   // plus the fallback's and the hit shading's groups against the device (D4900: a probe set binds one atlas per size in each)
+  const fallbackCounts = { storageBuffers: fallback.storageBufferCount, storageTextures: fallback.storageTextureCount, sampledTextures: fallback.sampledTextureCount };
+  const hitShadingCounts = hitShading?.layout ? { storageBuffers: hitShading.storageBufferCount, storageTextures: hitShading.storageTextureCount, sampledTextures: hitShading.sampledTextureCount } : {};
   checkStageLimits(device, 'ssr: the intersect pipeline', [
     ['pass', { storageBuffers: useMissList ? 4 : 2, storageTextures: 3, sampledTextures: useHitSource ? 11 : 10 }],
-    ['radiance fallback', { storageBuffers: fallback.storageBufferCount, storageTextures: fallback.storageTextureCount, sampledTextures: fallback.sampledTextureCount }],
-    ['hit shading', hitShading?.layout ? { storageBuffers: hitShading.storageBufferCount, storageTextures: hitShading.storageTextureCount, sampledTextures: hitShading.sampledTextureCount } : {}],
+    ['radiance fallback', fallbackCounts],
+    ['hit shading', hitShadingCounts],
   ]);
-  const intersectLayouts = hitShading?.layout ? [intersectBgl, fallback.layout ?? emptyBgl, emptyBgl, hitShading.layout] : withFallback(intersectBgl);
-  const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource), intersectLayouts);
+  const layoutsWith = (bgl: GPUBindGroupLayout) => (hitShading?.layout ? [bgl, fallback.layout ?? emptyBgl, emptyBgl, hitShading.layout] : withFallback(bgl));
+  const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource), layoutsWith(intersectBgl));
+
+  // W73 (rayReuse 'ratio', D5040): intersect's storing variant and the resolve are built with
+  // createComputePipelineAsync on the first 'ratio' frame; the tracer keeps copying until both resolve, so
+  // no frame stalls on the compile (D3D12). The record buffer is allocated while 'ratio' runs and freed
+  // on the next 'copy' frame. A combination that can't run (record buffer over the binding limit, stage
+  // limits, a pipeline error) warns once and stays on 'copy'.
+  type ReusePipes = { intersectBgl: GPUBindGroupLayout; intersectPipe: GPUComputePipeline; resolveBgl: GPUBindGroupLayout; resolvePipe: GPUComputePipeline };
+  type RayReuse = ReusePipes & { records: GPUBuffer };
+  let reusePipes: ReusePipes | null = null;
+  let reuseState: 'idle' | 'pending' | 'failed' = 'idle';
+  let reuseRecords: GPUBuffer | null = null;
+  let reuseStamp = 0;
+  const reuseFail = (e: unknown) => {
+    reuseState = 'failed';
+    console.warn("ssr: rayReuse 'ratio' is unavailable; staying on 'copy'.", e);
+  };
+  function startReuseBuild() {
+    reuseState = 'pending';
+    try {
+      if (W * H * 16 > maxBinding) throw new Error(`ssr: rayReuse 'ratio' at ${W}x${H} needs a ${W * H * 16} B record buffer; the device's maxStorageBufferBindingSize is ${maxBinding}`);
+      // intersect's group 0 plus the record buffer (binding 19), and the resolve's own group (D4900)
+      checkStageLimits(device, "ssr: the intersect pipeline with rayReuse 'ratio'", [
+        ['pass', { storageBuffers: (useMissList ? 4 : 2) + 1, storageTextures: 3, sampledTextures: useHitSource ? 11 : 10 }],
+        ['radiance fallback', fallbackCounts],
+        ['hit shading', hitShadingCounts],
+      ]);
+      checkStageLimits(device, 'ssr: the ray reuse resolve', [
+        ['pass', { storageBuffers: 3, storageTextures: 3, sampledTextures: 3 }],
+        ['radiance fallback', fallbackCounts],
+      ]);
+    } catch (e) { reuseFail(e); return; }
+    const intersectBgl = device.createBindGroupLayout({ label: 'ssr intersect (ray reuse)', entries: [...intersectEntries, bufEntry(19)] });
+    const resolveBgl = device.createBindGroupLayout({
+      label: 'ssr ray reuse',
+      entries: [uniformEntry(0), texEntry(1), texEntry(2), texEntry(3),
+        bufEntry(4, 'read-only-storage'), bufEntry(5, 'read-only-storage'), bufEntry(6, 'read-only-storage'),
+        storageTexEntry(7, 'rgba16float'), storageTexEntry(8, 'r32float'), storageTexEntry(9, 'r32float')],
+    });
+    Promise.all([
+      device.createComputePipelineAsync(pipeDescriptor(`intersect (${variant}, ray reuse)`,
+        intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource, true), layoutsWith(intersectBgl))),
+      device.createComputePipelineAsync(pipeDescriptor('ray reuse', rayReuseResolveWgsl(inverted, fallback.wgsl), withFallback(resolveBgl))),
+    ]).then(([intersectPipe, resolvePipe]) => {
+      if (destroyed) return;
+      reusePipes = { intersectBgl, intersectPipe, resolveBgl, resolvePipe };
+      reuseState = 'idle';
+    }).catch(reuseFail);
+  }
+  /** The 'ratio' resources for this frame, or null (not built yet, or unavailable): copy this frame. */
+  function ensureReuse(): RayReuse | null {
+    if (!reusePipes) {
+      if (reuseState === 'idle') startReuseBuild();
+      return null;
+    }
+    reuseRecords ??= buf('ray records', W * H * 16);
+    return { ...reusePipes, records: reuseRecords };
+  }
 
   let missArgsPipe: GPUComputePipeline | undefined, missArgsGroup: GPUBindGroup | undefined;
   if (useMissList) {
@@ -612,6 +711,11 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[138] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
     u[139] = useHitSource && inputs.hitSource ? 1 : 0;
     u[140] = (s.quadCopy ?? 'always') === 'sameSurface' ? 1 : 0;
+    // words 141-149: other X streams; 150-153: W73 ray reuse (D5040)
+    u[150] = (s.rayReuse === 'ratio' ? 1 : 0) | (s.missesTraced ? 2 : 0) | (s.rayReuseMixSources ? 4 : 0) | (s.rayReusePattern === 'pixel' ? 8 : 0);
+    u[151] = s.rayReuseTaps === 4 ? 4 : 8;
+    f[152] = Math.max(0, s.rayReuseRadius ?? 4);
+    u[153] = reuseStamp;
     // W71 (X1): words 141-144
     u[141] = QUAD_BASE_ROTATION[s.quadBaseRotation ?? 'fixed'] ?? 0;
     f[142] = Math.max(0, s.thicknessDepthFactor ?? 0);
@@ -632,6 +736,11 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     const useHistory = (settings.hitColor ?? 'current') === 'history';
     if (useHistory && (!inputs.history || !inputs.motion)) throw new Error("ssr: hitColor 'history' needs inputs.history and inputs.motion");
     if (inputs.history && (inputs.history.width !== W || inputs.history.height !== H)) throw new Error(`ssr: history is ${inputs.history.width}x${inputs.history.height}, expected ${W}x${H}`);
+    const R = settings.rayReuse === 'ratio' ? ensureReuse() : null;
+    // back on 'copy' (or 'ratio' not built yet): free the 16 B/px records; a later 'ratio' frame allocates a
+    // fresh (zeroed) buffer, and the stamp keeps counting, so nothing stale matches
+    if (!R && reuseRecords) { reuseRecords.destroy(); reuseRecords = null; }
+    if (R) reuseStamp = (reuseStamp % 32767) + 1; // 15 bits, never 0 (a fresh buffer's)
     writeParams(inputs, settings, useHistory);
     const classifyGroup = device.createBindGroup({
       label: 'ssr classify', layout: classifyBgl,
@@ -650,7 +759,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
         { binding: 12, resource: confidence.createView() }],
     });
     const intersectGroup = device.createBindGroup({
-      label: 'ssr intersect', layout: intersectBgl,
+      label: 'ssr intersect', layout: R ? R.intersectBgl : intersectBgl,
       entries: [P(0),
         { binding: 1, resource: inputs.color.createView() },
         { binding: 2, resource: inputs.normal.createView() },
@@ -668,7 +777,21 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
         { binding: 15, resource: (inputs.albedo ?? dummyMaterial).createView() },
         { binding: 16, resource: (inputs.metalness?.texture ?? dummyMaterial).createView() },
         { binding: 17, resource: (inputs.clearcoat ?? dummyMaterial).createView() },
-        ...(useHitSource ? [{ binding: 18, resource: (inputs.hitSource ?? dummyVariance).createView() }] : [])],
+        ...(useHitSource ? [{ binding: 18, resource: (inputs.hitSource ?? dummyVariance).createView() }] : []),
+        ...(R ? [{ binding: 19, resource: { buffer: R.records } }] : [])],
+    });
+    const resolveGroup = R && device.createBindGroup({
+      label: 'ssr ray reuse', layout: R.resolveBgl,
+      entries: [P(0),
+        { binding: 1, resource: hierarchyView },
+        { binding: 2, resource: inputs.normal.createView() },
+        { binding: 3, resource: extractedRoughness.createView() },
+        { binding: 4, resource: { buffer: R.records } },
+        { binding: 5, resource: { buffer: denoiserTileList } },
+        { binding: 6, resource: { buffer: rayCounter } },
+        { binding: 7, resource: radiance.createView() },
+        { binding: 8, resource: hitDistance.createView() },
+        { binding: 9, resource: confidence.createView() }],
     });
 
     timer?.begin();
@@ -686,7 +809,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     pass('blue noise', (p) => { p.setPipeline(noisePipe); p.setBindGroup(0, noiseGroup); p.dispatchWorkgroups(16, 16); });
     pass('indirect args', (p) => { p.setPipeline(argsPipe); p.setBindGroup(0, argsGroup); p.dispatchWorkgroups(1); });
     pass('intersect', (p) => {
-      p.setPipeline(intersectPipe); p.setBindGroup(0, intersectGroup);
+      p.setPipeline(R ? R.intersectPipe : intersectPipe); p.setBindGroup(0, intersectGroup);
       if (fallback.layout) p.setBindGroup(1, inputs.fallbackBindGroup!);
       if (hitShading?.layout) {
         if (!fallback.layout) p.setBindGroup(1, emptyGroup);
@@ -695,6 +818,14 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
       }
       p.dispatchWorkgroupsIndirect(indirectArgs, 0);
     });
+    if (R) {
+      // one 8x8 group per denoiser tile (indirect args at byte 12)
+      pass('ray reuse', (p) => {
+        p.setPipeline(R.resolvePipe); p.setBindGroup(0, resolveGroup!);
+        if (fallback.layout) p.setBindGroup(1, inputs.fallbackBindGroup!);
+        p.dispatchWorkgroupsIndirect(indirectArgs, 12);
+      });
+    }
     if (missArgsPipe) pass('miss args', (p) => { p.setPipeline(missArgsPipe!); p.setBindGroup(0, missArgsGroup!); p.dispatchWorkgroups(1); });
     afterSubmit = timer?.end(cmd);
     frameIndex++;
@@ -712,7 +843,8 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     },
     destroy() {
       for (const t of [depthHierarchy, radiance, hitDistance, confidence, extractedRoughness, blueNoise, dummyVariance, dummyHistory, dummyMaterial]) t.destroy();
-      for (const b of [rayList, denoiserTileList, tileFlags, rayCounter, indirectArgs, missList, missCounter, missArgs, params, noiseTable]) b?.destroy();
+      for (const b of [rayList, denoiserTileList, tileFlags, rayCounter, indirectArgs, missList, missCounter, missArgs, params, noiseTable, reuseRecords]) b?.destroy();
+      destroyed = true;
       timer?.destroy();
     },
   };
