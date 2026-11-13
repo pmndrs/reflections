@@ -439,6 +439,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     // X0 (W70): linear readbacks for examples/shared/metrics (energy, raw speckle, the raw 2x2 energy)
     ...hybridReaders(renderer, ssr, hybrid),
     setDenoise(on) { const was = hybrid.denoise; hybrid.denoise = on && !!denoiser; return was; },
+    jitterPhases: () => (aa && aa.mode === 'upscaler' ? aa.upscaler.jitterPhaseCount : null),
     reset: resetAll,
     setExposure(e) { renderer.toneMappingExposure = e; },
     status: () => (denoiser ? 'denoiser ffx-reflections' : wantDenoise ? 'no denoiser found' : '') + (providerInfo ? ` | ${providerInfo.kind} ${providerInfo.triangles.toLocaleString()} tris` : '') +

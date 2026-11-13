@@ -1012,6 +1012,7 @@ async function main() {
       readSignal: async () => { const x = await m(); if (!x.readSignal) throw new Error(`${id}: no signal readback`); return x.readSignal(); },
       readDenoised: async () => { const x = await m(); return x.readDenoised ? x.readDenoised() : null; },
       setDenoise(on) { return live.get(id)?.setDenoise?.(on) ?? false; },
+      jitterPhases: () => live.get(id)?.jitterPhases?.() ?? null,
       describe: () => ({ page: 'bench', scene: entry.id, pose, method: id, settings: settingsQuery(), status: live.get(id)?.status() }),
     });
   }

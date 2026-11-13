@@ -33,6 +33,11 @@ export interface MetricsHost {
   readDenoised?(): Promise<LinearFrame | null>;
   /** Denoiser on / off (raw speckle on the display wants it off); returns the previous state. */
   setDenoise?(on: boolean): boolean;
+  /**
+   * The display AA's jitter period in frames (the upscaler: 8 at ratio 1, 18 at 1.5), or 1 / undefined without
+   * jitter. Rest drift compares frames of the same jitter phase (else it measures the jitter, not the settling).
+   */
+  jitterPhases?(): number | null;
   /** Free-form description for the result (scene, pose, aa, upscale, denoiser). */
   describe?(): Record<string, unknown>;
 }
@@ -82,6 +87,16 @@ export function canvasReader(width: number, height: number) {
   return (src: CanvasImageSource) => { g.clearRect(0, 0, width, height); g.drawImage(src, 0, 0, width, height); return g.getImageData(0, 0, width, height).data; };
 }
 
+/** A grey PNG data URL of `f(i)` (clamped 0..255) at w x h (heat maps for the write-ups). */
+export async function toPng(w: number, h: number, f: (i: number) => number): Promise<string> {
+  const c = new OffscreenCanvas(w, h), g = c.getContext('2d')!;
+  const img = g.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) { const v = Math.max(0, Math.min(255, f(i))); img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255; }
+  g.putImageData(img, 0, 0);
+  const blob = await c.convertToBlob({ type: 'image/png' });
+  return new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result as string); fr.readAsDataURL(blob); });
+}
+
 // ---- camera moves ---------------------------------------------------------------------------------------------
 
 const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -101,8 +116,15 @@ export interface Metrics {
   all(o?: AllOptions): Promise<Record<string, unknown>>;
 }
 
-export interface RestDriftOptions extends RegionOptions { a?: number; b?: number; threshold?: number }
-export interface RestDriftResult { frames: [number, number]; threshold: number; regions: PerRegion<{ px: number; mean: number; pctOver: number; p99: number }> }
+export interface RestDriftOptions extends RegionOptions { a?: number; b?: number; threshold?: number; /** Frames after `b` for the consecutive-frame rest flicker (default 8; 0 = skip). */ restFrames?: number; /** false: compare `a` as given even if its jitter phase differs from `b`'s. */ alignPhase?: boolean; /** Also return `heat`: a PNG data URL of |a - b| x `gain` (default 16), and `frames` (both frames). */ heat?: boolean; gain?: number }
+export interface RestDriftResult {
+  /** The frames compared: `a` moved down to the jitter phase of `b` (see `jitterPhases`). */
+  frames: [number, number]; jitterPhases: number; threshold: number;
+  regions: PerRegion<{ px: number; mean: number; pctOver: number; p99: number }>;
+  /** W36's rest flicker over the `restFrames` frames after `b`: mean |frame - previous| and % px whose mean change > 1/255. */
+  rest: PerRegion<{ mean: number; pctOver1: number }>;
+  heat?: string; images?: [string, string];
+}
 export interface OrbitOptions extends RegionOptions { warm?: number; deg?: number; half?: number; passes?: number; threshold?: number }
 export interface OrbitResult { deg: number; half: number; passes: number; regions: PerRegion<{ px: number; std: number; d2: number; pctD2Over: number; mean: number }> }
 export interface QuadOptions extends RegionOptions { warm?: number; frames?: number }
@@ -139,14 +161,35 @@ export function createMetrics(host: MetricsHost): Metrics {
   };
 
   async function restDrift(o: RestDriftOptions = {}): Promise<RestDriftResult> {
-    const a = o.a ?? 120, b = o.b ?? 240, t = o.threshold ?? 8;
+    const b = o.b ?? 240, t = o.threshold ?? 8, nRest = o.restFrames ?? 8;
+    const period = Math.max(1, Math.round(host.jitterPhases?.() ?? 1));
+    let a = o.a ?? 120;
+    if (o.alignPhase !== false && period > 1) a -= (period - (((b - a) % period) + period) % period) % period; // b - a a multiple of the period
     const R = await start(o, a - 1);
     const A = await luma();
     await host.step(b - a - 1);
     const B = await luma();
     const out: RestDriftResult['regions'] = {};
     for (const [k, m] of Object.entries(R)) { const d = drift(A, B, m, t); out[k] = { px: d.px, mean: d.mean, pctOver: d.pctOver, p99: d.p99 }; }
-    return round({ frames: [a, b], threshold: t, regions: out });
+    // W36's rest metric: consecutive frames after b
+    const rest: RestDriftResult['rest'] = {};
+    if (nRest > 0) {
+      const sum = new Float64Array(N);
+      let prev = B;
+      for (let f = 0; f < nRest; f++) { const x = await luma(); for (let i = 0; i < N; i++) sum[i] += Math.abs(x[i] - prev[i]); prev = x; }
+      for (const [k, m] of Object.entries(R)) {
+        let px = 0, s = 0, over = 0;
+        for (let i = 0; i < N; i++) if (m[i]) { const v = sum[i] / nRest; s += v; px++; if (v > 1) over++; }
+        rest[k] = { mean: px ? s / px : 0, pctOver1: px ? (100 * over) / px : 0 };
+      }
+    }
+    const res: RestDriftResult = round({ frames: [a, b], jitterPhases: period, threshold: t, regions: out, rest });
+    if (o.heat) {
+      const g = o.gain ?? 16;
+      res.heat = await toPng(W, H, (i) => Math.abs(A[i] - B[i]) * g);
+      res.images = [await toPng(W, H, (i) => A[i]), await toPng(W, H, (i) => B[i])];
+    }
+    return res;
   }
 
   /**

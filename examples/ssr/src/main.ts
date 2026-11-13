@@ -767,6 +767,7 @@ async function main() {
     setView(pos, target) { kit!.camera.position.set(...pos); controls.target.set(...target); kit!.camera.lookAt(controls.target); kit!.camera.updateMatrixWorld(); },
     ...hybridReaders(renderer, ssr, hybrid),
     setDenoise(on) { const was = hybrid.denoise; hybrid.denoise = on && !!denoiser; denoiseBox.checked = hybrid.denoise; return was; },
+    jitterPhases: () => (aa.mode === 'upscaler' ? aa.upscaler.jitterPhaseCount : null),
     describe: () => ({ page: 'ssr', scene: kit?.id, aa: aa.mode, ratio: aa.ratio, render: [W, H], display: [DW, DH], denoiser: hybrid.denoise ? denoiser?.name ?? null : null, rt: ssr.rayTracing, hit: hitMode }),
   });
   Object.assign(window, {

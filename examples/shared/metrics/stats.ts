@@ -144,24 +144,26 @@ export interface QuadEnergy {
  * Frames at another size than the trace (under `?upscale=`) smear the grid: compare like with like.
  */
 export function quadEnergy(l: Luma, w: number, h: number, mask: Mask): QuadEnergy {
-  let sa = 0, ca = 0, sw = 0, cw = 0;
+  // x and y separately (their pair counts differ), averaged: a plain gradient then gives across = within
+  const s = [0, 0, 0, 0], c = [0, 0, 0, 0]; // [x across, x within, y across, y within]
   for (let y = 0; y < h; y++) {
     const row = y * w;
     for (let x = 0; x + 1 < w; x++) {
       const i = row + x; if (!mask[i] || !mask[i + 1]) continue;
-      const d = l[i + 1] - l[i];
-      if (x & 1) { sa += d * d; ca++; } else { sw += d * d; cw++; }
+      const d = l[i + 1] - l[i], k = x & 1 ? 0 : 1;
+      s[k] += d * d; c[k]++;
     }
   }
   for (let y = 0; y + 1 < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x; if (!mask[i] || !mask[i + w]) continue;
-      const d = l[i + w] - l[i];
-      if (y & 1) { sa += d * d; ca++; } else { sw += d * d; cw++; }
+      const d = l[i + w] - l[i], k = y & 1 ? 2 : 3;
+      s[k] += d * d; c[k]++;
     }
   }
-  const across = ca ? sa / ca : 0, within = cw ? sw / cw : 0;
-  return { pairs: ca + cw, across, within, power: across - within, ratio: across + within > 0 ? (across - within) / (across + within) : 0 };
+  const m = (k: number) => (c[k] ? s[k] / c[k] : 0);
+  const across = (m(0) + m(2)) / 2, within = (m(1) + m(3)) / 2;
+  return { pairs: c[0] + c[1] + c[2] + c[3], across, within, power: across - within, ratio: across + within > 0 ? (across - within) / (across + within) : 0 };
 }
 
 // ---- speckle -------------------------------------------------------------------------------------------------

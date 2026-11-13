@@ -64,6 +64,135 @@ export async function ssrExpMetricsSmoke(ctx, pages) {
   return { ssr: r, lineSpread: ls, grazing: gz, measure: cols, bench: pm };
 }
 
+const SSR_SCENES = ['mirrorWall', 'contact', 'facingMirrors', 'moving', 'offscreen', 'rooms'];
+const SHOWCASE_SCENES = ['carConcept', 'toyCar', 'chess', 'sponza'];
+
+/**
+ * The baseline at today's defaults (W70): every page metric on examples/ssr's six scenes (AA upscaler, denoiser on,
+ * the page's defaults) and the showcase's four (the bench's ours denoised: upscaler AA, hit colour final), rest
+ * drift and orbit flicker run twice (the noise floor), rest drift also with AA off and with `?upscale=quality`
+ * (ratio 1.5), Measure vs the PT with the X0 columns on the showcase (carConcept at W50's pose, so its lip / band /
+ * door / car regions get masks and the energy metric its skirt and door), the line spread and the grazing sweep.
+ * Writes $OUT/ssr-exp-baseline.json as it goes. Env: SSR_EXP_SCENES (subset), SSR_EXP_PARTS (ssr, showcase,
+ * lineSpread, grazing), SSR_EXP_SPP (PT samples, default 128; line spread / grazing 256).
+ */
 export async function ssrExpBaseline(ctx, pages) {
-  throw new Error("not yet");
+  const { openPage, check, PORT, OUT } = ctx;
+  const only = process.env.SSR_EXP_SCENES?.split(',');
+  const parts = (process.env.SSR_EXP_PARTS ?? 'ssr,showcase,lineSpread,grazing').split(',');
+  const spp = Number(process.env.SSR_EXP_SPP ?? 128);
+  const file = path.join(OUT, 'ssr-exp-baseline.json');
+  fs.mkdirSync(OUT, { recursive: true });
+  const out = fs.existsSync(file) && process.env.SSR_EXP_APPEND ? JSON.parse(fs.readFileSync(file, 'utf8')) : { date: new Date().toISOString(), ssr: {}, showcase: {} };
+  const save = () => fs.writeFileSync(file, JSON.stringify(out, null, 1));
+  const errors = [];
+  const t0 = Date.now();
+  const say = (s) => console.log(`  [${((Date.now() - t0) / 1000).toFixed(0)} s] ${s}`);
+  const close = (p) => { p.close(); const k = pages.indexOf(p); if (k >= 0) pages.splice(k, 1); };
+
+  if (parts.includes('ssr')) for (const scene of SSR_SCENES.filter((x) => !only || only.includes(x))) {
+    const before = ctx.results.logs.length;
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?scene=${scene}`);
+    pages.push(p);
+    await p.T('window.__p.stop()');
+    const r = await p.T('window.__p.metrics.all()');
+    r.restDrift2 = await p.T('window.__p.metrics.restDrift()');
+    r.orbitFlicker2 = await p.T('window.__p.metrics.orbitFlicker()');
+    errors.push(...(await p.T('window.__p.gpuErrors')));
+    close(p);
+    // the noise floor across page loads (run 3), then AA off and ?upscale=quality (ratio 1.5)
+    for (const [k, q] of [['reload', ''], ['restDriftAAOff', 'aa=off'], ['restDriftUpscale', 'upscale=quality']]) {
+      const x = await openPage(`http://127.0.0.1:${PORT}/ssr/?scene=${scene}${q ? '&' + q : ''}`);
+      pages.push(x);
+      await x.T('window.__p.stop()');
+      if (k === 'reload') {
+        r.restDrift3 = await x.T('window.__p.metrics.restDrift()');
+        r.orbitFlicker3 = await x.T('window.__p.metrics.orbitFlicker()');
+      } else {
+        r[k] = await x.T('window.__p.metrics.restDrift()');
+        r[k].host = await x.T("({ aa: window.__p.aa.mode, ratio: window.__p.aa.ratio })");
+        if (k === 'restDriftUpscale') r.restDriftUpscaleUnaligned = await x.T('window.__p.metrics.restDrift({ alignPhase: false, restFrames: 0 })');
+      }
+      errors.push(...(await x.T('window.__p.gpuErrors')));
+      close(x);
+    }
+    errors.push(...errsSince(ctx, before));
+    out.ssr[scene] = r;
+    save();
+    const R = (o) => o?.regions?.reflection;
+    say(`ssr ${scene}: drift ${R(r.restDrift)?.mean} / ${R(r.restDrift2)?.mean} / ${R(r.restDrift3)?.mean} (${R(r.restDrift)?.pctOver}% > 8; rest ${r.restDrift?.rest?.reflection?.mean}) off ${R(r.restDriftAAOff)?.mean} upscale ${R(r.restDriftUpscale)?.mean} (unaligned ${R(r.restDriftUpscaleUnaligned)?.mean}, rest ${r.restDriftUpscale?.rest?.reflection?.mean}); orbit std ${R(r.orbitFlicker)?.std} / ${R(r.orbitFlicker2)?.std} / ${R(r.orbitFlicker3)?.std}; quad ${r.quadEnergy?.display?.reflection?.ratio} raw ${r.quadEnergy?.signal?.reflection?.ratio}; pan d2 ${r.edgePan?.regions?.borderReflection?.d2}; speckle ${R(r.speckle)?.pct}%; energy loss ${R(r.energy)?.loss}`);
+  }
+
+  if (parts.includes('showcase')) for (const scene of SHOWCASE_SCENES.filter((x) => !only || only.includes(x))) {
+    const before = ctx.results.logs.length;
+    const pose = scene === 'carConcept' ? 'w50' : 'hero';
+    const b = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual&scene=${scene}&pose=${pose}&left=ours-denoised&right=ours-denoised`);
+    pages.push(b);
+    if (!(await b.T('window.__p.entries()')).includes(scene)) { console.log(`  (${scene}: no assets, skipped)`); close(b); continue; }
+    const m = await b.T(`window.__p.measure({ samples: ${spp}, warmup: 48, frames: 16, methods: ['ours-denoised', 'ours-raw'] })`);
+    const r = { pose, measure: { referenceSamples: m.referenceSamples, frames: m.frames, rows: m.rows } };
+    Object.assign(r, await b.T("window.__p.metrics.all({ method: 'ours-denoised' })"));
+    r.restDrift2 = await b.T("window.__p.metrics.restDrift({ method: 'ours-denoised' })");
+    r.orbitFlicker2 = await b.T("window.__p.metrics.orbitFlicker({ method: 'ours-denoised' })");
+    errors.push(...(await b.T('window.__p.gpuErrors()')), ...errsSince(ctx, before));
+    close(b);
+    out.showcase[scene] = r;
+    save();
+    const R = (o) => o?.regions?.reflection;
+    const g = m.rows.find((x) => x.region === 'glossy');
+    say(`showcase ${scene} @${pose}: glossy MAD ${g?.methods['ours-denoised']?.mad.toFixed(2)} std ${g?.methods['ours-denoised']?.std.toFixed(3)} quad ${g?.methods['ours-denoised']?.quad.toFixed(3)} (raw ${g?.methods['ours-raw']?.quad.toFixed(3)}, PT ${g?.refQuad.toFixed(3)}); drift ${R(r.restDrift)?.mean} / ${R(r.restDrift2)?.mean}; orbit std ${R(r.orbitFlicker)?.std} / ${R(r.orbitFlicker2)?.std}; energy loss ${R(r.energy)?.loss}${scene === 'carConcept' ? ` (lip ${r.energy?.regions?.lip?.loss}, door ${r.energy?.regions?.door?.loss}, band ${r.energy?.regions?.band?.loss})` : ''}`);
+  }
+
+  const methods = ['ours-denoised', 'ours-raw', 'ours-rt'];
+  if (parts.includes('lineSpread')) {
+    const before = ctx.results.logs.length;
+    const b = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual&scene=lineSpread&pose=e15&left=ours-denoised&right=ours-denoised`);
+    pages.push(b);
+    out.lineSpread = await b.T(`window.__p.metrics.lineSpread({ methods: ${JSON.stringify(methods)}, samples: 256, warmup: 64, frames: 16 })`);
+    ctx.savePng('ssr-exp-lineSpread-r0.5.png', await b.T('window.__p.shot()'));
+    errors.push(...(await b.T('window.__p.gpuErrors()')), ...errsSince(ctx, before));
+    close(b);
+    save();
+    for (const row of out.lineSpread.rows) say(`line spread r ${row.roughness}: PT ${row.pt} px; ${methods.map((id) => `${id} ${row.methods[id]?.width} (${row.methods[id]?.ratio})`).join(', ')}`);
+  }
+  if (parts.includes('grazing')) {
+    const before = ctx.results.logs.length;
+    const b = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual&scene=grazing&pose=e15&left=ours-denoised&right=ours-denoised`);
+    pages.push(b);
+    out.grazing = await b.T(`window.__p.metrics.grazing({ methods: ${JSON.stringify(methods)}, samples: 256, warmup: 64, frames: 16 })`);
+    errors.push(...(await b.T('window.__p.gpuErrors()')), ...errsSince(ctx, before));
+    close(b);
+    save();
+    for (const row of out.grazing.rows) say(`grazing e${row.elevation}: ${row.px} px, PT gradient ${row.ptGradient}; ${methods.map((id) => `${id} MAD ${row.methods[id]?.mad} grad x${row.methods[id]?.gradientRatio}`).join(', ')}`);
+  }
+  out.seconds = (Date.now() - t0) / 1000;
+  save();
+  const bad = nonFinite(out);
+  check('ssr-exp baseline: every metric on every scene, finite, no GPU errors', bad.length === 0 && errors.length === 0, `${((Date.now() - t0) / 60000).toFixed(1)} min; ${file}${bad.length ? '; non-finite ' + bad.slice(0, 4).join(', ') : ''}${errors.length ? '; ' + errors[0] : ''}`);
+}
+
+/**
+ * `--only ssr-exp-run`: one metric call on one page, for the experiment streams' A/Bs.
+ *   SSR_EXP_URL='ssr/?scene=contact&upscale=quality' SSR_EXP_EVAL='window.__p.metrics.restDrift({ heat: true })' pnpm check -- --only ssr-exp-run
+ * Prints the result as JSON ($OUT/ssr-exp-run.json); every PNG data URL in it is saved as $OUT/ssr-exp-run-<path>.png
+ * and replaced by the file name. The page's loop is stopped first when it has `__p.stop`.
+ */
+export async function ssrExpRun(ctx, pages) {
+  const { openPage, PORT, OUT } = ctx;
+  const url = process.env.SSR_EXP_URL ?? 'ssr/?scene=contact';
+  const expr = process.env.SSR_EXP_EVAL ?? 'window.__p.metrics.all()';
+  const p = await openPage(`http://127.0.0.1:${PORT}/${url.replace(/^\//, '')}`);
+  pages.push(p);
+  await p.T('window.__p.stop?.()');
+  const r = await p.T(expr);
+  const strip = (o, at) => {
+    if (typeof o === 'string' && o.startsWith('data:image/png')) { const name = `ssr-exp-run-${at || 'image'}.png`; ctx.savePng(name, o); return name; }
+    if (o && typeof o === 'object') { for (const k of Object.keys(o)) o[k] = strip(o[k], at ? `${at}-${k}` : k); }
+    return o;
+  };
+  strip(r, '');
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, 'ssr-exp-run.json'), JSON.stringify(r, null, 1));
+  console.log(JSON.stringify(r, null, 1).slice(0, 4000));
+  ctx.check('ssr-exp-run: the expression returned', r !== undefined, `${url}: ${expr}`);
 }

@@ -101,6 +101,8 @@ export interface CompareMethod {
   readSignal?(): Promise<{ data: Float32Array; width: number; height: number }>;
   /** X0: ours only, the denoised output (null while the denoiser isn't running). */
   readDenoised?(): Promise<{ data: Float32Array; width: number; height: number } | null>;
+  /** X0: ours only, the display AA's jitter period in frames (null: no jitter). */
+  jitterPhases?(): number | null;
   /** X0: ours only, the denoiser on / off without a rebuild; returns the previous state. */
   setDenoise?(on: boolean): boolean;
   /** W51: GPU ms per pass of the last timed frame (ours with `timestamps=1`). */
