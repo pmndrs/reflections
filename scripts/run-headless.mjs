@@ -541,32 +541,84 @@ async function hybridChecks(pages) {
 }
 
 /**
- * W75 (X5, D5080): `reflectionResolution: 'half'` (examples/ssr ?res=half), with the denoiser and the
- * ray-traced pass: the tracer and the denoiser run at ceil(w/2) x ceil(h/2), the residual is upsampled,
- * and the final image stays close to full res (mean |diff| per channel vs a 'full' page of the same scene).
+ * Reflection-region deltas of PNG data URLs (decoded in a page), max channel / 255: the region is where the
+ * full-res composite differs from the probe-only one by > 8 (where reflections show); `ref` = mean
+ * |full - probe| there, `test` = mean |test - probe|, `diff` = mean |test - full|, `max` = max |test - full| anywhere.
+ */
+const REGION_DELTA = `async (full, probe, test) => {
+  const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+  const F = await px(full), Pr = await px(probe), T = await px(test);
+  const d = (A, B, k) => Math.max(Math.abs(A[k] - B[k]), Math.abs(A[k + 1] - B[k + 1]), Math.abs(A[k + 2] - B[k + 2]));
+  let n = 0, ref = 0, tst = 0, diff = 0, max = 0;
+  for (let k = 0; k < F.length; k += 4) {
+    max = Math.max(max, d(T, F, k));
+    if (d(F, Pr, k) <= 8) continue;
+    n++; ref += d(F, Pr, k); tst += d(T, Pr, k); diff += d(T, F, k);
+  }
+  return { px: n, ref: ref / Math.max(1, n), test: tst / Math.max(1, n), diff: diff / Math.max(1, n), max };
+}`;
+
+/**
+ * W75 (X5, D5080; review fix 3): `reflectionResolution: 'half'` (examples/ssr ?res=half), with the denoiser
+ * and the ray-traced pass. On the reflection region (full vs probe-only > 8/255) the half-res composite must
+ * carry the reflection (its delta from probe-only >= 60 % of full's: a zero residual fails) and stay near full
+ * (mean |half - full| < 35 % of that delta). Also: 'mixed' (halfResMinRoughness 0.01 set at runtime on a
+ * composite built for half: the mirror path's gate is a uniform), an odd size (961x541), and a runtime
+ * full -> half -> full switch that must end identical to the first full frame.
  */
 async function halfResChecks(pages) {
   const full = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1`);
   const half = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1&res=half`);
-  pages.push(full, half);
+  const odd = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1&w=961&h=541`);
+  pages.push(full, half, odd);
+  const shotOf = async (p, prep = '') => {
+    if (prep) await p.T(prep);
+    await p.T('(window.__p.ssr.settings.frameIndex = 5, window.__p.ssr.settings.minTraversalOccupancy = 0, window.__p.ssr.resetHistory(), window.__p.hybrid.resetHistory(), true)');
+    await p.T('window.__p.step(24)');
+    return p.T('window.__p.shot()');
+  };
+  const probeOnly = async (p) => { await p.T('window.__p.setSSR(false)'); const s = await shotOf(p); await p.T('window.__p.setSSR(true)'); return s; };
+  const judge = (name, r, extra = true, more = '') => check(name, extra && r.px > 2000 && r.test >= 0.6 * r.ref && r.diff < 0.35 * r.ref,
+    `${r.px} reflection px: full vs probe-only ${r.ref.toFixed(2)}, this vs probe-only ${r.test.toFixed(2)}, this vs full ${r.diff.toFixed(2)} (max ${r.max})${more}`);
   for (const id of ['mirrorWall', 'contact']) {
     const before = results.logs.length;
-    const shot = {};
-    for (const [k, p] of [['full', full], ['half', half]]) {
-      await p.T(`window.__p.load(${JSON.stringify(id)})`);
-      await p.T('(window.__p.ssr.settings.frameIndex = 5, true)');
-      await p.T('window.__p.step(24)');
-      shot[k] = await p.T('window.__p.shot()');
-    }
-    savePng(`half-res-${id}-final.png`, shot.half);
+    await full.T(`window.__p.load(${JSON.stringify(id)})`);
+    await half.T(`window.__p.load(${JSON.stringify(id)})`);
+    const fShot = await shotOf(full), pShot = await probeOnly(full);
+    const hShot = await shotOf(half, "(window.__p.ssr.settings.halfResMinRoughness = 0, true)");
+    savePng(`half-res-${id}-final.png`, hShot);
     const info = await half.T('({ res: window.__p.ssr.resolution, w: window.__p.ssr.tracer.width, h: window.__p.ssr.tracer.height, gw: window.__p.ssr.gbuffer.width, gh: window.__p.ssr.gbuffer.height })');
     const st = await half.T('window.__p.ssr.readTraceStats()');
-    const d = await half.T(`(${IMAGE_STATS})(${JSON.stringify(shot.half)}, ${JSON.stringify(shot.full)})`);
+    const r = await full.T(`(${REGION_DELTA})(${JSON.stringify(fShot)}, ${JSON.stringify(pShot)}, ${JSON.stringify(hShot)})`);
+    // 'mixed' at runtime, no composite rebuild: the full-res mirror path below 0.01 through the uniform gate
+    const mShot = await shotOf(half, '(window.__p.ssr.settings.halfResMinRoughness = 0.01, true)');
+    const mode = await half.T('({ mode: window.__p.ssr.traceMode, mirror: window.__p.ssr.mirrorPath })');
+    await half.T('(window.__p.ssr.settings.halfResMinRoughness = 0, true)');
+    savePng(`half-res-${id}-mixed.png`, mShot);
+    const rm = await full.T(`(${REGION_DELTA})(${JSON.stringify(fShot)}, ${JSON.stringify(pShot)}, ${JSON.stringify(mShot)})`);
     const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
-    check(`half-res ${id}: traced and denoised at half size, upsampled, final within 6/255 mean of full res, no validation errors`,
-      errs.length === 0 && info.res === 'half' && info.w === Math.ceil(info.gw / 2) && info.h === Math.ceil(info.gh / 2) && (st?.traced ?? 0) > 0 && d.mean < 6,
-      errs.length ? errs.slice(0, 2).join(' | ') : `tracer ${info.w}x${info.h} of ${info.gw}x${info.gh}, ${st?.traced} traced rays, final vs full mean ${d.mean.toFixed(2)} max ${d.max}`);
+    judge(`half-res ${id}: traced and denoised at half size, the upsampled residual carries the reflection and stays near full res`, r,
+      errs.length === 0 && info.res === 'half' && info.w === Math.ceil(info.gw / 2) && info.h === Math.ceil(info.gh / 2) && (st?.traced ?? 0) > 0,
+      errs.length ? ` | ${errs.slice(0, 2).join(' | ')}` : `; tracer ${info.w}x${info.h} of ${info.gw}x${info.gh}, ${st?.traced} traced rays`);
+    judge(`half-res ${id} 'mixed' (halfResMinRoughness 0.01 at runtime, composite built for half): mirror path on, reflection carried`, rm,
+      errs.length === 0 && mode.mode === 'mixed' && mode.mirror, `; traceMode ${mode.mode}`);
   }
+  // odd size and the runtime switch on one page (setResolution rebuilds the page's composites)
+  const before = results.logs.length;
+  await odd.T("window.__p.load('contact')");
+  const f0 = await shotOf(odd), p0 = await probeOnly(odd);
+  const h1 = await shotOf(odd, "window.__p.setResolution('half')");
+  const oddInfo = await odd.T('({ w: window.__p.ssr.tracer.width, h: window.__p.ssr.tracer.height, up: window.__p.hybrid.upsampled && window.__p.hybrid.upsampled.residual.width })');
+  const f2 = await shotOf(odd, "window.__p.setResolution('full')");
+  const upAfter = await odd.T('(window.__p.hybrid.upsampled ? window.__p.hybrid.upsampled.residual.width : 1)');
+  const ro = await odd.T(`(${REGION_DELTA})(${JSON.stringify(f0)}, ${JSON.stringify(p0)}, ${JSON.stringify(h1)})`);
+  const same = await odd.T(`(${IMAGE_STATS})(${JSON.stringify(f2)}, ${JSON.stringify(f0)})`);
+  const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+  judge('half-res odd size 961x541 contact: tracer 481x271, reflection carried, near full', ro, errs.length === 0 && oddInfo.w === 481 && oddInfo.h === 271,
+    errs.length ? ` | ${errs.slice(0, 2).join(' | ')}` : `; tracer ${oddInfo.w}x${oddInfo.h}`);
+  check('half-res runtime switch full -> half -> full ends identical to full, half-res targets released', errs.length === 0 && same.max === 0 && oddInfo.up === 961 && upAfter === 1,
+    `final after the switch back vs before: mean ${same.mean.toFixed(3)}, max ${same.max}/255; upsampled targets ${oddInfo.up} px wide at half, ${upAfter} after`);
 }
 
 /**
