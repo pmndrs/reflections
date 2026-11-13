@@ -225,7 +225,7 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
     set(key, value) {
       if (key === 'ptMax') { method.setMaxSamples!(Number(value ?? DEFAULT_MAX_SAMPLES)); return 'live'; }
       if (key === 'ptRaw') { showDenoised = value !== '1'; dirty = true; return 'live'; }
-      if (['ptBounces', 'ptDenoise', 'ptClearcoat', 'floorRoughness', 'floor', 'floorPolish', 'tone', 'keyLight', 'paintRoughness', 'bgBlur', 'bgIntensity'].includes(key)) return 'rebuild';
+      if (['ptBounces', 'ptDenoise', 'ptClearcoat', 'floorRoughness', 'floor', 'floorPolish', 'tone', 'keyLight', 'paintRoughness', 'bgBlur', 'bgIntensity', 'envLight', 'background'].includes(key)) return 'rebuild';
       return 'ignored';
     },
     status: () => {

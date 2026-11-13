@@ -237,6 +237,15 @@ export interface ScreenSpaceReflectionsSettings {
    * count. Default 'off' (D3540: no visibility).
    */
   hitShadeOcclusion?: 'off' | 'screen';
+  /**
+   * W58 (D3740): which quad pixels take the ray of their quad's base pixel when `samplesPerQuad` < 4.
+   * 'always' (default, FFX): every glossy pixel of the quad, so a silhouette inside a 2x2 quad shows
+   * the base pixel's reflection on both sides (a 2x2 stair step and, on a mirror floor next to a car,
+   * the car's reflection copied onto the floor) until the denoiser blurs it. 'sameSurface': a pixel
+   * whose view depth differs from the base's by more than 5 % or whose normal by more than ~25 degrees
+   * traces its own ray (and goes to the miss list on its own). Costs a few more rays along edges.
+   */
+  quadCopy?: 'always' | 'sameSurface';
 }
 
 export interface ScreenSpaceCamera {
@@ -565,6 +574,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     f[137] = Math.min(1, Math.max(0, s.hitLobeFilterMixed ?? 1));
     u[138] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
     u[139] = useHitSource && inputs.hitSource ? 1 : 0;
+    u[140] = (s.quadCopy ?? 'always') === 'sameSurface' ? 1 : 0;
     device.queue.writeBuffer(params, 0, data);
   }
 

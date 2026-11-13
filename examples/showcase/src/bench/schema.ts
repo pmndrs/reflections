@@ -127,6 +127,8 @@ export const SETTINGS: Setting[] = [
   num('floorRoughness', 'scene', 'Floor roughness', 0, 0.6, 0.01, null, { defaultNote: 'per scene (stages 0.03)', appliesTo: ALL, tradeoff: 'Floor roughness, every method; ours re-bakes its probes. The path tracer rebuilds.' }),
   bool('floorPolish', 'scene', 'Polished floor (Sponza)', null, { pageDefault: true, appliesTo: ALL, tradeoff: 'Sponza\'s polished override of its `Floors` material; off = the asset\'s rough stone.' }),
   num('bgBlur', 'scene', 'Background blur', 0, 1, 0.05, null, { pageDefault: 0, apply: 'rebuild', appliesTo: ALL, tradeoff: 'Backdrop blur (display only; lighting unchanged). The compare / bench show it sharp so every method shows the same backdrop (the PT blurs differently); the showcase uses 0.35.' }),
+  num('envLight', 'scene', 'Environment light scale', 0, 3, 0.05, null, { pageDefault: 1, apply: 'rebuild', appliesTo: ALL, tradeoff: 'W58: scales the image-based light (scene.environmentIntensity): three\'s IBL, the probe bake and the path tracer\'s environment. 0 leaves the key light alone (with keyLight: what share of a look is the HDRI).' }),
+  sel('background', 'scene', 'Background', [['hdri', 'HDRI'], ['black', 'black (camera rays only)']], null, { pageDefault: 'hdri', apply: 'rebuild', appliesTo: ALL, tradeoff: 'W58: black hides the backdrop the camera sees (backgroundIntensity 0); lighting and reflections keep the environment.' }),
   num('keyLight', 'scene', 'Key light scale', 0, 3, 0.05, null, { pageDefault: 1, apply: 'rebuild', appliesTo: ALL, tradeoff: 'Scales every directional / spot / point light (W45: what share of a reference is the key light).' }),
 
   // ---- screen-space ----------------------------------------------------------------------------------------
@@ -143,6 +145,11 @@ export const SETTINGS: Setting[] = [
     appliesTo: OURS_SSR, api: 'settings.samplesPerQuad',
     tradeoff: 'Rays per 2x2 quad for glossy (non-mirror) pixels. More rays, less noise: spq 4 lowered denoised std 0.14 -> 0.10 on a 0.25 floor (W21).',
     cost: 'intersect grows about linearly in glossy rays (0.53-0.58 ms at 1080p at 1, W6)',
+  }),
+  sel('s.quadCopy', 'sssr', 'Quad copy', [['always', 'always (FFX)'], ['sameSurface', 'same surface only (edge px trace their own ray)']], 'always', {
+    appliesTo: OURS_SSR, api: 'settings.quadCopy',
+    tradeoff: 'W58 (D3740): with samplesPerQuad < 4 a quad shares one ray. \'always\' copies it to every glossy px of the quad, across a silhouette too: on carConcept the skirt\'s reflection lands on the mirror floor below it (bright 2x2 dashes, raw) and the floor\'s on the skirt, the stair-stepped raw edge the denoiser then spreads. \'sameSurface\' gives px on another surface (depth > 5 %, normal > ~25 deg) their own ray. carConcept w50 960x540, lip / band MAD vs PT raw 18.6 / 14.0 -> 11.5 / 12.2, denoised 41.5 / 30.6 -> 34.4 / 26.9 (spq 4: 11.2 / 13.5, 34.3 / 27.7).',
+    cost: '1080p: classify +0.02, intersect +0.02, rt trace ~+0.2 ms (carConcept w50, W58)',
   }),
   num('s.maxTraversalIntersections', 'sssr', 'Max march steps', 0, 256, 1, 128, { appliesTo: OURS_SSR, api: 'settings.maxTraversalIntersections', tradeoff: 'Hi-Z march steps per ray: fewer is cheaper and sends long rays to the miss list (probe or RT); 0 = SSR off.' }),
   num('s.minTraversalOccupancy', 'sssr', 'Min occupancy', 0, 64, 1, 4, { appliesTo: OURS_SSR, api: 'settings.minTraversalOccupancy', tradeoff: 'Glossy rays stop once this few lanes of their subgroup still march (FFX): higher ends long tails earlier (cheaper, more misses). Mirrors ignore it.' }),

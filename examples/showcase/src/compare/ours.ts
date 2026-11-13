@@ -44,6 +44,7 @@ const SSSR_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   thicknessLengthFactor: 'n', mostDetailedMip: 'n', temporalVarianceGuidedTracing: 'b', varianceThreshold: 'n', iblFactor: 'n', temporalStabilityFactor: 'n',
   missConfidenceThreshold: 'n', missRoughnessThreshold: 'n', fallbackRoughness: 's', mirrorBias: 'n', frameIndex: 'n',
   hitLobeFilterMixed: 'n', hitShadeOcclusion: 's', // W52 (D3641, D3642)
+  quadCopy: 's', // W58 (D3740)
 };
 /** `ScreenSpaceReflectionsPass.traceSettings` fields the bench sets as `t.<field>`. */
 const TRACE_FIELDS: Record<string, 'n' | 'b' | 's'> = {
@@ -406,7 +407,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   }
   /** Keys read only at creation (a Rebuild applies them). */
   const REBUILD = new Set(['bvh', 'bvhBuilder', 'rtShadingNormals', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
-    'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity', 'timestamps', 'shim']);
+    'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity', 'envLight', 'background', 'timestamps', 'shim']);
 
   return {
     id, canvas, scene: sceneInfo(kit),
