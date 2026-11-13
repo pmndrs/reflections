@@ -1416,11 +1416,14 @@ async function rtShadingNormalChecks(p, label) {
  * reference frame, both shadings on the same rays). A shadow ray can only darken a hit.
  */
 async function rtHitShadingLines(p, id) {
-  // W76: these compare hit shading on the same rays, calibrated on the pre-W76 ray set (D901's +-10 %): the new
-  // defaults (narrower compensated sample, 'relative' thickness with RT) move which pixels are traced (contact
-  // @pmndrs/bvh 1.08 -> 1.10), so this runs the pre-W76 tracer
-  await p.T("(window.__p.setSettings({ hitColorFilter: 'off', thicknessDepthFactor: 0 }), true)");
   const fmt = (hs) => `mean ${hs.meanShaded.toFixed(3)} vs ${hs.meanScreen.toFixed(3)} (ratio ${hs.ratio.toFixed(3)}), mean abs rel ${hs.meanAbsRel.toFixed(3)}`;
+  // W76 review 4: the D901 ratio at the package defaults, logged (the check below runs the pre-W76 rays it was
+  // calibrated on; the new defaults trace other pixels: contact @pmndrs/bvh sat at 1.10 against the 10 % bound)
+  await p.T(CONE_READY);
+  const dflt = await p.T('window.__p.hitShadingError({ hitSpecular: false })');
+  console.log(`  rt ${id}: D901 at the package defaults (W76): ${dflt.source}: ${fmt(dflt)}${Math.abs(1 - dflt.ratio) > 0.1 ? ' (outside the +-10 % the check holds the pre-W76 rays to)' : ''}`);
+  // W76: the checks below compare hit shading on the same rays, calibrated on the pre-W76 ray set (D901's +-10 %)
+  await p.T("(window.__p.setSettings({ hitColorFilter: 'off', thicknessDepthFactor: 0 }), true)");
   // off, on, off again: the second 'off' is the frame-to-frame noise of this per-pixel comparison
   // (not zero with reuse off on 'contact'); information, the check is on the shaded hits below
   const hs = await p.T('window.__p.hitShadingError({ hitSpecular: false }, [{ hitShadows: false }, { hitShadows: true }, { hitShadows: false }])');
