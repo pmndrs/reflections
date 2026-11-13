@@ -1,0 +1,3 @@
+mirrorWall | grad full 5.07 | half: luma MAD 1.36, >8/255 3.0%, grad ratio 0.908 | mixed: luma MAD 0.69, >8/255 1.6%, grad ratio 1.119
+facingMirrors | grad full 2.63 | half: luma MAD 1.24, >8/255 3.6%, grad ratio 0.952 | mixed: luma MAD 0.61, >8/255 1.6%, grad ratio 1.061
+contact | grad full 5.74 | half: luma MAD 2.00, >8/255 6.2%, grad ratio 0.876 | mixed: luma MAD 2.74, >8/255 8.1%, grad ratio 1.754

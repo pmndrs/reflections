@@ -84,8 +84,6 @@ export class ScreenSpaceReflections {
   private readonly packPipe: GPUComputePipeline;
   private readonly packLayout: GPUBindGroupLayout;
   private tracer: CoreTracer | null = null;
-  /** The tracer was created with the hit-colour pyramid (W72, D5020: `settings.hitColorFilter` 'cone'). */
-  private tracerCone = false;
   private packed: { reflection: ReturnType<typeof createPixiTarget>; aux: ReturnType<typeof createPixiTarget>; group: GPUBindGroup } | null = null;
 
   constructor(options: ScreenSpaceReflectionsOptions) {
@@ -121,20 +119,14 @@ export class ScreenSpaceReflections {
   configure(width: number, height: number) {
     if (this.tracer && this.tracer.width === width && this.tracer.height === height) return;
     this.disposeTracer();
-    const tracer = (this.tracer = this.createTracer(width, height));
+    const tracer = (this.tracer = createScreenSpaceReflections(this.device, {
+      width, height, depthInverted: false, variant: this.variantOption, radianceFallback: this.fallback, timestamps: this.timestamps,
+    }));
     const reflection = createPixiTarget(this.renderer, 'reflections: radiance + confidence', width, height, 'rgba16float', true);
     const aux = createPixiTarget(this.renderer, 'reflections: hit distance, ray length, roughness', width, height, 'rgba16float', true);
     this.packed = { reflection, aux, group: this.packGroup(tracer.outputs.radiance, reflection.gpu, aux.gpu) };
     this.denoisedGroup = null;
     this.seam?.resetHistory();
-  }
-
-  private createTracer(width: number, height: number): CoreTracer {
-    this.tracerCone = this.settings.hitColorFilter === 'cone';
-    return createScreenSpaceReflections(this.device, {
-      width, height, depthInverted: false, variant: this.variantOption, radianceFallback: this.fallback, timestamps: this.timestamps,
-      hitColorPyramid: this.tracerCone,
-    });
   }
 
   private packGroup(radiance: GPUTexture, reflection: GPUTexture, aux: GPUTexture) {
@@ -166,17 +158,9 @@ export class ScreenSpaceReflections {
    * render samples the results.
    */
   dispatch(encoder: GPUCommandEncoder, frame: FrameInputs) {
-    let tracer = this.tracer;
+    const tracer = this.tracer;
     const packed = this.packed;
     if (!tracer || !packed) throw new Error('ScreenSpaceReflections: call configure(width, height) first');
-    if ((this.settings.hitColorFilter === 'cone') !== this.tracerCone) {
-      // W72 (D5020): the hit-colour pyramid is a binding of the tracer: rebuild it, keep the pixi targets
-      const { width, height } = tracer;
-      tracer.destroy();
-      tracer = this.tracer = this.createTracer(width, height);
-      packed.group = this.packGroup(tracer.outputs.radiance, packed.reflection.gpu, packed.aux.gpu);
-      this.denoisedGroup = null;
-    }
     const inputs = screenSpaceInputsFromFrame(frame, tracer, { fallbackBindGroup: this.probes?.set.bindGroup });
     const settings: ScreenSpaceReflectionsSettings = { ...this.settings, frameIndex: frame.frameIndex };
     if (!this.enabled) settings.roughnessThreshold = 0;

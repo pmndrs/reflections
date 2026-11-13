@@ -47,6 +47,7 @@ export class PassTimer {
       this.unread = null;
       this.pending = read.mapAsync(GPUMapMode.READ, 0, n * 16).then(() => {
         const t = new BigInt64Array(read.getMappedRange(0, n * 16));
+        this.timings.clear(); // W74: no stale keys from passes this frame did not run
         let total = 0;
         for (let i = 0; i < n; i++) {
           const ms = Number(t[2 * i + 1] - t[2 * i]) / 1e6;

@@ -7,12 +7,15 @@
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | bench | probe-layouts)
 //   pnpm check -- --only ssr-exp-metrics         # X0 (W70): the experiment metrics smoke (examples/shared/metrics); ssr-exp-baseline = the full baseline (scripts/ssr-exp.mjs)
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
+//   pnpm check -- --only ssr-exp-x1              # W71 (X1): each X1 setting at its default = absent on examples/ssr; historyEdgeConfidence at rest / panning
+//   pnpm check -- --only ssr-exp-grazing         # W71 (X1 #3): grazing sweep 5/15/30/60 deg vs the path tracer, hitLobeFilterGrazing 0 / 0.5 / 1 (minutes)
 //   pnpm check -- --only hit-source              # W53: the denoiser's hit source through the seam (needs the Denoiser repo's W53 branch)
 //   pnpm check -- --only probe-bindings          # W62: Sponza's three-size probe set at the default 16 sampled textures
 //   pnpm check -- --only probe-bindings-measure  # W62: Sponza with fewer probe sizes vs the path tracer (MAD, PSNR), lookup ms; out/w62-probe-bindings.json
 //   pnpm check -- --only probe-layouts-measure   # W61: probe layouts at equal memory, error vs RT / path tracer, seams, timing (minutes); out/w61-probe-layouts.json
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p: core on the 2D array (warp), core on the cube array, the pre-phase-2 TSL node
 //   pnpm check -- --only mirror-bias --mirror-bias   # W32 / D49: mirrorBias noise / bias sweep (minutes), JSON to out/mirror-bias.json
+//   pnpm check -- --only ray-reuse                    # W73 / D5040: rayReuse 'copy' is the default path, 'ratio' runs and lowers raw noise
 //   pnpm check -- --only seam        # W26 / D53: the SSR-to-probe seam sweep (Lagarde's options off / on), JSON to out/seam.json (SEAM_SHOTS=1: images)
 //   pnpm check -- --only probes --probes-layout cube2d   # run the probe feature checks on the 2D array (default: 'auto', a cube array through the shim)
 //   pnpm check -- --only probe-bench --low-roughness   # D101: lookups between mips, two lod mappings
@@ -218,6 +221,7 @@ async function sssrCoreChecks(pages) {
     check('sssr parity (default occupancy): lists', r.rayListSame && r.tileListSame && r.tileFlagsSame, `rays ${r.rays}`);
     console.log(`  default occupancy: radiance differs on ${r.radianceDiffPixels} px, misses ${r.misses.join(' vs ')} (informational)`);
   }
+  await x1CoreChecks(s, hasSubgroups); // W71 (X1)
   // Reverse-Z: same scene, max-reduced pyramid; the hit fraction should match the forward-Z page closely.
   const rz = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?reverse`);
   pages.push(rz);
@@ -236,6 +240,9 @@ async function sssrCoreChecks(pages) {
   check('sssr cube-environment fallback: same rays and hits', se.rays === st.rays && Math.abs(se.mirrorHitFraction - st.mirrorHitFraction) < 1e-3,
     `rays ${se.rays}, hit ${(se.mirrorHitFraction * 100).toFixed(1)}%`);
   savePng('sssr-core-env.png', await env.T('window.__p.shot()'));
+  const graz = await env.T('window.__p.identity({}, { hitLobeFilterGrazing: 1 })'); // W71 (X1 #3)
+  check('sssr X1 hitLobeFilterGrazing 1 changes re-shaded hits only (cube environment: same lists)', graz.radianceDiffPixels > 0 && graz.listsSame && graz.hitDiffPixels === 0,
+    `radiance ${graz.radianceDiffPixels} px differ, hit distance ${graz.hitDiffPixels}, lists same ${graz.listsSame}`);
   // fallbackRoughness (D1806): 'surface' takes misses' fallback at the pixel's roughness (the rough-path
   // lookup), 'mirror' is FFX's roughness 0. Mirrors and confidence-1 pixels must not change.
   const fr = await env.T('window.__p.fallbackRoughness()');
@@ -259,6 +266,153 @@ async function sssrCoreChecks(pages) {
   pages.push(big);
   const t = await big.T('window.__p.time(30)');
   console.log(`  GPU ms ${t.size.join('x')} (${t.variant}, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
+}
+
+/**
+ * W71 (X1, D5000-D5003) on examples/sssr-core: each setting at its default gives the same lists and
+ * images bit for bit as the setting absent; the rotated quad bases keep the variants' parity.
+ */
+async function x1CoreChecks(s, hasSubgroups) {
+  const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitLobeFilterGrazing: 0, historyEdgeConfidence: false };
+  // 'relative' at k 0 is off (review: thickness 0 would make smoothstep(0, 0, d) undefined)
+  for (const [name, def] of [...Object.entries(X1_DEFAULTS), ['all four', X1_DEFAULTS], ['relative at k 0', { thicknessDepthMode: 'relative', thicknessDepthFactor: 0 }]]) {
+    const r = await s.T(`window.__p.identity({}, ${JSON.stringify(typeof def === 'object' ? def : { [name]: def })})`);
+    check(`sssr X1 ${name}: default ${JSON.stringify(def)} = absent, bit for bit`, r.listsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
+      `rays ${r.rays.join(' / ')}, misses ${r.misses.join(' / ')}, differing px radiance ${r.radianceDiffPixels}, hit ${r.hitDiffPixels}`);
+  }
+  // the settings act (no history input here, so not historyEdgeConfidence; the grazing filter on the ?env page,
+  // since the constant fallback looks the same at every roughness)
+  const thick = await s.T('window.__p.identity({}, { thicknessDepthFactor: 0.05 })');
+  const rel = await s.T("window.__p.identity({}, { thicknessDepthFactor: 0.001, thicknessDepthMode: 'relative' })");
+  check('sssr X1 thicknessDepthFactor and its relative mode change the hits (k 0.05 added: fewer misses; relative 0.001: more)',
+    thick.misses[1] < thick.misses[0] && rel.misses[1] > rel.misses[0],
+    `misses ${thick.misses.join(' to ')} at k 0.05, ${rel.misses.join(' to ')} relative 0.001`);
+  // quadBaseRotation (D5000): which corner carries the copies, over 4 frames
+  const corners = {};
+  for (const rot of ['fixed', 'frame', 'pattern']) {
+    corners[rot] = [];
+    for (let f = 0; f < 4; f++) corners[rot].push((await s.T(`window.__p.quadCorners({ quadBaseRotation: '${rot}', frameIndex: ${f} })`)).corners);
+  }
+  const share = (c) => { const n = c.reduce((a, b) => a + b, 0) || 1; return c.map((v) => v / n); };
+  const fixedOk = corners.fixed.every((c) => c[0] > 0 && c[1] + c[2] + c[3] === 0);
+  const order = [0, 3, 1, 2]; // quadCorner(k): tl, br, tr, bl (index tl 0, tr 1, bl 2, br 3)
+  const frameOk = corners.frame.every((c, f) => share(c)[order[f]] > 0.99);
+  const patternOk = corners.pattern.every((c) => share(c).every((v) => v > 0.15 && v < 0.35));
+  check('sssr X1 quadBaseRotation: fixed = top-left, frame cycles the corner, pattern spreads all four per frame', fixedOk && frameOk && patternOk,
+    `copy-carrying rays per corner [tl, tr, bl, br]: fixed ${JSON.stringify(corners.fixed[0])}, frame ${corners.frame.map((c) => JSON.stringify(c)).join(' ')}, pattern f0 ${JSON.stringify(corners.pattern[0])}`);
+  if (!hasSubgroups) return;
+  for (const cfg of [{ quadBaseRotation: 'frame', frameIndex: 5 }, { quadBaseRotation: 'pattern', frameIndex: 6 }, { quadBaseRotation: 'pattern', frameIndex: 6, samplesPerQuad: 2 },
+    { quadBaseRotation: 'pattern', frameIndex: 3, quadCopy: 'sameSurface' }]) {
+    const r = await s.T(`window.__p.parity(${JSON.stringify({ minTraversalOccupancy: 0, ...cfg })})`);
+    check(`sssr X1 parity (${Object.entries(cfg).map(([k, v]) => `${k} ${v}`).join(', ')}): lists and images`,
+      r.rayListSame && r.tileListSame && r.missListSame && r.tileFlagsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
+      `rays ${r.rays}, misses ${r.misses}, radiance ${r.radianceDiffPixels} px`);
+  }
+}
+
+/**
+ * `--only ssr-exp-x1` (W71, X1: D5000-D5003): on examples/ssr (denoised, AA off, hit colour from last
+ * frame, re-shade off so historyEdgeConfidence applies; RT off and on), every X1 setting at its default
+ * renders the same image as the setting absent (max 0/255; the absent run repeated gives the noise
+ * floor), and historyEdgeConfidence changes nothing at rest and something while the camera pans.
+ */
+const X1_KEYS = ['quadBaseRotation', 'thicknessDepthFactor', 'thicknessDepthMode', 'hitLobeFilterGrazing', 'historyEdgeConfidence'];
+const X1_DEFAULT_SETTINGS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitLobeFilterGrazing: 0, historyEdgeConfidence: false };
+const X1_SHOT = `async (keys, settings, n, pan) => {
+  const p = window.__p;
+  p.stop();
+  for (const k of keys) delete p.ssr.settings[k];
+  p.setSettings({ frameIndex: 7, minTraversalOccupancy: 0, ...settings });
+  const cam = p.kit.camera, c = p.controls;
+  if (!window.__x1Pose) window.__x1Pose = { pos: cam.position.clone(), target: c.target.clone() };
+  cam.position.copy(window.__x1Pose.pos); c.target.copy(window.__x1Pose.target); c.update();
+  p.ssr.resetHistory(); p.hybrid.resetHistory(); p.aa?.reset?.();
+  for (let i = 0; i < n; i++) {
+    if (pan) { const a = pan * (i - n + 1); const d = window.__x1Pose.target.clone().sub(window.__x1Pose.pos); d.applyAxisAngle(new p.THREE.Vector3(0, 1, 0), a); c.target.copy(window.__x1Pose.pos).add(d); c.update(); }
+    await p.step(1);
+  }
+  return p.shot();
+}`;
+async function x1Checks(pages) {
+  for (const [scene, rt] of [['mirrorWall', 0], ['mirrorWall', 1], ['facingMirrors', 0]]) {
+    const pg = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&scene=${scene}&rt=${rt}&denoise=1&aa=off&hit=final&reshade=off`);
+    pages.push(pg);
+    const shot = (s, n = 8, pan = 0) => pg.T(`(${X1_SHOT})(${JSON.stringify(X1_KEYS)}, ${JSON.stringify(s)}, ${n}, ${pan})`);
+    const diff = (a, b) => pg.T(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
+    const A = await shot({}), A2 = await shot({});
+    const floor = await diff(A, A2);
+    const rows = [];
+    for (const [k, v] of [...Object.entries(X1_DEFAULT_SETTINGS), ['all', X1_DEFAULT_SETTINGS]]) {
+      const d = await diff(A, await shot(typeof v === 'object' ? v : { [k]: v }));
+      rows.push(`${k} ${d.max}`);
+      check(`X1 ${scene}${rt ? ' rt' : ''}: ${k} at its default = absent (max /255)`, d.max === 0 || d.max <= floor.max, `max ${d.max}, mean ${d.mean.toFixed(4)}; absent twice: max ${floor.max}`);
+    }
+    if (scene === 'mirrorWall' && !rt) {
+      const rest = await diff(await shot({ historyEdgeConfidence: true }), A);
+      // while panning: X0's edgePan (second difference at the screen border, reflection px); on must not pop more
+      // than off, within the off runs' own spread + 5 % (W70's guess for d2)
+      const edge = async (on) => { await pg.T(`(() => { const p = window.__p; for (const k of ${JSON.stringify(X1_KEYS)}) delete p.ssr.settings[k]; p.setSettings({ historyEdgeConfidence: ${on} }); })()`);
+        return (await pg.T('window.__p.metrics.edgePan()')).regions.borderReflection.d2; };
+      const off1 = await edge(false), on = await edge(true), off2 = await edge(false);
+      check('X1 historyEdgeConfidence: no change at rest; panning, edge pops no worse than off (mirrorWall, hit final, re-shade off; X0 edgePan border-reflection d2)',
+        rest.max <= floor.max && on <= Math.max(off1, off2) * 1.05,
+        `at rest max ${rest.max}; edgePan d2 off ${off1} / ${off2}, on ${on}`);
+    }
+    pg.close();
+  }
+}
+
+/**
+ * `--only ssr-exp-grazing` (W71, X1 #3, D5002; the maintainer's test case for hitLobeFilterGrazing):
+ * the bench (showcase/bench.html), one glossy floor seen at camera elevations 5 / 15 / 30 / 60 deg
+ * (the floor point under the scene's centre as target, the hero pose's heading and distance), the
+ * bench's Measure vs the path tracer (OIDN) per elevation over the glossy px and the lower half of the
+ * frame (the floor), with hitLobeFilterGrazing 0 / 0.5 / 1 and hitLobeFilterMixed off (1) / on (0),
+ * methods ours denoised and ours + RT. X0's grazing sweep (gradient energy) and line spread are not
+ * on main yet: this is the error half, shaped so X0 can absorb it (one row per scene x elevation x
+ * setting). GRAZING_SCENES=toyCar,carConcept, GRAZING_FLOOR=<roughness> (default 0.2),
+ * GRAZING_SPP (default 32). JSON to out/w71-grazing.json.
+ */
+async function grazingSweep(pages) {
+  const scenes = (process.env.GRAZING_SCENES ?? 'toyCar').split(',');
+  const floorR = Number(process.env.GRAZING_FLOOR ?? 0.2), spp = Number(process.env.GRAZING_SPP ?? 32);
+  const rows = [];
+  for (const scene of scenes) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual&scene=${scene}&pose=hero&left=ours-denoised&right=pathtraced&aa=off&floorRoughness=${floorR}`);
+    pages.push(p);
+    if (!(await p.T('window.__p.entries()')).length) { console.log('  (no showcase assets: grazing sweep skipped)'); p.close(); return; }
+    await p.T(`(async () => { const P = window.__p; P.addRegion('floorHalf', [0, 0.5, 1, 0.5]); await P.step(2); })()`);
+    for (const elev of [5, 15, 30, 60]) {
+      await p.T(`(async () => {
+        const P = window.__p, [pos, t] = P.view(), e = ${elev} * Math.PI / 180;
+        const h = [pos[0] - t[0], pos[2] - t[2]], hl = Math.hypot(...h), d = Math.hypot(pos[0] - t[0], pos[1] - t[1], pos[2] - t[2]);
+        if (!window.__g0) window.__g0 = { h: [h[0] / hl, h[1] / hl], d, t };
+        const g = window.__g0, target = [g.t[0], 0.001, g.t[2]];
+        P.setView([target[0] + g.d * Math.cos(e) * g.h[0], target[1] + g.d * Math.sin(e), target[2] + g.d * Math.cos(e) * g.h[1]], target);
+        await P.step(2);
+      })()`);
+      savePng(`w71-grazing-${scene}-${elev}.png`, await p.T('window.__p.shot()'));
+      for (const mixed of [1, 0]) {
+        for (const g of [0, 0.5, 1]) {
+          const m = await p.T(`(async () => { const P = window.__p;
+            P.setSetting('s.hitLobeFilterMixed', ${mixed === 1 ? 'null' : mixed}); P.setSetting('s.hitLobeFilterGrazing', ${g === 0 ? 'null' : g});
+            await P.step(2);
+            return P.measure({ samples: ${spp}, warmup: 24, frames: 8, methods: ['ours-denoised', 'ours-rt'] }); })()`);
+          const by = Object.fromEntries(m.rows.map((r) => [r.region, r]));
+          const row = { scene, elevation: elev, floorRoughness: floorR, hitLobeFilterGrazing: g, hitLobeFilterMixed: mixed, spp: m.referenceSamples,
+            regions: Object.fromEntries(['glossy', 'floorHalf'].map((k) => [k, { px: by[k]?.px, ptLuma: by[k]?.refLuma, methods: by[k]?.methods }])) };
+          rows.push(row);
+          const f = (k, id) => { const v = by[k]?.methods[id]; return v ? `${v.mad.toFixed(2)}/${v.luma.toFixed(1)}` : '-'; };
+          console.log(`  ${scene} ${String(elev).padStart(2)} deg mix ${mixed} graz ${g}: glossy MAD/luma dn ${f('glossy', 'ours-denoised')} rt ${f('glossy', 'ours-rt')} (PT ${by.glossy?.refLuma.toFixed(1)}); floor half dn ${f('floorHalf', 'ours-denoised')} rt ${f('floorHalf', 'ours-rt')} (PT ${by.floorHalf?.refLuma.toFixed(1)})`);
+        }
+      }
+    }
+    const errs = await p.T('window.__p.gpuErrors()');
+    check(`grazing sweep ${scene}: ran every elevation x setting, no GPU errors`, errs.length === 0 && rows.filter((r) => r.scene === scene).length === 24, errs[0] ?? `${rows.length} rows`);
+    p.close();
+  }
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, 'w71-grazing.json'), JSON.stringify(rows, null, 1));
 }
 
 /**
@@ -384,6 +538,124 @@ async function hybridChecks(pages) {
     `${b.sphere.px} px reflect the sphere: probe weight ${b.sphereProbe.toFixed(3)} (FFX blend ${f.sphereProbe.toFixed(3)}); ${b.behind.px} px reflect the wall behind it: hit weight ${b.behindSSR.toFixed(3)} (FFX ${f.behindSSR.toFixed(3)})`);
   await p.T('window.__p.setDepthAware(true)');
   await seamChecks(p);
+  await halfResChecks(pages); // W75 (X5, D5080)
+}
+
+/**
+ * Reflection-region deltas of PNG data URLs (decoded in a page), max channel / 255: the region is where the
+ * full-res composite differs from the probe-only one by > 8 (where reflections show); `ref` = mean
+ * |full - probe| there, `test` = mean |test - probe|, `diff` = mean |test - full|, `max` = max |test - full| anywhere.
+ */
+const REGION_DELTA = `async (full, probe, test) => {
+  const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+  const F = await px(full), Pr = await px(probe), T = await px(test);
+  const d = (A, B, k) => Math.max(Math.abs(A[k] - B[k]), Math.abs(A[k + 1] - B[k + 1]), Math.abs(A[k + 2] - B[k + 2]));
+  let n = 0, ref = 0, tst = 0, diff = 0, max = 0;
+  for (let k = 0; k < F.length; k += 4) {
+    max = Math.max(max, d(T, F, k));
+    if (d(F, Pr, k) <= 8) continue;
+    n++; ref += d(F, Pr, k); tst += d(T, Pr, k); diff += d(T, F, k);
+  }
+  return { px: n, ref: ref / Math.max(1, n), test: tst / Math.max(1, n), diff: diff / Math.max(1, n), max };
+}`;
+
+/**
+ * W75 (X5, D5080; review fix 3): `reflectionResolution: 'half'` (examples/ssr ?res=half), with the denoiser
+ * and the ray-traced pass. On the reflection region (full vs probe-only > 8/255) the half-res composite must
+ * carry the reflection (its delta from probe-only >= 60 % of full's: a zero residual fails) and stay near full
+ * (mean |half - full| < 35 % of that delta). Also: 'mixed' (halfResMinRoughness 0.01 set at runtime on a
+ * composite built for half: the mirror path's gate is a uniform), an odd size (961x541), and a runtime
+ * full -> half -> full switch that must end identical to the first full frame.
+ */
+async function halfResChecks(pages) {
+  const full = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1`);
+  const half = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1&res=half`);
+  const odd = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1&w=961&h=541`);
+  pages.push(full, half, odd);
+  const shotOf = async (p, prep = '') => {
+    if (prep) await p.T(prep);
+    await p.T('(window.__p.ssr.settings.frameIndex = 5, window.__p.ssr.settings.minTraversalOccupancy = 0, window.__p.ssr.resetHistory(), window.__p.hybrid.resetHistory(), true)');
+    await p.T('window.__p.step(24)');
+    return p.T('window.__p.shot()');
+  };
+  const probeOnly = async (p) => { await p.T('window.__p.setSSR(false)'); const s = await shotOf(p); await p.T('window.__p.setSSR(true)'); return s; };
+  const judge = (name, r, extra = true, more = '') => check(name, extra && r.px > 2000 && r.test >= 0.6 * r.ref && r.diff < 0.35 * r.ref,
+    `${r.px} reflection px: full vs probe-only ${r.ref.toFixed(2)}, this vs probe-only ${r.test.toFixed(2)}, this vs full ${r.diff.toFixed(2)} (max ${r.max})${more}`);
+  for (const id of ['mirrorWall', 'contact']) {
+    const before = results.logs.length;
+    await full.T(`window.__p.load(${JSON.stringify(id)})`);
+    await half.T(`window.__p.load(${JSON.stringify(id)})`);
+    const fShot = await shotOf(full), pShot = await probeOnly(full);
+    const hShot = await shotOf(half, "(window.__p.ssr.settings.halfResMinRoughness = 0, true)");
+    savePng(`half-res-${id}-final.png`, hShot);
+    const info = await half.T('({ res: window.__p.ssr.resolution, w: window.__p.ssr.tracer.width, h: window.__p.ssr.tracer.height, gw: window.__p.ssr.gbuffer.width, gh: window.__p.ssr.gbuffer.height })');
+    const st = await half.T('window.__p.ssr.readTraceStats()');
+    const r = await full.T(`(${REGION_DELTA})(${JSON.stringify(fShot)}, ${JSON.stringify(pShot)}, ${JSON.stringify(hShot)})`);
+    // 'mixed' at runtime, no composite rebuild: the full-res mirror path below 0.01 through the uniform gate
+    const mShot = await shotOf(half, '(window.__p.ssr.settings.halfResMinRoughness = 0.01, true)');
+    const mode = await half.T('({ mode: window.__p.ssr.traceMode, mirror: window.__p.ssr.mirrorPath })');
+    await half.T('(window.__p.ssr.settings.halfResMinRoughness = 0, true)');
+    savePng(`half-res-${id}-mixed.png`, mShot);
+    const rm = await full.T(`(${REGION_DELTA})(${JSON.stringify(fShot)}, ${JSON.stringify(pShot)}, ${JSON.stringify(mShot)})`);
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    judge(`half-res ${id}: traced and denoised at half size, the upsampled residual carries the reflection and stays near full res`, r,
+      errs.length === 0 && info.res === 'half' && info.w === Math.ceil(info.gw / 2) && info.h === Math.ceil(info.gh / 2) && (st?.traced ?? 0) > 0,
+      errs.length ? ` | ${errs.slice(0, 2).join(' | ')}` : `; tracer ${info.w}x${info.h} of ${info.gw}x${info.gh}, ${st?.traced} traced rays`);
+    judge(`half-res ${id} 'mixed' (halfResMinRoughness 0.01 at runtime, composite built for half): mirror path on, reflection carried`, rm,
+      errs.length === 0 && mode.mode === 'mixed' && mode.mirror, `; traceMode ${mode.mode}`);
+  }
+  // W75 (coordinator): half-res + W73's rayReuse 'ratio' + W74's tracedMissRate 'half' together, never run before
+  {
+    const before = results.logs.length;
+    await half.T("window.__p.load('contact')");
+    await half.T("(Object.assign(window.__p.ssr.settings, { rayReuse: 'ratio', halfResMinRoughness: 0 }), window.__p.ssr.traceSettings.tracedMissRate = 'half', true)");
+    // the fill's pipelines compile asynchronously (W74 review): 'full' until they are ready
+    await half.T('(async () => { for (let i = 0; i < 100 && !(window.__p.ssr.traced && window.__p.ssr.traced.halfRateReady); i++) await window.__p.step(2); return true; })()');
+    await half.T('window.__p.step(30)');
+    const fin = await half.T(`(async () => {
+      const P = window.__p, dev = P.ssr.device, r = P.renderer;
+      const read = async (tex) => {
+        const bpp = tex.format === 'rgba16float' ? 8 : 4, w = tex.width, h = tex.height, bpr = Math.ceil(w * bpp / 256) * 256;
+        const buf = dev.createBuffer({ size: bpr * h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+        const enc = dev.createCommandEncoder(); enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow: bpr }, [w, h]); dev.queue.submit([enc.finish()]);
+        await buf.mapAsync(GPUMapMode.READ); const dv = new DataView(buf.getMappedRange().slice(0)); buf.unmap(); buf.destroy();
+        let bad = 0, n = 0, nz = 0;
+        for (let y = 0; y < h; y++) for (let x = 0; x < w * (bpp === 8 ? 4 : 1); x++) {
+          const o = y * bpr + x * (bpp === 8 ? 2 : 4);
+          let v; if (bpp === 8) { const u = dv.getUint16(o, true), e = (u >> 10) & 31; v = e === 31 ? NaN : 1; if (u & 0x7fff) nz++; } else { v = dv.getFloat32(o, true); if (v !== 0) nz++; }
+          n++; if (!Number.isFinite(v)) bad++;
+        }
+        return { n, bad, nz };
+      };
+      const g = (t) => r.backend.get(t).texture;
+      const up = P.hybrid.upsampled;
+      return { radiance: await read(g(P.ssr.radiance)), confidence: await read(g(P.ssr.confidence)), residual: await read(g(up.residual)), upConf: await read(g(up.confidence)), stats: await P.ssr.readTraceStats() };
+    })()`);
+    const shot = await half.T('window.__p.shot()');
+    savePng('half-res-ratio-halfrate-contact.png', shot);
+    await half.T("(delete window.__p.ssr.settings.rayReuse, delete window.__p.ssr.traceSettings.tracedMissRate, true)");
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    const bad = ['radiance', 'confidence', 'residual', 'upConf'].reduce((a, k) => a + fin[k].bad, 0);
+    check("half-res + rayReuse 'ratio' + tracedMissRate 'half' (contact, rt): all finite, the fill ran, no validation errors",
+      errs.length === 0 && bad === 0 && fin.residual.nz > 0 && (fin.stats?.halfRateSkipped ?? 0) > 0 && (fin.stats?.traced ?? 0) > 0,
+      errs.length ? errs.slice(0, 2).join(' | ') : `non-finite ${bad}; traced ${fin.stats?.traced}, half-rate skipped ${fin.stats?.halfRateSkipped}, filled ${fin.stats?.filled}; residual non-zero ${fin.residual.nz} of ${fin.residual.n}`);
+  }
+  // odd size and the runtime switch on one page (setResolution rebuilds the page's composites)
+  const before = results.logs.length;
+  await odd.T("window.__p.load('contact')");
+  const f0 = await shotOf(odd), p0 = await probeOnly(odd);
+  const h1 = await shotOf(odd, "window.__p.setResolution('half')");
+  const oddInfo = await odd.T('({ w: window.__p.ssr.tracer.width, h: window.__p.ssr.tracer.height, up: window.__p.hybrid.upsampled && window.__p.hybrid.upsampled.residual.width })');
+  const f2 = await shotOf(odd, "window.__p.setResolution('full')");
+  const upAfter = await odd.T('(window.__p.hybrid.upsampled ? window.__p.hybrid.upsampled.residual.width : 1)');
+  const ro = await odd.T(`(${REGION_DELTA})(${JSON.stringify(f0)}, ${JSON.stringify(p0)}, ${JSON.stringify(h1)})`);
+  const same = await odd.T(`(${IMAGE_STATS})(${JSON.stringify(f2)}, ${JSON.stringify(f0)})`);
+  const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+  judge('half-res odd size 961x541 contact: tracer 481x271, reflection carried, near full', ro, errs.length === 0 && oddInfo.w === 481 && oddInfo.h === 271,
+    errs.length ? ` | ${errs.slice(0, 2).join(' | ')}` : `; tracer ${oddInfo.w}x${oddInfo.h}`);
+  check('half-res runtime switch full -> half -> full ends identical to full, half-res targets released', errs.length === 0 && same.max === 0 && oddInfo.up === 961 && upAfter === 1,
+    `final after the switch back vs before: mean ${same.mean.toFixed(3)}, max ${same.max}/255; upsampled targets ${oddInfo.up} px wide at half, ${upAfter} after`);
 }
 
 /**
@@ -535,9 +807,44 @@ async function ssrChecks(pages) {
   const t = await big.T('window.__p.time(30)');
   console.log(`  GPU ms ${t.size.join('x')} through the three adapter (${t.variant}, mirrorWall, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
   await mirrorBiasChecks(pages);
+  await rayReuseChecks(pages);
   await hitColorFilterChecks(pages); // W72
   await denoiserGateChecks(pages);
   await specOccChecks(pages);
+}
+
+/**
+ * W73 (X3, D5040): `settings.rayReuse`. 'copy' (and unset) is FFX's quad copy bit for bit; 'ratio' runs the
+ * resolve (no validation error), changes the radiance, and lowers the raw temporal std on the roughnessRamp
+ * strips (examples/ssr `mirrorBiasStats` at bias 0: 8-bit luma of the final image, denoiser off).
+ */
+async function rayReuseChecks(pages) {
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0`);
+  pages.push(p);
+  await p.T("window.__p.load('roughnessRamp')");
+  await p.T("window.__p.setPose('strips')");
+  await p.T('window.__p.setSettings({ minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false })');
+  await p.T('window.__p.step(4)');
+  const h = {};
+  for (const [k, v] of [['unset', null], ['copy', "'copy'"], ['ratio (first frame)', "'ratio'"], ['ratio', "'ratio'"], ['copy again', "'copy'"]]) {
+    await p.T(v === null ? '(delete window.__p.ssr.settings.rayReuse, true)' : `window.__p.setSettings({ rayReuse: ${v} })`);
+    h[k] = await p.T('window.__p.radianceHash(7)');
+    // the 'ratio' pipelines build asynchronously from the first 'ratio' frame (it copies meanwhile)
+    if (k === 'ratio (first frame)') await p.T('new Promise((r) => setTimeout(r, 1500))');
+  }
+  check("ssr rayReuse: 'copy' is the default path, 'ratio' copies until its pipelines are built, then changes the radiance",
+    h.unset === h.copy && h.copy === h['copy again'] && h['ratio (first frame)'] === h.copy && h.copy !== h.ratio, JSON.stringify(h));
+  // raw (denoiser off), against one reference: the mean of 32 raw copy@4 frames (every px its own ray)
+  const q = await p.T(`window.__p.configStats({ configs: [{ name: 'copy', settings: { rayReuse: 'copy' } }, { name: 'ratio', settings: { rayReuse: 'ratio' } }],
+    ref: { rayReuse: 'copy', samplesPerQuad: 4 }, bins: [0.2, 0.3, 0.4], frames: 16, refFrames: 32, denoise: [false] })`);
+  const [cp, ra] = ['copy', 'ratio'].map((n) => q.results.find((x) => x.name === n).bins);
+  await p.T('(["rayReuse", "minTraversalOccupancy", "temporalVarianceGuidedTracing"].forEach((k) => delete window.__p.ssr.settings[k]), true)');
+  check("ssr rayReuse 'ratio': less raw noise on the roughnessRamp strips (r 0.2-0.4)", cp.every((b, k) => b.px > 1000 && ra[k].std < b.std),
+    cp.map((b, k) => `r ${b.roughness}: std ${b.std.toFixed(2)} -> ${ra[k].std.toFixed(2)} (${b.px} px)`).join('; '));
+  // a dimming or biased estimator also lowers the std: its mean must stay at copy@4's (8-bit luma; the
+  // smoother signal reads ~0.5 brighter through the tone curve, W73 phase 1)
+  check("ssr rayReuse 'ratio': mean luma within 1.5 / 255 of copy@4 on the same strips (no dimming, no bias)", ra.every((b) => Math.abs(b.signed) < 1.5) && cp.every((b) => Math.abs(b.signed) < 1.5),
+    cp.map((b, k) => `r ${b.roughness}: copy ${b.signed.toFixed(2)}, ratio ${ra[k].signed.toFixed(2)} (copy@4 mean ${q.refStats[k].mean.toFixed(1)})`).join('; '));
 }
 
 /**
@@ -605,32 +912,86 @@ async function denoiserGateChecks(pages) {
  * the mirrorWall floor at r 0.2 / 0.3 / 0.4, bias 0 / 0.25 / 0.5 / 0.75, denoise off and on) into out/mirror-bias.json.
  */
 /**
- * W72 (X2, D5020-D5022): hitColorFilter / mirrorBiasCompensate. Unset, 'off', compensate without the
- * cone (ignored) and back to unset after a 'cone' rebuild give the same radiance bit for bit; 'cone'
- * and 'cone' + compensate change it; no GPU errors. roughnessRamp strips, raw, occupancy 0 (D301).
+ * W72 (X2, D5020-D5024): hitColorFilter / mirrorBiasCompensate. examples/ssr roughnessRamp strips, raw, occupancy 0 (D301).
+ * - Unset, 'off', compensate without the cone (ignored) and unset again after 'cone' give the same radiance bit for
+ *   bit; 'cone' and 'cone' + compensate change it (the cone variant builds async: frames run as 'off' until
+ *   `outputs.hitColorFilterActive`).
+ * - The mean of the glossy radiance with 'cone' stays within 10 % of 'off' (a black or wrong pyramid fails).
+ * - 'cone' + rayReuse 'ratio' differs from 'ratio' alone (the ratio intersect variant reads the pyramid).
+ * - hitColor 'history' with hitShading 'off' (the pyramid of last frame's colour) changes the hits.
+ * - ?rt=1: 'cone' differs from 'off' after the traced pass (on-screen reused hits read the pyramid), defaults unchanged.
+ * - A 97x61 canvas and the pixi3d arcade (when its vendor build is there) run 'cone'. No GPU errors anywhere.
  */
-async function hitColorFilterChecks(pages) {
-  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=current`);
-  pages.push(p);
-  await p.T("window.__p.load('roughnessRamp')");
-  await p.T("window.__p.setPose('strips')");
-  await p.T('window.__p.setSettings({ minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false })');
-  await p.T('window.__p.step(4)');
-  const keys = ['hitColorFilter', 'hitColorConeScale', 'mirrorBias', 'mirrorBiasCompensate'];
-  const h = {};
-  for (const [k, s] of [['unset', {}], ['off', { hitColorFilter: 'off' }], ['compensate, no cone', { mirrorBiasCompensate: true }],
-    ['bias 0.5', { mirrorBias: 0.5 }], ['bias 0.5 + compensate, no cone', { mirrorBias: 0.5, mirrorBiasCompensate: true }],
-    ['cone', { hitColorFilter: 'cone' }], ['cone + compensate 0.5', { hitColorFilter: 'cone', mirrorBias: 0.5, mirrorBiasCompensate: true }], ['unset again', {}]]) {
-    await p.T(`(${JSON.stringify(keys)}.forEach((k) => delete window.__p.ssr.settings[k]), window.__p.setSettings(${JSON.stringify(s)}), true)`);
-    await p.T('window.__p.step(1)'); // a flip of 'cone' rebuilds the tracer at the next frame
-    h[k] = await p.T('window.__p.radianceHash(7)');
+const HCF_PAGE = `async (cmd) => {
+  const p = window.__p;
+  const keys = ['hitColorFilter', 'hitColorConeScale', 'mirrorBias', 'mirrorBiasCompensate', 'rayReuse', 'hitShading'];
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const set = (s) => { for (const k of keys) delete p.ssr.settings[k]; p.setSettings(s); };
+  // until the tracer runs the cone (and ray reuse's own async build), at most ~6 s
+  // ray reuse has no ready flag: give its async build 2 s
+  const settle = async (wantCone, minSteps) => { for (let i = 0; i < 60; i++) { await p.step(1); if ((!wantCone || p.ssr.tracer.outputs.hitColorFilterActive) && i >= minSteps) break; await sleep(100); } return !wantCone || !!p.ssr.tracer.outputs.hitColorFilterActive; };
+  const mean = async () => {
+    const t = p.ssr.tracer.outputs, dev = p.ssr.device;
+    const read = async (tex, bpp) => { const bpr = Math.ceil(tex.width * bpp / 256) * 256; const b = dev.createBuffer({ size: bpr * tex.height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }); const e = dev.createCommandEncoder(); e.copyTextureToBuffer({ texture: tex }, { buffer: b, bytesPerRow: bpr }, [tex.width, tex.height]); dev.queue.submit([e.finish()]); await b.mapAsync(GPUMapMode.READ); const out = new Uint8Array(tex.width * tex.height * bpp); const src = new Uint8Array(b.getMappedRange()); for (let y = 0; y < tex.height; y++) out.set(src.subarray(y * bpr, y * bpr + tex.width * bpp), y * tex.width * bpp); b.unmap(); b.destroy(); return out; };
+    const h2f = (h) => { const e = (h >> 10) & 31, f = h & 1023; return e === 0 ? f * 5.96e-8 : (1 + f / 1024) * 2 ** (e - 15); };
+    const r = new Uint16Array((await read(t.radiance, 8)).buffer), a = new Float32Array((await read(t.extractedRoughness, 4)).buffer);
+    let s = 0, n = 0; for (let i = 0; i < a.length; i++) if (a[i] > 1e-4 && a[i] < 0.2) { s += 0.2126 * h2f(r[i * 4]) + 0.7152 * h2f(r[i * 4 + 1]) + 0.0722 * h2f(r[i * 4 + 2]); n++; }
+    return n ? s / n : 0;
+  };
+  const out = {};
+  for (const [name, s] of cmd) {
+    set(s);
+    const active = await settle(s.hitColorFilter === 'cone', s.rayReuse ? 20 : 4);
+    out[name] = { hash: await p.radianceHash(7), active, mean: await mean() };
   }
-  const errors = await p.T('window.__p.gpuErrors.length');
-  await p.T(`(${JSON.stringify([...keys, 'minTraversalOccupancy', 'temporalVarianceGuidedTracing'])}.forEach((k) => delete window.__p.ssr.settings[k]), true)`);
-  check('ssr hitColorFilter / mirrorBiasCompensate (W72): defaults are the old path bit for bit, cone changes the hits, no GPU errors',
+  set({});
+  return { out, errors: p.gpuErrors.length };
+}`;
+async function hitColorFilterChecks(pages) {
+  const base = { minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false };
+  const cone = { hitColorFilter: 'cone' }, comp = { hitColorFilter: 'cone', mirrorBias: 0.5, mirrorBiasCompensate: true };
+  const run = async (url, cmd, scene = 'roughnessRamp') => {
+    const p = await openPage(url);
+    pages.push(p);
+    await p.T(`window.__p.load('${scene}')`);
+    if (scene === 'roughnessRamp') await p.T("window.__p.setPose('strips')");
+    await p.T(`window.__p.setSettings(${JSON.stringify(base)})`);
+    await p.T('window.__p.step(4)');
+    return p.T(`(${HCF_PAGE})(${JSON.stringify(cmd)})`);
+  };
+  const a = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=current`, [
+    ['unset', {}], ['off', { hitColorFilter: 'off' }], ['compensate, no cone', { mirrorBiasCompensate: true }],
+    ['bias 0.5', { mirrorBias: 0.5 }], ['bias 0.5 + compensate, no cone', { mirrorBias: 0.5, mirrorBiasCompensate: true }],
+    ['cone', cone], ['cone + compensate 0.5', comp], ['unset again', {}],
+    ['ratio', { rayReuse: 'ratio' }], ['cone + ratio', { ...cone, rayReuse: 'ratio' }], ['comp + ratio', { ...comp, rayReuse: 'ratio' }]]);
+  const h = Object.fromEntries(Object.entries(a.out).map(([k, v]) => [k, v.hash]));
+  const ratioMean = a.out.cone.mean / a.out.off.mean;
+  check('ssr hitColorFilter / mirrorBiasCompensate (W72): defaults are the old path bit for bit, cone changes the hits, its mean stays within 10 % of off, no GPU errors',
     h.unset === h.off && h.unset === h['compensate, no cone'] && h.unset === h['unset again'] && h['bias 0.5'] === h['bias 0.5 + compensate, no cone']
-    && h.cone !== h.unset && h['cone + compensate 0.5'] !== h.cone && h['cone + compensate 0.5'] !== h['bias 0.5'] && errors === 0,
-    `${JSON.stringify(h)}; GPU errors ${errors}`);
+    && a.out.cone.active && h.cone !== h.unset && h['cone + compensate 0.5'] !== h.cone && h['cone + compensate 0.5'] !== h['bias 0.5']
+    && Math.abs(ratioMean - 1) < 0.1 && a.errors === 0,
+    `${JSON.stringify(h)}; glossy mean cone / off ${ratioMean.toFixed(4)}; GPU errors ${a.errors}`);
+  check("ssr hitColorFilter 'cone' with rayReuse 'ratio' (W72 + W73): the ratio intersect variant reads the pyramid",
+    a.out['cone + ratio'].active && h.ratio !== h.unset && h['cone + ratio'] !== h.ratio && h['comp + ratio'] !== h['cone + ratio'] && a.errors === 0,
+    `ratio ${h.ratio}, cone + ratio ${h['cone + ratio']}, comp + ratio ${h['comp + ratio']}`);
+  const b = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=final`, [['off', { hitShading: 'off' }], ['cone', { ...cone, hitShading: 'off' }], ['off again', { hitShading: 'off' }]]);
+  check("ssr hitColorFilter 'cone' with hitColor 'history' and hitShading 'off' (the pyramid of last frame's colour)",
+    b.out.cone.active && b.out.cone.hash !== b.out.off.hash && Math.abs(b.out.cone.mean / b.out.off.mean - 1) < 0.1 && b.errors === 0,
+    `off ${b.out.off.hash} / cone ${b.out.cone.hash}, mean ratio ${(b.out.cone.mean / b.out.off.mean).toFixed(4)}; GPU errors ${b.errors}`);
+  const c = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=current&rt=1`, [['unset', {}], ['cone', cone], ['comp 0.5', comp], ['unset again', {}]], 'contact');
+  check("ssr hitColorFilter 'cone' with ?rt=1 (traced pass after the tracer): defaults unchanged, cone and compensation change the result",
+    c.out.cone.active && c.out.unset.hash === c.out['unset again'].hash && c.out.cone.hash !== c.out.unset.hash && c.out['comp 0.5'].hash !== c.out.cone.hash && c.errors === 0,
+    `${JSON.stringify(Object.fromEntries(Object.entries(c.out).map(([k, v]) => [k, v.hash])))}; GPU errors ${c.errors}`);
+  const d = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=current&w=97&h=61`, [['off', {}], ['cone', comp]], 'mirrorWall');
+  check("ssr hitColorFilter 'cone' on a 97x61 canvas (odd sizes, a short pyramid)", d.out.cone.active && d.errors === 0, `active ${d.out.cone.active}, GPU errors ${d.errors}`);
+  if (fs.existsSync(path.join(ROOT, 'examples/pixi3d/vendor/package.json'))) {
+    const q = await openPage(`http://127.0.0.1:${PORT}/pixi3d/arcade/`);
+    pages.push(q);
+    const r = await q.T(`(async () => { const P = window.__p; P.stop(); P.view.ssr.settings.hitColorFilter = 'cone'; P.view.ssr.settings.mirrorBias = 0.5; P.view.ssr.settings.mirrorBiasCompensate = true;
+      let active = false; for (let i = 0; i < 60 && !active; i++) { await P.step(1); active = !!P.view.ssr.core.outputs.hitColorFilterActive; await new Promise((r) => setTimeout(r, 100)); }
+      delete P.view.ssr.settings.hitColorFilter; await P.step(2); return { active, off: !P.view.ssr.core.outputs.hitColorFilterActive, errors: P.gpuErrors.length }; })()`);
+    check("pixi3d arcade: hitColorFilter 'cone' toggles on and off without a rebuild (W72)", r.active && r.off && r.errors === 0, JSON.stringify(r));
+  }
 }
 
 async function mirrorBiasChecks(pages) {
@@ -1035,6 +1396,38 @@ async function rtMaterialsAlone(pages) {
   }
 }
 
+/** W74 (X4, D5060): traceSettings.tracedMissRate 'half' on contact (glossy floor): fewer traced rays, the skipped quads filled. */
+async function halfRateChecks(p) {
+  const before = results.logs.length;
+  await p.T("window.__p.load('contact')");
+  await p.T("window.__p.setTraceSettings({ tracedMissRate: 'full' })");
+  await p.T('window.__p.step(3)');
+  const full = await p.T('window.__p.traceStats()');
+  await p.T("window.__p.setTraceSettings({ tracedMissRate: 'half' })");
+  await p.T('window.__p.ssr.traced.prepareHalfRate()'); // the fill compiles asynchronously (review fix 4)
+  await p.T('window.__p.step(3)');
+  const half = await p.T('window.__p.traceStats()');
+  await p.T('window.__p.setTraceSettings({})');
+  const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+  check("rt tracedMissRate 'half': fewer traced rays, the skipped quads filled from their traced neighbours, no validation errors",
+    errs.length === 0 && half.halfRateSkipped > 0 && half.traced < full.traced && half.filled > 0 && half.filled > 4 * half.fillFallbacks && half.fillOverflow === 0,
+    errs.length ? errs.slice(0, 2).join(' | ') : `traced ${full.traced} -> ${half.traced}, ${half.halfRateSkipped} quads on the fill list, ${half.filled} px filled, ${half.fillFallbacks} kept the probe, overflow ${half.fillOverflow}`);
+  // W74 review fix 6: content. A still frame (frameIndex fixed, no occupancy exit, AA off) at full and at half rate:
+  // only the filled px differ. Per px a fill vs that px's own full-rate ray is sample noise (~1x the mean), so the
+  // check reads means: the signed radiance bias over the changed px and the 8x8 block means (docs/research/w74/scripts/content.js).
+  // W74 contact (stochastic fill): bias -0.08 over the changed px, almost all of it the 583 fallback px (black in three's
+  // radiance; the composite adds their probe); successful fills alone +0.7 % (docs/research/w74/scripts/bias.js),
+  // blocks 0.14, confidence 0.665 vs 0.706 (the confidence-0 bug of 4e7e6dd would read ~0).
+  const aaMode = await p.T('window.__p.aa.mode');
+  await p.T("window.__p.setAA('off')");
+  const body = fs.readFileSync(path.join(ROOT, 'docs/research/w74/scripts/content.js'), 'utf8');
+  const c = await p.T(`(async () => { const P = window.__p; const SCENE = 'contact'; ${body} })()`);
+  await p.T(`window.__p.setAA(${JSON.stringify(aaMode)})`);
+  check("rt tracedMissRate 'half': filled px match full-rate tracing on average (contact, still frame: radiance bias and 8x8 block means)",
+    c.changed > 1000 && c.bias > -0.3 && c.bias < 0.3 && c.blockErr < 0.3 && c.confHalf > 0.7 * c.confFull,
+    `${c.changed} px changed (${c.filled} filled, ${c.fallbacks} kept the probe): bias ${(c.bias * 100).toFixed(1)} %, 8x8 block mean error ${(c.blockErr * 100).toFixed(1)} % over ${c.blocks} blocks, confidence ${c.confHalf.toFixed(3)} vs ${c.confFull.toFixed(3)}`);
+}
+
 async function ssrRtChecks(pages) {
   console.log('examples/ssr (?rt=1):');
   // probes at 128 px: the size W25 / W28 measured the hit-shading checks at (the page follows the
@@ -1092,6 +1485,7 @@ async function ssrRtChecks(pages) {
     await rtHitShadingLines(p, id);
     if (id === 'contact') await rtShadingNormalChecks(p, 'three-mesh-bvh port');
   }
+  await halfRateChecks(p); // W74 (X4, D5060)
   await rtMaterialChecks(p, 'three-mesh-bvh port'); // W49 (D1701 / D1702)
   if (args.includes('--rt-material-assets')) await rtMaterialAssetSurvey(p, 'three-mesh-bvh');
   if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '&bvh=three-mesh-bvh');
@@ -2681,7 +3075,7 @@ async function pixi3dChecks(pages) {
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' || only === 'ssr-exp-baseline' ? 3_600_000 : 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' || only === 'ssr-exp-baseline' || only === 'ssr-exp-grazing' ? 3_600_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -2955,6 +3349,7 @@ async function main() {
     if (runs('hybrid')) await hybridChecks(pages);
     if (only === 'hit-color-filter') await hitColorFilterChecks(pages); // W72: hitColorFilter / mirrorBiasCompensate alone (also part of ssr)
     if (only === 'mirror-bias') await mirrorBiasChecks(pages); // W32: the mirrorBias check alone (also part of ssr)
+    if (only === 'ray-reuse') await rayReuseChecks(pages); // W73: the rayReuse check alone (also part of ssr)
     if (only === 'denoiser-gate') await denoiserGateChecks(pages); // W34: the D1402 check alone (also part of ssr)
     if (only === 'spec-occ') await specOccChecks(pages); // W39: the specOcc toggle alone (also part of ssr)
     if (only === 'seam') {
@@ -2986,7 +3381,10 @@ async function main() {
     }
     if (runs('ssr-rt')) await ssrRtChecks(pages);
     if (only === 'halo-options') await haloOptionChecks(pages); // W52 (D3640-D3642)
+    if (only === 'ssr-exp-x1') await x1Checks(pages); // W71 (X1, D5000-D5003): defaults identical on examples/ssr
+    if (only === 'ssr-exp-grazing') await grazingSweep(pages); // W71 (X1 #3): grazing sweep vs the path tracer (minutes), JSON to out/w71-grazing.json
     if (only === 'hit-source') await hitSourceChecks(pages); // W53 (D3660-D3662)
+    if (only === 'half-res') await halfResChecks(pages); // W75 (X5, D5080): also part of hybrid
     if (runs('probe-layouts')) await probeLayoutChecks(pages); // W61
     if (runs('probe-bindings')) await probeBindingChecks(pages); // W62
     if (only === 'probe-bindings-measure') await probeBindingMeasure(pages); // W62: the measurement (minutes), JSON to out/w62-probe-bindings.json

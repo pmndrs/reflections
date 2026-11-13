@@ -46,6 +46,8 @@ const SSSR_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   missConfidenceThreshold: 'n', missRoughnessThreshold: 'n', fallbackRoughness: 's', mirrorBias: 'n', frameIndex: 'n',
   hitLobeFilterMixed: 'n', hitShadeOcclusion: 's', // W52 (D3641, D3642)
   quadCopy: 's', // W58 (D3740)
+  rayReuse: 's', rayReuseTaps: 'n', rayReuseRadius: 'n', rayReuseMixSources: 'b', rayReusePattern: 's', // W73 (D5040, D5047)
+  quadBaseRotation: 's', thicknessDepthFactor: 'n', thicknessDepthMode: 's', hitLobeFilterGrazing: 'n', historyEdgeConfidence: 'b', // W71 (X1, D5000-D5003)
   hitColorFilter: 's', hitColorConeScale: 'n', mirrorBiasCompensate: 'b', // W72 (D5020-D5022)
 };
 /** `ScreenSpaceReflectionsPass.traceSettings` fields the bench sets as `t.<field>`. */
@@ -53,6 +55,8 @@ const TRACE_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   maxTracedRaysPerFrame: 'n', maxRaysPerTile: 'n', maxRayLength: 'n', rayLengthRoughnessFalloff: 'n', normalOffset: 'n', reuseOnScreenHits: 'b',
   hitShadows: 'b', hitSpecular: 'b', onScreenDepthTolerance: 'n', iblFactor: 'n',
   hitShadeVisibility: 's', // W52 (D3640)
+  // W74 (X4, D5060): half-rate glossy misses + the bilateral fill
+  tracedMissRate: 's', tracedHalfRateMinRoughness: 'n', fillPlaneTolerance: 'n', fillNormalPower: 'n', fillRoughnessTolerance: 'n', fillSourceMask: 'n', fillMinWeightSum: 'n', fillFootprint: 'n',
 };
 /** @pmndrs/upscaler runtime settings the bench sets as `aa.<field>` (plus `sharpness` / `accum`, the showcase's keys). */
 const UPSCALER_FIELDS: Record<string, 'n' | 'b'> = { rcasDenoise: 'b', exposure: 'n', autoExposure: 'b', lockThinFeatures: 'b', detectShadingChanges: 'b' };
@@ -138,6 +142,9 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   const baseTrace = { ...ssr.traceSettings };
   for (const [f, t] of Object.entries(SSSR_FIELDS)) if (params.has(`s.${f}`)) (ssr.settings as N)[f] = parse(t, params.get(`s.${f}`)!);
   for (const [f, t] of Object.entries(TRACE_FIELDS)) if (params.has(`t.${f}`)) (ssr.traceSettings as N)[f] = parse(t, params.get(`t.${f}`)!);
+  // W75 (X5, D5080): half-res reflections; composites are built for one mode, so it is read at creation (Rebuild)
+  if (params.has('s.reflectionResolution')) ssr.settings.reflectionResolution = params.get('s.reflectionResolution') as 'full' | 'half';
+  if (params.has('s.halfResMinRoughness')) ssr.settings.halfResMinRoughness = Number(params.get('s.halfResMinRoughness')); // step 2
   // the traced misses take their fallback at the tracer's roughness setting (the adapter doesn't pass it on)
   if (ssr.settings.fallbackRoughness) ssr.traceSettings.fallbackRoughness = ssr.settings.fallbackRoughness;
   let ssrOn = params.get('ssr') !== '0';
@@ -324,6 +331,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   const resetAll = () => { ssr.resetHistory(); hybrid.resetHistory(); ssr.gbuffer.resetHistory(); aa?.reset(); };
   ssr.resetHistory(); hybrid.resetHistory();
   let timings: ReadonlyMap<string, number> = new Map();
+  let hybridTimings: ReadonlyMap<string, number> = new Map(); // W75: the half-res upsample
 
   /** Rebuild the FFX denoiser with the current options (it takes them at construction; drops its history). */
   const renewDenoiser = () => {
@@ -409,7 +417,8 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   }
   /** Keys read only at creation (a Rebuild applies them). */
   const REBUILD = new Set(['bvh', 'bvhBuilder', 'rtShadingNormals', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
-    'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity', 'envLight', 'background', 'timestamps', 'shim']);
+    'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity', 'envLight', 'background', 'timestamps', 'shim',
+    's.reflectionResolution', 's.halfResMinRoughness']);
 
   return {
     id, canvas, scene: sceneInfo(kit),
@@ -427,6 +436,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
       }
       // never blocks: resolves with this frame's timestamps a few ms later (and recycles the readback buffer)
       if (timestampsOn) ssr.readTimings().then((t) => { timings = t; }).catch(() => {});
+      if (timestampsOn) hybrid.readTimings().then((t) => { hybridTimings = t; }).catch(() => {});
     },
     renderMask(cam) {
       // W46: the glossy mask from the authored roughness, so Measure compares ?specAA off and on over
@@ -467,6 +477,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     timings() {
       const out = new Map<string, number>();
       for (const [k, v] of timings) out.set(k === 'total' ? 'reflections total' : k, v);
+      for (const [k, v] of hybridTimings) if (k !== 'total') out.set(k, v);
       const dn = hybrid.denoise ? (denoiser?.gpuTimings as ReadonlyMap<string, number> | undefined) : undefined;
       if (dn) for (const [k, v] of dn) out.set(k === 'total' ? 'denoise total' : `denoise ${k}`, v);
       if (aa && aa.mode === 'upscaler') for (const [k, v] of aa.timings) out.set(`upscaler ${k}`, v);

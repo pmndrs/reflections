@@ -2,7 +2,8 @@
 // SPD-style: up to six levels per dispatch from a 64x64 tile in workgroup memory). One instance per
 // device, so pipelines are shared by every pass that builds a chain (depth pyramid, probe prefilter).
 
-import { Downsampler } from 'downsampler/webgpu';
+import { planBatches } from 'downsampler';
+import { Downsampler, createKernel, kernelLayoutEntries } from 'downsampler/webgpu';
 
 const perDevice = new WeakMap<GPUDevice, Downsampler>();
 
@@ -11,6 +12,28 @@ export function downsamplerFor(device: GPUDevice): Downsampler {
   let d = perDevice.get(device);
   if (!d) perDevice.set(device, (d = new Downsampler(device)));
   return d;
+}
+
+/**
+ * W72: compile, with createComputePipelineAsync, the kernels the shared Downsampler will use for an
+ * 'average' chain into a `format` texture of `width` x `height` x `levels` read from a `sourceFormat`
+ * source (`encodePass(..., { source, reduction: 'average' })`). The Downsampler builds its pipelines
+ * synchronously on first use; WebGPU implementations cache pipelines by content (Dawn does), so the
+ * same descriptors compiled here first make that later call a cache hit instead of a stall. Same
+ * plan, kernel source and layout as Downsampler.prepare (2-D, filterable formats read by 'sample').
+ */
+export function warmDownsampler(device: GPUDevice, format: 'rgba16float', width: number, height: number, levels: number, sourceFormat: GPUTextureFormat): Promise<unknown> {
+  const d = downsamplerFor(device);
+  const filterable = (f: string) => !f.startsWith('depth') && !f.endsWith('32float') && !/16[us]norm$/.test(f);
+  const jobs = planBatches(width, height, { baseMipLevel: 0, mipLevelCount: levels, levelsPerDispatch: d.levelsPerDispatch, fromSource: true }).map((batch) => {
+    const src = batch.sourceMipLevel === null ? sourceFormat : format;
+    const access = filterable(src) ? (d.averageAccess ?? 'sample') : 'load';
+    const label = `downsampler ${format}:2d:${batch.count}:${access}:${src}:average`;
+    const module = device.createShaderModule({ label, code: createKernel({ format, dimension: '2d', count: batch.count, reduction: 'average', access, sourceFormat: src }) });
+    const bgl = device.createBindGroupLayout({ label: `downsampler ${format}:2d:${batch.count}:${access}`, entries: kernelLayoutEntries({ format, dimension: '2d', count: batch.count, access }) });
+    return device.createComputePipelineAsync({ label, layout: device.createPipelineLayout({ label, bindGroupLayouts: [bgl] }), compute: { module, entryPoint: 'main' } });
+  });
+  return Promise.all(jobs);
 }
 
 /** Color-attachment bytes per sample the reflections G-buffer can use (three's base 28 + lit 8 + specular 10 + clear coat 4 = 50, rounded up to the next common limit). */
