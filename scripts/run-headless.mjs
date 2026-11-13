@@ -539,6 +539,7 @@ async function hybridChecks(pages) {
   await p.T('window.__p.setDepthAware(true)');
   await seamChecks(p);
   await halfResChecks(pages); // W75 (X5, D5080)
+  await presetChecks(pages); // W77
 }
 
 /**
@@ -656,6 +657,54 @@ async function halfResChecks(pages) {
     errs.length ? ` | ${errs.slice(0, 2).join(' | ')}` : `; tracer ${oddInfo.w}x${oddInfo.h}`);
   check('half-res runtime switch full -> half -> full ends identical to full, half-res targets released', errs.length === 0 && same.max === 0 && oddInfo.up === 961 && upAfter === 1,
     `final after the switch back vs before: mean ${same.mean.toFixed(3)}, max ${same.max}/255; upsampled targets ${oddInfo.up} px wide at half, ${upAfter} after`);
+}
+
+/**
+ * W77: the 'performance' preset (core REFLECTION_PRESETS) through the three adapter's `preset` options. examples/ssr
+ * ?preset=performance must trace at half size with the denoiser keeping hit sources apart (FFX separateHitSources +
+ * missesMatchAnySource), and render bit for bit what the two settings give when set by hand (?res=half&hitSource=hits);
+ * explicit ?res=full&hitSource=off must win over the preset; at runtime applyReflectionsPreset ('default' undoes it, an
+ * override wins) through __p.setPreset.
+ */
+async function presetChecks(pages) {
+  const base = `http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1&scene=contact`;
+  const pre = await openPage(`${base}&preset=performance`);
+  const hand = await openPage(`${base}&res=half&hitSource=hits`);
+  const over = await openPage(`${base}&preset=performance&res=full&hitSource=off`);
+  pages.push(pre, hand, over);
+  const before = results.logs.length;
+  const state = (p) => p.T(`(() => { const P = window.__p, o = P.hybrid.denoiser && P.hybrid.denoiser.opts;
+    return { res: P.ssr.settings.reflectionResolution ?? 'full', w: P.ssr.tracer && P.ssr.tracer.width, gw: P.ssr.gbuffer.width, mode: P.hybrid.denoiserHitSourceMode, hs: P.hybrid.denoiserHitSource,
+      dn: o ? [!!o.separateHitSources, !!o.missesMatchAnySource] : null }; })()`);
+  const shot = async (p) => {
+    await p.T('(window.__p.ssr.settings.frameIndex = 5, window.__p.ssr.settings.minTraversalOccupancy = 0, window.__p.ssr.resetHistory(), window.__p.hybrid.resetHistory(), true)');
+    await p.T('window.__p.step(24)');
+    return p.T('window.__p.shot()');
+  };
+  const sPre = await shot(pre), sHand = await shot(hand);
+  await shot(over);
+  const a = await state(pre), h = await state(hand), o = await state(over);
+  const same = await pre.T(`(${IMAGE_STATS})(${JSON.stringify(sPre)}, ${JSON.stringify(sHand)})`);
+  const dnOk = (x, on) => x.dn === null || (x.dn[0] === on && x.dn[1] === on);
+  const fmt = (x) => `${x.res} ${x.w}/${x.gw} px, hit source ${x.mode} (${x.hs}), FFX ${x.dn ? x.dn.join('/') : 'n/a'}`;
+  let errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+  check("preset 'performance' (?preset=): half-res trace, the denoiser keeps hit sources apart, same frame as setting both by hand",
+    errs.length === 0 && a.res === 'half' && a.w === Math.ceil(a.gw / 2) && a.mode === 'hits' && a.hs && dnOk(a, true) && same.max === 0 && h.res === 'half',
+    errs.length ? errs.slice(0, 2).join(' | ') : `preset: ${fmt(a)}; by hand: ${fmt(h)}; frame vs by hand mean ${same.mean.toFixed(3)}, max ${same.max}/255`);
+  check("preset 'performance' + explicit ?res=full&hitSource=off: the explicit settings win",
+    errs.length === 0 && o.res === 'full' && o.w === o.gw && o.mode === 'off' && !o.hs && dnOk(o, false), fmt(o));
+  // runtime: 'default' undoes the preset; an override wins over it
+  const b2 = results.logs.length;
+  await pre.T("(window.__p.setPreset('default'), true)"); await shot(pre);
+  const d = await state(pre);
+  await pre.T("(window.__p.setPreset('performance', { tracer: { reflectionResolution: 'full' } }), true)"); await shot(pre);
+  const r = await state(pre);
+  await pre.T("(window.__p.setPreset('performance'), true)"); await shot(pre);
+  const back = await state(pre);
+  errs = results.logs.slice(b2).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+  check("applyReflectionsPreset at runtime: 'default' restores full + no hit source, an override wins, 'performance' again is half",
+    errs.length === 0 && d.res === 'full' && d.w === d.gw && d.mode === 'off' && dnOk(d, false) && r.res === 'full' && r.mode === 'hits' && dnOk(r, true) && back.res === 'half' && back.w === Math.ceil(back.gw / 2),
+    errs.length ? errs.slice(0, 2).join(' | ') : `default: ${fmt(d)}; performance + full: ${fmt(r)}; performance: ${fmt(back)}`);
 }
 
 /**
@@ -3384,7 +3433,8 @@ async function main() {
     if (only === 'ssr-exp-x1') await x1Checks(pages); // W71 (X1, D5000-D5003): defaults identical on examples/ssr
     if (only === 'ssr-exp-grazing') await grazingSweep(pages); // W71 (X1 #3): grazing sweep vs the path tracer (minutes), JSON to out/w71-grazing.json
     if (only === 'hit-source') await hitSourceChecks(pages); // W53 (D3660-D3662)
-    if (only === 'half-res') await halfResChecks(pages); // W75 (X5, D5080): also part of hybrid
+    if (only === 'half-res') { await halfResChecks(pages); await presetChecks(pages); } // W75 (X5, D5080), W77: also part of hybrid
+    if (only === 'preset') await presetChecks(pages); // W77
     if (runs('probe-layouts')) await probeLayoutChecks(pages); // W61
     if (runs('probe-bindings')) await probeBindingChecks(pages); // W62
     if (only === 'probe-bindings-measure') await probeBindingMeasure(pages); // W62: the measurement (minutes), JSON to out/w62-probe-bindings.json
