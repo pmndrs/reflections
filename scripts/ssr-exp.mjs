@@ -129,7 +129,9 @@ export async function ssrExpBaseline(ctx, pages) {
     const b = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual&scene=${scene}&pose=${pose}&left=ours-denoised&right=ours-denoised`);
     pages.push(b);
     if (!(await b.T('window.__p.entries()')).includes(scene)) { console.log(`  (${scene}: no assets, skipped)`); close(b); continue; }
-    const m = await b.T(`window.__p.measure({ samples: ${spp}, warmup: 48, frames: 16, methods: ['ours-denoised', 'ours-raw'] })`);
+    // W76: SSR_EXP_MEASURE_METHODS adds methods to the Measure (e.g. ours-rt: RT's 'relative' thickness default)
+    const measureMethods = (process.env.SSR_EXP_MEASURE_METHODS ?? 'ours-denoised,ours-raw').split(',');
+    const m = await b.T(`window.__p.measure({ samples: ${spp}, warmup: 48, frames: 16, methods: ${JSON.stringify(measureMethods)} })`);
     const r = { pose, measure: { referenceSamples: m.referenceSamples, frames: m.frames, rows: m.rows } };
     Object.assign(r, await b.T("window.__p.metrics.all({ method: 'ours-denoised' })"));
     r.restDrift2 = await b.T("window.__p.metrics.restDrift({ method: 'ours-denoised' })");

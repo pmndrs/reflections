@@ -313,7 +313,7 @@ export class ScreenSpaceReflectionsPass {
       // environment for 1 - confidence, exactly the term three's lit image already has
       this.rt.dispatch(cmd, { tracer: core, inputs, hitShadingBindGroup }, { ...this.traceSettings, hitColor: useHistory ? 'history' : 'current', hitShading, hitLobeFilter: this.traceSettings.hitLobeFilter ?? this.settings.hitLobeFilter, hitShadeOcclusion: this.traceSettings.hitShadeOcclusion ?? this.settings.hitShadeOcclusion,
         hitLobeFilterMixed: this.traceSettings.hitLobeFilterMixed ?? this.settings.hitLobeFilterMixed,
-        hitLobeFilterGrazing: this.traceSettings.hitLobeFilterGrazing ?? this.settings.hitLobeFilterGrazing, roughnessThreshold: this.settings.roughnessThreshold, fallbackColor: [0, 0, 0],
+        roughnessThreshold: this.settings.roughnessThreshold, fallbackColor: [0, 0, 0],
         tracedMissRate: halfRate ? 'half' : 'full', tracedHalfRateMinRoughness: halfRateMin });
         // W72 (D5021) / W76: the traced lobe filter follows the lobe split the tracer ran (core takes it from `outputs.settings`)
       cmd.copyTextureToTexture({ texture: this.rt.source }, { texture: this.gpu(this.source) }, size);

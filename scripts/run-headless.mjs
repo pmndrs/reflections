@@ -7,8 +7,8 @@
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | bench | probe-layouts)
 //   pnpm check -- --only ssr-exp-metrics         # X0 (W70): the experiment metrics smoke (examples/shared/metrics); ssr-exp-baseline = the full baseline (scripts/ssr-exp.mjs)
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
-//   pnpm check -- --only ssr-exp-x1              # W71 (X1): each X1 setting at its default = absent on examples/ssr; historyEdgeConfidence at rest / panning
-//   pnpm check -- --only ssr-exp-grazing         # W71 (X1 #3): grazing sweep 5/15/30/60 deg vs the path tracer, hitLobeFilterGrazing 0 / 0.5 / 1 (minutes)
+//   pnpm check -- --only ssr-exp-x1              # W71 (X1): each X1 setting at its default = absent on examples/ssr; (W76: historyEdgeConfidence and hitLobeFilterGrazing removed)
+//   pnpm check -- --only ssr-exp-grazing         # W71 (X1 #3) / W76: grazing sweep 5/15/30/60 deg vs the path tracer, hitColorConeGrazing 0 / 0.5 / 1 (minutes)
 //   pnpm check -- --only hit-source              # W53: the denoiser's hit source through the seam (needs the Denoiser repo's W53 branch)
 //   pnpm check -- --only probe-bindings          # W62: Sponza's three-size probe set at the default 16 sampled textures
 //   pnpm check -- --only probe-bindings-measure  # W62: Sponza with fewer probe sizes vs the path tracer (MAD, PSNR), lookup ms; out/w62-probe-bindings.json
@@ -240,8 +240,8 @@ async function sssrCoreChecks(pages) {
   check('sssr cube-environment fallback: same rays and hits', se.rays === st.rays && Math.abs(se.mirrorHitFraction - st.mirrorHitFraction) < 1e-3,
     `rays ${se.rays}, hit ${(se.mirrorHitFraction * 100).toFixed(1)}%`);
   savePng('sssr-core-env.png', await env.T('window.__p.shot()'));
-  const graz = await env.T('window.__p.identity({}, { hitLobeFilterGrazing: 1 })'); // W71 (X1 #3)
-  check('sssr X1 hitLobeFilterGrazing 1 changes re-shaded hits only (cube environment: same lists)', graz.radianceDiffPixels > 0 && graz.listsSame && graz.hitDiffPixels === 0,
+  const graz = await env.T('window.__p.identity({ hitColorConeGrazing: 0 }, {})'); // W76 (X1 #3 on the cone, D5100)
+  check('sssr W76 hitColorConeGrazing (default 1 vs 0) changes the cone hits only (cube environment: same lists)', graz.radianceDiffPixels > 0 && graz.listsSame && graz.hitDiffPixels === 0,
     `radiance ${graz.radianceDiffPixels} px differ, hit distance ${graz.hitDiffPixels}, lists same ${graz.listsSame}`);
   // fallbackRoughness (D1806): 'surface' takes misses' fallback at the pixel's roughness (the rough-path
   // lookup), 'mirror' is FFX's roughness 0. Mirrors and confidence-1 pixels must not change.
@@ -274,7 +274,8 @@ async function sssrCoreChecks(pages) {
  */
 async function x1CoreChecks(s, hasSubgroups) {
   // (W76 removed historyEdgeConfidence, D5003)
-  const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitLobeFilterGrazing: 0 };
+  // (W76 removed hitLobeFilterGrazing and historyEdgeConfidence; hitColorConeGrazing 1 is W76's default)
+  const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitColorConeGrazing: 1 };
   // 'relative' at k 0 is off (review: thickness 0 would make smoothstep(0, 0, d) undefined)
   for (const [name, def] of [...Object.entries(X1_DEFAULTS), ['all of them', X1_DEFAULTS], ['relative at k 0', { thicknessDepthMode: 'relative', thicknessDepthFactor: 0 }]]) {
     const r = await s.T(`window.__p.identity({}, ${JSON.stringify(typeof def === 'object' ? def : { [name]: def })})`);
@@ -332,13 +333,15 @@ async function x1CoreChecks(s, hasSubgroups) {
 }
 
 /**
- * `--only ssr-exp-x1` (W71, X1: D5000-D5003): on examples/ssr (denoised, AA off, hit colour from last
- * frame, re-shade off so historyEdgeConfidence applies; RT off and on), every X1 setting at its default
- * renders the same image as the setting absent (max 0/255; the absent run repeated gives the noise
- * floor), and historyEdgeConfidence changes nothing at rest and something while the camera pans.
+ * `--only ssr-exp-x1` (W71, X1: D5000-D5002): on examples/ssr (denoised, AA off, hit colour from last
+ * frame, re-shade off; RT off and on), every X1 setting at its default renders the same image as the
+ * setting absent (max 0/255; the absent run repeated gives the noise floor). W76 removed X1 #4
+ * (historyEdgeConfidence, D5003) and its edge-pan check; with RT on the thickness defaults are W76's
+ * ('relative' 0.02), so there the explicit RT-off values are not the defaults and are not compared.
  */
-const X1_KEYS = ['quadBaseRotation', 'thicknessDepthFactor', 'thicknessDepthMode', 'hitLobeFilterGrazing', 'historyEdgeConfidence'];
-const X1_DEFAULT_SETTINGS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitLobeFilterGrazing: 0, historyEdgeConfidence: false };
+const X1_KEYS = ['quadBaseRotation', 'thicknessDepthFactor', 'thicknessDepthMode', 'hitColorConeGrazing'];
+const X1_DEFAULT_SETTINGS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add', hitColorConeGrazing: 1 };
+const X1_DEFAULT_SETTINGS_RT = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0.02, thicknessDepthMode: 'relative', hitColorConeGrazing: 1 };
 const X1_SHOT = `async (keys, settings, n, pan) => {
   const p = window.__p;
   p.stop();
@@ -347,6 +350,8 @@ const X1_SHOT = `async (keys, settings, n, pan) => {
   const cam = p.kit.camera, c = p.controls;
   if (!window.__x1Pose) window.__x1Pose = { pos: cam.position.clone(), target: c.target.clone() };
   cam.position.copy(window.__x1Pose.pos); c.target.copy(window.__x1Pose.target); c.update();
+  // W76: the cone (default) builds its intersect variant asynchronously: wait until the tracer runs it
+  for (let i = 0; i < 100 && (p.ssr.settings.hitColorFilter ?? 'cone') === 'cone' && !p.ssr.tracer?.outputs.hitColorFilterActive; i++) { await p.step(1); await new Promise((r) => setTimeout(r, 30)); }
   p.ssr.resetHistory(); p.hybrid.resetHistory(); p.aa?.reset?.();
   for (let i = 0; i < n; i++) {
     if (pan) { const a = pan * (i - n + 1); const d = window.__x1Pose.target.clone().sub(window.__x1Pose.pos); d.applyAxisAngle(new p.THREE.Vector3(0, 1, 0), a); c.target.copy(window.__x1Pose.pos).add(d); c.update(); }
@@ -363,32 +368,22 @@ async function x1Checks(pages) {
     const A = await shot({}), A2 = await shot({});
     const floor = await diff(A, A2);
     const rows = [];
-    for (const [k, v] of [...Object.entries(X1_DEFAULT_SETTINGS), ['all', X1_DEFAULT_SETTINGS]]) {
+    const defaults = rt ? X1_DEFAULT_SETTINGS_RT : X1_DEFAULT_SETTINGS;
+    for (const [k, v] of [...Object.entries(defaults), ['all', defaults]]) {
       const d = await diff(A, await shot(typeof v === 'object' ? v : { [k]: v }));
       rows.push(`${k} ${d.max}`);
       check(`X1 ${scene}${rt ? ' rt' : ''}: ${k} at its default = absent (max /255)`, d.max === 0 || d.max <= floor.max, `max ${d.max}, mean ${d.mean.toFixed(4)}; absent twice: max ${floor.max}`);
-    }
-    if (scene === 'mirrorWall' && !rt) {
-      const rest = await diff(await shot({ historyEdgeConfidence: true }), A);
-      // while panning: X0's edgePan (second difference at the screen border, reflection px); on must not pop more
-      // than off, within the off runs' own spread + 5 % (W70's guess for d2)
-      const edge = async (on) => { await pg.T(`(() => { const p = window.__p; for (const k of ${JSON.stringify(X1_KEYS)}) delete p.ssr.settings[k]; p.setSettings({ historyEdgeConfidence: ${on} }); })()`);
-        return (await pg.T('window.__p.metrics.edgePan()')).regions.borderReflection.d2; };
-      const off1 = await edge(false), on = await edge(true), off2 = await edge(false);
-      check('X1 historyEdgeConfidence: no change at rest; panning, edge pops no worse than off (mirrorWall, hit final, re-shade off; X0 edgePan border-reflection d2)',
-        rest.max <= floor.max && on <= Math.max(off1, off2) * 1.05,
-        `at rest max ${rest.max}; edgePan d2 off ${off1} / ${off2}, on ${on}`);
     }
     pg.close();
   }
 }
 
 /**
- * `--only ssr-exp-grazing` (W71, X1 #3, D5002; the maintainer's test case for hitLobeFilterGrazing):
+ * `--only ssr-exp-grazing` (W71, X1 #3, D5002; the maintainer's test case for the grazing shrink, on the cone since W76):
  * the bench (showcase/bench.html), one glossy floor seen at camera elevations 5 / 15 / 30 / 60 deg
  * (the floor point under the scene's centre as target, the hero pose's heading and distance), the
  * bench's Measure vs the path tracer (OIDN) per elevation over the glossy px and the lower half of the
- * frame (the floor), with hitLobeFilterGrazing 0 / 0.5 / 1 and hitLobeFilterMixed off (1) / on (0),
+ * frame (the floor), with hitColorConeGrazing 0 / 0.5 / 1 and hitLobeFilterMixed off (1) / on (0),
  * methods ours denoised and ours + RT. X0's grazing sweep (gradient energy) and line spread are not
  * on main yet: this is the error half, shaped so X0 can absorb it (one row per scene x elevation x
  * setting). GRAZING_SCENES=toyCar,carConcept, GRAZING_FLOOR=<roughness> (default 0.2),
@@ -416,11 +411,11 @@ async function grazingSweep(pages) {
       for (const mixed of [1, 0]) {
         for (const g of [0, 0.5, 1]) {
           const m = await p.T(`(async () => { const P = window.__p;
-            P.setSetting('s.hitLobeFilterMixed', ${mixed === 1 ? 'null' : mixed}); P.setSetting('s.hitLobeFilterGrazing', ${g === 0 ? 'null' : g});
+            P.setSetting('s.hitLobeFilterMixed', ${mixed === 1 ? 'null' : mixed}); P.setSetting('s.hitColorConeGrazing', ${g === 1 ? 'null' : g});
             await P.step(2);
             return P.measure({ samples: ${spp}, warmup: 24, frames: 8, methods: ['ours-denoised', 'ours-rt'] }); })()`);
           const by = Object.fromEntries(m.rows.map((r) => [r.region, r]));
-          const row = { scene, elevation: elev, floorRoughness: floorR, hitLobeFilterGrazing: g, hitLobeFilterMixed: mixed, spp: m.referenceSamples,
+          const row = { scene, elevation: elev, floorRoughness: floorR, hitColorConeGrazing: g, hitLobeFilterMixed: mixed, spp: m.referenceSamples,
             regions: Object.fromEntries(['glossy', 'floorHalf'].map((k) => [k, { px: by[k]?.px, ptLuma: by[k]?.refLuma, methods: by[k]?.methods }])) };
           rows.push(row);
           const f = (k, id) => { const v = by[k]?.methods[id]; return v ? `${v.mad.toFixed(2)}/${v.luma.toFixed(1)}` : '-'; };
@@ -585,9 +580,9 @@ const REGION_DELTA = `async (full, probe, test) => {
  * W75 (X5, D5080; review fix 3): `reflectionResolution: 'half'` (examples/ssr ?res=half), with the denoiser
  * and the ray-traced pass. On the reflection region (full vs probe-only > 8/255) the half-res composite must
  * carry the reflection (its delta from probe-only >= 60 % of full's: a zero residual fails) and stay near full
- * (mean |half - full| < 35 % of that delta). Also: 'mixed' (halfResMinRoughness 0.01 set at runtime on a
- * composite built for half: the mirror path's gate is a uniform), an odd size (961x541), and a runtime
- * full -> half -> full switch that must end identical to the first full frame.
+ * (mean |half - full| < 35 % of that delta). Also an odd size (961x541) and a runtime full -> half -> full
+ * switch that must end identical to the first full frame. (W75's 'mixed' check went with halfResMinRoughness:
+ * W76, D5084.)
  */
 async function halfResChecks(pages) {
   const full = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1`);
@@ -608,29 +603,21 @@ async function halfResChecks(pages) {
     await full.T(`window.__p.load(${JSON.stringify(id)})`);
     await half.T(`window.__p.load(${JSON.stringify(id)})`);
     const fShot = await shotOf(full), pShot = await probeOnly(full);
-    const hShot = await shotOf(half, "(window.__p.ssr.settings.halfResMinRoughness = 0, true)");
+    const hShot = await shotOf(half);
     savePng(`half-res-${id}-final.png`, hShot);
     const info = await half.T('({ res: window.__p.ssr.resolution, w: window.__p.ssr.tracer.width, h: window.__p.ssr.tracer.height, gw: window.__p.ssr.gbuffer.width, gh: window.__p.ssr.gbuffer.height })');
     const st = await half.T('window.__p.ssr.readTraceStats()');
     const r = await full.T(`(${REGION_DELTA})(${JSON.stringify(fShot)}, ${JSON.stringify(pShot)}, ${JSON.stringify(hShot)})`);
-    // 'mixed' at runtime, no composite rebuild: the full-res mirror path below 0.01 through the uniform gate
-    const mShot = await shotOf(half, '(window.__p.ssr.settings.halfResMinRoughness = 0.01, true)');
-    const mode = await half.T('({ mode: window.__p.ssr.traceMode, mirror: window.__p.ssr.mirrorPath })');
-    await half.T('(window.__p.ssr.settings.halfResMinRoughness = 0, true)');
-    savePng(`half-res-${id}-mixed.png`, mShot);
-    const rm = await full.T(`(${REGION_DELTA})(${JSON.stringify(fShot)}, ${JSON.stringify(pShot)}, ${JSON.stringify(mShot)})`);
     const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
     judge(`half-res ${id}: traced and denoised at half size, the upsampled residual carries the reflection and stays near full res`, r,
       errs.length === 0 && info.res === 'half' && info.w === Math.ceil(info.gw / 2) && info.h === Math.ceil(info.gh / 2) && (st?.traced ?? 0) > 0,
       errs.length ? ` | ${errs.slice(0, 2).join(' | ')}` : `; tracer ${info.w}x${info.h} of ${info.gw}x${info.gh}, ${st?.traced} traced rays`);
-    judge(`half-res ${id} 'mixed' (halfResMinRoughness 0.01 at runtime, composite built for half): mirror path on, reflection carried`, rm,
-      errs.length === 0 && mode.mode === 'mixed' && mode.mirror, `; traceMode ${mode.mode}`);
   }
   // W75 (coordinator): half-res + W73's rayReuse 'ratio' + W74's tracedMissRate 'half' together, never run before
   {
     const before = results.logs.length;
     await half.T("window.__p.load('contact')");
-    await half.T("(Object.assign(window.__p.ssr.settings, { rayReuse: 'ratio', halfResMinRoughness: 0 }), window.__p.ssr.traceSettings.tracedMissRate = 'half', true)");
+    await half.T("(Object.assign(window.__p.ssr.settings, { rayReuse: 'ratio' }), window.__p.ssr.traceSettings.tracedMissRate = 'half', true)");
     // the fill's pipelines compile asynchronously (W74 review): 'full' until they are ready
     await half.T('(async () => { for (let i = 0; i < 100 && !(window.__p.ssr.traced && window.__p.ssr.traced.halfRateReady); i++) await window.__p.step(2); return true; })()');
     await half.T('window.__p.step(30)');
@@ -933,9 +920,11 @@ async function denoiserGateChecks(pages) {
  * the mirrorWall floor at r 0.2 / 0.3 / 0.4, bias 0 / 0.25 / 0.5 / 0.75, denoise off and on) into out/mirror-bias.json.
  */
 /**
- * W72 (X2, D5020-D5024): hitColorFilter / mirrorBiasCompensate. examples/ssr roughnessRamp strips, raw, occupancy 0 (D301).
- * - Unset, 'off', compensate without the cone (ignored) and unset again after 'cone' give the same radiance bit for
- *   bit; 'cone' and 'cone' + compensate change it (the cone variant builds async: frames run as 'off' until
+ * W72 (X2, D5020-D5024) / W76 (cone + compensation at 0.5 by default): hitColorFilter / mirrorBiasCompensate.
+ * examples/ssr roughnessRamp strips, raw, occupancy 0 (D301).
+ * - Unset, the explicit cone + compensation 0.5, 'cone' alone and unset again give the same radiance bit for bit
+ *   (W76's defaults); 'off' and 'off' + compensate (ignored without the cone) give the pre-W76 path; the cone without
+ *   compensation differs from both (the cone variant builds async: frames run as 'off' until
  *   `outputs.hitColorFilterActive`).
  * - The mean of the glossy radiance with 'cone' stays within 10 % of 'off' (a black or wrong pyramid fails).
  * - 'cone' + rayReuse 'ratio' differs from 'ratio' alone (the ratio intersect variant reads the pyramid).
@@ -950,7 +939,7 @@ const HCF_PAGE = `async (cmd) => {
   const set = (s) => { for (const k of keys) delete p.ssr.settings[k]; p.setSettings(s); };
   // until the tracer runs the cone (and ray reuse's own async build), at most ~6 s
   // ray reuse has no ready flag: give its async build 2 s
-  const settle = async (wantCone, minSteps) => { for (let i = 0; i < 60; i++) { await p.step(1); if ((!wantCone || p.ssr.tracer.outputs.hitColorFilterActive) && i >= minSteps) break; await sleep(100); } return !wantCone || !!p.ssr.tracer.outputs.hitColorFilterActive; };
+  const settle = async (wantCone0, minSteps) => { const wantCone = wantCone0 ?? true; for (let i = 0; i < 60; i++) { await p.step(1); if ((!wantCone || p.ssr.tracer.outputs.hitColorFilterActive) && i >= minSteps) break; await sleep(100); } return !wantCone || !!p.ssr.tracer.outputs.hitColorFilterActive; };
   const mean = async () => {
     const t = p.ssr.tracer.outputs, dev = p.ssr.device;
     const read = async (tex, bpp) => { const bpr = Math.ceil(tex.width * bpp / 256) * 256; const b = dev.createBuffer({ size: bpr * tex.height, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }); const e = dev.createCommandEncoder(); e.copyTextureToBuffer({ texture: tex }, { buffer: b, bytesPerRow: bpr }, [tex.width, tex.height]); dev.queue.submit([e.finish()]); await b.mapAsync(GPUMapMode.READ); const out = new Uint8Array(tex.width * tex.height * bpp); const src = new Uint8Array(b.getMappedRange()); for (let y = 0; y < tex.height; y++) out.set(src.subarray(y * bpr, y * bpr + tex.width * bpp), y * tex.width * bpp); b.unmap(); b.destroy(); return out; };
@@ -962,7 +951,7 @@ const HCF_PAGE = `async (cmd) => {
   const out = {};
   for (const [name, s] of cmd) {
     set(s);
-    const active = await settle(s.hitColorFilter === 'cone', s.rayReuse ? 20 : 4);
+    const active = await settle((s.hitColorFilter ?? 'cone') === 'cone', s.rayReuse ? 20 : 4);
     out[name] = { hash: await p.radianceHash(7), active, mean: await mean() };
   }
   set({});
@@ -970,7 +959,7 @@ const HCF_PAGE = `async (cmd) => {
 }`;
 async function hitColorFilterChecks(pages) {
   const base = { minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false };
-  const cone = { hitColorFilter: 'cone' }, comp = { hitColorFilter: 'cone', mirrorBias: 0.5, mirrorBiasCompensate: true };
+  const off = { hitColorFilter: 'off' }, coneAlone = { hitColorFilter: 'cone', mirrorBiasCompensate: false }, comp = { hitColorFilter: 'cone', mirrorBias: 0.5, mirrorBiasCompensate: true };
   const run = async (url, cmd, scene = 'roughnessRamp') => {
     const p = await openPage(url);
     pages.push(p);
@@ -981,37 +970,44 @@ async function hitColorFilterChecks(pages) {
     return p.T(`(${HCF_PAGE})(${JSON.stringify(cmd)})`);
   };
   const a = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=current`, [
-    ['unset', {}], ['off', { hitColorFilter: 'off' }], ['compensate, no cone', { mirrorBiasCompensate: true }],
-    ['bias 0.5', { mirrorBias: 0.5 }], ['bias 0.5 + compensate, no cone', { mirrorBias: 0.5, mirrorBiasCompensate: true }],
-    ['cone', cone], ['cone + compensate 0.5', comp], ['unset again', {}],
-    ['ratio', { rayReuse: 'ratio' }], ['cone + ratio', { ...cone, rayReuse: 'ratio' }], ['comp + ratio', { ...comp, rayReuse: 'ratio' }]]);
+    ['unset', {}], ['off', off], ['off + compensate (ignored)', { ...off, mirrorBiasCompensate: true }],
+    ['off + bias 0.5', { ...off, mirrorBias: 0.5 }], ['off + bias 0.5 + compensate (ignored)', { ...off, mirrorBias: 0.5, mirrorBiasCompensate: true }],
+    ['cone', { hitColorFilter: 'cone' }], ['cone + compensate 0.5 (explicit)', comp], ['cone alone', coneAlone], ['unset again', {}],
+    ['ratio, off', { ...off, rayReuse: 'ratio' }], ['ratio (default cone)', { rayReuse: 'ratio' }], ['ratio, cone alone', { ...coneAlone, rayReuse: 'ratio' }]]);
   const h = Object.fromEntries(Object.entries(a.out).map(([k, v]) => [k, v.hash]));
-  const ratioMean = a.out.cone.mean / a.out.off.mean;
-  check('ssr hitColorFilter / mirrorBiasCompensate (W72): defaults are the old path bit for bit, cone changes the hits, its mean stays within 10 % of off, no GPU errors',
-    h.unset === h.off && h.unset === h['compensate, no cone'] && h.unset === h['unset again'] && h['bias 0.5'] === h['bias 0.5 + compensate, no cone']
-    && a.out.cone.active && h.cone !== h.unset && h['cone + compensate 0.5'] !== h.cone && h['cone + compensate 0.5'] !== h['bias 0.5']
-    && Math.abs(ratioMean - 1) < 0.1 && a.errors === 0,
-    `${JSON.stringify(h)}; glossy mean cone / off ${ratioMean.toFixed(4)}; GPU errors ${a.errors}`);
+  const ratioMean = a.out['cone alone'].mean / a.out.off.mean, compMean = a.out.unset.mean / a.out.off.mean;
+  check("ssr hitColorFilter / mirrorBiasCompensate (W72, W76 defaults): unset = cone + compensation 0.5 bit for bit, 'off' = the old path (compensation ignored), the cone changes the hits, means within 10 % of off, no GPU errors",
+    h.unset === h['cone + compensate 0.5 (explicit)'] && h.unset === h.cone && h.unset === h['unset again'] && a.out.unset.active
+    && h.off === h['off + compensate (ignored)'] && h['off + bias 0.5'] === h['off + bias 0.5 + compensate (ignored)'] && h.off !== h['off + bias 0.5']
+    && a.out['cone alone'].active && h['cone alone'] !== h.off && h['cone alone'] !== h.unset && h.unset !== h.off
+    && Math.abs(ratioMean - 1) < 0.1 && Math.abs(compMean - 1) < 0.1 && a.errors === 0,
+    `${JSON.stringify(h)}; glossy mean cone alone / off ${ratioMean.toFixed(4)}, default / off ${compMean.toFixed(4)}; GPU errors ${a.errors}`);
   check("ssr hitColorFilter 'cone' with rayReuse 'ratio' (W72 + W73): the ratio intersect variant reads the pyramid",
-    a.out['cone + ratio'].active && h.ratio !== h.unset && h['cone + ratio'] !== h.ratio && h['comp + ratio'] !== h['cone + ratio'] && a.errors === 0,
-    `ratio ${h.ratio}, cone + ratio ${h['cone + ratio']}, comp + ratio ${h['comp + ratio']}`);
-  const b = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=final`, [['off', { hitShading: 'off' }], ['cone', { ...cone, hitShading: 'off' }], ['off again', { hitShading: 'off' }]]);
+    a.out['ratio (default cone)'].active && h['ratio, off'] !== h.off && h['ratio (default cone)'] !== h['ratio, off'] && h['ratio, cone alone'] !== h['ratio (default cone)'] && a.errors === 0,
+    `ratio off ${h['ratio, off']}, ratio + default cone ${h['ratio (default cone)']}, ratio + cone alone ${h['ratio, cone alone']}`);
+  const b = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=final`, [['off', { ...off, hitShading: 'off' }], ['cone', { ...coneAlone, hitShading: 'off' }], ['off again', { ...off, hitShading: 'off' }]]);
   check("ssr hitColorFilter 'cone' with hitColor 'history' and hitShading 'off' (the pyramid of last frame's colour)",
     b.out.cone.active && b.out.cone.hash !== b.out.off.hash && Math.abs(b.out.cone.mean / b.out.off.mean - 1) < 0.1 && b.errors === 0,
     `off ${b.out.off.hash} / cone ${b.out.cone.hash}, mean ratio ${(b.out.cone.mean / b.out.off.mean).toFixed(4)}; GPU errors ${b.errors}`);
-  const c = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=current&rt=1`, [['unset', {}], ['cone', cone], ['comp 0.5', comp], ['unset again', {}]], 'contact');
-  check("ssr hitColorFilter 'cone' with ?rt=1 (traced pass after the tracer): defaults unchanged, cone and compensation change the result",
-    c.out.cone.active && c.out.unset.hash === c.out['unset again'].hash && c.out.cone.hash !== c.out.unset.hash && c.out['comp 0.5'].hash !== c.out.cone.hash && c.errors === 0,
+  const c = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=current&rt=1`, [['unset', {}], ['off', off], ['cone', coneAlone], ['comp 0.5', comp], ['unset again', {}]], 'contact');
+  check("ssr hitColorFilter 'cone' with ?rt=1 (traced pass after the tracer): unset = explicit cone + compensation 0.5, stable; off and the cone alone differ",
+    c.out.cone.active && c.out.unset.active && c.out.unset.hash === c.out['unset again'].hash && c.out.unset.hash === c.out['comp 0.5'].hash
+    && c.out.cone.hash !== c.out.unset.hash && c.out.off.hash !== c.out.unset.hash && c.errors === 0,
     `${JSON.stringify(Object.fromEntries(Object.entries(c.out).map(([k, v]) => [k, v.hash])))}; GPU errors ${c.errors}`);
-  const d = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=current&w=97&h=61`, [['off', {}], ['cone', comp]], 'mirrorWall');
+  const d = await run(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=0&hit=current&w=97&h=61`, [['off', off], ['cone', {}]], 'mirrorWall');
   check("ssr hitColorFilter 'cone' on a 97x61 canvas (odd sizes, a short pyramid)", d.out.cone.active && d.errors === 0, `active ${d.out.cone.active}, GPU errors ${d.errors}`);
   if (fs.existsSync(path.join(ROOT, 'examples/pixi3d/vendor/package.json'))) {
     const q = await openPage(`http://127.0.0.1:${PORT}/pixi3d/arcade/`);
     pages.push(q);
-    const r = await q.T(`(async () => { const P = window.__p; P.stop(); P.view.ssr.settings.hitColorFilter = 'cone'; P.view.ssr.settings.mirrorBias = 0.5; P.view.ssr.settings.mirrorBiasCompensate = true;
+    // W76: the pixi adapter gets the core defaults (cone + compensation 0.5) with no settings, and 'off' still switches it off
+    const r = await q.T(`(async () => { const P = window.__p; P.stop();
       let active = false; for (let i = 0; i < 60 && !active; i++) { await P.step(1); active = !!P.view.ssr.core.outputs.hitColorFilterActive; await new Promise((r) => setTimeout(r, 100)); }
-      delete P.view.ssr.settings.hitColorFilter; await P.step(2); return { active, off: !P.view.ssr.core.outputs.hitColorFilterActive, errors: P.gpuErrors.length }; })()`);
-    check("pixi3d arcade: hitColorFilter 'cone' toggles on and off without a rebuild (W72)", r.active && r.off && r.errors === 0, JSON.stringify(r));
+      const ran = P.view.ssr.core.outputs.settings ?? {};
+      P.view.ssr.settings.hitColorFilter = 'off'; await P.step(2); const off = !P.view.ssr.core.outputs.hitColorFilterActive;
+      delete P.view.ssr.settings.hitColorFilter; await P.step(2);
+      return { active, off, back: !!P.view.ssr.core.outputs.hitColorFilterActive, ran: { hitColorFilter: ran.hitColorFilter, mirrorBias: ran.mirrorBias, mirrorBiasCompensate: ran.mirrorBiasCompensate }, errors: P.gpuErrors.length }; })()`);
+    check("pixi3d arcade: the cone + compensation 0.5 is the default without settings, 'off' turns it off without a rebuild (W72, W76)",
+      r.active && r.off && r.back && r.ran.hitColorFilter === 'cone' && r.ran.mirrorBias === 0.5 && r.ran.mirrorBiasCompensate === true && r.errors === 0, JSON.stringify(r));
   }
 }
 
@@ -1021,7 +1017,8 @@ async function mirrorBiasChecks(pages) {
   await p.T("window.__p.load('roughnessRamp')");
   await p.T("window.__p.setPose('strips')");
   // occupancy 0: with the occupancy exit, which rays share a subgroup (atomic list order) changes the output run to run (D301)
-  await p.T('window.__p.setSettings({ minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false })');
+  // W76: D49's truncation is the knob with the cone off (with the default cone + compensation the bias narrows the lobe instead)
+  await p.T("window.__p.setSettings({ minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false, hitColorFilter: 'off' })");
   await p.T('window.__p.step(4)');
   const h = {};
   for (const [k, b] of [['unset', null], ['unset again', null], ['0', 0], ['0.5', 0.5]]) {
@@ -1029,11 +1026,12 @@ async function mirrorBiasChecks(pages) {
     h[k] = await p.T('window.__p.radianceHash(7)');
   }
   await p.T('(["mirrorBias", "minTraversalOccupancy", "temporalVarianceGuidedTracing"].forEach((k) => delete window.__p.ssr.settings[k]), true)');
-  check('ssr mirrorBias: 0 is the default path, 0.5 changes the rays', h.unset === h['unset again'] && h.unset === h['0'] && h['0'] !== h['0.5'], JSON.stringify(h));
+  check("ssr mirrorBias (hitColorFilter 'off'): 0 is the default path, 0.5 changes the rays", h.unset === h['unset again'] && h.unset === h['0'] && h['0'] !== h['0.5'], JSON.stringify(h));
   const q = await p.T('window.__p.mirrorBiasStats({ biases: [0, 0.5], bins: [0.2, 0.3, 0.4], frames: 16, refFrames: 32, denoise: [false] })');
   const [b0, b5] = q.results;
   const ratio = b0.bins.map((b, k) => b5.bins[k].std / b.std);
-  check('ssr mirrorBias 0.5: less raw noise on the roughnessRamp strips (r 0.2-0.4)', ratio.every((r) => r < 0.9) && b0.bins.every((b) => b.px > 1000),
+  await p.T('(delete window.__p.ssr.settings.hitColorFilter, true)');
+  check("ssr mirrorBias 0.5 (hitColorFilter 'off', D49): less raw noise on the roughnessRamp strips (r 0.2-0.4)", ratio.every((r) => r < 0.9) && b0.bins.every((b) => b.px > 1000),
     b0.bins.map((b, k) => `r ${b.roughness}: std ${b.std.toFixed(2)} -> ${b5.bins[k].std.toFixed(2)} (${b.px} px)`).join('; '));
   if (!mirrorBiasFull) return;
   const all = [];
@@ -2956,6 +2954,14 @@ async function babylonChecks(pages) {
     check(`${tag}: mirror floor reflects the scene (confident SSR)`, st.mirrorPixels > 1000 && st.mirrorConfident > 0.3,
       `${st.mirrorPixels} mirror px, ${(st.mirrorConfident * 100).toFixed(1)}% with confidence >= 0.9`);
     if (variant === 'auto') {
+      // W76: the babylon adapter dispatches core with its own settings object: core's defaults reach it (cone +
+      // compensation at mirrorBias 0.5), and the cone's async variant comes up without errors
+      const w76 = await p.T(`(async () => { const P = window.__p, t = () => P.ssr.tracer;
+        for (let i = 0; i < 60 && !t()?.outputs.hitColorFilterActive; i++) { await P.step(1); await new Promise((r) => setTimeout(r, 100)); }
+        const ran = t()?.outputs.settings ?? {};
+        return { active: !!t()?.outputs.hitColorFilterActive, hitColorFilter: ran.hitColorFilter, mirrorBias: ran.mirrorBias, mirrorBiasCompensate: ran.mirrorBiasCompensate, gpuErrors: (P.gpuErrors ?? []).length }; })()`);
+      check('babylon: W76 defaults reach the adapter (cone + compensation at mirrorBias 0.5, active, no GPU errors)',
+        w76.active && w76.hitColorFilter === 'cone' && w76.mirrorBias === 0.5 && w76.mirrorBiasCompensate === true && w76.gpuErrors === 0, JSON.stringify(w76));
       const o = await p.T('window.__p.orientation()');
       check('babylon: adapter cube captures (Y-mirror undone) sample as world directions', o.ok,
         o.ok ? `${o.rows.length} directions` : o.rows.filter((r) => !r.ok).slice(0, 4).map((r) => `${r.dir.join(',')}: got ${r.got.join('')} want ${r.expect.join('')}`).join('; '));

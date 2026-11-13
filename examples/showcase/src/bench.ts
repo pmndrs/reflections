@@ -1013,7 +1013,9 @@ async function main() {
       readDenoised: async () => { const x = await m(); return x.readDenoised ? x.readDenoised() : null; },
       setDenoise(on) { return live.get(id)?.setDenoise?.(on) ?? false; },
       jitterPhases: () => live.get(id)?.jitterPhases?.() ?? null,
-      describe: () => ({ page: 'bench', scene: entry.id, pose, method: id, settings: settingsQuery(), status: live.get(id)?.status() }),
+      describe: () => ({ page: 'bench', scene: entry.id, pose, method: id, settings: settingsQuery(), status: live.get(id)?.status(),
+        // W76: what the unset W76 defaults resolve to on this method (the 'relative' thickness with RT)
+        effective: Object.fromEntries(['s.hitColorFilter', 's.mirrorBias', 's.mirrorBiasCompensate', 's.thicknessDepthMode', 's.thicknessDepthFactor'].map((k) => [k, live.get(id)?.get?.(k) ?? null])) }),
     });
   }
   const ptMetrics: BenchPTMetrics = benchPTMetrics({

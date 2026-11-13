@@ -231,11 +231,6 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W52 (D3641): the lobe filter x this where traced and screen-space hits mix (last frame\'s source around the pixel). W50\'s halo: lip 80 -> 56 at 0, but the skirt 50 -> 23 (PT 35), and it overshoots at 1080p (D3643: the halo is mostly a 960x540 effect). Below 1 the tracer is rebuilt once (one more sampled texture).',
     cost: '+0.07 ms (W52)',
   }),
-  num('s.hitLobeFilterGrazing', 'sssr', 'Lobe filter grazing shrink', 0, 1, 0.05, 0, {
-    appliesTo: OURS_SSR, api: 'settings.hitLobeFilterGrazing (+ traceSettings)',
-    tradeoff: 'W71 (X1 #3, D5002): the hit lobe filter\'s spread x mix(1, mix(sat(2 NdotV), 1, sqrt(roughness)), this) (SSSR 2015 slide 85 at 1): less widening on floors seen at a grazing angle, where the lobe filter over-blurs. Screen-space and traced hits. 0 = off.',
-    cost: 'intersect +0.01 ms at 1080p (contact + RT, g 1); RT: a second trace pipeline, compiled on first use (W71)',
-  }),
   sel('s.hitShadeOcclusion', 'sssr', 'Re-shade occlusion', [['off', 'off'], ['screen', 'screen (8-sample depth march along R)']], 'off', {
     appliesTo: OURS_SSR, api: 'settings.hitShadeOcclusion (+ traceSettings)',
     tradeoff: 'W52 (D3642): a re-shaded hit marches the depth buffer along R and darkens where blocked (the re-shade had no occlusion, W44). Wheel 43 -> 37 (PT 26); works without RT. Untuned.',
@@ -252,6 +247,11 @@ export const SETTINGS: Setting[] = [
     defaultNote: 'W76: `cone` with compensation at mirror bias 0.5; `off` is the one switch back to the pre-W76 tracer (bit for bit)',
     tradeoff: 'W72 (X2 #5, D5020): a screen-space hit reads its screen colour (the re-shade\'s diffuse) from an 8-level pyramid at log2 of the lobe cone\'s width in px where the ray hits: long rays blur, contacts stay sharp (SSSR 2015). Raw fireflies go (r 0.35 sphere p999 23.9 -> 3.2 x mean, grazing emissive wall raw MAD 32 -> 8 at 5 deg); no widening on the line spread (r 0.05 x1.24 -> 1.22) and no leakage at silhouettes, but alone it brings no lost glossy reflection back and the denoised grazing floor gets blurrier (gradient x0.79 -> 0.40). Use it with Compensate mirror bias.',
     cost: '1080p (mirrorWall, glossy floor, shared GPU, A/B): pyramid pass +0.24-0.26 ms, intersect within noise (W72)',
+  }),
+  num('s.hitColorConeGrazing', 'sssr', 'Hit colour cone grazing shrink', 0, 1, 0.05, 1, {
+    appliesTo: OURS_SSR, api: 'settings.hitColorConeGrazing (DEFAULT_HIT_COLOR_CONE_GRAZING)',
+    tradeoff: 'W76 (X1 #3 folded into the cone, D5100): the cone x mix(1, mix(sat(2 NdotV), 1, sqrt(roughness)), this) (SSSR 2015 slide 85 at 1), so a floor seen at a grazing angle reads a finer pyramid mip. X0 grazing (r 0.15 floor, cone + compensation 0.5): denoised gradient vs PT at 5 / 15 deg x0.53 / 0.53 at 0 -> x0.67 / 0.63 at 1 (pre-W76 x0.79 / 0.75), denoised MAD 6.98 -> 6.50 at 5 deg, 8.91 -> 9.24 at 15; raw MAD 7.4 -> 9.6 at 5 deg (pre-W76 32); 60 deg unchanged. Only with the cone. (W71\'s hitLobeFilterGrazing, the same shrink on the lobe filter, was a no-op and is gone.)',
+    cost: 'part of the intersect (one normal load per cone hit); see Hit colour filter',
   }),
   num('s.hitColorConeScale', 'sssr', 'Hit colour cone scale', 0, 4, 0.05, 1, {
     appliesTo: OURS_SSR, api: 'settings.hitColorConeScale',

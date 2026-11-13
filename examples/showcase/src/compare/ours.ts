@@ -48,7 +48,8 @@ const SSSR_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   hitLobeFilterMixed: 'n', hitShadeOcclusion: 's', // W52 (D3641, D3642)
   quadCopy: 's', // W58 (D3740)
   rayReuse: 's', rayReuseTaps: 'n', rayReuseRadius: 'n', rayReuseMixSources: 'b', rayReusePattern: 's', // W73 (D5040, D5047)
-  quadBaseRotation: 's', thicknessDepthFactor: 'n', thicknessDepthMode: 's', hitLobeFilterGrazing: 'n', // W71 (X1, D5000-D5002; W76 removed historyEdgeConfidence, D5003)
+  quadBaseRotation: 's', thicknessDepthFactor: 'n', thicknessDepthMode: 's', // W71 (X1, D5000-D5001; W76 removed hitLobeFilterGrazing and historyEdgeConfidence, D5002-D5003)
+  hitColorConeGrazing: 'n', // W76 (D5100)
   hitColorFilter: 's', hitColorConeScale: 'n', mirrorBiasCompensate: 'b', // W72 (D5020-D5022)
 };
 /** W76: the fields `resolveScreenSpaceSettings` fills (the bench shows their effective value). */

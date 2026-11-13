@@ -149,6 +149,12 @@ export function mirrorBiasSplit(s0: Pick<ScreenSpaceReflectionsSettings, 'mirror
  * lobe, bit for bit what the tracer did before W76).
  */
 export const DEFAULT_HIT_COLOR_FILTER: 'off' | 'cone' = 'cone';
+/**
+ * W76: `hitColorConeGrazing` when unset: the cone's grazing shrink at full strength. X0's grazing sweep
+ * (r 0.15 floor, cone + compensation 0.5): denoised gradient vs the PT at 5 / 15 deg x0.53 / x0.53 ->
+ * x0.67 / x0.63 (the pre-W76 default x0.79 / x0.75), 60 deg unchanged.
+ */
+export const DEFAULT_HIT_COLOR_CONE_GRAZING = 1;
 /** W76: `mirrorBiasCompensate` when unset (it acts only with `hitColorFilter: 'cone'`). */
 export const DEFAULT_MIRROR_BIAS_COMPENSATE = true;
 /** W76: `mirrorBias` when unset and compensation is on (cone + `mirrorBiasCompensate`); 0 otherwise (D49's truncation stays opt-in). */
@@ -403,12 +409,14 @@ export interface ScreenSpaceReflectionsSettings {
   /** See {@link thicknessDepthFactor}. Default 'add'; W76: 'relative' with `missesTraced`. 'relative' with a factor of 0 is the same as 'add' (off). */
   thicknessDepthMode?: 'add' | 'relative';
   /**
-   * W71 (X1 #3, D5002): shrink the lobe filter's spread (`hitLobeFilter`) at grazing angles by
-   * `mix(1, mix(saturate(2 NdotV), 1, sqrt(perceptual roughness)), this)` (SSSR 2015 slide 85 at 1):
-   * a grazing view sees a narrower footprint of the lobe. 0..1, default 0 (no change). The three
-   * adapter passes it to the ray-traced pass unless `traceSettings` sets its own.
+   * W76 (X1 #3 folded into X2's cone, D5002 / D5100): SSSR 2015 slide 85's grazing shrink of the
+   * cone, `coneTan *= mix(1, mix(saturate(2 NdotV), 1, sqrt(perceptual roughness)), this)`: a floor
+   * seen at a grazing angle takes a narrower cone (a finer pyramid mip), so the cone's blur at low
+   * elevations drops. Only with `hitColorFilter: 'cone'`. 0..1, default
+   * {@link DEFAULT_HIT_COLOR_CONE_GRAZING} (the slide's); 0 = W72's cone without it. (W71's
+   * `hitLobeFilterGrazing`, the same shrink on `hitLobeFilter`, measured as a no-op and was removed.)
    */
-  hitLobeFilterGrazing?: number;
+  hitColorConeGrazing?: number;
   /**
    * W74 (plan X4, D5060): which glossy misses go to the ray-traced pass. 'full' (default): every
    * miss (FFX's hybrid sample). 'half': of the glossy misses at perceptual roughness >=
@@ -905,7 +913,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     // W71 (X1): words 141-144
     u[141] = QUAD_BASE_ROTATION[s.quadBaseRotation ?? 'fixed'] ?? 0;
     f[142] = Math.max(0, s.thicknessDepthFactor ?? 0);
-    f[143] = Math.min(1, Math.max(0, s.hitLobeFilterGrazing ?? 0));
+    f[143] = Math.min(1, Math.max(0, s.hitColorConeGrazing ?? DEFAULT_HIT_COLOR_CONE_GRAZING)); // W76 (was W71's hitLobeFilterGrazing)
     // bit 0 was historyEdgeConfidence (W71, X1 #4; removed by W76: no measurable effect, D5003), kept 0
     u[144] = (s.thicknessDepthMode ?? 'add') === 'relative' ? 2 : 0;
     // 154-156: W74 (X4)

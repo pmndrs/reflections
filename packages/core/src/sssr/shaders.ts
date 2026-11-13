@@ -107,7 +107,7 @@ struct Params {
   // W71 (X1, words 141-144; D5000-D5003)
   quadBaseRotation: u32,
   thicknessDepthFactor: f32,
-  hitLobeFilterGrazing: f32,
+  hitColorConeGrazing: f32, // 143: W76 (was W71's hitLobeFilterGrazing, D5002)
   x1Flags: u32, // bit 1 thicknessDepthMode 'relative'; bit 0 was historyEdgeConfidence (removed by W76, D5003), always 0
   // W72 (X2 #5 / #6, words 145-149; D5020-D5022)
   hitColorFilterCone: u32,
@@ -634,11 +634,11 @@ ${hitSource ? `  if (P.hasHitSource == 0u || P.hitLobeFilterMixed >= 1.0) { retu
   return 1.0;` : '  return 1.0;'}
 }
 
-// W71 (X1 #3, D5002): the lobe filter's spread shrinks at grazing angles, SSSR 2015 slide 85's cone
+// W76 (X1 #3 on X2's cone, D5002 / D5100): SSSR 2015 slide 85's grazing shrink of the cone,
 // coneTan *= lerp(saturate(NdotV * 2), 1, sqrt(roughness)) (roughness perceptual: sqrt(sqrt(alpha))),
-// blended in by hitLobeFilterGrazing (0 = off, 1 = the slide's).
-fn lobeFilterGrazingScale(n_dot_v: f32, alpha: f32) -> f32 {
-  return mix(1.0, mix(saturate(2.0 * n_dot_v), 1.0, sqrt(sqrt(max(alpha, 0.0)))), P.hitLobeFilterGrazing);
+// blended in by hitColorConeGrazing (0 = off, 1 = the slide's).
+fn coneGrazingScale(n_dot_v: f32, alpha: f32) -> f32 {
+  return mix(1.0, mix(saturate(2.0 * n_dot_v), 1.0, sqrt(sqrt(max(alpha, 0.0)))), P.hitColorConeGrazing);
 }
 
 // W71 (X1 #2): bit 1 of x1Flags. (Bit 0 was X1 #4's historyEdgeConfidence, removed by W76: D5003.)
@@ -915,17 +915,13 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
     var cone_mip = 0.0;${pyr ? `
     if (P.hitColorFilterCone != 0u) {
       cone_mip = hitColorConeMip(world_space_hit, world_ray_length, (*r).roughness); // W72 (D5020)
-      if (P.hitLobeFilterGrazing > 0.0) { // W76: SSSR 2015 slide 85's grazing shrink on the cone itself (D5002)
+      if (P.hitColorConeGrazing > 0.0) { // W76: SSSR 2015 slide 85's grazing shrink on the cone (D5100)
         let n_cone = (P.viewMatrix * vec4f(loadWorldSpaceNormal(vec2i((*r).coords)), 0.0)).xyz;
-        cone_mip += log2(max(lobeFilterGrazingScale(dot(n_cone, -normalize((*r).view_space_ray)), (*r).roughness), 1e-4));
+        cone_mip += log2(max(coneGrazingScale(dot(n_cone, -normalize((*r).view_space_ray)), (*r).roughness), 1e-4));
       }
     }` : ''}
     if (P.hitShadingMode == HIT_SHADING_RESHADE) {
-      var spread = P.hitLobeFilter * lobeFilterMixScale((*r).coords) * (*r).roughness * P.filterAlphaScale; // D3550: the ray stands for its lobe; W72 (D5021): x the share the sample leaves to filters
-      if (P.hitLobeFilterGrazing > 0.0) {
-        let n_vs = (P.viewMatrix * vec4f(loadWorldSpaceNormal(vec2i((*r).coords)), 0.0)).xyz;
-        spread *= lobeFilterGrazingScale(dot(n_vs, -normalize((*r).view_space_ray)), (*r).roughness);
-      }
+      let spread = P.hitLobeFilter * lobeFilterMixScale((*r).coords) * (*r).roughness * P.filterAlphaScale; // D3550: the ray stands for its lobe; W72 (D5021): x the share the sample leaves to filters
       hitLobeSpread = spread * spread;
       hsoPixel = (*r).coords;
       hit_radiance = reshadeHit(hit.xy, world_space_hit, normalize(world_space_reflected_direction), cone_mip);

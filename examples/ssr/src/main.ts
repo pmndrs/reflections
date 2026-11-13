@@ -772,7 +772,9 @@ async function main() {
     ...hybridReaders(renderer, ssr, hybrid),
     setDenoise(on) { const was = hybrid.denoise; hybrid.denoise = on && !!denoiser; denoiseBox.checked = hybrid.denoise; return was; },
     jitterPhases: () => (aa.mode === 'upscaler' ? aa.upscaler.jitterPhaseCount : null),
-    describe: () => ({ page: 'ssr', scene: kit?.id, aa: aa.mode, ratio: aa.ratio, render: [W, H], display: [DW, DH], denoiser: hybrid.denoise ? denoiser?.name ?? null : null, rt: ssr.rayTracing, hit: hitMode }),
+    describe: () => ({ page: 'ssr', scene: kit?.id, aa: aa.mode, ratio: aa.ratio, render: [W, H], display: [DW, DH], denoiser: hybrid.denoise ? denoiser?.name ?? null : null, rt: ssr.rayTracing, hit: hitMode,
+      // W76: the defaults the tracer resolved last frame (cone / compensation; 'relative' thickness with RT)
+      effective: (({ hitColorFilter, mirrorBias, mirrorBiasCompensate, hitColorConeGrazing, thicknessDepthMode, thicknessDepthFactor }) => ({ hitColorFilter, mirrorBias, mirrorBiasCompensate, hitColorConeGrazing, thicknessDepthMode, thicknessDepthFactor }))(ssr.tracer?.outputs.settings ?? {}) }),
   });
   Object.assign(window, {
     __p: {
