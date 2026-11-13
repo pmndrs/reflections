@@ -122,9 +122,9 @@ struct Params {
   rayReuseTaps: u32,
   rayReuseRadius: f32,
   rayReuseStamp: u32,
-  _pad154: u32,
-  _pad155: u32,
-  _pad156: u32,
+  tracedHalfRate: u32,            // 154 (W74, X4): glossy misses of every other quad go to the fill list
+  tracedHalfRateMinAlpha: f32,    // 155: ... from this alpha up (mirrors and near-mirrors stay full rate)
+  missFillCapacity: u32,          // 156: fill entries at most (they follow the miss list's missListCapacity entries)
   _pad157: u32,
   _pad158: u32,
   _pad159: u32,
@@ -440,12 +440,15 @@ fn main() {
 `;
 
 /** Miss-list indirect args (hybrid sample's prepare_indirect_args_hw.hlsl), run after intersect.
- *  missCounter: [0] append counter, [1] this frame's count, [2] overflow append counter, [3] dropped this frame.
- *  args: ceil(count / 64) groups of 64 in 2-D (see groups2d) for the ray-traced pass. */
-export const missArgsWgsl = (capacity: number) => /* wgsl */ `${ARGS_2D_WGSL}
+ *  missCounter: [0] append counter, [1] this frame's count, [2] overflow append counter, [3] dropped this frame;
+ *  W74 (X4) fill list: [4] append counter, [5] this frame's fill entries (at most fillCapacity), [6] unused, [7] fill
+ *  entries past fillCapacity this frame (intersect sent those to the miss list instead).
+ *  args: ceil(count / 64) groups of 64 in 2-D (see groups2d) for the ray-traced pass; [3..5] the fill: 4 threads per entry. */
+export const missArgsWgsl = (capacity: number, fillCapacity = 0) => /* wgsl */ `${ARGS_2D_WGSL}
 const P_capacity: u32 = ${capacity}u;
-@group(0) @binding(0) var<storage, read_write> missCounter: array<u32, 4>;
-@group(0) @binding(1) var<storage, read_write> args: array<u32, 3>;
+const P_fill_capacity: u32 = ${fillCapacity}u;
+@group(0) @binding(0) var<storage, read_write> missCounter: array<u32, 8>;
+@group(0) @binding(1) var<storage, read_write> args: array<u32, 6>;
 @compute @workgroup_size(1)
 fn main() {
   let count = missCounter[0];
@@ -455,6 +458,12 @@ fn main() {
   missCounter[2] = 0u;
   let a = groups2d((missCounter[1] + 63u) / 64u);
   args[0] = a.x; args[1] = a.y; args[2] = 1u;
+  let fills = missCounter[4];
+  missCounter[4] = 0u;
+  missCounter[5] = min(fills, P_fill_capacity);
+  missCounter[7] = fills - missCounter[5];
+  let f = groups2d((missCounter[5] * 4u + 63u) / 64u); // one thread per (entry, quad pixel)
+  args[3] = f.x; args[4] = f.y; args[5] = 1u;
 }
 `;
 
@@ -491,7 +500,7 @@ ${commonWgsl(inverted)}
 @group(0) @binding(9) var o_hit: texture_storage_2d<r32float, write>;
 @group(0) @binding(10) var o_confidence: texture_storage_2d<r32float, write>;
 ${missList ? `@group(0) @binding(11) var<storage, read_write> missList: array<vec2u>;
-@group(0) @binding(12) var<storage, read_write> missCounter: array<atomic<u32>, 4>;` : ''}
+@group(0) @binding(12) var<storage, read_write> missCounter: array<atomic<u32>, 8>;` : ''}
 @group(0) @binding(13) var t_history: texture_2d<f32>;
 @group(0) @binding(14) var t_motion: texture_2d<f32>;
 @group(0) @binding(15) var t_albedo: texture_2d<f32>;
@@ -920,6 +929,16 @@ fn missEntry(r: ptr<function, Ray>) -> vec2u {
   return vec2u((*r).packed, pack2x16snorm(octEncode(d)));
 }
 
+// W74 (plan X4, D5060): tracedMissRate 'half'. A glossy miss (alpha >= tracedHalfRateMinAlpha, never
+// a mirror) of every other 2x2 quad, a checkerboard of quads that flips each frame, goes to the fill
+// list (after the miss list's own entries) instead of the miss list; the ray-traced pass's fill
+// gives it its traced neighbours' result (core/bilateral). Mirrors and near-mirrors stay full rate.
+fn halfRateFill(r: ptr<function, Ray>) -> bool {
+  if (isMirrorReflection((*r).roughness) || (*r).roughness < P.tracedHalfRateMinAlpha) { return false; }
+  let q = (*r).coords >> vec2u(1u);
+  return ((q.x + q.y + P.frameIndex) & 1u) != 0u;
+}
+
 @compute @workgroup_size(64)
 fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u) {
   let ray_index = (wg.y * nwg.x + wg.x) * 64u + gi; // 2-D indirect groups (D601)
@@ -931,8 +950,22 @@ ${sg ? `
     let occupancy = countOneBits(ballot.x) + countOneBits(ballot.y) + countOneBits(ballot.z) + countOneBits(ballot.w);
     marchStep(&r.march, occupancy);
   }
-  let miss = finishRay(&r);
+  var miss = finishRay(&r);
   ${missList ? `
+  if (P.tracedHalfRate != 0u) {
+    // W74 (X4): the fill list, one atomic per subgroup; past its capacity the entry is traced after all.
+    let fill = miss && halfRateFill(&r);
+    let fb = subgroupBallot(fill);
+    let fill_count = countOneBits(fb.x) + countOneBits(fb.y) + countOneBits(fb.z) + countOneBits(fb.w);
+    let fill_local = subgroupExclusiveAdd(select(0u, 1u, fill));
+    var fill_base = 0u;
+    if (subgroupElect() && fill_count > 0u) { fill_base = atomicAdd(&missCounter[4], fill_count); }
+    fill_base = subgroupBroadcastFirst(fill_base);
+    if (fill) {
+      let k = fill_base + fill_local;
+      if (k < P.missFillCapacity) { missList[P.missListCapacity + k] = missEntry(&r); miss = false; }
+    }
+  }
   // One atomic per subgroup (the hybrid sample's WaveActiveCountBits / WavePrefixCountBits append).
   let mb = subgroupBallot(miss);
   let wave_count = countOneBits(mb.x) + countOneBits(mb.y) + countOneBits(mb.z) + countOneBits(mb.w);
@@ -963,6 +996,27 @@ ${sg ? `
   var miss = false;
   if (has_ray) { miss = finishRay(&r); }
   ${missList ? `
+  if (P.tracedHalfRate != 0u) {
+    // W74 (X4): the fill list, one atomic per workgroup; past its capacity the entry is traced after all.
+    let fill = miss && halfRateFill(&r);
+    let fbit = select(0u, 1u, fill);
+    g_Scan[gi] = fbit;
+    workgroupBarrier();
+    for (var off = 1u; off < 64u; off <<= 1u) {
+      var v = 0u;
+      if (gi >= off) { v = g_Scan[gi - off]; }
+      workgroupBarrier();
+      g_Scan[gi] += v;
+      workgroupBarrier();
+    }
+    if (gi == 63u) { g_Base = select(0u, atomicAdd(&missCounter[4], g_Scan[63]), g_Scan[63] > 0u); }
+    let fill_base = workgroupUniformLoad(&g_Base);
+    if (fill) {
+      let k = fill_base + g_Scan[gi] - fbit;
+      if (k < P.missFillCapacity) { missList[P.missListCapacity + k] = missEntry(&r); miss = false; }
+    }
+    workgroupBarrier(); // g_Scan / g_Base are reused below
+  }
   // One atomic per workgroup: prefix sum in workgroup memory.
   let bit = select(0u, 1u, miss);
   g_Scan[gi] = bit;

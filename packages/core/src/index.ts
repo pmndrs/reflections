@@ -37,6 +37,8 @@ export {
 
 // Trace seam + ray-traced reflections over the SSSR miss list (SPEC "Trace seam", section 4).
 export * from './trace';
+// Joint bilateral gather of a sparse reflection signal (W74: the RT layer's half-rate fill; X5's upsample).
+export * from './bilateral';
 
 // Denoise seam (SPEC "Denoise seam"): any denoiser-core-shaped TemporalDenoiser<SpecularInputs>, fed from the frame contract.
 export {

@@ -1194,6 +1194,38 @@ async function rtMaterialsAlone(pages) {
   }
 }
 
+/** W74 (X4, D5060): traceSettings.tracedMissRate 'half' on contact (glossy floor): fewer traced rays, the skipped quads filled. */
+async function halfRateChecks(p) {
+  const before = results.logs.length;
+  await p.T("window.__p.load('contact')");
+  await p.T("window.__p.setTraceSettings({ tracedMissRate: 'full' })");
+  await p.T('window.__p.step(3)');
+  const full = await p.T('window.__p.traceStats()');
+  await p.T("window.__p.setTraceSettings({ tracedMissRate: 'half' })");
+  await p.T('window.__p.ssr.traced.prepareHalfRate()'); // the fill compiles asynchronously (review fix 4)
+  await p.T('window.__p.step(3)');
+  const half = await p.T('window.__p.traceStats()');
+  await p.T('window.__p.setTraceSettings({})');
+  const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+  check("rt tracedMissRate 'half': fewer traced rays, the skipped quads filled from their traced neighbours, no validation errors",
+    errs.length === 0 && half.halfRateSkipped > 0 && half.traced < full.traced && half.filled > 0 && half.filled > 4 * half.fillFallbacks && half.fillOverflow === 0,
+    errs.length ? errs.slice(0, 2).join(' | ') : `traced ${full.traced} -> ${half.traced}, ${half.halfRateSkipped} quads on the fill list, ${half.filled} px filled, ${half.fillFallbacks} kept the probe, overflow ${half.fillOverflow}`);
+  // W74 review fix 6: content. A still frame (frameIndex fixed, no occupancy exit, AA off) at full and at half rate:
+  // only the filled px differ. Per px a fill vs that px's own full-rate ray is sample noise (~1x the mean), so the
+  // check reads means: the signed radiance bias over the changed px and the 8x8 block means (docs/research/w74/scripts/content.js).
+  // W74 contact (stochastic fill): bias -0.08 over the changed px, almost all of it the 583 fallback px (black in three's
+  // radiance; the composite adds their probe); successful fills alone +0.7 % (docs/research/w74/scripts/bias.js),
+  // blocks 0.14, confidence 0.665 vs 0.706 (the confidence-0 bug of 4e7e6dd would read ~0).
+  const aaMode = await p.T('window.__p.aa.mode');
+  await p.T("window.__p.setAA('off')");
+  const body = fs.readFileSync(path.join(ROOT, 'docs/research/w74/scripts/content.js'), 'utf8');
+  const c = await p.T(`(async () => { const P = window.__p; const SCENE = 'contact'; ${body} })()`);
+  await p.T(`window.__p.setAA(${JSON.stringify(aaMode)})`);
+  check("rt tracedMissRate 'half': filled px match full-rate tracing on average (contact, still frame: radiance bias and 8x8 block means)",
+    c.changed > 1000 && c.bias > -0.3 && c.bias < 0.3 && c.blockErr < 0.3 && c.confHalf > 0.7 * c.confFull,
+    `${c.changed} px changed (${c.filled} filled, ${c.fallbacks} kept the probe): bias ${(c.bias * 100).toFixed(1)} %, 8x8 block mean error ${(c.blockErr * 100).toFixed(1)} % over ${c.blocks} blocks, confidence ${c.confHalf.toFixed(3)} vs ${c.confFull.toFixed(3)}`);
+}
+
 async function ssrRtChecks(pages) {
   console.log('examples/ssr (?rt=1):');
   // probes at 128 px: the size W25 / W28 measured the hit-shading checks at (the page follows the
@@ -1251,6 +1283,7 @@ async function ssrRtChecks(pages) {
     await rtHitShadingLines(p, id);
     if (id === 'contact') await rtShadingNormalChecks(p, 'three-mesh-bvh port');
   }
+  await halfRateChecks(p); // W74 (X4, D5060)
   await rtMaterialChecks(p, 'three-mesh-bvh port'); // W49 (D1701 / D1702)
   if (args.includes('--rt-material-assets')) await rtMaterialAssetSurvey(p, 'three-mesh-bvh');
   if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '&bvh=three-mesh-bvh');

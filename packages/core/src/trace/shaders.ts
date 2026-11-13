@@ -34,10 +34,16 @@ export const RT_STATE = {
   tilePhase: 10,
   /** f32 bits: the fraction of tiles that get one ray more (remainder / tiles). */
   tileExtra: 11,
+  /** W74 (X4): fill-list pixels the bilateral fill gave their traced neighbours' result (zeroed by the begin pass). */
+  filled: 12,
+  /** W74 (X4): fill-list pixels with no usable neighbour (kept intersect's fallback, source 'capped'). */
+  fillFallbacks: 13,
 } as const;
 
 /** Per-pixel source codes written to `source` (0 = the RT pass did not touch the pixel). */
-export const RT_SOURCE = { none: 0, tracedHit: 1, tracedMiss: 2, capped: 3, onScreenHit: 4 } as const;
+export const RT_SOURCE = { none: 0, tracedHit: 1, tracedMiss: 2, capped: 3, onScreenHit: 4, fillPending: 5 } as const;
+// fillPending (W74): a fill-list pixel between the mark and the scatter pass of the half-rate fill;
+// none is left after the scatter (a filled pixel takes its main tap's code, an unfilled one 'capped').
 
 export const RT_PARAMS_WGSL = /* wgsl */ `
 struct RtParams {
@@ -71,10 +77,15 @@ struct RtParams {
   hitLobeFilterMixed: f32,
   glossyAlpha: f32,
   hitLobeFilterGrazing: f32, // W71 (X1 #3, word 67; D5002)
-  // words 68-79: reserved for the other SSR-sources streams, RT_PARAMS_SIZE 320
-  _pad68: vec4u,
-  _pad72: vec4u,
-  _pad76: vec4u,
+  fillPlaneTolerance: f32,      // 68 (W74, X4): the half-rate fill's BilateralWeights
+  fillNormalPower: f32,         // 69
+  fillRoughnessTolerance: f32,  // 70
+  fillSourceMask: u32,          // 71
+  fillMinWeightSum: f32,        // 72
+  missCapacity: u32,            // 73: the fill list starts at missList[missCapacity]
+  fillFootprint: u32,           // 74: 2, 3 or 4 quads across
+  fillFrame: u32,               // 75: the dispatch count (the stochastic fill's random number, W74 review)
+  _pad76: vec4u,               // 76-79: reserved, RT_PARAMS_SIZE 320
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
@@ -110,6 +121,8 @@ fn main() {
   for (var i = 0u; i < 8u; i++) {
     if (i != ${RT_STATE.tilesWithMissesLastFrame}u) { state[i] = 0u; }
   }
+  state[${RT_STATE.filled}] = 0u;
+  state[${RT_STATE.fillFallbacks}] = 0u;
 }
 `;
 
@@ -390,3 +403,178 @@ ${parts.lobeGrazing ? `  // W71 (X1 #3, D5002): shrink it at grazing angles, as 
 }
 `;
 }
+
+// ---------------------------------------------------------------------------------------------
+// W74 (plan X4, D5060): the half-rate fill. With tracedMissRate 'half' the SSSR intersect pass puts
+// the glossy misses of every other 2x2 quad on a fill list (missList[missCapacity + i], i <
+// missCounter[5]) instead of the miss list. After the trace, three passes over that list give each
+// of their pixels (the entry's pixel and its quad copies) a joint bilateral gather of its traced
+// neighbours (core/bilateral, over a footprint of quads), so the denoiser and the composite see one
+// signal: the same radiance / hit distance / confidence / source targets the trace writes.
+//   mark     source = fillPending on every fill pixel (so no fill pixel taps another one)
+//   gather   reads the targets (sampled), writes each pixel's result to a scratch buffer
+//   scatter  writes the scratch to the targets (storage); no usable neighbour: source 'capped', the
+//            rest stays as intersect wrote it (its probe fallback, as an entry past the ray budget)
+// Two passes because a target can't be sampled and written in one dispatch, and only r32float
+// targets have read-write storage in core WebGPU. One thread per (entry, quad pixel) slot: the
+// fill args (missArgs bytes 12-23) cover 4 x the fill entries.
+
+const FILL_COMMON_WGSL = /* wgsl */ `
+${RT_PARAMS_WGSL}
+fn unpackRayCoords(packed: u32) -> vec2u { return vec2u(packed & 32767u, (packed >> 15u) & 16383u); }
+// The entry's k-th pixel: 0 its own, 1-3 the quad copies classify flagged (bits 29-31), as store().
+fn fillPixel(packed: u32, k: u32) -> vec2i {
+  let c0 = unpackRayCoords(packed);
+  let t = c0 ^ vec2u(1u);
+  return vec2i(select(select(select(t, vec2u(c0.x, t.y), k == 2u), vec2u(t.x, c0.y), k == 1u), c0, k == 0u));
+}
+fn fillHasPixel(packed: u32, k: u32) -> bool { return k == 0u || ((packed >> (28u + k)) & 1u) != 0u; }
+// slot = entry * 4 + k over 2-D indirect groups (D601)
+fn fillSlot(gi: u32, wg: vec3u, nwg: vec3u) -> u32 { return (wg.y * nwg.x + wg.x) * 64u + gi; }
+`;
+
+export const RT_FILL_MARK_WGSL = /* wgsl */ `
+${FILL_COMMON_WGSL}
+@group(0) @binding(1) var<storage, read> missList: array<vec2u>;
+@group(0) @binding(2) var<storage, read> missCounter: array<u32, 8>;
+@group(0) @binding(3) var o_source: texture_storage_2d<r32float, write>;
+@compute @workgroup_size(64)
+fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u) {
+  let slot = fillSlot(gi, wg, nwg);
+  if ((slot >> 2u) >= missCounter[5]) { return; }
+  let packed = missList[P.missCapacity + (slot >> 2u)].x;
+  if (fillHasPixel(packed, slot & 3u)) { textureStore(o_source, fillPixel(packed, slot & 3u), vec4f(${RT_SOURCE.fillPending}.0)); }
+}
+`;
+
+/** Gather: `bilateralWgsl` is core/bilateral's BILATERAL_FILL_WGSL (passed in to keep this module's imports one-way). */
+export const rtFillGatherWgsl = (bilateralWgsl: string) => /* wgsl */ `
+${FILL_COMMON_WGSL}
+@group(0) @binding(1) var t_depth: texture_2d<f32>;
+@group(0) @binding(2) var t_normal: texture_2d<f32>;
+@group(0) @binding(3) var t_roughness: texture_2d<f32>;
+@group(0) @binding(4) var t_radiance: texture_2d<f32>;
+@group(0) @binding(5) var t_hit: texture_2d<f32>;
+@group(0) @binding(6) var t_confidence: texture_2d<f32>;
+@group(0) @binding(7) var t_source: texture_2d<f32>;
+@group(0) @binding(8) var<storage, read> missList: array<vec2u>;
+@group(0) @binding(9) var<storage, read> missCounter: array<u32, 8>;
+@group(0) @binding(10) var<storage, read_write> scratch: array<vec4u>;
+@group(0) @binding(11) var<storage, read_write> state: array<atomic<u32>>;
+${bilateralWgsl}
+
+fn worldFromDepth(uv: vec2f, z: f32) -> vec3f {
+  let ndc = vec4f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, z, 1.0);
+  let w = P.invViewProjection * ndc;
+  return w.xyz / w.w;
+}
+fn isBackground(z: f32) -> bool { return select(z >= 1.0 - 1e-6, z < 1e-6, P.depthInverted != 0u); }
+fn fillSurface(c: vec2i) -> BilateralSurface {
+  var s: BilateralSurface;
+  if (any(c < vec2i(0)) || any(c >= vec2i(P.renderSize))) { return s; }
+  let z = textureLoad(t_depth, c, 0).x;
+  if (isBackground(z)) { return s; }
+  s.position = worldFromDepth((vec2f(c) + 0.5) * P.inverseRenderSize, z);
+  s.normal = normalize(P.normalsUnpackMul * textureLoad(t_normal, c, 0).xyz + P.normalsUnpackAdd);
+  s.roughness = sqrt(max(textureLoad(t_roughness, c, 0).x, 0.0));
+  s.valid = true;
+  return s;
+}
+// X4's tap: of quad 'cell', the pixel nearest the one filled (a traced quad wrote its ray to each of
+// its glossy pixels; the nearest one's own depth and normal are what the weights compare). The
+// source is read first: a tap the mask rejects (the checkerboard's own and diagonal quads are
+// fillPending) loads no geometry.
+fn bilateralTap(cell: vec2i, pixel: vec2i) -> BilateralTap {
+  var t: BilateralTap;
+  let c = clamp(pixel, cell * 2, cell * 2 + 1);
+  if (any(c < vec2i(0)) || any(c >= vec2i(P.renderSize))) { return t; }
+  t.source = u32(textureLoad(t_source, c, 0).x + 0.5);
+  if (t.source >= 32u || ((P.fillSourceMask >> t.source) & 1u) == 0u) { return t; }
+  t.surface = fillSurface(c);
+  if (!t.surface.valid) { return t; }
+  t.radiance = textureLoad(t_radiance, c, 0);
+  t.hitDistance = textureLoad(t_hit, c, 0).x;
+  t.confidence = textureLoad(t_confidence, c, 0).x;
+  t.spatial = 1.0;
+  return t;
+}
+
+// A uniform number per pixel and frame (PCG hash) for the stochastic coverage choice.
+fn fillRandom(c: vec2i, frame: u32) -> f32 {
+  var h = u32(c.x) * 747796405u + u32(c.y) * 2891336453u + frame * 277803737u;
+  h = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
+  h = (h >> 22u) ^ h;
+  return f32(h >> 8u) * (1.0 / 16777216.0);
+}
+
+const FILL_FILLED: u32 = 0x80000000u;
+var<workgroup> wgFilled: atomic<u32>;
+var<workgroup> wgFallbacks: atomic<u32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u) {
+  if (gi == 0u) { atomicStore(&wgFilled, 0u); atomicStore(&wgFallbacks, 0u); }
+  workgroupBarrier();
+  let slot = fillSlot(gi, wg, nwg);
+  let index = slot >> 2u;
+  let k = slot & 3u;
+  if (index < missCounter[5]) {
+    let packed = missList[P.missCapacity + index].x;
+    if (fillHasPixel(packed, k)) {
+      let w = BilateralWeights(P.fillPlaneTolerance, P.fillNormalPower, P.fillRoughnessTolerance, P.fillSourceMask, P.fillMinWeightSum);
+      let c = fillPixel(packed, k);
+      let p = fillSurface(c);
+      var out = vec4u(0u);
+      if (p.valid) {
+        // one coverage class per px (W74 review): no partial confidence from mixing hits and misses, t from hits only;
+        // the class drawn by its weight share, so the expected confidence is the neighbours' (a majority vote biased it)
+        // footprint 3: the pixel's own quad at the centre; 2 and 4 (even): the bilinear 2x2 of quads around the
+        // pixel's position in quad units, (c + 0.5) / 2 - 0.5, so its lower cell is (c - 1) >> 1 (W74 review fix 2)
+        let origin = select((c - 1) >> vec2u(1u), c >> vec2u(1u), P.fillFootprint == 3u);
+        let r = bilateralFillStochastic(p, P.cameraPosition, c, origin, P.fillFootprint, w, fillRandom(c, P.fillFrame));
+        if (r.weightSum > 0.0 && r.weightSum >= w.minWeightSum) {
+          let conf = min(u32(round(saturate(r.confidence) * 16777215.0)), 0xffffffu); // (x + 0.5 rounds to 2^24 in f32 at 1)
+          out = vec4u(pack2x16float(r.radiance.xy), pack2x16float(r.radiance.zw), bitcast<u32>(r.hitDistance), FILL_FILLED | ((r.source & 7u) << 24u) | conf);
+        }
+      }
+      if ((out.w & FILL_FILLED) != 0u) { atomicAdd(&wgFilled, 1u); } else { atomicAdd(&wgFallbacks, 1u); }
+      scratch[slot] = out;
+    }
+  }
+  workgroupBarrier();
+  if (gi == 0u) {
+    let f = atomicLoad(&wgFilled);
+    let b = atomicLoad(&wgFallbacks);
+    if (f > 0u) { atomicAdd(&state[${RT_STATE.filled}], f); }
+    if (b > 0u) { atomicAdd(&state[${RT_STATE.fillFallbacks}], b); }
+  }
+}
+`;
+
+export const RT_FILL_SCATTER_WGSL = /* wgsl */ `
+${FILL_COMMON_WGSL}
+@group(0) @binding(1) var<storage, read> missList: array<vec2u>;
+@group(0) @binding(2) var<storage, read> missCounter: array<u32, 8>;
+@group(0) @binding(3) var<storage, read> scratch: array<vec4u>;
+@group(0) @binding(4) var o_radiance: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(5) var o_hit: texture_storage_2d<r32float, write>;
+@group(0) @binding(6) var o_confidence: texture_storage_2d<r32float, write>;
+@group(0) @binding(7) var o_source: texture_storage_2d<r32float, write>;
+@compute @workgroup_size(64)
+fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec3u, @builtin(num_workgroups) nwg: vec3u) {
+  let slot = fillSlot(gi, wg, nwg);
+  if ((slot >> 2u) >= missCounter[5]) { return; }
+  let packed = missList[P.missCapacity + (slot >> 2u)].x;
+  if (!fillHasPixel(packed, slot & 3u)) { return; }
+  let c = fillPixel(packed, slot & 3u);
+  let v = scratch[slot];
+  if ((v.w & 0x80000000u) == 0u) {
+    textureStore(o_source, c, vec4f(${RT_SOURCE.capped}.0));
+    return;
+  }
+  textureStore(o_radiance, c, vec4f(unpack2x16float(v.x), unpack2x16float(v.y)));
+  textureStore(o_hit, c, vec4f(bitcast<f32>(v.z)));
+  textureStore(o_confidence, c, vec4f(f32(v.w & 0xffffffu) / 16777215.0));
+  textureStore(o_source, c, vec4f(f32((v.w >> 24u) & 7u)));
+}
+`;
