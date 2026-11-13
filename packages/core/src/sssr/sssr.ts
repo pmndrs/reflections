@@ -17,7 +17,7 @@ import { createDepthPyramidBuilder, createDepthPyramidTexture, depthPyramidMipCo
 import { mat4Invert, mat4Mul, type Mat4Like } from './math';
 import {
   BLUE_NOISE_WGSL, classifyWgsl, CONSTANT_FALLBACK_WGSL, ENVIRONMENT_FALLBACK_WGSL,
-  INDIRECT_ARGS_WGSL, intersectWgsl, missArgsWgsl, PARAMS_SIZE, type Variant,
+  INDIRECT_ARGS_WGSL, intersectWgsl, missArgsWgsl, PARAMS_SIZE, rayReuseResolveWgsl, type Variant,
 } from './shaders';
 import { PassTimer } from './timer';
 import type { FrameInputs } from '../frame/contract';
@@ -25,6 +25,7 @@ import { DEFAULT_HIT_LOBE_FILTER, DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULA
 import { shadeLobeWgslFor } from '../trace/hitShading';
 import { checkStageLimits } from '../limits';
 import { dedupeWgslChunks } from '../probes/layouts';
+import { downsamplerFor, warmDownsampler } from '../downsample';
 
 export type ScreenSpaceVariant = Variant;
 
@@ -115,6 +116,28 @@ export interface ScreenSpaceReflectionsOptions {
    * off unless asked for. Default false.
    */
   hitSource?: boolean;
+}
+
+/** The largest `mirrorBias` `mirrorBiasCompensate` uses (W72): the sample keeps alpha x 0.1. */
+export const MAX_COMPENSATED_BIAS = 0.99;
+
+/** Levels of the hit-colour pyramid (W72): mip 0 (a converting copy) plus seven reductions, so cones up to 128 px wide (6 levels capped the r 0.35 sphere at 32 px: raw fireflies 1.72 % vs 1.22 % at 8, line spread unchanged). */
+export const HIT_COLOR_PYRAMID_LEVELS = 8;
+
+/**
+ * W72 (X2 #6, D5021, D5022): how a glossy pixel's lobe (alpha) is split between the ray's sample
+ * and the filters that stand in for the rest of it (the cone at screen-space hits, `hitLobeFilter`
+ * at re-shaded and traced hits). Blur adds in squares, alpha^2 = alpha_sample^2 + alpha_filter^2:
+ * with `mirrorBiasCompensate` (and the cone filter on) the sample takes alpha x sqrt(1 - f) and the
+ * filters alpha x sqrt(f), f = mirrorBias, and the bias truncates nothing. Otherwise the sample is
+ * the full lobe truncated by `mirrorBias` (D49) and the filters keep their full widths (1).
+ */
+export function mirrorBiasSplit(s: Pick<ScreenSpaceReflectionsSettings, 'mirrorBias' | 'mirrorBiasCompensate' | 'hitColorFilter'>): { sample: number; filter: number; compensated: boolean } {
+  // compensated, f stops at MAX_COMPENSATED_BIAS: at f 1 the sample's alpha is 0, and a blue-noise U1 of
+  // 1.0 (unorm8) puts the VNDF's normal in the tangent plane, normalize(vec3f(0)) = NaN (W72 review)
+  const f = Math.min(s.mirrorBiasCompensate ? MAX_COMPENSATED_BIAS : 1, Math.max(0, s.mirrorBias ?? 0));
+  const compensated = !!s.mirrorBiasCompensate && (s.hitColorFilter ?? 'off') === 'cone';
+  return compensated ? { sample: Math.sqrt(1 - f), filter: Math.sqrt(f), compensated } : { sample: 1, filter: 1, compensated };
 }
 
 /**
@@ -246,7 +269,133 @@ export interface ScreenSpaceReflectionsSettings {
    * traces its own ray (and goes to the miss list on its own). Costs a few more rays along edges.
    */
   quadCopy?: 'always' | 'sameSurface';
+  /**
+   * W72 (X2 #5, D5020): how a screen-space hit's screen colour is filtered. 'off' (default, FFX): the
+   * hit's texel. 'cone': SSSR 2015's pre-filtered colour, the hit-colour pyramid (this frame's scene
+   * colour without specular; last frame's with `hitColor: 'history'` and `hitShading: 'off'`) read at
+   * log2 of the lobe cone's width in px where the ray hits (alpha-based cone x ray length, projected at
+   * the hit's depth), so long rays blur and contacts stay sharp. With `hitShading: 'reshade'` it is the
+   * hit's diffuse part. The first 'cone' frame builds its intersect variant with
+   * createComputePipelineAsync (and warms the downsampler's kernels); until then, or where the device's
+   * per-stage limits leave no room for the pyramid's sampled texture (warned once), frames run as 'off'.
+   * The pyramid is freed on the next 'off' frame. The cone stands for the lobe's spread the sample leaves out: the whole lobe (a double
+   * blur, as `hitLobeFilter` 1), or sqrt(mirrorBias) of it with `mirrorBiasCompensate`.
+   */
+  hitColorFilter?: 'off' | 'cone';
+  /** W72 (D5020): scales the cone's width (1 = the reflected lobe's full width at half maximum). Default 1. */
+  hitColorConeScale?: number;
+  /**
+   * W72 (X2 #6, D5022; needs `hitColorFilter: 'cone'`, ignored without): `mirrorBias` f narrows the
+   * sampled lobe to alpha x sqrt(1 - f) instead of truncating it, and the cone and `hitLobeFilter`
+   * supply alpha x sqrt(f), so the blur the bias removes comes back as filtering (less noise, the same
+   * total lobe width; SSSR 2015 shipped f 0.7 with its cone). See {@link mirrorBiasSplit}. Default false.
+   */
+  mirrorBiasCompensate?: boolean;
+  /**
+   * W73 (X3 phase A, D5040): what the glossy pixels without their own ray get when `samplesPerQuad` < 4.
+   * 'copy' (default, FFX): the quad's one ray, copied (see `quadCopy`). 'ratio': a resolve after
+   * intersect reuses the pixel's own ray, its quad's ray and `rayReuseTaps` traced neighbours within
+   * `rayReuseRadius`, each weighted by this pixel's GGX BRDF x cos along the direction from this
+   * pixel to the neighbour's hit over the pdf the neighbour sampled it with, normalised (the ratio
+   * estimator of SSSR 2015 and DiligentFX). Radiance, confidence and hit distance are all resolved
+   * with the same weights; neighbours on another surface (normal, plane distance) are skipped, and
+   * a pixel with nothing usable keeps the copy. Also smooths the pixels that have their own ray. The
+   * first 'ratio' frame allocates a 16 B/px record buffer and builds two pipelines.
+   */
+  rayReuse?: 'copy' | 'ratio';
+  /** Neighbour taps of the 'ratio' resolve besides the pixel's own quad: 4 or 8. Default 8. */
+  rayReuseTaps?: 4 | 8;
+  /**
+   * Radius of the 'ratio' taps in px at perceptual roughness >= 0.2, scaled by sat(5 r) below
+   * (DiligentFX's 4 sat(5 r)): near-mirrors reuse only their quad. Default 4.
+   */
+  rayReuseRadius?: number;
+  /**
+   * A ray-traced pass overwrites the miss list's pixels (and their quad copies) after this dispatch
+   * (the three adapter sets it while its traced pass runs). The 'ratio' resolve then leaves those
+   * pixels to it and doesn't reuse their screen-space rays elsewhere, so screen and traced hits
+   * don't mix (D3660). Default false.
+   */
+  missesTraced?: boolean;
+  /**
+   * The 'ratio' resolve reuses only rays of the pixel's own hit source (screen-space hit vs miss: its
+   * own ray's, else its quad's; D3660) unless this is true. Mixed, a pixel's confidence becomes the
+   * share of hits around it, which the three composite's depth-aware blend (D2400) reads as one ray's
+   * thickness confidence and hands the hits the whole weight (carConcept's door, SSR only: raw signal
+   * 1.04 -> 1.38): mix only with `depthAware` 0 or a composite that is linear in confidence. Default false.
+   */
+  rayReuseMixSources?: boolean;
+  /**
+   * The 'ratio' taps' rotation: 'frame' (default) re-rotates them per pixel and frame, so the
+   * resolve's error moves every frame; 'pixel' fixes them per pixel, so the error stays put for the
+   * denoiser's temporal pass to treat as bias (W73 phase 2, D5046).
+   */
+  rayReusePattern?: 'frame' | 'pixel';
+  /**
+   * W75 (plan X5 step 2, D5084): perceptual roughness below which this tracer traces nothing: those
+   * pixels take the path of pixels above `roughnessThreshold` (the radiance fallback, confidence 0),
+   * left to another tracer (three's half-res reflections hand them to a full-res one). Default 0.
+   */
+  minRoughness?: number;
+  /**
+   * W71 (X1 #1, D5000): which pixel of a 2x2 quad traces when `samplesPerQuad` < 4 (the others take
+   * its ray). 'fixed' (default, FFX): the top-left, every frame, so the copy's 2x2 grid stays put under
+   * TAA / an upscaler. 'frame': the corner cycles with the frame index (diagonal first). 'pattern': a
+   * 4x4 Latin square over quads, offset by the frame index, so neighbouring quads trace different
+   * corners. Composes with `quadCopy: 'sameSurface'` (the same-surface test is against the chosen base).
+   */
+  quadBaseRotation?: 'fixed' | 'frame' | 'pattern';
+  /**
+   * W71 (X1 #2, D5001): thickness that scales with depth. With `thicknessDepthMode` 'add' (default)
+   * the hit acceptance thickness gains `thicknessDepthFactor x |view z of the hit|`; with 'relative'
+   * it is that term alone (Diligent's `distance / viewZ < 0.025`: this at 0.025), so one value serves
+   * every scene scale. Default 0 (no change). 0 is off in both modes: 'relative' takes effect only
+   * once the factor is above 0 (a zero thickness would make the hit test undefined).
+   */
+  thicknessDepthFactor?: number;
+  /** See {@link thicknessDepthFactor}. Default 'add'; 'relative' with a factor of 0 is the same as 'add' (off). */
+  thicknessDepthMode?: 'add' | 'relative';
+  /**
+   * W71 (X1 #3, D5002): shrink the lobe filter's spread (`hitLobeFilter`) at grazing angles by
+   * `mix(1, mix(saturate(2 NdotV), 1, sqrt(perceptual roughness)), this)` (SSSR 2015 slide 85 at 1):
+   * a grazing view sees a narrower footprint of the lobe. 0..1, default 0 (no change). The three
+   * adapter passes it to the ray-traced pass unless `traceSettings` sets its own.
+   */
+  hitLobeFilterGrazing?: number;
+  /**
+   * W71 (X1 #4, D5003): with `hitColor: 'history'` (and `hitShading: 'off'`, where a hit's colour is
+   * read from last frame), the screen-edge fade becomes min(this frame's, the previous position's),
+   * and a hit whose previous position was off screen gets confidence 0 (it goes to the probe or the
+   * miss list) instead of this frame's colour without specular. More misses near the edges while
+   * the camera moves: more traced rays with RT on. Default false. Screen-space hits only: the
+   * ray-traced pass's on-screen hit reuse from history (D906) keeps its fallback to this frame's
+   * colour, so a traced hit can still pop at the edge.
+   */
+  historyEdgeConfidence?: boolean;
+  /**
+   * W74 (plan X4, D5060): which glossy misses go to the ray-traced pass. 'full' (default): every
+   * miss (FFX's hybrid sample). 'half': of the glossy misses at perceptual roughness >=
+   * `tracedHalfRateMinRoughness`, only those of every other 2x2 quad (a checkerboard of quads that
+   * flips each frame) are traced; the others go to the fill list (`missFillCapacity` entries after
+   * the miss list's own), and the traced pass's bilateral fill (`TracedReflectionsSettings.
+   * tracedMissRate: 'half'`) gives them their traced neighbours' result. Pass the same to both.
+   * Needs `missList`; without the traced pass the fill entries keep this pass's fallback.
+   */
+  tracedMissRate?: 'full' | 'half';
+  /**
+   * Perceptual roughness from which `tracedMissRate: 'half'` applies; below it (mirrors and
+   * near-mirrors) every miss is traced. Default {@link DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS}.
+   */
+  tracedHalfRateMinRoughness?: number;
 }
+
+/**
+ * Default `tracedHalfRateMinRoughness` (W74): perceptual 0.05 (alpha 0.0025), near FFX's mirror
+ * test (alpha < 1e-4, perceptual 0.01), so mirror-like floors and paint keep every traced ray.
+ */
+export const DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS = 0.05;
+
+const QUAD_BASE_ROTATION: Record<string, number> = { fixed: 0, frame: 1, pattern: 2 };
 
 export interface ScreenSpaceCamera {
   /** Column-major view matrix (world -> view). */
@@ -339,8 +488,22 @@ export interface ScreenSpaceReflectionsOutputs {
   missList?: GPUBuffer;
   /** [0] append counter (reset after intersect), [1] misses listed this frame, [2] overflow append counter (reset), [3] dropped past capacity this frame. */
   missCounter?: GPUBuffer;
-  /** Indirect args for a ray-traced pass over the miss list: 64 per group, 2-D groups (index (wg.y * nwg.x + wg.x) * 64 + local, bounds-check against missCounter[1]). */
+  /**
+   * Indirect args for a ray-traced pass over the miss list: 64 per group, 2-D groups (index (wg.y * nwg.x + wg.x) * 64 + local, bounds-check against missCounter[1]).
+   * W74: bytes 12-23 hold the same for the fill list (bounds-check against missCounter[5]).
+   */
   missArgs?: GPUBuffer;
+  /** W74 (X4): entries of the miss list before the fill list: the k-th fill entry is `missList[missCapacity + k]`. */
+  missCapacity?: number;
+  /** W74 (X4): fill-list entries at most (`tracedMissRate: 'half'`); past it intersect sends the entry to the miss list. */
+  missFillCapacity?: number;
+  /**
+   * W72 (D5020): the hit-colour pyramid this frame's 'cone' read, when it is of this frame's scene colour
+   * (`inputs.color`); undefined otherwise. The ray-traced pass reads it for its on-screen hits.
+   */
+  hitColorPyramid?: GPUTexture;
+  /** W72: this frame ran `hitColorFilter: 'cone'` (false while its pipelines build, or where it is unavailable). */
+  hitColorFilterActive?: boolean;
 }
 
 export interface ScreenSpaceReflections {
@@ -438,10 +601,13 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   // counts what it drops (missCounter[3]). The per-tile cap (D9) will bound it further.
   const maxBinding = device.limits.maxStorageBufferBindingSize;
   if (W * H * 4 > maxBinding) throw new Error(`ssr: ${W}x${H} needs a ${W * H * 4} B ray list; the device's maxStorageBufferBindingSize is ${maxBinding}`);
-  const missCapacity = Math.min(W * H, Math.floor(maxBinding / 8));
-  const missList = useMissList ? buf('miss list', missCapacity * 8) : undefined;
-  const missCounter = useMissList ? buf('miss counter', 16) : undefined;
-  const missArgs = useMissList ? buf('miss args', 12, GPUBufferUsage.INDIRECT) : undefined;
+  // W74 (X4): the fill list of tracedMissRate 'half' follows the miss list in the same buffer (no
+  // extra binding in intersect): one entry per 2x2 quad of half the screen, plus a row of slack.
+  const missFillCapacity = useMissList ? Math.ceil(Math.ceil(W / 2) * Math.ceil(H / 2) / 2) + Math.ceil(W / 2) : 0;
+  const missCapacity = Math.min(W * H, Math.floor(maxBinding / 8) - missFillCapacity);
+  const missList = useMissList ? buf('miss list', (missCapacity + missFillCapacity) * 8) : undefined;
+  const missCounter = useMissList ? buf('miss counter', 32) : undefined;
+  const missArgs = useMissList ? buf('miss args', 24, GPUBufferUsage.INDIRECT) : undefined;
   const params = device.createBuffer({ label: 'ssr params', size: PARAMS_SIZE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const noiseTable = device.createBuffer({ label: 'ssr blue-noise table', size: 128 * 128 * 2, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   device.queue.writeBuffer(noiseTable, 0, blueNoiseBytes());
@@ -449,13 +615,19 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const dummyHistory = device.createTexture({ label: 'ssr no history', size: [1, 1], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING });
   const dummyMaterial = device.createTexture({ label: 'ssr no hit material', size: [1, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING });
   const hierarchyView = depthHierarchy.createView();
+  // W72 (D5020): the hit-colour pyramid (allocated on the first 'cone' frame) and its trilinear sampler
+  const hitColorLevels = Math.min(HIT_COLOR_PYRAMID_LEVELS, Math.floor(Math.log2(Math.max(W, H))) + 1);
+  let hitColorPyramid: GPUTexture | null = null;
+  let hitColorSampler: GPUSampler | null = null;
 
   // ---- pipelines
-  const pipe = (label: string, code: string, layouts: GPUBindGroupLayout[]) => device.createComputePipeline({
+  const pipeDescriptor = (label: string, code: string, layouts: GPUBindGroupLayout[]): GPUComputePipelineDescriptor => ({
     label: `ssr ${label}`,
     layout: device.createPipelineLayout({ label: `ssr ${label}`, bindGroupLayouts: layouts }),
     compute: { module: device.createShaderModule({ label: `ssr ${label}`, code: dedupeWgslChunks(code) }), entryPoint: 'main' },
   });
+  const pipe = (label: string, code: string, layouts: GPUBindGroupLayout[]) => device.createComputePipeline(pipeDescriptor(label, code, layouts));
+  let destroyed = false;
   const withFallback = (bgl: GPUBindGroupLayout) => (fallback.layout ? [bgl, fallback.layout] : [bgl]);
 
   const classifyBgl = device.createBindGroupLayout({
@@ -482,32 +654,137 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     entries: [{ binding: 0, resource: { buffer: rayCounter } }, { binding: 1, resource: { buffer: indirectArgs } }],
   });
 
-  const intersectBgl = device.createBindGroupLayout({
-    label: 'ssr intersect',
-    entries: [uniformEntry(0), texEntry(1), texEntry(2), texEntry(3), texEntry(4), texEntry(5),
-      bufEntry(6, 'read-only-storage'), bufEntry(7, 'read-only-storage'),
-      storageTexEntry(8, 'rgba16float'), storageTexEntry(9, 'r32float'), storageTexEntry(10, 'r32float'),
-      ...(useMissList ? [bufEntry(11), bufEntry(12)] : []), texEntry(13), texEntry(14), texEntry(15), texEntry(16), texEntry(17),
-      ...(useHitSource ? [texEntry(18)] : [])],
-  });
+  const intersectEntries: GPUBindGroupLayoutEntry[] = [uniformEntry(0), texEntry(1), texEntry(2), texEntry(3), texEntry(4), texEntry(5),
+    bufEntry(6, 'read-only-storage'), bufEntry(7, 'read-only-storage'),
+    storageTexEntry(8, 'rgba16float'), storageTexEntry(9, 'r32float'), storageTexEntry(10, 'r32float'),
+    ...(useMissList ? [bufEntry(11), bufEntry(12)] : []), texEntry(13), texEntry(14), texEntry(15), texEntry(16), texEntry(17),
+    ...(useHitSource ? [texEntry(18)] : [])];
+  const intersectBgl = device.createBindGroupLayout({ label: 'ssr intersect', entries: intersectEntries });
   // the re-shade's radiance (W44): the hit shading's @group(3), groups 1-2 empty where unused
   const hitShading = options.hitSpecularShading;
   const emptyBgl = device.createBindGroupLayout({ label: 'ssr empty', entries: [] });
   const emptyGroup = device.createBindGroup({ label: 'ssr empty', layout: emptyBgl, entries: [] });
-  // the intersect's own group 0 (sampled 1-5, 13-17, 18 with hitSource; storage textures 8-10; buffers 6, 7, and 11, 12 with the miss list)
+  // the intersect's own group 0 (sampled 1-5, 13-17, 18 with hitSource, 20 with the cone; storage textures 8-10; buffers 6, 7, 11, 12 with the miss list, 19 with ray reuse)
   // plus the fallback's and the hit shading's groups against the device (D4900: a probe set binds one atlas per size in each)
+  const fallbackCounts = { storageBuffers: fallback.storageBufferCount, storageTextures: fallback.storageTextureCount, sampledTextures: fallback.sampledTextureCount };
+  const hitShadingCounts = hitShading?.layout ? { storageBuffers: hitShading.storageBufferCount, storageTextures: hitShading.storageTextureCount, sampledTextures: hitShading.sampledTextureCount } : {};
   checkStageLimits(device, 'ssr: the intersect pipeline', [
     ['pass', { storageBuffers: useMissList ? 4 : 2, storageTextures: 3, sampledTextures: useHitSource ? 11 : 10 }],
-    ['radiance fallback', { storageBuffers: fallback.storageBufferCount, storageTextures: fallback.storageTextureCount, sampledTextures: fallback.sampledTextureCount }],
-    ['hit shading', hitShading?.layout ? { storageBuffers: hitShading.storageBufferCount, storageTextures: hitShading.storageTextureCount, sampledTextures: hitShading.sampledTextureCount } : {}],
+    ['radiance fallback', fallbackCounts],
+    ['hit shading', hitShadingCounts],
   ]);
-  const intersectLayouts = hitShading?.layout ? [intersectBgl, fallback.layout ?? emptyBgl, emptyBgl, hitShading.layout] : withFallback(intersectBgl);
-  const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource), intersectLayouts);
+  const layoutsWith = (bgl: GPUBindGroupLayout) => (hitShading?.layout ? [bgl, fallback.layout ?? emptyBgl, emptyBgl, hitShading.layout] : withFallback(bgl));
+  const intersectPipe = pipe(`intersect (${variant})`, intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource), layoutsWith(intersectBgl));
+
+  // W73 (rayReuse 'ratio', D5040): intersect's storing variant and the resolve are built with
+  // createComputePipelineAsync on the first 'ratio' frame; the tracer keeps copying until both resolve, so
+  // no frame stalls on the compile (D3D12). The record buffer is allocated while 'ratio' runs and freed
+  // on the next 'copy' frame. A combination that can't run (record buffer over the binding limit, stage
+  // limits, a pipeline error) warns once and stays on 'copy'.
+  type ReusePipes = { intersectBgl: GPUBindGroupLayout; intersectPipe: GPUComputePipeline; resolveBgl: GPUBindGroupLayout; resolvePipe: GPUComputePipeline };
+  type RayReuse = ReusePipes & { records: GPUBuffer };
+  let reusePipes: ReusePipes | null = null;
+  let reuseState: 'idle' | 'pending' | 'failed' = 'idle';
+  let reuseRecords: GPUBuffer | null = null;
+  let reuseStamp = 0;
+  const reuseFail = (e: unknown) => {
+    reuseState = 'failed';
+    console.warn("ssr: rayReuse 'ratio' is unavailable; staying on 'copy'.", e);
+  };
+  function startReuseBuild() {
+    reuseState = 'pending';
+    try {
+      if (W * H * 16 > maxBinding) throw new Error(`ssr: rayReuse 'ratio' at ${W}x${H} needs a ${W * H * 16} B record buffer; the device's maxStorageBufferBindingSize is ${maxBinding}`);
+      // intersect's group 0 plus the record buffer (binding 19), and the resolve's own group (D4900)
+      checkStageLimits(device, "ssr: the intersect pipeline with rayReuse 'ratio'", [
+        ['pass', { storageBuffers: (useMissList ? 4 : 2) + 1, storageTextures: 3, sampledTextures: useHitSource ? 11 : 10 }],
+        ['radiance fallback', fallbackCounts],
+        ['hit shading', hitShadingCounts],
+      ]);
+      checkStageLimits(device, 'ssr: the ray reuse resolve', [
+        ['pass', { storageBuffers: 3, storageTextures: 3, sampledTextures: 3 }],
+        ['radiance fallback', fallbackCounts],
+      ]);
+    } catch (e) { reuseFail(e); return; }
+    const intersectBgl = device.createBindGroupLayout({ label: 'ssr intersect (ray reuse)', entries: [...intersectEntries, bufEntry(19)] });
+    const resolveBgl = device.createBindGroupLayout({
+      label: 'ssr ray reuse',
+      entries: [uniformEntry(0), texEntry(1), texEntry(2), texEntry(3),
+        bufEntry(4, 'read-only-storage'), bufEntry(5, 'read-only-storage'), bufEntry(6, 'read-only-storage'),
+        storageTexEntry(7, 'rgba16float'), storageTexEntry(8, 'r32float'), storageTexEntry(9, 'r32float')],
+    });
+    Promise.all([
+      device.createComputePipelineAsync(pipeDescriptor(`intersect (${variant}, ray reuse)`,
+        intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource, true), layoutsWith(intersectBgl))),
+      device.createComputePipelineAsync(pipeDescriptor('ray reuse', rayReuseResolveWgsl(inverted, fallback.wgsl), withFallback(resolveBgl))),
+    ]).then(([intersectPipe, resolvePipe]) => {
+      if (destroyed) return;
+      reusePipes = { intersectBgl, intersectPipe, resolveBgl, resolvePipe };
+      reuseState = 'idle';
+    }).catch(reuseFail);
+  }
+  /** The 'ratio' resources for this frame, or null (not built yet, or unavailable): copy this frame. */
+  function ensureReuse(): RayReuse | null {
+    if (!reusePipes) {
+      if (reuseState === 'idle') startReuseBuild();
+      return null;
+    }
+    reuseRecords ??= buf('ray records', W * H * 16);
+    return { ...reusePipes, records: reuseRecords };
+  }
+
+  // W72 (hitColorFilter 'cone', D5020): intersect's cone variants (plain, and with the ray-reuse records)
+  // add the pyramid (binding 20) and its sampler (21). Built with createComputePipelineAsync on the first
+  // 'cone' frame (the downsampler's kernels warmed the same way); frames run as 'off' until they resolve.
+  // A device whose per-stage limits leave no room for the pyramid warns once and stays 'off'.
+  type ConePipe = { bgl: GPUBindGroupLayout; pipe: GPUComputePipeline };
+  const coneEntries: GPUBindGroupLayoutEntry[] = [texEntry(20, 'float'), { binding: 21, visibility: C, sampler: { type: 'filtering' } }];
+  const conePipes: { plain: ConePipe | null; reuse: ConePipe | null } = { plain: null, reuse: null };
+  const coneState: { plain: 'idle' | 'pending' | 'failed'; reuse: 'idle' | 'pending' | 'failed' } = { plain: 'idle', reuse: 'idle' };
+  let coneWarned = false;
+  let coneWarm: Promise<unknown> | null = null;
+  const coneFail = (which: 'plain' | 'reuse', e: unknown) => {
+    coneState[which] = 'failed';
+    if (!coneWarned) { coneWarned = true; console.warn("ssr: hitColorFilter 'cone' is unavailable; running as 'off'.", e); }
+  };
+  function startConeBuild(which: 'plain' | 'reuse', sourceFormat: GPUTextureFormat) {
+    coneState[which] = 'pending';
+    const reuse = which === 'reuse';
+    try {
+      checkStageLimits(device, `ssr: the intersect pipeline with hitColorFilter 'cone'${reuse ? " and rayReuse 'ratio'" : ''}`, [
+        ['pass', { storageBuffers: (useMissList ? 4 : 2) + (reuse ? 1 : 0), storageTextures: 3, sampledTextures: (useHitSource ? 11 : 10) + 1 }],
+        ['radiance fallback', fallbackCounts],
+        ['hit shading', hitShadingCounts],
+      ]);
+    } catch (e) { coneFail(which, e); return; }
+    const bgl = device.createBindGroupLayout({ label: `ssr intersect (cone${reuse ? ', ray reuse' : ''})`, entries: [...intersectEntries, ...(reuse ? [bufEntry(19)] : []), ...coneEntries] });
+    coneWarm ??= warmDownsampler(device, 'rgba16float', W, H, hitColorLevels, sourceFormat);
+    Promise.all([
+      device.createComputePipelineAsync(pipeDescriptor(`intersect (${variant}, cone${reuse ? ', ray reuse' : ''})`,
+        intersectWgsl(variant, inverted, fallback.wgsl, useMissList, screenSpaceHitShadingWgsl(hitShading), useHitSource, reuse, true), layoutsWith(bgl))),
+      coneWarm,
+    ]).then(([pipe]) => {
+      if (destroyed) return;
+      conePipes[which] = { bgl, pipe };
+      coneState[which] = 'idle';
+    }).catch((e) => coneFail(which, e));
+  }
+  /** The cone variant for this frame, or null (not built yet, or unavailable): run as 'off'. */
+  function ensureCone(reuse: boolean, sourceFormat: GPUTextureFormat): ConePipe | null {
+    const which = reuse ? 'reuse' : 'plain';
+    if (!conePipes[which]) {
+      if (coneState[which] === 'idle') startConeBuild(which, sourceFormat);
+      return null;
+    }
+    hitColorPyramid ??= tex('hit colour pyramid', 'rgba16float', W, H, hitColorLevels);
+    hitColorSampler ??= device.createSampler({ label: 'ssr hit colour', magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear' });
+    return conePipes[which];
+  }
 
   let missArgsPipe: GPUComputePipeline | undefined, missArgsGroup: GPUBindGroup | undefined;
   if (useMissList) {
     const bgl = device.createBindGroupLayout({ label: 'ssr miss args', entries: [bufEntry(0), bufEntry(1)] });
-    missArgsPipe = pipe('miss args', missArgsWgsl(missCapacity), [bgl]);
+    missArgsPipe = pipe('miss args', missArgsWgsl(missCapacity, missFillCapacity), [bgl]);
     missArgsGroup = device.createBindGroup({
       label: 'ssr miss args', layout: bgl,
       entries: [{ binding: 0, resource: { buffer: missCounter! } }, { binding: 1, resource: { buffer: missArgs! } }],
@@ -517,6 +794,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
   const outputs: ScreenSpaceReflectionsOutputs = {
     radiance, hitDistance, confidence, extractedRoughness, depthHierarchy, blueNoise, rayList, denoiserTileList, tileFlags,
     rayCounter, indirectArgs, missList, missCounter, missArgs,
+    ...(useMissList ? { missCapacity, missFillCapacity } : {}),
   };
 
   let frameIndex = 0;
@@ -575,6 +853,29 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[138] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
     u[139] = useHitSource && inputs.hitSource ? 1 : 0;
     u[140] = (s.quadCopy ?? 'always') === 'sameSurface' ? 1 : 0;
+    // words 141-149: other X streams; 150-153: W73 ray reuse (D5040)
+    u[150] = (s.rayReuse === 'ratio' ? 1 : 0) | (s.missesTraced ? 2 : 0) | (s.rayReuseMixSources ? 4 : 0) | (s.rayReusePattern === 'pixel' ? 8 : 0);
+    u[151] = s.rayReuseTaps === 4 ? 4 : 8;
+    f[152] = Math.max(0, s.rayReuseRadius ?? 4);
+    u[153] = reuseStamp;
+    // W71 (X1): words 141-144
+    u[141] = QUAD_BASE_ROTATION[s.quadBaseRotation ?? 'fixed'] ?? 0;
+    f[142] = Math.max(0, s.thicknessDepthFactor ?? 0);
+    f[143] = Math.min(1, Math.max(0, s.hitLobeFilterGrazing ?? 0));
+    u[144] = (s.historyEdgeConfidence ? 1 : 0) | ((s.thicknessDepthMode ?? 'add') === 'relative' ? 2 : 0);
+    // 154-156: W74 (X4)
+    u[154] = useMissList && s.tracedMissRate === 'half' ? 1 : 0;
+    f[155] = Math.max(0, s.tracedHalfRateMinRoughness ?? DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS) ** 2;
+    u[156] = missFillCapacity;
+    // 157: W75 (X5 step 2)
+    f[157] = Math.max(0, s.minRoughness ?? 0) ** 2;
+    // W72 (X2, D5020-D5022): 145-149
+    const split = mirrorBiasSplit(s);
+    u[145] = (s.hitColorFilter ?? 'off') === 'cone' ? 1 : 0;
+    f[146] = Math.max(0, s.hitColorConeScale ?? 1);
+    u[147] = split.compensated ? 1 : 0;
+    f[148] = split.sample;
+    f[149] = split.filter;
     device.queue.writeBuffer(params, 0, data);
   }
 
@@ -590,7 +891,21 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     const useHistory = (settings.hitColor ?? 'current') === 'history';
     if (useHistory && (!inputs.history || !inputs.motion)) throw new Error("ssr: hitColor 'history' needs inputs.history and inputs.motion");
     if (inputs.history && (inputs.history.width !== W || inputs.history.height !== H)) throw new Error(`ssr: history is ${inputs.history.width}x${inputs.history.height}, expected ${W}x${H}`);
-    writeParams(inputs, settings, useHistory);
+    const R = settings.rayReuse === 'ratio' ? ensureReuse() : null;
+    // back on 'copy' (or 'ratio' not built yet): free the 16 B/px records; a later 'ratio' frame allocates a
+    // fresh (zeroed) buffer, and the stamp keeps counting, so nothing stale matches
+    if (!R && reuseRecords) { reuseRecords.destroy(); reuseRecords = null; }
+    if (R) reuseStamp = (reuseStamp % 32767) + 1; // 15 bits, never 0 (a fresh buffer's)
+    // W72 (D5020): the hit-colour source (last frame's where 'off' hits read it, else this frame's scene
+    // colour, the re-shade's diffuse) and the cone variant; not ready = this frame runs as 'off'
+    const coneSource = useHistory && (settings.hitShading ?? 'reshade') === 'off' ? inputs.history! : inputs.color;
+    const K = (settings.hitColorFilter ?? 'off') === 'cone' ? ensureCone(!!R, coneSource.format) : null;
+    if (!K && hitColorPyramid) { downsamplerFor(device).release(hitColorPyramid); hitColorPyramid.destroy(); hitColorPyramid = null; }
+    outputs.hitColorPyramid = K && coneSource === inputs.color ? hitColorPyramid! : undefined;
+    outputs.hitColorFilterActive = !!K;
+    // without the cone (building, or unavailable) compensation has no filter to hand the bias to: the full lobe
+    // (mirrorBias 0), not D49's truncation, so a compensated setting never turns into a sharper one
+    writeParams(inputs, K ? settings : { ...settings, hitColorFilter: 'off', ...(settings.mirrorBiasCompensate && settings.hitColorFilter === 'cone' ? { mirrorBias: 0 } : {}) }, useHistory);
     const classifyGroup = device.createBindGroup({
       label: 'ssr classify', layout: classifyBgl,
       entries: [P(0),
@@ -608,7 +923,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
         { binding: 12, resource: confidence.createView() }],
     });
     const intersectGroup = device.createBindGroup({
-      label: 'ssr intersect', layout: intersectBgl,
+      label: 'ssr intersect', layout: K ? K.bgl : R ? R.intersectBgl : intersectBgl,
       entries: [P(0),
         { binding: 1, resource: inputs.color.createView() },
         { binding: 2, resource: inputs.normal.createView() },
@@ -626,7 +941,22 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
         { binding: 15, resource: (inputs.albedo ?? dummyMaterial).createView() },
         { binding: 16, resource: (inputs.metalness?.texture ?? dummyMaterial).createView() },
         { binding: 17, resource: (inputs.clearcoat ?? dummyMaterial).createView() },
-        ...(useHitSource ? [{ binding: 18, resource: (inputs.hitSource ?? dummyVariance).createView() }] : [])],
+        ...(useHitSource ? [{ binding: 18, resource: (inputs.hitSource ?? dummyVariance).createView() }] : []),
+        ...(R ? [{ binding: 19, resource: { buffer: R.records } }] : []),
+        ...(K ? [{ binding: 20, resource: hitColorPyramid!.createView() }, { binding: 21, resource: hitColorSampler! }] : [])],
+    });
+    const resolveGroup = R && device.createBindGroup({
+      label: 'ssr ray reuse', layout: R.resolveBgl,
+      entries: [P(0),
+        { binding: 1, resource: hierarchyView },
+        { binding: 2, resource: inputs.normal.createView() },
+        { binding: 3, resource: extractedRoughness.createView() },
+        { binding: 4, resource: { buffer: R.records } },
+        { binding: 5, resource: { buffer: denoiserTileList } },
+        { binding: 6, resource: { buffer: rayCounter } },
+        { binding: 7, resource: radiance.createView() },
+        { binding: 8, resource: hitDistance.createView() },
+        { binding: 9, resource: confidence.createView() }],
     });
 
     timer?.begin();
@@ -643,8 +973,14 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     });
     pass('blue noise', (p) => { p.setPipeline(noisePipe); p.setBindGroup(0, noiseGroup); p.dispatchWorkgroups(16, 16); });
     pass('indirect args', (p) => { p.setPipeline(argsPipe); p.setBindGroup(0, argsGroup); p.dispatchWorkgroups(1); });
+    if (K) {
+      // W72 (D5020): the hit-colour source -> pyramid (level 0 a converting copy, then 2x2 averages)
+      const p = cmd.beginComputePass({ label: 'ssr hit colour pyramid', timestampWrites: timer?.pass('hit colour pyramid') });
+      downsamplerFor(device).encodePass(p, hitColorPyramid!, { source: { texture: coneSource }, reduction: 'average' });
+      p.end();
+    }
     pass('intersect', (p) => {
-      p.setPipeline(intersectPipe); p.setBindGroup(0, intersectGroup);
+      p.setPipeline(K ? K.pipe : R ? R.intersectPipe : intersectPipe); p.setBindGroup(0, intersectGroup);
       if (fallback.layout) p.setBindGroup(1, inputs.fallbackBindGroup!);
       if (hitShading?.layout) {
         if (!fallback.layout) p.setBindGroup(1, emptyGroup);
@@ -653,6 +989,14 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
       }
       p.dispatchWorkgroupsIndirect(indirectArgs, 0);
     });
+    if (R) {
+      // one 8x8 group per denoiser tile (indirect args at byte 12)
+      pass('ray reuse', (p) => {
+        p.setPipeline(R.resolvePipe); p.setBindGroup(0, resolveGroup!);
+        if (fallback.layout) p.setBindGroup(1, inputs.fallbackBindGroup!);
+        p.dispatchWorkgroupsIndirect(indirectArgs, 12);
+      });
+    }
     if (missArgsPipe) pass('miss args', (p) => { p.setPipeline(missArgsPipe!); p.setBindGroup(0, missArgsGroup!); p.dispatchWorkgroups(1); });
     afterSubmit = timer?.end(cmd);
     frameIndex++;
@@ -669,8 +1013,9 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
       return timer.timings;
     },
     destroy() {
-      for (const t of [depthHierarchy, radiance, hitDistance, confidence, extractedRoughness, blueNoise, dummyVariance, dummyHistory, dummyMaterial]) t.destroy();
-      for (const b of [rayList, denoiserTileList, tileFlags, rayCounter, indirectArgs, missList, missCounter, missArgs, params, noiseTable]) b?.destroy();
+      for (const t of [depthHierarchy, radiance, hitDistance, confidence, extractedRoughness, blueNoise, dummyVariance, dummyHistory, dummyMaterial, hitColorPyramid]) t?.destroy();
+      for (const b of [rayList, denoiserTileList, tileFlags, rayCounter, indirectArgs, missList, missCounter, missArgs, params, noiseTable, reuseRecords]) b?.destroy();
+      destroyed = true;
       timer?.destroy();
     },
   };

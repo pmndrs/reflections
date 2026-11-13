@@ -1,0 +1,6 @@
+{"name":"full | raw","rows":{"frame":{"px":518400,"pt":142.4,"ours-rt":[145.7,7.9]},"glossy":{"px":334950,"pt":150.7,"ours-rt":[155.6,11.1]}}}
+{"name":"half | raw","rows":{"frame":{"px":518400,"pt":142.4,"ours-rt":[145.8,7.9]},"glossy":{"px":334950,"pt":150.7,"ours-rt":[155.7,11.2]}}}
+{"name":"mixed | raw","rows":{"frame":{"px":518400,"pt":142.4,"ours-rt":[145.7,7.8]},"glossy":{"px":334950,"pt":150.7,"ours-rt":[155.6,11]}}}
+{"name":"full | denoised","rows":{"frame":{"px":518400,"pt":142.4,"ours-rt":[146,8.1]},"glossy":{"px":334950,"pt":150.7,"ours-rt":[156.1,11.4]}}}
+{"name":"half | denoised","rows":{"frame":{"px":518400,"pt":142.4,"ours-rt":[146.5,8.4]},"glossy":{"px":334950,"pt":150.7,"ours-rt":[156.8,11.9]}}}
+{"name":"mixed | denoised","rows":{"frame":{"px":518400,"pt":142.4,"ours-rt":[145.7,7.8]},"glossy":{"px":334950,"pt":150.7,"ours-rt":[155.6,11]}}}
