@@ -1074,7 +1074,9 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
   // 'frame': re-rotated every frame (the error moves); 'pixel' (flag bit 3): fixed per pixel (D5046)
   let frame_seed = select(P.frameIndex * 2654435769u, 0u, (P.rayReuseFlags & 8u) != 0u);
   let rotation = f32(pcg(c.x + c.y * 65521u + frame_seed) >> 8u) * (2.0 * M_PI / 16777216.0);
-  let taps = min(P.rayReuseTaps, 8u);
+  // Below 1.5 px (perceptual r < 0.075 at radius 4) only the own quad: the taps would land on the next
+  // quads and widen a near-mirror's reflection (W73 phase 2, line spread at r 0.05: x1.29 -> x1.55).
+  let taps = select(0u, min(P.rayReuseTaps, 8u), radius >= 1.5);
   var seen: array<vec2i, 9>;
   var n_seen = 0u;
   for (var i = 0u; i <= taps; i++) {
