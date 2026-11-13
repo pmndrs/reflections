@@ -104,10 +104,11 @@ struct Params {
   hitShadeOcclusion: u32,
   hasHitSource: u32,
   quadCopySameSurface: u32,
-  _pad141: u32,
-  _pad142: u32,
-  _pad143: u32,
-  _pad144: u32,
+  // W71 (X1, words 141-144; D5000-D5003)
+  quadBaseRotation: u32,
+  thicknessDepthFactor: f32,
+  hitLobeFilterGrazing: f32,
+  x1Flags: u32, // bit 0 historyEdgeConfidence, bit 1 thicknessDepthMode 'relative'
   _pad145: u32,
   _pad146: u32,
   _pad147: u32,
@@ -121,6 +122,8 @@ struct Params {
   tracedHalfRateMinAlpha: f32,    // 155: ... from this alpha up (mirrors and near-mirrors stay full rate)
   missFillCapacity: u32,          // 156: fill entries at most (they follow the miss list's missListCapacity entries)
   minRoughnessAlpha: f32,         // 157 (W75, X5 step 2): classify traces no pixel below this alpha (they take the rough path)
+  _pad158: u32,
+  _pad159: u32,
 };
 @group(0) @binding(0) var<uniform> P: Params;
 `;
@@ -219,7 +222,32 @@ fn remapForWaveReduction(a: u32) -> vec2u {
   return vec2u(bitfieldInsertMask(bitfieldExtract(a, 2u, 3u), a, 1u),
                bitfieldInsertMask(bitfieldExtract(a, 3u, 3u), bitfieldExtract(a, 1u, 2u), 2u));
 }
-fn isBaseRay(id: vec2u, samples_per_quad: u32) -> bool {
+// W71 (X1 #1, D5000), quadBaseRotation: which corner of a 2x2 quad traces. 0 'fixed' (FFX): the
+// top-left (spq 1; spq 2 the even-parity diagonal). 1 'frame': the corner cycles with the frame index,
+// diagonal first. 2 'pattern': a 4x4 Latin square over quads (Diligent's half-res pick is a fixed
+// position pattern, SSSR 2015 re-picks per frame), offset by the frame index. A corner past an odd
+// render size's last column or row falls back to the top-left, which is always on screen.
+fn quadCorner(k: u32) -> vec2u {
+  switch (k & 3u) {
+    case 0u: { return vec2u(0u, 0u); }
+    case 1u: { return vec2u(1u, 1u); }
+    case 2u: { return vec2u(1u, 0u); }
+    default: { return vec2u(0u, 1u); }
+  }
+}
+fn quadBaseCorner(id: vec2u) -> vec2u {
+  if (P.quadBaseRotation == 0u) { return vec2u(0u); }
+  var k = P.frameIndex;
+  if (P.quadBaseRotation == 2u) {
+    let q = (id >> vec2u(1u)) & vec2u(3u);
+    k += q.x + 2u * q.y + (q.y >> 1u); // rows 0123 / 2301 / 1230 / 3012: each corner once per row and column
+  }
+  let o = quadCorner(k);
+  if (any((id & vec2u(~1u)) + o >= P.renderSize)) { return vec2u(0u); }
+  return o;
+}
+fn isBaseRay(id_in: vec2u, samples_per_quad: u32) -> bool {
+  let id = id_in ^ quadBaseCorner(id_in);
   switch (samples_per_quad) {
     case 1u: { return ((id.x & 1u) | (id.y & 1u)) == 0u; }
     case 2u: { return (id.x & 1u) == (id.y & 1u); }
@@ -235,10 +263,10 @@ fn loadWorldSpaceNormal(p: vec2i) -> vec3f {
   return normalize(P.normalsUnpackMul * textureLoad(t_normal, p, 0).xyz + P.normalsUnpackAdd);
 }
 // The pixel whose ray a non-base quad pixel copies (FFX's copy: x neighbour for spq 2, the quad's
-// even-even pixel for spq 1).
+// even-even pixel for spq 1; with quadBaseRotation the quad's chosen corner).
 fn quadBase(id: vec2u, samples_per_quad: u32) -> vec2i {
   if (samples_per_quad == 2u) { return vec2i(id ^ vec2u(1u, 0u)); }
-  return vec2i(id & vec2u(~1u));
+  return vec2i((id & vec2u(~1u)) | quadBaseCorner(id));
 }
 // Same surface for the quad copy (D3740): view depth within 5 % and normals within ~25 degrees.
 fn sameSurfaceAsBase(p: vec2i, b_in: vec2i) -> bool {
@@ -564,6 +592,34 @@ ${hitSource ? `  if (P.hasHitSource == 0u || P.hitLobeFilterMixed >= 1.0) { retu
   return 1.0;` : '  return 1.0;'}
 }
 
+// W71 (X1 #3, D5002): the lobe filter's spread shrinks at grazing angles, SSSR 2015 slide 85's cone
+// coneTan *= lerp(saturate(NdotV * 2), 1, sqrt(roughness)) (roughness perceptual: sqrt(sqrt(alpha))),
+// blended in by hitLobeFilterGrazing (0 = off, 1 = the slide's).
+fn lobeFilterGrazingScale(n_dot_v: f32, alpha: f32) -> f32 {
+  return mix(1.0, mix(saturate(2.0 * n_dot_v), 1.0, sqrt(sqrt(max(alpha, 0.0)))), P.hitLobeFilterGrazing);
+}
+
+// W71 (X1 #4, D5003; Diligent SSR_Intersection.fx): with the hit colour from last frame, the screen
+// edge fade is min(this frame's, the previous position's), and a hit whose previous position was off
+// screen gets no confidence (FFX's hybrid sample takes this frame's specular-free colour there, a pop).
+const X1_HISTORY_EDGE: u32 = 1u;
+const X1_THICKNESS_RELATIVE: u32 = 2u;
+fn screenEdgeVignette(uv: vec2f) -> f32 {
+  let size = vec2f(P.renderSize);
+  let fov = 0.05 * vec2f(size.y / size.x, 1.0); // validateHit's fade
+  let border = smoothstep(vec2f(0.0), fov, uv) * (1.0 - smoothstep(vec2f(1.0) - fov, vec2f(1.0), uv));
+  return border.x * border.y;
+}
+fn historyEdgeScale(hit_uv: vec2f) -> f32 {
+  let pc = clamp(vec2i(vec2f(P.renderSize) * hit_uv), vec2i(0), vec2i(P.renderSize) - 1);
+  let prev_uv = hit_uv - textureLoad(t_motion, pc, 0).xy * P.motionVectorScale;
+  if (any(prev_uv < vec2f(0.0)) || any(prev_uv >= vec2f(1.0))) { return 0.0; }
+  let now = screenEdgeVignette(hit_uv);
+  let prev = screenEdgeVignette(prev_uv);
+  if (prev >= now || now <= 0.0) { return 1.0; }
+  return prev / now;
+}
+
 fn reshadeHit(hit_uv: vec2f, world_hit: vec3f, ray_direction: vec3f) -> vec3f {
   let p = clamp(vec2i(vec2f(P.renderSize) * hit_uv), vec2i(0), vec2i(P.renderSize) - 1);
   let N = loadWorldSpaceNormal(p);
@@ -812,14 +868,31 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   let world_space_ray = world_space_hit - world_space_origin;
   let world_ray_length = max(0.0, length(world_space_ray));
   // Thickness: a constant plus the hybrid sample's roughness and ray-length terms (D42, D1001).
-  let thickness = P.depthBufferThickness + (*r).roughness * P.thicknessRoughnessFactor + world_ray_length * P.thicknessLengthFactor;
+  var thickness = P.depthBufferThickness + (*r).roughness * P.thicknessRoughnessFactor + world_ray_length * P.thicknessLengthFactor;
+  // W71 (X1 #2, D5001): plus thicknessDepthFactor x the hit's view depth, or ('relative', Diligent's
+  // distance / viewZ test) that term alone, so one number serves a toy car and a hall. k 0 is off in
+  // both modes ('relative' at k 0 would be thickness 0, and smoothstep(0, 0, d) is undefined in WGSL),
+  // and the relative thickness is kept above 1e-6 for the same reason.
+  let depth_relative = (P.x1Flags & X1_THICKNESS_RELATIVE) != 0u;
+  if (P.thicknessDepthFactor > 0.0) {
+    let depth_term = P.thicknessDepthFactor * abs(screenSpaceToViewSpace(hit).z);
+    thickness = select(thickness + depth_term, max(depth_term, 1e-6), depth_relative);
+  }
   var confidence = 0.0;
   if (valid_hit) { confidence = validateHit(hit, (*r).uv, world_space_ray, screen_size, thickness, (*r).march.most_detailed_mip); }
+  // W71 (X1 #4, D5003): historyEdgeConfidence, where the hit's colour comes from last frame.
+  if (confidence > 0.0 && (P.x1Flags & X1_HISTORY_EDGE) != 0u && P.hitColorFromHistory != 0u && P.hitShadingMode != HIT_SHADING_RESHADE) {
+    confidence *= historyEdgeScale(hit.xy);
+  }
   var hit_radiance = vec3f(0.0);
   let world_space_reflected_direction = (P.invView * vec4f((*r).view_space_reflected_direction, 0.0)).xyz;
   if (confidence > 0.0) {
     if (P.hitShadingMode == HIT_SHADING_RESHADE) {
-      let spread = P.hitLobeFilter * lobeFilterMixScale((*r).coords) * (*r).roughness; // D3550: the ray stands for its lobe
+      var spread = P.hitLobeFilter * lobeFilterMixScale((*r).coords) * (*r).roughness; // D3550: the ray stands for its lobe
+      if (P.hitLobeFilterGrazing > 0.0) {
+        let n_vs = (P.viewMatrix * vec4f(loadWorldSpaceNormal(vec2i((*r).coords)), 0.0)).xyz;
+        spread *= lobeFilterGrazingScale(dot(n_vs, -normalize((*r).view_space_ray)), (*r).roughness);
+      }
       hitLobeSpread = spread * spread;
       hsoPixel = (*r).coords;
       hit_radiance = reshadeHit(hit.xy, world_space_hit, normalize(world_space_reflected_direction));
