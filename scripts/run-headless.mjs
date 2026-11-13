@@ -662,51 +662,77 @@ async function halfResChecks(pages) {
 }
 
 /**
- * W77: the 'performance' preset (core REFLECTION_PRESETS) through the three adapter's `preset` options. examples/ssr
- * ?preset=performance must trace at half size with the denoiser keeping hit sources apart (FFX separateHitSources +
- * missesMatchAnySource), and render bit for bit what the two settings give when set by hand (?res=half&hitSource=hits);
- * explicit ?res=full&hitSource=off must win over the preset; at runtime applyReflectionsPreset ('default' undoes it, an
- * override wins) through __p.setPreset.
+ * W77: the presets (core REFLECTION_PRESETS) through the three adapter, on examples/ssr (contact, RT, FFX):
+ * - ?preset=performance traces at half size and renders bit for bit what ?res=half renders; the denoiser's
+ *   options (FFX's public `options`; the check fails without them) are untouched: 'performance' has no hit source;
+ * - explicit ?res=full wins over the preset; an unknown ?preset= warns and renders as no preset;
+ * - at runtime (__p.setPreset = applyReflectionsPreset) the page's own construction settings are the base:
+ *   on ?res=half&hitSource=hits, 'performance' with a hit-source override 'all' -> 'default' returns to half +
+ *   'hits' (the FFX options the page built), not to the package defaults;
+ * - a hit source that can't reach a denoiser without setOptions sets hybrid.hitSourceUnsupported (and warns).
  */
 async function presetChecks(pages) {
   const base = `http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1&scene=contact`;
   const pre = await openPage(`${base}&preset=performance`);
-  const hand = await openPage(`${base}&res=half&hitSource=hits`);
-  const over = await openPage(`${base}&preset=performance&res=full&hitSource=off`);
-  pages.push(pre, hand, over);
+  const hand = await openPage(`${base}&res=half`);
+  const over = await openPage(`${base}&preset=performance&res=full`);
+  const own = await openPage(`${base}&res=half&hitSource=hits`);
+  pages.push(pre, hand, over, own);
   const before = results.logs.length;
-  const state = (p) => p.T(`(() => { const P = window.__p, o = P.hybrid.denoiser && P.hybrid.denoiser.opts;
+  const state = (p) => p.T(`(() => { const P = window.__p, d = P.hybrid.denoiser, o = d && d.options;
     return { res: P.ssr.settings.reflectionResolution ?? 'full', w: P.ssr.tracer && P.ssr.tracer.width, gw: P.ssr.gbuffer.width, mode: P.hybrid.denoiserHitSourceMode, hs: P.hybrid.denoiserHitSource,
-      dn: o ? [!!o.separateHitSources, !!o.missesMatchAnySource] : null }; })()`);
+      dn: o ? [!!o.separateHitSources, !!o.missesMatchAnySource] : null, unsupported: P.hybrid.hitSourceUnsupported }; })()`);
   const shot = async (p) => {
     await p.T('(window.__p.ssr.settings.frameIndex = 5, window.__p.ssr.settings.minTraversalOccupancy = 0, window.__p.ssr.resetHistory(), window.__p.hybrid.resetHistory(), true)');
     await p.T('window.__p.step(24)');
     return p.T('window.__p.shot()');
   };
   const sPre = await shot(pre), sHand = await shot(hand);
-  await shot(over);
-  const a = await state(pre), h = await state(hand), o = await state(over);
+  await shot(over); await shot(own);
+  const a = await state(pre), h = await state(hand), o = await state(over), w = await state(own);
   const same = await pre.T(`(${IMAGE_STATS})(${JSON.stringify(sPre)}, ${JSON.stringify(sHand)})`);
-  const dnOk = (x, on) => x.dn === null || (x.dn[0] === on && x.dn[1] === on);
-  const fmt = (x) => `${x.res} ${x.w}/${x.gw} px, hit source ${x.mode} (${x.hs}), FFX ${x.dn ? x.dn.join('/') : 'n/a'}`;
+  const dn = (x, sep, any) => x.dn !== null && x.dn[0] === sep && x.dn[1] === any; // fails without a denoiser exposing options
+  const fmt = (x) => `${x.res} ${x.w}/${x.gw} px, hit source ${x.mode ?? 'own'} (${x.hs}), FFX options ${x.dn ? x.dn.join('/') : 'MISSING'}`;
   let errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
-  check("preset 'performance' (?preset=): half-res trace, the denoiser keeps hit sources apart, same frame as setting both by hand",
-    errs.length === 0 && a.res === 'half' && a.w === Math.ceil(a.gw / 2) && a.mode === 'hits' && a.hs && dnOk(a, true) && same.max === 0 && h.res === 'half',
+  check("preset 'performance' (?preset=): half-res trace, same frame as ?res=half, the denoiser's options untouched (no hit source)",
+    errs.length === 0 && a.res === 'half' && a.w === Math.ceil(a.gw / 2) && a.mode === null && !a.hs && dn(a, false, false) && same.max === 0 && h.res === 'half',
     errs.length ? errs.slice(0, 2).join(' | ') : `preset: ${fmt(a)}; by hand: ${fmt(h)}; frame vs by hand mean ${same.mean.toFixed(3)}, max ${same.max}/255`);
-  check("preset 'performance' + explicit ?res=full&hitSource=off: the explicit settings win",
-    errs.length === 0 && o.res === 'full' && o.w === o.gw && o.mode === 'off' && !o.hs && dnOk(o, false), fmt(o));
-  // runtime: 'default' undoes the preset; an override wins over it
+  check("preset 'performance' + explicit ?res=full: the explicit setting wins", errs.length === 0 && o.res === 'full' && o.w === o.gw, fmt(o));
+  // an unknown name: a warning, then no preset
+  const b1 = results.logs.length;
+  const bad = await openPage(`${base}&preset=fast`);
+  pages.push(bad);
+  await shot(bad);
+  const x = await state(bad);
+  const warned = results.logs.slice(b1).some((l) => /unknown preset 'fast'/.test(l));
+  errs = results.logs.slice(b1).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+  check("an unknown ?preset= warns and renders as no preset", errs.length === 0 && warned && x.res === 'full' && x.w === x.gw && x.mode === null && dn(x, false, false),
+    errs.length ? errs.slice(0, 2).join(' | ') : `warned ${warned}; ${fmt(x)}`);
+  // runtime, from the page's own base (half + 'hits' set at construction)
   const b2 = results.logs.length;
+  await own.T("(window.__p.setPreset('performance', { denoiser: { hitSource: 'all' } }), true)"); await shot(own);
+  const r1 = await state(own);
+  await own.T("(window.__p.setPreset('default'), true)"); await shot(own);
+  const r2 = await state(own);
   await pre.T("(window.__p.setPreset('default'), true)"); await shot(pre);
-  const d = await state(pre);
-  await pre.T("(window.__p.setPreset('performance', { tracer: { reflectionResolution: 'full' } }), true)"); await shot(pre);
-  const r = await state(pre);
-  await pre.T("(window.__p.setPreset('performance'), true)"); await shot(pre);
-  const back = await state(pre);
+  const r3 = await state(pre);
   errs = results.logs.slice(b2).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
-  check("applyReflectionsPreset at runtime: 'default' restores full + no hit source, an override wins, 'performance' again is half",
-    errs.length === 0 && d.res === 'full' && d.w === d.gw && d.mode === 'off' && dnOk(d, false) && r.res === 'full' && r.mode === 'hits' && dnOk(r, true) && back.res === 'half' && back.w === Math.ceil(back.gw / 2),
-    errs.length ? errs.slice(0, 2).join(' | ') : `default: ${fmt(d)}; performance + full: ${fmt(r)}; performance: ${fmt(back)}`);
+  check("applyReflectionsPreset at runtime rebuilds from the page's own settings: performance + 'all' -> default returns to its half + 'hits'; a ?preset=performance page goes to the package default",
+    errs.length === 0 && w.res === 'half' && w.hs && dn(w, true, true) && r1.res === 'half' && r1.mode === 'all' && dn(r1, true, false)
+      && r2.res === 'half' && r2.mode === null && r2.hs && dn(r2, true, true) && r3.res === 'full' && r3.w === r3.gw && dn(r3, false, false),
+    errs.length ? errs.slice(0, 2).join(' | ') : `own: ${fmt(w)}; performance + all: ${fmt(r1)}; default: ${fmt(r2)}; ?preset=performance page -> default: ${fmt(r3)}`);
+  // a denoiser without setOptions: the flag (and a warning), then the real denoiser back
+  const b3 = results.logs.length;
+  const u = await pre.T(`(() => { const P = window.__p, real = P.hybrid.denoiser;
+    const stub = { name: 'stub', device: real.device, configure() {}, dispatch() { throw new Error('stub'); }, resetHistory() {}, dispose() {} };
+    P.hybrid.setDenoiser(stub); const before = P.hybrid.hitSourceUnsupported; P.hybrid.setDenoiserHitSource('hits');
+    const after = P.hybrid.hitSourceUnsupported; P.hybrid.setDenoiserHitSource('off'); P.hybrid.setDenoiser(real); P.hybrid.restoreDenoiserHitSource();
+    return { before, after }; })()`);
+  const warnedU = results.logs.slice(b3).some((l) => /needs a denoiser that takes it/.test(l));
+  await shot(pre);
+  errs = results.logs.slice(b3).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+  check('a hit source a denoiser without setOptions cannot take: hybrid.hitSourceUnsupported is set and a warning logged', errs.length === 0 && !u.before && u.after && warnedU,
+    errs.length ? errs.slice(0, 2).join(' | ') : `before ${u.before}, after ${u.after}, warned ${warnedU}`);
 }
 
 /**
