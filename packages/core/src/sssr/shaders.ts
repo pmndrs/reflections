@@ -474,7 +474,7 @@ export function intersectWgsl(variant: Variant, inverted: boolean, fallbackWgsl:
   const reuseMirror = rayReuse ? '\n    reuse_value = mix(environment_lookup, hit_radiance, confidence);' : '';
   const reuseInit = rayReuse ? '\n  var reuse_value = hit_radiance * confidence;' : '';
   const finishTail = rayReuse ? `let miss = confidence < P.missConfidenceThreshold && !isBackground(hit.z) && (*r).roughness <= P.missRoughnessThreshold;
-  storeRayRecord((*r).coords, reuse_value, confidence, normalize(world_space_reflected_direction), hit_distance, ${missList ? 'miss' : 'false'});
+  storeRayRecord((*r).coords, reuse_value, confidence, normalize(world_space_reflected_direction), world_ray_length, ${missList ? 'miss' : 'false'});
   return miss;` : 'return confidence < P.missConfidenceThreshold && !isBackground(hit.z) && (*r).roughness <= P.missRoughnessThreshold;';
   return /* wgsl */ `
 ${sg ? 'enable subgroups;\ndiagnostic(off, subgroup_uniformity);' : ''}
@@ -997,7 +997,7 @@ ${sg ? `
 //         radiance with fallbackRoughness 'surface' (the resolve adds this pixel's own fallback for
 //         1 - confidence), or the ray's whole radiance mix(fallback, hit, confidence) with 'mirror'
 //   z     pack2x16snorm(octEncode(world direction))
-//   w     f16 bits of the hit distance (0 = no hit) | stamp (15 bits) << 16 | miss-listed << 31
+//   w     f16 bits of the world ray length (a hit when confidence > 0) | stamp (15 bits) << 16 | miss-listed << 31
 
 const RAY_RECORD_STORE_WGSL = /* wgsl */ `
 fn storeRayRecord(c: vec2u, value: vec3f, confidence: f32, dir: vec3f, t: f32, miss: bool) {
@@ -1134,11 +1134,13 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
   var sum_confidence = 0.0;
   var sum_hit_w = 0.0;
   var sum_t = 0.0;
+  var sum_length = 0.0;
   // The pixel's own ray: w = brdfCos / pdf = G1(L).
   if (own.valid && dot(N, own.dir) > 0.0) {
     let w = brdfCos(N, V, own.dir, alpha) / max(vndfPdf(N, V, own.dir, alpha), 1e-12);
     sum_w += w; sum_value += w * own.value; sum_confidence += w * own.confidence;
-    if (own.t > 0.0) { sum_hit_w += w * own.confidence; sum_t += w * own.confidence * own.t; }
+    sum_length += w * own.t;
+    if (own.confidence > 0.0) { sum_hit_w += w * own.confidence; sum_t += w * own.confidence * own.t; }
   }
   // Neighbours: the quad's own ray first, then rayReuseTaps on a golden-angle disk of radius
   // rayReuseRadius x sat(5 r) (Diligent's 4 sat(5 r), r perceptual), rotated per pixel and frame,
@@ -1181,8 +1183,8 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
     if (abs(dot(N, Xq - X)) > 0.02 * view_distance) { continue; }
     // SSSR 2015: the direction from this pixel to the neighbour's hit (misses: the ray's direction)
     var L = rec.dir;
-    var t = 0.0;
-    if (rec.t > 0.0) {
+    var t = rec.t; // a miss: the neighbour's own ray length
+    if (rec.confidence > 0.0) {
       let H = Xq + rec.dir * rec.t;
       t = length(H - X);
       L = (H - X) / max(t, 1e-6);
@@ -1193,7 +1195,8 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
     let w = brdfCos(N, V, L, alpha) / pdf;
     if (!(w > 0.0) || w > 3.0e38) { continue; }
     sum_w += w; sum_value += w * rec.value; sum_confidence += w * rec.confidence;
-    if (rec.t > 0.0) { sum_hit_w += w * rec.confidence; sum_t += w * rec.confidence * t; }
+    sum_length += w * t;
+    if (rec.confidence > 0.0) { sum_hit_w += w * rec.confidence; sum_t += w * rec.confidence * t; }
   }
   if (!(sum_w > 0.0)) { return; } // nothing usable: keep the quad copy
   let confidence = clamp(sum_confidence / sum_w, 0.0, 1.0);
@@ -1203,7 +1206,8 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
     radiance += (1.0 - confidence) * sampleRadianceFallback(X, reflect(-V, N), sqrt(alpha));
   }
   let hit_distance = select(0.0, sum_t / sum_hit_w, sum_hit_w > 0.0);
-  textureStore(o_radiance, c, vec4f(radiance, hit_distance));
+  // w = world ray length (FFX's layout): re-derived to the hits, the rays' own length for misses (D5045)
+  textureStore(o_radiance, c, vec4f(radiance, sum_length / sum_w));
   textureStore(o_hit, c, vec4f(hit_distance));
   textureStore(o_confidence, c, vec4f(confidence));
 }
