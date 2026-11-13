@@ -16,7 +16,7 @@ const stats = Object.fromEntries(configs.map((n) => [n, []]));
 const push = (name, key, v) => { if (typeof v === 'number' && Number.isFinite(v)) (per[name][key] ??= []).push(v); };
 for (let k = 0; k < rounds; k++) {
   for (const name of (k % 2 ? [...configs].reverse() : configs)) {
-    await S.setResolution(name);
+    await S.setResolution(name, typeof MINR !== 'undefined' ? MINR : 0.05);
     S.ssr.resetHistory(); S.hybrid.resetHistory();
     await S.step(8);
     await S.renderer.resolveTimestampsAsync('render');
