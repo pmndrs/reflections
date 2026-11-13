@@ -1003,6 +1003,23 @@ async function rtMaterialsAlone(pages) {
   }
 }
 
+/** W74 (X4, D5060): traceSettings.tracedMissRate 'half' on contact (glossy floor): fewer traced rays, the skipped quads filled. */
+async function halfRateChecks(p) {
+  const before = results.logs.length;
+  await p.T("window.__p.load('contact')");
+  await p.T("window.__p.setTraceSettings({ tracedMissRate: 'full' })");
+  await p.T('window.__p.step(3)');
+  const full = await p.T('window.__p.traceStats()');
+  await p.T("window.__p.setTraceSettings({ tracedMissRate: 'half' })");
+  await p.T('window.__p.step(3)');
+  const half = await p.T('window.__p.traceStats()');
+  await p.T('window.__p.setTraceSettings({})');
+  const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+  check("rt tracedMissRate 'half': fewer traced rays, the skipped quads filled from their traced neighbours, no validation errors",
+    errs.length === 0 && half.halfRateSkipped > 0 && half.traced < full.traced && half.filled > 0 && half.filled > 4 * half.fillFallbacks && half.fillOverflow === 0,
+    errs.length ? errs.slice(0, 2).join(' | ') : `traced ${full.traced} -> ${half.traced}, ${half.halfRateSkipped} quads on the fill list, ${half.filled} px filled, ${half.fillFallbacks} kept the probe, overflow ${half.fillOverflow}`);
+}
+
 async function ssrRtChecks(pages) {
   console.log('examples/ssr (?rt=1):');
   // probes at 128 px: the size W25 / W28 measured the hit-shading checks at (the page follows the
@@ -1060,6 +1077,7 @@ async function ssrRtChecks(pages) {
     await rtHitShadingLines(p, id);
     if (id === 'contact') await rtShadingNormalChecks(p, 'three-mesh-bvh port');
   }
+  await halfRateChecks(p); // W74 (X4, D5060)
   await rtMaterialChecks(p, 'three-mesh-bvh port'); // W49 (D1701 / D1702)
   if (args.includes('--rt-material-assets')) await rtMaterialAssetSurvey(p, 'three-mesh-bvh');
   if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '&bvh=three-mesh-bvh');
