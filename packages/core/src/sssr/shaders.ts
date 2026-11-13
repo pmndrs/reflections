@@ -55,7 +55,7 @@
 import { SCREEN_VISIBILITY_WGSL } from '../trace/hitShading';
 
 /** Byte size of the uniform block (struct Params below). */
-export const PARAMS_SIZE = 576;
+export const PARAMS_SIZE = 640;
 
 export const PARAMS_WGSL = /* wgsl */ `
 struct Params {
@@ -104,6 +104,18 @@ struct Params {
   hitShadeOcclusion: u32,
   hasHitSource: u32,
   quadCopySameSurface: u32,
+  // W71 (X1, words 141-144; D5000-D5003)
+  quadBaseRotation: u32,
+  thicknessDepthFactor: f32,
+  hitLobeFilterGrazing: f32,
+  x1Flags: u32, // bit 0 historyEdgeConfidence, bit 1 thicknessDepthMode 'relative'
+  // words 145-159: reserved for the other SSR-sources streams (X2, X3), PARAMS_SIZE 640
+  _pad145: u32,
+  _pad146: u32,
+  _pad147: u32,
+  _pad148: vec4u,
+  _pad152: vec4u,
+  _pad156: vec4u,
 };
 @group(0) @binding(0) var<uniform> P: Params;
 `;
@@ -202,7 +214,32 @@ fn remapForWaveReduction(a: u32) -> vec2u {
   return vec2u(bitfieldInsertMask(bitfieldExtract(a, 2u, 3u), a, 1u),
                bitfieldInsertMask(bitfieldExtract(a, 3u, 3u), bitfieldExtract(a, 1u, 2u), 2u));
 }
-fn isBaseRay(id: vec2u, samples_per_quad: u32) -> bool {
+// W71 (X1 #1, D5000), quadBaseRotation: which corner of a 2x2 quad traces. 0 'fixed' (FFX): the
+// top-left (spq 1; spq 2 the even-parity diagonal). 1 'frame': the corner cycles with the frame index,
+// diagonal first. 2 'pattern': a 4x4 Latin square over quads (Diligent's half-res pick is a fixed
+// position pattern, SSSR 2015 re-picks per frame), offset by the frame index. A corner past an odd
+// render size's last column or row falls back to the top-left, which is always on screen.
+fn quadCorner(k: u32) -> vec2u {
+  switch (k & 3u) {
+    case 0u: { return vec2u(0u, 0u); }
+    case 1u: { return vec2u(1u, 1u); }
+    case 2u: { return vec2u(1u, 0u); }
+    default: { return vec2u(0u, 1u); }
+  }
+}
+fn quadBaseCorner(id: vec2u) -> vec2u {
+  if (P.quadBaseRotation == 0u) { return vec2u(0u); }
+  var k = P.frameIndex;
+  if (P.quadBaseRotation == 2u) {
+    let q = (id >> vec2u(1u)) & vec2u(3u);
+    k += q.x + 2u * q.y + (q.y >> 1u); // rows 0123 / 2301 / 1230 / 3012: each corner once per row and column
+  }
+  let o = quadCorner(k);
+  if (any((id & vec2u(~1u)) + o >= P.renderSize)) { return vec2u(0u); }
+  return o;
+}
+fn isBaseRay(id_in: vec2u, samples_per_quad: u32) -> bool {
+  let id = id_in ^ quadBaseCorner(id_in);
   switch (samples_per_quad) {
     case 1u: { return ((id.x & 1u) | (id.y & 1u)) == 0u; }
     case 2u: { return (id.x & 1u) == (id.y & 1u); }
@@ -218,10 +255,10 @@ fn loadWorldSpaceNormal(p: vec2i) -> vec3f {
   return normalize(P.normalsUnpackMul * textureLoad(t_normal, p, 0).xyz + P.normalsUnpackAdd);
 }
 // The pixel whose ray a non-base quad pixel copies (FFX's copy: x neighbour for spq 2, the quad's
-// even-even pixel for spq 1).
+// even-even pixel for spq 1; with quadBaseRotation the quad's chosen corner).
 fn quadBase(id: vec2u, samples_per_quad: u32) -> vec2i {
   if (samples_per_quad == 2u) { return vec2i(id ^ vec2u(1u, 0u)); }
-  return vec2i(id & vec2u(~1u));
+  return vec2i((id & vec2u(~1u)) | quadBaseCorner(id));
 }
 // Same surface for the quad copy (D3740): view depth within 5 % and normals within ~25 degrees.
 fn sameSurfaceAsBase(p: vec2i, b_in: vec2i) -> bool {

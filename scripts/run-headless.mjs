@@ -216,6 +216,7 @@ async function sssrCoreChecks(pages) {
     check('sssr parity (default occupancy): lists', r.rayListSame && r.tileListSame && r.tileFlagsSame, `rays ${r.rays}`);
     console.log(`  default occupancy: radiance differs on ${r.radianceDiffPixels} px, misses ${r.misses.join(' vs ')} (informational)`);
   }
+  await x1CoreChecks(s, hasSubgroups); // W71 (X1)
   // Reverse-Z: same scene, max-reduced pyramid; the hit fraction should match the forward-Z page closely.
   const rz = await openPage(`http://127.0.0.1:${PORT}/sssr-core/?reverse`);
   pages.push(rz);
@@ -257,6 +258,39 @@ async function sssrCoreChecks(pages) {
   pages.push(big);
   const t = await big.T('window.__p.time(30)');
   console.log(`  GPU ms ${t.size.join('x')} (${t.variant}, median of ${t.frames}): ${JSON.stringify(t.ms)}`);
+}
+
+/**
+ * W71 (X1, D5000-D5003) on examples/sssr-core: each setting at its default gives the same lists and
+ * images bit for bit as the setting absent; the rotated quad bases keep the variants' parity.
+ */
+async function x1CoreChecks(s, hasSubgroups) {
+  for (const [name, def] of [['quadBaseRotation', 'fixed']]) {
+    const r = await s.T(`window.__p.identity({}, ${JSON.stringify({ [name]: def })})`);
+    check(`sssr X1 ${name}: default '${def}' = absent, bit for bit`, r.listsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
+      `rays ${r.rays.join(' / ')}, misses ${r.misses.join(' / ')}, differing px radiance ${r.radianceDiffPixels}, hit ${r.hitDiffPixels}`);
+  }
+  // quadBaseRotation (D5000): which corner carries the copies, over 4 frames
+  const corners = {};
+  for (const rot of ['fixed', 'frame', 'pattern']) {
+    corners[rot] = [];
+    for (let f = 0; f < 4; f++) corners[rot].push((await s.T(`window.__p.quadCorners({ quadBaseRotation: '${rot}', frameIndex: ${f} })`)).corners);
+  }
+  const share = (c) => { const n = c.reduce((a, b) => a + b, 0) || 1; return c.map((v) => v / n); };
+  const fixedOk = corners.fixed.every((c) => c[0] > 0 && c[1] + c[2] + c[3] === 0);
+  const order = [0, 3, 1, 2]; // quadCorner(k): tl, br, tr, bl (index tl 0, tr 1, bl 2, br 3)
+  const frameOk = corners.frame.every((c, f) => share(c)[order[f]] > 0.99);
+  const patternOk = corners.pattern.every((c) => share(c).every((v) => v > 0.15 && v < 0.35));
+  check('sssr X1 quadBaseRotation: fixed = top-left, frame cycles the corner, pattern spreads all four per frame', fixedOk && frameOk && patternOk,
+    `copy-carrying rays per corner [tl, tr, bl, br]: fixed ${JSON.stringify(corners.fixed[0])}, frame ${corners.frame.map((c) => JSON.stringify(c)).join(' ')}, pattern f0 ${JSON.stringify(corners.pattern[0])}`);
+  if (!hasSubgroups) return;
+  for (const cfg of [{ quadBaseRotation: 'frame', frameIndex: 5 }, { quadBaseRotation: 'pattern', frameIndex: 6 }, { quadBaseRotation: 'pattern', frameIndex: 6, samplesPerQuad: 2 },
+    { quadBaseRotation: 'pattern', frameIndex: 3, quadCopy: 'sameSurface' }]) {
+    const r = await s.T(`window.__p.parity(${JSON.stringify({ minTraversalOccupancy: 0, ...cfg })})`);
+    check(`sssr X1 parity (${Object.entries(cfg).map(([k, v]) => `${k} ${v}`).join(', ')}): lists and images`,
+      r.rayListSame && r.tileListSame && r.missListSame && r.tileFlagsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
+      `rays ${r.rays}, misses ${r.misses}, radiance ${r.radianceDiffPixels} px`);
+  }
 }
 
 /**

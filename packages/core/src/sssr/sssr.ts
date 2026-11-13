@@ -246,7 +246,17 @@ export interface ScreenSpaceReflectionsSettings {
    * traces its own ray (and goes to the miss list on its own). Costs a few more rays along edges.
    */
   quadCopy?: 'always' | 'sameSurface';
+  /**
+   * W71 (X1 #1, D5000): which pixel of a 2x2 quad traces when `samplesPerQuad` < 4 (the others take
+   * its ray). 'fixed' (default, FFX): the top-left, every frame, so the copy's 2x2 grid stays put under
+   * TAA / an upscaler. 'frame': the corner cycles with the frame index (diagonal first). 'pattern': a
+   * 4x4 Latin square over quads, offset by the frame index, so neighbouring quads trace different
+   * corners. Composes with `quadCopy: 'sameSurface'` (the same-surface test is against the chosen base).
+   */
+  quadBaseRotation?: 'fixed' | 'frame' | 'pattern';
 }
+
+const QUAD_BASE_ROTATION: Record<string, number> = { fixed: 0, frame: 1, pattern: 2 };
 
 export interface ScreenSpaceCamera {
   /** Column-major view matrix (world -> view). */
@@ -575,6 +585,8 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[138] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
     u[139] = useHitSource && inputs.hitSource ? 1 : 0;
     u[140] = (s.quadCopy ?? 'always') === 'sameSurface' ? 1 : 0;
+    // W71 (X1): words 141-144
+    u[141] = QUAD_BASE_ROTATION[s.quadBaseRotation ?? 'fixed'] ?? 0;
     device.queue.writeBuffer(params, 0, data);
   }
 
