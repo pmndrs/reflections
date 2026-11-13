@@ -151,6 +151,11 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W58 (D3740): with samplesPerQuad < 4 a quad shares one ray. \'always\' copies it to every glossy px of the quad, across a silhouette too: on carConcept the skirt\'s reflection lands on the mirror floor below it (bright 2x2 dashes, raw) and the floor\'s on the skirt, the stair-stepped raw edge the denoiser then spreads. \'sameSurface\' gives px on another surface (depth > 5 %, normal > ~25 deg) their own ray. carConcept w50 960x540, lip / band MAD vs PT raw 18.6 / 14.0 -> 11.5 / 12.2, denoised 41.5 / 30.6 -> 34.4 / 26.9 (spq 4: 11.2 / 13.5, 34.3 / 27.7).',
     cost: '1080p: classify +0.02, intersect +0.02, rt trace ~+0.2 ms (carConcept w50, W58)',
   }),
+  sel('s.quadBaseRotation', 'sssr', 'Quad base rotation', [['fixed', 'fixed (FFX: top-left)'], ['frame', 'frame (corner cycles per frame)'], ['pattern', 'pattern (4x4 Latin square, per frame)']], 'fixed', {
+    appliesTo: OURS_SSR, api: 'settings.quadBaseRotation',
+    tradeoff: 'W71 (X1 #1, D5000): which px of a 2x2 quad traces when samplesPerQuad < 4. \'fixed\' keeps the copy\'s 2x2 grid in place (it can show under TAA / the upscaler and drift in blocks at rest); \'frame\' / \'pattern\' move it every frame, so the history averages it out. Composes with Quad copy \'sameSurface\'.',
+    cost: 'classify: one more lookup per px (not timed yet; X0)',
+  }),
   num('s.maxTraversalIntersections', 'sssr', 'Max march steps', 0, 256, 1, 128, { appliesTo: OURS_SSR, api: 'settings.maxTraversalIntersections', tradeoff: 'Hi-Z march steps per ray: fewer is cheaper and sends long rays to the miss list (probe or RT); 0 = SSR off.' }),
   num('s.minTraversalOccupancy', 'sssr', 'Min occupancy', 0, 64, 1, 4, { appliesTo: OURS_SSR, api: 'settings.minTraversalOccupancy', tradeoff: 'Glossy rays stop once this few lanes of their subgroup still march (FFX): higher ends long tails earlier (cheaper, more misses). Mirrors ignore it.' }),
   num('s.depthBufferThickness', 'sssr', 'Thickness', 0, 0.5, 0.001, 0.2, {
@@ -159,6 +164,14 @@ export const SETTINGS: Setting[] = [
   }),
   num('s.thicknessRoughnessFactor', 'sssr', 'Thickness per alpha', 0, 20, 0.1, 10, { defaultNote: 'showcase scenes set their own', appliesTo: OURS_SSR, api: 'settings.thicknessRoughnessFactor', tradeoff: 'Thickness added per unit of the pixel\'s alpha: rough rays need less precision (D1001).' }),
   num('s.thicknessLengthFactor', 'sssr', 'Thickness per ray length', 0, 0.1, 0.001, 0.01, { appliesTo: OURS_SSR, api: 'settings.thicknessLengthFactor', tradeoff: 'Thickness added per world unit of ray length: far hits are coarser (D1001).' }),
+  num('s.thicknessDepthFactor', 'sssr', 'Thickness per view depth', 0, 0.1, 0.001, 0, {
+    appliesTo: OURS_SSR, api: 'settings.thicknessDepthFactor',
+    tradeoff: 'W71 (X1 #2, D5001): thickness += k x the hit\'s view depth, so one value scales from a toy car to a hall (with mode \'relative\' it is the whole thickness: Diligent\'s distance / viewZ < 0.025 is k 0.025). 0 = off.',
+  }),
+  sel('s.thicknessDepthMode', 'sssr', 'Thickness depth mode', [['add', 'add (to the constant, alpha and length terms)'], ['relative', 'relative (k x view depth alone, Diligent)']], 'add', {
+    appliesTo: OURS_SSR, api: 'settings.thicknessDepthMode',
+    tradeoff: 'W71 (X1 #2, D5001): how Thickness per view depth combines. \'relative\' drops the constant, per-alpha and per-length terms (0 thickness at k 0).',
+  }),
   num('s.mostDetailedMip', 'sssr', 'Most detailed mip', 0, 4, 1, 0, { appliesTo: OURS_SSR, api: 'settings.mostDetailedMip', tradeoff: 'Pyramid mip glossy rays start on: higher is cheaper and coarser. Mirrors always use 0.' }),
   sel('hit', 'sssr', 'Hit colour', [['final', 'last frame\'s image'], ['lit', 'last frame\'s lit (no SSR)'], ['current', 'this frame, no specular (FFX)']], 'current', {
     pageDefault: 'final', appliesTo: OURS_SSR, api: 'settings.hitColor (+ historySource)',

@@ -265,11 +265,19 @@ async function sssrCoreChecks(pages) {
  * images bit for bit as the setting absent; the rotated quad bases keep the variants' parity.
  */
 async function x1CoreChecks(s, hasSubgroups) {
-  for (const [name, def] of [['quadBaseRotation', 'fixed']]) {
-    const r = await s.T(`window.__p.identity({}, ${JSON.stringify({ [name]: def })})`);
-    check(`sssr X1 ${name}: default '${def}' = absent, bit for bit`, r.listsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
+  const X1_DEFAULTS = { quadBaseRotation: 'fixed', thicknessDepthFactor: 0, thicknessDepthMode: 'add' };
+  for (const [name, def] of [...Object.entries(X1_DEFAULTS), ['all four', X1_DEFAULTS]]) {
+    const r = await s.T(`window.__p.identity({}, ${JSON.stringify(typeof def === 'object' ? def : { [name]: def })})`);
+    check(`sssr X1 ${name}: default ${JSON.stringify(def)} = absent, bit for bit`, r.listsSame && r.radianceDiffPixels === 0 && r.hitDiffPixels === 0,
       `rays ${r.rays.join(' / ')}, misses ${r.misses.join(' / ')}, differing px radiance ${r.radianceDiffPixels}, hit ${r.hitDiffPixels}`);
   }
+  // the settings act (no history input here, so not historyEdgeConfidence; the grazing filter on the ?env page,
+  // since the constant fallback looks the same at every roughness)
+  const thick = await s.T('window.__p.identity({}, { thicknessDepthFactor: 0.05 })');
+  const rel = await s.T("window.__p.identity({}, { thicknessDepthFactor: 0.001, thicknessDepthMode: 'relative' })");
+  check('sssr X1 thicknessDepthFactor and its relative mode change the hits (k 0.05 added: fewer misses; relative 0.001: more)',
+    thick.misses[1] < thick.misses[0] && rel.misses[1] > rel.misses[0],
+    `misses ${thick.misses.join(' to ')} at k 0.05, ${rel.misses.join(' to ')} relative 0.001`);
   // quadBaseRotation (D5000): which corner carries the copies, over 4 frames
   const corners = {};
   for (const rot of ['fixed', 'frame', 'pattern']) {

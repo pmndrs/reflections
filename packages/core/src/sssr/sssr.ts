@@ -254,6 +254,15 @@ export interface ScreenSpaceReflectionsSettings {
    * corners. Composes with `quadCopy: 'sameSurface'` (the same-surface test is against the chosen base).
    */
   quadBaseRotation?: 'fixed' | 'frame' | 'pattern';
+  /**
+   * W71 (X1 #2, D5001): thickness that scales with depth. With `thicknessDepthMode` 'add' (default)
+   * the hit acceptance thickness gains `thicknessDepthFactor x |view z of the hit|`; with 'relative'
+   * it is that term alone (Diligent's `distance / viewZ < 0.025`: this at 0.025), so one value serves
+   * every scene scale. Default 0 (no change).
+   */
+  thicknessDepthFactor?: number;
+  /** See {@link thicknessDepthFactor}. Default 'add'. */
+  thicknessDepthMode?: 'add' | 'relative';
 }
 
 const QUAD_BASE_ROTATION: Record<string, number> = { fixed: 0, frame: 1, pattern: 2 };
@@ -587,6 +596,8 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     u[140] = (s.quadCopy ?? 'always') === 'sameSurface' ? 1 : 0;
     // W71 (X1): words 141-144
     u[141] = QUAD_BASE_ROTATION[s.quadBaseRotation ?? 'fixed'] ?? 0;
+    f[142] = Math.max(0, s.thicknessDepthFactor ?? 0);
+    u[144] = ((s.thicknessDepthMode ?? 'add') === 'relative' ? 2 : 0);
     device.queue.writeBuffer(params, 0, data);
   }
 

@@ -574,6 +574,8 @@ ${hitSource ? `  if (P.hasHitSource == 0u || P.hitLobeFilterMixed >= 1.0) { retu
   return 1.0;` : '  return 1.0;'}
 }
 
+const X1_THICKNESS_RELATIVE: u32 = 2u;
+
 fn reshadeHit(hit_uv: vec2f, world_hit: vec3f, ray_direction: vec3f) -> vec3f {
   let p = clamp(vec2i(vec2f(P.renderSize) * hit_uv), vec2i(0), vec2i(P.renderSize) - 1);
   let N = loadWorldSpaceNormal(p);
@@ -822,7 +824,14 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   let world_space_ray = world_space_hit - world_space_origin;
   let world_ray_length = max(0.0, length(world_space_ray));
   // Thickness: a constant plus the hybrid sample's roughness and ray-length terms (D42, D1001).
-  let thickness = P.depthBufferThickness + (*r).roughness * P.thicknessRoughnessFactor + world_ray_length * P.thicknessLengthFactor;
+  var thickness = P.depthBufferThickness + (*r).roughness * P.thicknessRoughnessFactor + world_ray_length * P.thicknessLengthFactor;
+  // W71 (X1 #2, D5001): plus thicknessDepthFactor x the hit's view depth, or ('relative', Diligent's
+  // distance / viewZ test) that term alone, so one number serves a toy car and a hall.
+  let depth_relative = (P.x1Flags & X1_THICKNESS_RELATIVE) != 0u;
+  if (P.thicknessDepthFactor != 0.0 || depth_relative) {
+    let depth_term = P.thicknessDepthFactor * abs(screenSpaceToViewSpace(hit).z);
+    thickness = select(thickness + depth_term, depth_term, depth_relative);
+  }
   var confidence = 0.0;
   if (valid_hit) { confidence = validateHit(hit, (*r).uv, world_space_ray, screen_size, thickness, (*r).march.most_detailed_mip); }
   var hit_radiance = vec3f(0.0);
