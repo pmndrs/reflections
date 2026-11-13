@@ -1,17 +1,21 @@
 // W78 (W73's noise.js): denoised noise on glossy floors (examples/ssr `configStats`: 8-bit luma of the final image,
 // static camera, loop stopped; per roughness bin: temporal std, flicker, bias vs one shared reference = the mean of
 // REF_FRAMES raw frames at spq 4 copy). examples/ssr/?manual&denoise=1. `denoiserBrdf` is the page's example-only
-// per-frame key (off | replace | combine). Prelude: optional CONFIGS, CASES, FRAMES, REF_FRAMES, DENOISE.
+// per-frame keys (denoiserBrdf off | replace | combine, denoiserKeepBlack). Load with ?keepSample=1 (no tracer
+// rebuild between modes, so the cone / ratio pipelines built by the warm config stay). Prelude: optional CONFIGS, CASES, FRAMES, REF_FRAMES, DENOISE.
 const COMP = { hitColorFilter: 'cone', mirrorBias: 0.5, mirrorBiasCompensate: true };
 const configs = typeof CONFIGS !== 'undefined' ? CONFIGS : [
+  ['warm (builds the cone and ratio pipelines)', { ...COMP, rayReuse: 'ratio' }],
   ['copy@1', { samplesPerQuad: 1 }],
   ['copy@1 brdf replace', { samplesPerQuad: 1, denoiserBrdf: 'replace' }],
   ['copy@1 brdf combine', { samplesPerQuad: 1, denoiserBrdf: 'combine' }],
+  ['copy@1 keepBlack', { samplesPerQuad: 1, denoiserKeepBlack: true }],
+  ['copy@1 brdf replace + keepBlack', { samplesPerQuad: 1, denoiserBrdf: 'replace', denoiserKeepBlack: true }],
   ['copy@4', { samplesPerQuad: 4 }],
   ['ratio@1 (W73)', { rayReuse: 'ratio', samplesPerQuad: 1 }],
   ['comp0.5 copy@1', { ...COMP }],
   ['comp0.5 brdf replace', { ...COMP, denoiserBrdf: 'replace' }],
-  ['comp0.5 brdf combine', { ...COMP, denoiserBrdf: 'combine' }],
+  ['comp0.5 brdf replace + keepBlack', { ...COMP, denoiserBrdf: 'replace', denoiserKeepBlack: true }],
 ];
 const cases = typeof CASES !== 'undefined' ? CASES : [0.2, 0.3, 0.4].map((r) => ({ scene: 'mirrorWall', pose: 'default', floor: r, bins: [r] }));
 const all = [];
