@@ -1,0 +1,1010 @@
+[
+ {
+  "scene": "toyCar",
+  "elevation": 5,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0,
+  "hitLobeFilterMixed": 1,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 292776,
+    "ptLuma": 173.37558641437587,
+    "methods": {
+     "ours-denoised": {
+      "mad": 17.65961690848859,
+      "luma": 186.4709473698323,
+      "frameMad": 17.66009224344328
+     },
+     "ours-rt": {
+      "mad": 17.188847731142854,
+      "luma": 184.9571869453791,
+      "frameMad": 17.189698779953822
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 170.5813947679241,
+    "methods": {
+     "ours-denoised": {
+      "mad": 17.346319605197024,
+      "luma": 184.54968313210998,
+      "frameMad": 17.346855870629245
+     },
+     "ours-rt": {
+      "mad": 16.854657118056995,
+      "luma": 182.92872985132746,
+      "frameMad": 16.85561744470329
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 5,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0.5,
+  "hitLobeFilterMixed": 1,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 292776,
+    "ptLuma": 173.37558641437587,
+    "methods": {
+     "ours-denoised": {
+      "mad": 17.637707809609726,
+      "luma": 186.43508386659113,
+      "frameMad": 17.638442728683327
+     },
+     "ours-rt": {
+      "mad": 17.18767035207708,
+      "luma": 184.91822231593568,
+      "frameMad": 17.188543032898096
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 170.5813947679241,
+    "methods": {
+     "ours-denoised": {
+      "mad": 17.32161619084517,
+      "luma": 184.5093083336919,
+      "frameMad": 17.322445666153847
+     },
+     "ours-rt": {
+      "mad": 16.854730420526057,
+      "luma": 182.8879513439977,
+      "frameMad": 16.85571518132874
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 5,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 1,
+  "hitLobeFilterMixed": 1,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 292776,
+    "ptLuma": 173.37558641437587,
+    "methods": {
+     "ours-denoised": {
+      "mad": 17.60642166138285,
+      "luma": 186.39306144501288,
+      "frameMad": 17.606884472542347
+     },
+     "ours-rt": {
+      "mad": 17.19340354628241,
+      "luma": 184.87752670598127,
+      "frameMad": 17.194242071298184
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 170.5813947679241,
+    "methods": {
+     "ours-denoised": {
+      "mad": 17.286254501030538,
+      "luma": 184.46184178382737,
+      "frameMad": 17.286776941874255
+     },
+     "ours-rt": {
+      "mad": 16.86215358153438,
+      "luma": 182.84466163141946,
+      "frameMad": 16.86309976209007
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 5,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0,
+  "hitLobeFilterMixed": 0,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 292776,
+    "ptLuma": 173.37558641437587,
+    "methods": {
+     "ours-denoised": {
+      "mad": 17.658638771619536,
+      "luma": 186.46041953874277,
+      "frameMad": 17.65914911627443
+     },
+     "ours-rt": {
+      "mad": 17.23938138713458,
+      "luma": 184.78880932144523,
+      "frameMad": 17.24011772936665
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 170.5813947679241,
+    "methods": {
+     "ours-denoised": {
+      "mad": 17.34505079732665,
+      "luma": 184.5378345611209,
+      "frameMad": 17.34562660751189
+     },
+     "ours-rt": {
+      "mad": 16.914782343108158,
+      "luma": 182.74855012408943,
+      "frameMad": 16.915613425927287
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 5,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0.5,
+  "hitLobeFilterMixed": 0,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 292776,
+    "ptLuma": 173.37558641437587,
+    "methods": {
+     "ours-denoised": {
+      "mad": 17.63567269288811,
+      "luma": 186.42429116389354,
+      "frameMad": 17.636157136057456
+     },
+     "ours-rt": {
+      "mad": 17.24150900916175,
+      "luma": 184.77609306669763,
+      "frameMad": 17.24223880486462
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 170.5813947679241,
+    "methods": {
+     "ours-denoised": {
+      "mad": 17.319236593365765,
+      "luma": 184.49701517840674,
+      "frameMad": 17.31978314686372
+     },
+     "ours-rt": {
+      "mad": 16.917212255659507,
+      "luma": 182.734223323839,
+      "frameMad": 16.918035943931333
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 5,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 1,
+  "hitLobeFilterMixed": 0,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 292776,
+    "ptLuma": 173.37558641437587,
+    "methods": {
+     "ours-denoised": {
+      "mad": 17.603554850806567,
+      "luma": 186.3825268038538,
+      "frameMad": 17.604104190005522
+     },
+     "ours-rt": {
+      "mad": 17.246763452831956,
+      "luma": 184.76224024201198,
+      "frameMad": 17.24746279294194
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 170.5813947679241,
+    "methods": {
+     "ours-denoised": {
+      "mad": 17.283071952162018,
+      "luma": 184.44999930562446,
+      "frameMad": 17.28369180812915
+     },
+     "ours-rt": {
+      "mad": 16.92315425668844,
+      "luma": 182.71860846783898,
+      "frameMad": 16.92394322273794
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 15,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0,
+  "hitLobeFilterMixed": 1,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 371847,
+    "ptLuma": 167.7802665216074,
+    "methods": {
+     "ours-denoised": {
+      "mad": 13.385798348057646,
+      "luma": 176.36259432188075,
+      "frameMad": 13.386443774805661
+     },
+     "ours-rt": {
+      "mad": 13.243407794953958,
+      "luma": 175.88448535998387,
+      "frameMad": 13.243839199984969
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 153.6183851675618,
+    "methods": {
+     "ours-denoised": {
+      "mad": 11.224189332566102,
+      "luma": 160.69909263197488,
+      "frameMad": 11.225113972483863
+     },
+     "ours-rt": {
+      "mad": 11.107558031126295,
+      "luma": 160.1788269840121,
+      "frameMad": 11.108165991517355
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 15,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0.5,
+  "hitLobeFilterMixed": 1,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 371847,
+    "ptLuma": 167.7802665216074,
+    "methods": {
+     "ours-denoised": {
+      "mad": 13.382216453712,
+      "luma": 176.34715210471907,
+      "frameMad": 13.382864121525294
+     },
+     "ours-rt": {
+      "mad": 13.242379930446955,
+      "luma": 175.8736952658723,
+      "frameMad": 13.242821196164376
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 153.6183851675618,
+    "methods": {
+     "ours-denoised": {
+      "mad": 11.21912503215472,
+      "luma": 160.67697949896788,
+      "frameMad": 11.220053530097044
+     },
+     "ours-rt": {
+      "mad": 11.108811406897857,
+      "luma": 160.16738998063636,
+      "frameMad": 11.109433513379495
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 15,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 1,
+  "hitLobeFilterMixed": 1,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 371847,
+    "ptLuma": 167.7802665216074,
+    "methods": {
+     "ours-denoised": {
+      "mad": 13.388017786876812,
+      "luma": 176.32698272053727,
+      "frameMad": 13.388568416571383
+     },
+     "ours-rt": {
+      "mad": 13.24315802824883,
+      "luma": 175.86295639269318,
+      "frameMad": 13.243610947504738
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 153.6183851675618,
+    "methods": {
+     "ours-denoised": {
+      "mad": 11.22737091692843,
+      "luma": 160.64782316544316,
+      "frameMad": 11.228160847483888
+     },
+     "ours-rt": {
+      "mad": 11.11174607767978,
+      "luma": 160.15550569253816,
+      "frameMad": 11.112385223770485
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 15,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0,
+  "hitLobeFilterMixed": 0,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 371847,
+    "ptLuma": 167.7802665216074,
+    "methods": {
+     "ours-denoised": {
+      "mad": 13.383562997675973,
+      "luma": 176.36809931486215,
+      "frameMad": 13.384140744258145
+     },
+     "ours-rt": {
+      "mad": 13.310787770230583,
+      "luma": 175.74200702769807,
+      "frameMad": 13.311170544148856
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 153.6183851675618,
+    "methods": {
+     "ours-denoised": {
+      "mad": 11.220958236887114,
+      "luma": 160.70678607603364,
+      "frameMad": 11.221786747689627
+     },
+     "ours-rt": {
+      "mad": 11.210806648667283,
+      "luma": 159.99827713331786,
+      "frameMad": 11.211351273153157
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 15,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0.5,
+  "hitLobeFilterMixed": 0,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 371847,
+    "ptLuma": 167.7802665216074,
+    "methods": {
+     "ours-denoised": {
+      "mad": 13.386464952870789,
+      "luma": 176.35033874344464,
+      "frameMad": 13.387126291181131
+     },
+     "ours-rt": {
+      "mad": 13.312220931360399,
+      "luma": 175.73829785154666,
+      "frameMad": 13.312602360639675
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 153.6183851675618,
+    "methods": {
+     "ours-denoised": {
+      "mad": 11.225070569706151,
+      "luma": 160.68129671569395,
+      "frameMad": 11.226018036269862
+     },
+     "ours-rt": {
+      "mad": 11.2129963991817,
+      "luma": 159.99312514518022,
+      "frameMad": 11.213540059161401
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 15,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 1,
+  "hitLobeFilterMixed": 0,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 371847,
+    "ptLuma": 167.7802665216074,
+    "methods": {
+     "ours-denoised": {
+      "mad": 13.382547683133414,
+      "luma": 176.34073803918963,
+      "frameMad": 13.38310974226006
+     },
+     "ours-rt": {
+      "mad": 13.313604228791872,
+      "luma": 175.73485119129307,
+      "frameMad": 13.31398072772788
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 153.6183851675618,
+    "methods": {
+     "ours-denoised": {
+      "mad": 11.219622395837803,
+      "luma": 160.66789225167054,
+      "frameMad": 11.220428401496159
+     },
+     "ours-rt": {
+      "mad": 11.215044688790815,
+      "luma": 159.9883965863463,
+      "frameMad": 11.215580954223203
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 30,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0,
+  "hitLobeFilterMixed": 1,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 470208,
+    "ptLuma": 149.5475379522468,
+    "methods": {
+     "ours-denoised": {
+      "mad": 11.976356119704304,
+      "luma": 159.7860060077425,
+      "frameMad": 11.976573222206426
+     },
+     "ours-rt": {
+      "mad": 11.843486464147137,
+      "luma": 159.58229386449062,
+      "frameMad": 11.843653057087128
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 117.97026999161832,
+    "methods": {
+     "ours-denoised": {
+      "mad": 7.438889371141993,
+      "luma": 122.98100918285641,
+      "frameMad": 7.439276459619335
+     },
+     "ours-rt": {
+      "mad": 7.342370434670347,
+      "luma": 122.81287252592286,
+      "frameMad": 7.3426575360076844
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 30,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0.5,
+  "hitLobeFilterMixed": 1,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 470208,
+    "ptLuma": 149.5475379522468,
+    "methods": {
+     "ours-denoised": {
+      "mad": 11.97299289179944,
+      "luma": 159.78438227117263,
+      "frameMad": 11.973186245946163
+     },
+     "ours-rt": {
+      "mad": 11.842868032162635,
+      "luma": 159.58070636486434,
+      "frameMad": 11.843038524086083
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 117.97026999161832,
+    "methods": {
+     "ours-denoised": {
+      "mad": 7.432759130658439,
+      "luma": 122.97771281595818,
+      "frameMad": 7.433100887345619
+     },
+     "ours-rt": {
+      "mad": 7.342525880915267,
+      "luma": 122.81135658572207,
+      "frameMad": 7.34282134130601
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 30,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 1,
+  "hitLobeFilterMixed": 1,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 470208,
+    "ptLuma": 149.5475379522468,
+    "methods": {
+     "ours-denoised": {
+      "mad": 11.975951245691174,
+      "luma": 159.78421397464163,
+      "frameMad": 11.976080798286285
+     },
+     "ours-rt": {
+      "mad": 11.842474855100464,
+      "luma": 159.5804399393133,
+      "frameMad": 11.84263843518929
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 117.97026999161832,
+    "methods": {
+     "ours-denoised": {
+      "mad": 7.437866833847816,
+      "luma": 122.9767107485391,
+      "frameMad": 7.43809027777778
+     },
+     "ours-rt": {
+      "mad": 7.342642425411126,
+      "luma": 122.81179063905924,
+      "frameMad": 7.342925668723723
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 30,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0,
+  "hitLobeFilterMixed": 0,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 470208,
+    "ptLuma": 149.5475379522468,
+    "methods": {
+     "ours-denoised": {
+      "mad": 11.97485323870979,
+      "luma": 159.78511780943668,
+      "frameMad": 11.974960106308796
+     },
+     "ours-rt": {
+      "mad": 11.833930498134938,
+      "luma": 159.48796625623652,
+      "frameMad": 11.834124915640459
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 117.97026999161832,
+    "methods": {
+     "ours-denoised": {
+      "mad": 7.4363498263889545,
+      "luma": 122.97924560270505,
+      "frameMad": 7.436534690072038
+     },
+     "ours-rt": {
+      "mad": 7.31425684799344,
+      "luma": 122.70568734305223,
+      "frameMad": 7.314597961676415
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 30,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0.5,
+  "hitLobeFilterMixed": 0,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 470208,
+    "ptLuma": 149.5475379522468,
+    "methods": {
+     "ours-denoised": {
+      "mad": 11.97350605122398,
+      "luma": 159.78241062155016,
+      "frameMad": 11.973624615774055
+     },
+     "ours-rt": {
+      "mad": 11.83357063966095,
+      "luma": 159.4872772607281,
+      "frameMad": 11.833765057166488
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 117.97026999161832,
+    "methods": {
+     "ours-denoised": {
+      "mad": 7.43466001157412,
+      "luma": 122.97533885463407,
+      "frameMad": 7.434868666409444
+     },
+     "ours-rt": {
+      "mad": 7.314551504629263,
+      "luma": 122.70624843506617,
+      "frameMad": 7.3148922968101555
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 30,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 1,
+  "hitLobeFilterMixed": 0,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 470208,
+    "ptLuma": 149.5475379522468,
+    "methods": {
+     "ours-denoised": {
+      "mad": 11.977500914490061,
+      "luma": 159.78692491389683,
+      "frameMad": 11.977710927930927
+     },
+     "ours-rt": {
+      "mad": 11.832785969188755,
+      "luma": 159.48700730801517,
+      "frameMad": 11.83297081646161
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 117.97026999161832,
+    "methods": {
+     "ours-denoised": {
+      "mad": 7.440431134259277,
+      "luma": 122.98153256557235,
+      "frameMad": 7.440805362654295
+     },
+     "ours-rt": {
+      "mad": 7.313635223765032,
+      "luma": 122.70704807501615,
+      "frameMad": 7.31395801183072
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 60,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0,
+  "hitLobeFilterMixed": 1,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 456265,
+    "ptLuma": 85.4715807025233,
+    "methods": {
+     "ours-denoised": {
+      "mad": 9.911200545006166,
+      "luma": 94.91181994970525,
+      "frameMad": 9.91123305535285
+     },
+     "ours-rt": {
+      "mad": 9.87534126732017,
+      "luma": 94.84424186920118,
+      "frameMad": 9.875369576891833
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 59.854246018565064,
+    "methods": {
+     "ours-denoised": {
+      "mad": 8.945476144548095,
+      "luma": 67.93581798064545,
+      "frameMad": 8.94552758487729
+     },
+     "ours-rt": {
+      "mad": 8.937653034980235,
+      "luma": 67.91856131542484,
+      "frameMad": 8.937684863683822
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 60,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0.5,
+  "hitLobeFilterMixed": 1,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 456265,
+    "ptLuma": 85.4715807025233,
+    "methods": {
+     "ours-denoised": {
+      "mad": 9.910106243083579,
+      "luma": 94.91041868925367,
+      "frameMad": 9.91013528322468
+     },
+     "ours-rt": {
+      "mad": 9.874288333900585,
+      "luma": 94.84273662696276,
+      "frameMad": 9.874317556684275
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 59.854246018565064,
+    "methods": {
+     "ours-denoised": {
+      "mad": 8.944472415124373,
+      "luma": 67.9341367099088,
+      "frameMad": 8.94451324588568
+     },
+     "ours-rt": {
+      "mad": 8.937338927469963,
+      "luma": 67.91798133278604,
+      "frameMad": 8.937372363683822
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 60,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 1,
+  "hitLobeFilterMixed": 1,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 456265,
+    "ptLuma": 85.4715807025233,
+    "methods": {
+     "ours-denoised": {
+      "mad": 9.909038059024121,
+      "luma": 94.9093198473527,
+      "frameMad": 9.909065455383747
+     },
+     "ours-rt": {
+      "mad": 9.873273116136053,
+      "luma": 94.84141100216142,
+      "frameMad": 9.873302521562142
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 59.854246018565064,
+    "methods": {
+     "ours-denoised": {
+      "mad": 8.943578478653084,
+      "luma": 67.93361118946139,
+      "frameMad": 8.94362284593697
+     },
+     "ours-rt": {
+      "mad": 8.937033179013149,
+      "luma": 67.91759162406703,
+      "frameMad": 8.93706565072085
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 60,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0,
+  "hitLobeFilterMixed": 0,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 456265,
+    "ptLuma": 85.4715807025233,
+    "methods": {
+     "ours-denoised": {
+      "mad": 9.911593408802426,
+      "luma": 94.91228774451774,
+      "frameMad": 9.911620439877156
+     },
+     "ours-rt": {
+      "mad": 9.871011637974597,
+      "luma": 94.80316036366129,
+      "frameMad": 9.871041408685418
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 59.854246018565064,
+    "methods": {
+     "ours-denoised": {
+      "mad": 8.945669528035916,
+      "luma": 67.93589070470048,
+      "frameMad": 8.945711644805435
+     },
+     "ours-rt": {
+      "mad": 8.94741882073118,
+      "luma": 67.86903133693363,
+      "frameMad": 8.947453221451273
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 60,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 0.5,
+  "hitLobeFilterMixed": 0,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 456265,
+    "ptLuma": 85.4715807025233,
+    "methods": {
+     "ours-denoised": {
+      "mad": 9.91061134063307,
+      "luma": 94.91116713681124,
+      "frameMad": 9.910643485694807
+     },
+     "ours-rt": {
+      "mad": 9.870724524126295,
+      "luma": 94.80292992636038,
+      "frameMad": 9.87075265105559
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 59.854246018565064,
+    "methods": {
+     "ours-denoised": {
+      "mad": 8.94533532664702,
+      "luma": 67.93542418521767,
+      "frameMad": 8.945387409980354
+     },
+     "ours-rt": {
+      "mad": 8.947698366770297,
+      "luma": 67.86961071897468,
+      "frameMad": 8.947729552469777
+     }
+    }
+   }
+  }
+ },
+ {
+  "scene": "toyCar",
+  "elevation": 60,
+  "floorRoughness": 0.2,
+  "hitLobeFilterGrazing": 1,
+  "hitLobeFilterMixed": 0,
+  "spp": 32,
+  "regions": {
+   "glossy": {
+    "px": 456265,
+    "ptLuma": 85.4715807025233,
+    "methods": {
+     "ours-denoised": {
+      "mad": 9.909162255854026,
+      "luma": 94.90956728623165,
+      "frameMad": 9.909207368526117
+     },
+     "ours-rt": {
+      "mad": 9.870406361070467,
+      "luma": 94.80229650061023,
+      "frameMad": 9.870432844218135
+     }
+    }
+   },
+   "floorHalf": {
+    "px": 259200,
+    "ptLuma": 59.854246018565064,
+    "methods": {
+     "ours-denoised": {
+      "mad": 8.944107671039893,
+      "luma": 67.93475027269827,
+      "frameMad": 8.944181295011068
+     },
+     "ours-rt": {
+      "mad": 8.947517361111847,
+      "luma": 67.86917270691828,
+      "frameMad": 8.947546939301084
+     }
+    }
+   }
+  }
+ }
+]

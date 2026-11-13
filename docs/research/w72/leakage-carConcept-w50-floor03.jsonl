@@ -1,0 +1,5 @@
+{"name":"warm","px":[12810,72590],"m":{"ours-raw":{"edge":31.04,"flat":16.35},"ours-denoised":{"edge":29.92,"flat":14.57}}}
+{"name":"default","px":[12810,72590],"m":{"ours-raw":{"edge":30.92,"flat":16.37},"ours-denoised":{"edge":29.88,"flat":14.57}}}
+{"name":"cone","px":[12810,72590],"m":{"ours-raw":{"edge":31.05,"flat":16.47},"ours-denoised":{"edge":30.01,"flat":14.57}}}
+{"name":"cone x2","px":[12810,72590],"m":{"ours-raw":{"edge":30.99,"flat":16.48},"ours-denoised":{"edge":29.91,"flat":14.52}}}
+{"name":"comp 0.5","px":[12810,72590],"m":{"ours-raw":{"edge":32.59,"flat":16.6},"ours-denoised":{"edge":28.33,"flat":13.15}}}

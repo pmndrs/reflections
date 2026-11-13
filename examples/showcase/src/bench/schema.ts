@@ -106,10 +106,10 @@ export const SETTINGS: Setting[] = [
   bool('aa.detectShadingChanges', 'aa', 'Detect shading changes', true, { appliesTo: RASTER, api: '@pmndrs/upscaler settings.detectShadingChanges', tradeoff: 'Ages the history where shading really changed (a light, a bake) so it re-converges instead of ghosting.' }),
 
   // ---- scene -----------------------------------------------------------------------------------------------
-  sel('scene', 'scene', 'Scene', [['carConcept', 'Car concept'], ['toyCar', 'Toy car'], ['chess', 'Chess set'], ['sponza', 'Sponza']], null, {
-    pageDefault: 'carConcept', apply: 'rebuild', appliesTo: 'page', tradeoff: 'Reloads every method on the new scene (downloaded assets only).',
+  sel('scene', 'scene', 'Scene', [['carConcept', 'Car concept'], ['toyCar', 'Toy car'], ['chess', 'Chess set'], ['sponza', 'Sponza'], ['lineSpread', 'Line spread (X0: emissive strip over a glossy floor)'], ['lineSpreadThin', 'Line spread, thin strip (X0: SSR thickness case)'], ['grazing', 'Grazing sweep (X0: checker wall over a glossy floor)']], null, {
+    pageDefault: 'carConcept', apply: 'rebuild', appliesTo: 'page', tradeoff: 'Reloads every method on the new scene (downloaded assets; X0\'s lineSpread / grazing are procedural, W70).',
   }),
-  sel('pose', 'scene', 'Camera', [['hero', 'hero'], ['low', 'low'], ['front', 'front'], ['close', 'close'], ['top', 'top'], ['w50', 'w50 (carConcept: W50\'s view, the Measure regions)']], null, {
+  sel('pose', 'scene', 'Camera', [['hero', 'hero'], ['low', 'low'], ['front', 'front'], ['close', 'close'], ['top', 'top'], ['w50', 'w50 (carConcept: W50\'s view, the Measure regions)'], ['e5', 'e5 (X0 scenes: 5 deg elevation)'], ['e15', 'e15 (X0: 15 deg, the line-spread gate)'], ['e30', 'e30 (X0: 30 deg)'], ['e60', 'e60 (X0: 60 deg)']], null, {
     pageDefault: 'hero', appliesTo: 'page', tradeoff: 'Camera preset (orbit freely after). The named Measure regions for carConcept are defined at `w50` (W50) and `hero` (W46).',
   }),
   sel('view', 'scene', 'Debug view (ours)', [['final', 'Final (hybrid)'], ['split', 'Raw | denoised (left half raw)'], ['off', 'Reflections off'], ['ibl', 'Probes / environment only'], ['reflections', 'Reflection term only'], ['source', 'Source per pixel'], ['rtSource', 'Ray-traced pass per pixel'], ['confidence', 'Screen-space confidence'], ['ssrWeight', 'Hit weight vs probe (depth-aware)'], ['hitDistance', 'Hit distance'], ['hitRadiance', 'Hit radiance (x confidence)'], ['signal', 'Raw signal (denoiser input)'], ['specular', 'Specular radiance (composited)'], ['denoiseDelta', 'Denoiser change |denoised - raw|'], ['probeSpecular', 'Probe / environment radiance'], ['ao', 'AO input (specOcc on)'], ['specularOcclusion', 'Specular occlusion factor'], ['traced', 'Traced pixels (RT)'], ['depth', 'Depth (banded)'], ['depthEdges', 'Depth edges'], ['normals', 'G-buffer normals'], ['roughness', 'G-buffer roughness'], ['shadingRoughness', "three's shading roughness"]], null, {
@@ -156,6 +156,42 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W80 (D5180): hits tried per ray. 1 = FFX (the first hit is validated once, a reject is a miss). More restarts the march past a rejected leaf cell (a thin foreground object, a back face) and keeps going, sharing the march-step budget; every leaf cell behind an object is another candidate, so it only gets through overlaps a few px wide, and it cannot find a surface the camera does not see. A 6 cm post in front of a wall (examples/ssr scene thinPost, 960x540): nothing changes up to 4, at 8 the wall class 0.944 -> 0.988 confident and misses -27 % at 1080p; the other examples scenes and carConcept do not move (lip / band MAD vs PT unchanged).',
     cost: '1080p, intersect: mirrorWall 0.93 -> 1.06 / 1.16 / 1.21 ms at 2 / 4 / 8, thinPost 0.96 -> 1.25 at 8 (about +0.25 ms at 8); carConcept w50 within noise (W80)',
   }),
+  sel('s.reflectionResolution', 'sssr', 'Reflection resolution', [['full', 'full'], ['half', 'half (trace + denoise at half res, joint bilateral upsample)']], 'full', {
+    apply: 'rebuild', appliesTo: OURS_SSR, api: 'settings.reflectionResolution',
+    tradeoff: 'W75 (X5, D5080): \'half\' point-samples the G-buffer at one pixel per 2x2 quad, traces (SSR + RT) and denoises there, and upsamples the residual (denoised - probe) with a joint bilateral filter (plane distance, normal, roughness). Fewer rays and a quarter of the denoiser\'s pixels; mirrors and thin edges lose resolution (step 1: everything at half res). carConcept w50 MAD vs PT denoised: band 30.6 -> 58.3, lip 41.5 -> 50.5 (raw +0.4..+2.4).',
+    cost: '1080p, AA off, rt (W75 phase 2): carConcept frame sum 14.0 -> 10.6 ms (rt trace 2.53 -> 0.89, denoise 1.94 -> 0.51, upsample +0.37, half-res sample +0.16); contact 11.2 -> 9.0; mirrorWall 8.2 -> 6.6',
+  }),
+  num('s.halfResMinRoughness', 'sssr', 'Half res: full-res path below roughness', 0, 1, 0.01, 0, {
+    apply: 'rebuild', appliesTo: OURS_SSR, api: 'settings.halfResMinRoughness',
+    tradeoff: 'W75 (X5 step 2, D5084): with half-res reflections, pixels below this perceptual roughness (mirrors, near-mirrors) are traced by a second full-res tracer (every pixel its own ray, its own RT pass, no denoiser) and composited at full res. 0 = every pixel at half res (step 1). At 0.05 carConcept\'s 0.03 floor goes to the full-res path.',
+    cost: 'a second full-res tracer + RT pass: at 0.01, 1080p sum carConcept 11.6 (half 10.6, full 14.0), mirrorWall 8.4 (full 8.2); at 0.05 carConcept 28.0 vs full 23.1 (W75)',
+  }),
+  sel('s.rayReuse', 'sssr', 'Ray reuse', [['copy', 'copy (FFX quad copy)'], ['ratio', 'ratio estimator (BRDF / pdf-weighted neighbours)']], 'copy', {
+    appliesTo: OURS_SSR, api: 'settings.rayReuse',
+    tradeoff: 'W73 (X3, D5040): what a glossy px without its own ray gets. \'copy\' pastes its quad\'s ray (FFX). \'ratio\' resolves every glossy px from its own ray, its quad\'s and s.rayReuseTaps neighbours within s.rayReuseRadius, weighted by its own BRDF along the direction to each neighbour\'s hit over that ray\'s pdf (SSSR 2015, DiligentFX); same surface only. The target: ratio at spq 1 about as quiet as copy at spq 4. Experiment; the FFX denoiser still runs after it.',
+    cost: 'one extra pass + 16 B/px record buffer (not timed yet: shared GPU)',
+  }),
+  sel('s.rayReuseTaps', 'sssr', 'Ray reuse taps', [['4', '4'], ['8', '8']], 8, {
+    appliesTo: OURS_SSR, api: 'settings.rayReuseTaps',
+    tradeoff: 'W73: neighbour taps of the ratio resolve besides the px\'s own quad. Only with s.rayReuse ratio.',
+  }),
+  num('s.rayReuseRadius', 'sssr', 'Ray reuse radius', 0, 16, 0.5, 4, {
+    appliesTo: OURS_SSR, api: 'settings.rayReuseRadius',
+    tradeoff: 'W73: tap radius in px at perceptual roughness >= 0.2, x sat(5 r) below (DiligentFX\'s 4 sat(5 r)). Wider is quieter and blurs more (the line-spread gate). Only with s.rayReuse ratio.',
+  }),
+  sel('s.rayReusePattern', 'sssr', 'Ray reuse tap pattern', [['frame', 'rotated per frame'], ['pixel', 'fixed per pixel']], 'frame', {
+    appliesTo: OURS_SSR, api: 'settings.rayReusePattern',
+    tradeoff: 'W73 (D5046): the ratio taps re-rotated per pixel and frame (the resolve\'s error moves every frame) or fixed per pixel (it stays put, for the denoiser\'s temporal pass). Only with s.rayReuse ratio.',
+  }),
+  bool('s.rayReuseMixSources', 'sssr', 'Ray reuse: mix hits and misses', false, {
+    appliesTo: OURS_SSR, api: 'settings.rayReuseMixSources',
+    tradeoff: 'W73 (D5047): off (default), the ratio resolve reuses only rays of the px\'s own hit source (screen hit vs miss, D3660). On, it also averages the hit / miss pattern, but the confidence then is a share of hits and the depth-aware blend (h.depthAware, D2400) hands the hits the whole weight: carConcept door raw 1.04 -> 1.38 linear (SSR only). Use with h.depthAware 0.',
+  }),
+  sel('s.quadBaseRotation', 'sssr', 'Quad base rotation', [['fixed', 'fixed (FFX: top-left)'], ['frame', 'frame (corner cycles per frame)'], ['pattern', 'pattern (4x4 Latin square, per frame)']], 'fixed', {
+    appliesTo: OURS_SSR, api: 'settings.quadBaseRotation',
+    tradeoff: 'W71 (X1 #1, D5000): which px of a 2x2 quad traces when samplesPerQuad < 4. \'fixed\' keeps the copy\'s 2x2 grid in place (it can show under TAA / the upscaler and drift in blocks at rest); \'frame\' / \'pattern\' move it every frame, so the history averages it out. Composes with Quad copy \'sameSurface\'.',
+    cost: 'classify +0.06 ms at 1080p (pattern: 0.154 -> 0.211, contact + RT; intersect / rt trace within noise; W71)',
+  }),
   num('s.maxTraversalIntersections', 'sssr', 'Max march steps', 0, 256, 1, 128, { appliesTo: OURS_SSR, api: 'settings.maxTraversalIntersections', tradeoff: 'Hi-Z march steps per ray: fewer is cheaper and sends long rays to the miss list (probe or RT); 0 = SSR off.' }),
   num('s.minTraversalOccupancy', 'sssr', 'Min occupancy', 0, 64, 1, 4, { appliesTo: OURS_SSR, api: 'settings.minTraversalOccupancy', tradeoff: 'Glossy rays stop once this few lanes of their subgroup still march (FFX): higher ends long tails earlier (cheaper, more misses). Mirrors ignore it.' }),
   num('s.depthBufferThickness', 'sssr', 'Thickness', 0, 0.5, 0.001, 0.2, {
@@ -164,10 +200,24 @@ export const SETTINGS: Setting[] = [
   }),
   num('s.thicknessRoughnessFactor', 'sssr', 'Thickness per alpha', 0, 20, 0.1, 10, { defaultNote: 'showcase scenes set their own', appliesTo: OURS_SSR, api: 'settings.thicknessRoughnessFactor', tradeoff: 'Thickness added per unit of the pixel\'s alpha: rough rays need less precision (D1001).' }),
   num('s.thicknessLengthFactor', 'sssr', 'Thickness per ray length', 0, 0.1, 0.001, 0.01, { appliesTo: OURS_SSR, api: 'settings.thicknessLengthFactor', tradeoff: 'Thickness added per world unit of ray length: far hits are coarser (D1001).' }),
+  num('s.thicknessDepthFactor', 'sssr', 'Thickness per view depth', 0, 0.1, 0.001, 0, {
+    appliesTo: OURS_SSR, api: 'settings.thicknessDepthFactor',
+    cost: 'intersect +0.008 ms at 1080p (add, k 0.01); relative: none measured (contact + RT, W71). Relative 0.01 sends 9-13 % more rays to the miss list',
+    tradeoff: 'W71 (X1 #2, D5001): thickness += k x the hit\'s view depth, so one value scales from a toy car to a hall (with mode \'relative\' it is the whole thickness: Diligent\'s distance / viewZ < 0.025 is k 0.025). 0 = off.',
+  }),
+  sel('s.thicknessDepthMode', 'sssr', 'Thickness depth mode', [['add', 'add (to the constant, alpha and length terms)'], ['relative', 'relative (k x view depth alone, Diligent)']], 'add', {
+    appliesTo: OURS_SSR, api: 'settings.thicknessDepthMode',
+    tradeoff: 'W71 (X1 #2, D5001): how Thickness per view depth combines. \'relative\' drops the constant, per-alpha and per-length terms; it takes effect only once Thickness per view depth is above 0 (k 0 = off in both modes).',
+  }),
   num('s.mostDetailedMip', 'sssr', 'Most detailed mip', 0, 4, 1, 0, { appliesTo: OURS_SSR, api: 'settings.mostDetailedMip', tradeoff: 'Pyramid mip glossy rays start on: higher is cheaper and coarser. Mirrors always use 0.' }),
   sel('hit', 'sssr', 'Hit colour', [['final', 'last frame\'s image'], ['lit', 'last frame\'s lit (no SSR)'], ['current', 'this frame, no specular (FFX)']], 'current', {
     pageDefault: 'final', appliesTo: OURS_SSR, api: 'settings.hitColor (+ historySource)',
     tradeoff: '`current` (FFX, the package default) has no reflections in reflections: a mirror seen in a mirror is black (W9: 99.6% px). `final` reprojects last frame\'s final image (D69, D1002): mirror-in-mirror, one frame late, can ghost.',
+  }),
+  bool('s.historyEdgeConfidence', 'sssr', 'History edge confidence', false, {
+    appliesTo: OURS_SSR, api: 'settings.historyEdgeConfidence',
+    cost: 'intersect +0.01, rt trace +0.005 ms at 1080p at rest (mirrorWall, hit final, re-shade off); traced rays +0.03-0.16 % while panning (W71)',
+    tradeoff: 'W71 (X1 #4, D5003): with Hit colour from last frame and Hit specular \'off\' (the only case a hit reads last frame\'s colour), the edge fade is min(now, previous) and a hit that was off screen last frame gets confidence 0 (probe / RT) instead of this frame\'s colour without specular: no lit / unlit pops at the screen edge while panning. Screen-space hits only: the RT pass\'s on-screen history reuse (D906) keeps the edge pop. More misses near the edges: more traced rays with RT. No effect with the re-shade (default).',
   }),
   sel('reshade', 'sssr', 'Hit specular (re-shade)', [['reshade', 'specular along the ray (re-shade)'], ['off', 'screen colour as is (FFX)']], 'reshade', {
     appliesTo: OURS_SSR, api: 'settings.hitShading',
@@ -184,15 +234,35 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W52 (D3641): the lobe filter x this where traced and screen-space hits mix (last frame\'s source around the pixel). W50\'s halo: lip 80 -> 56 at 0, but the skirt 50 -> 23 (PT 35), and it overshoots at 1080p (D3643: the halo is mostly a 960x540 effect). Below 1 the tracer is rebuilt once (one more sampled texture).',
     cost: '+0.07 ms (W52)',
   }),
+  num('s.hitLobeFilterGrazing', 'sssr', 'Lobe filter grazing shrink', 0, 1, 0.05, 0, {
+    appliesTo: OURS_SSR, api: 'settings.hitLobeFilterGrazing (+ traceSettings)',
+    tradeoff: 'W71 (X1 #3, D5002): the hit lobe filter\'s spread x mix(1, mix(sat(2 NdotV), 1, sqrt(roughness)), this) (SSSR 2015 slide 85 at 1): less widening on floors seen at a grazing angle, where the lobe filter over-blurs. Screen-space and traced hits. 0 = off.',
+    cost: 'intersect +0.01 ms at 1080p (contact + RT, g 1); RT: a second trace pipeline, compiled on first use (W71)',
+  }),
   sel('s.hitShadeOcclusion', 'sssr', 'Re-shade occlusion', [['off', 'off'], ['screen', 'screen (8-sample depth march along R)']], 'off', {
     appliesTo: OURS_SSR, api: 'settings.hitShadeOcclusion (+ traceSettings)',
     tradeoff: 'W52 (D3642): a re-shaded hit marches the depth buffer along R and darkens where blocked (the re-shade had no occlusion, W44). Wheel 43 -> 37 (PT 26); works without RT. Untuned.',
     cost: 'intersect +0.04 ms (W52)',
   }),
-  num('s.mirrorBias', 'sssr', 'Mirror bias', 0, 1, 0.01, 0, {
+  num('s.mirrorBias', 'sssr', 'Mirror bias', 0, 0.99, 0.01, 0, { // W72: capped (compensated, f stops at 0.99: MAX_COMPENSATED_BIAS)
     appliesTo: OURS_SSR, api: 'settings.mirrorBias',
     tradeoff: 'D49: truncates the GGX lobe toward the mirror direction: less noise, a sharper (biased) reflection. W32 / W39: no gain with the denoiser on a still or orbiting camera; W40: 0.7 halves rest shimmer on the carConcept floor (0.31 -> 0.14/255).',
     cost: 'free (one multiply in the sample)',
+  }),
+  sel('s.hitColorFilter', 'sssr', 'Hit colour filter', [['off', 'off (the hit texel, FFX)'], ['cone', 'cone (pre-filtered pyramid by the lobe cone at the hit)']], 'off', {
+    appliesTo: OURS_SSR, api: 'settings.hitColorFilter (the tracer builds its variant async on the first \'cone\' frame)',
+    tradeoff: 'W72 (X2 #5, D5020): a screen-space hit reads its screen colour (the re-shade\'s diffuse) from an 8-level pyramid at log2 of the lobe cone\'s width in px where the ray hits: long rays blur, contacts stay sharp (SSSR 2015). Raw fireflies go (r 0.35 sphere p999 23.9 -> 3.2 x mean, grazing emissive wall raw MAD 32 -> 8 at 5 deg); no widening on the line spread (r 0.05 x1.24 -> 1.22) and no leakage at silhouettes, but alone it brings no lost glossy reflection back and the denoised grazing floor gets blurrier (gradient x0.79 -> 0.40). Use it with Compensate mirror bias.',
+    cost: '1080p (mirrorWall, glossy floor, shared GPU, A/B): pyramid pass +0.24-0.26 ms, intersect within noise (W72)',
+  }),
+  num('s.hitColorConeScale', 'sssr', 'Hit colour cone scale', 0, 4, 0.05, 1, {
+    appliesTo: OURS_SSR, api: 'settings.hitColorConeScale',
+    tradeoff: 'W72 (D5020): scales the cone of Hit colour filter (1 = the reflected GGX lobe\'s full width at half maximum, 2.57 alpha). Only with the cone on. 2 widens the line spread (r 0.05 x1.22 -> 1.33): keep 1.',
+    cost: 'free',
+  }),
+  bool('s.mirrorBiasCompensate', 'sssr', 'Compensate mirror bias', false, {
+    appliesTo: OURS_SSR, api: 'settings.mirrorBiasCompensate (+ traceSettings, mirrorBiasSplit)',
+    tradeoff: 'W72 (X2 #6, D5021-D5022; needs Hit colour filter cone): Mirror bias f narrows the sampled lobe to alpha sqrt(1 - f) instead of truncating it, and the cone and the lobe filter (SSR and RT) supply alpha sqrt(f): less noise at the same total width. At f 0.5 the line spread\'s r 0.15 reflection, lost at the defaults, comes back at x0.99 of the PT (AA off x0.95) and r 0.05 narrows x1.24 -> 1.18; truncation (no compensation) brings it back at x0.55 (too sharp). Grazing denoised MAD -0.7..-1.0 at 5-15 deg but blurrier. f 0.7 x0.93 (AA off x0.88).',
+    cost: 'free on top of the cone (scales in the sample and the lobe filter)',
   }),
   sel('s.fallbackRoughness', 'sssr', 'Miss fallback roughness', [['surface', 'surface (the pixel\'s roughness)'], ['mirror', 'mirror (FFX: the ray\'s direction, sharp)']], 'surface', {
     appliesTo: OURS_SSR, api: 'settings.fallbackRoughness (+ traceSettings.fallbackRoughness)',
@@ -238,6 +308,20 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W52 (D3640): D3513\'s visibility ray along R for on-screen re-shaded traced hits too. Wheel 43 -> 41 vs PT 26 (carConcept); mirrors seen in mirrors go black where blocked (facingMirrors, D3542). Needs Hit shadow rays on.',
     cost: 'rt trace +0.30 ms (W52)',
   }),
+  sel('t.tracedMissRate', 'rt', 'Traced miss rate (glossy)', [['full', 'full (every miss traced)'], ['half', 'half (every other quad + bilateral fill)']], 'full', {
+    appliesTo: RT, api: 'traceSettings.tracedMissRate (or settings.tracedMissRate; traceSettings wins)',
+    tradeoff: 'W74 (X4, D5060): \'half\' traces the glossy misses of every other 2x2 quad (a checkerboard flipping each frame); the others take their traced neighbours\' result through core bilateralFill (plane distance, normal power, roughness, same source), or the probe where none fits. Half the glossy BVH rays; mirrors and near-mirrors stay full rate.',
+  }),
+  num('t.tracedHalfRateMinRoughness', 'rt', 'Half rate from roughness', 0, 1, 0.01, 0.05, {
+    appliesTo: RT, api: 'traceSettings.tracedHalfRateMinRoughness (or settings.; DEFAULT_TRACED_HALF_RATE_MIN_ROUGHNESS)',
+    tradeoff: 'W74: perceptual roughness from which \'half\' applies; smoother misses are all traced (mirror-like floors and paint keep their sharp reflections).',
+  }),
+  num('t.fillPlaneTolerance', 'rt', 'Fill: plane tolerance', 0, 0.1, 0.001, 0.01, { appliesTo: RT, api: 'traceSettings.fillPlaneTolerance (BilateralFillWeights.planeTolerance)', tradeoff: 'W74: a neighbour farther than this x the view distance from the pixel\'s tangent plane takes no weight (silhouettes, steps). 0 = off.' }),
+  num('t.fillNormalPower', 'rt', 'Fill: normal power', 0, 128, 1, 16, { appliesTo: RT, api: 'traceSettings.fillNormalPower', tradeoff: 'W74: pow(dot(n_p, n_q), k): higher keeps the fill on one face (curved and normal-mapped surfaces fall back to the probe more). 0 = off.' }),
+  num('t.fillRoughnessTolerance', 'rt', 'Fill: roughness tolerance', 0, 1, 0.01, 0.1, { appliesTo: RT, api: 'traceSettings.fillRoughnessTolerance', tradeoff: 'W74: perceptual roughness difference at which a neighbour\'s weight reaches 0. 0 = off.' }),
+  num('t.fillSourceMask', 'rt', 'Fill: accepted sources', 0, 31, 1, 22, { appliesTo: RT, api: 'traceSettings.fillSourceMask', tradeoff: 'W74: RT_SOURCE codes a neighbour may have, one bit each: 22 = traced hit (2) + traced miss (4) + on-screen traced hit (16). +1 also takes screen-space hits, +8 capped entries.' }),
+  num('t.fillMinWeightSum', 'rt', 'Fill: min weight sum', 0, 1, 0.01, 0.01, { appliesTo: RT, api: 'traceSettings.fillMinWeightSum', tradeoff: 'W74: below this the pixel keeps intersect\'s probe fallback (as an entry past the ray budget).' }),
+  sel('t.fillFootprint', 'rt', 'Fill: footprint (quads)', [['3', '3x3 quads'], ['2', '2x2 quads'], ['4', '4x4 quads']], 3, { appliesTo: RT, api: 'traceSettings.fillFootprint', tradeoff: 'W74: quads gathered around the pixel\'s own; 3 reaches the 4 traced edge neighbours of the checkerboard, 4 also the next ring (wider, softer).' }),
 
   // ---- hybrid ----------------------------------------------------------------------------------------------
   num('h.depthAware', 'hybrid', 'Depth-aware blend', 0, 1, 0.05, 1, { appliesTo: OURS_SSR, api: 'hybrid.depthAware.value', tradeoff: 'D2400: keeps the probe off hits it lies behind (1); 0 = FFX\'s confidence blend (the wall pattern showed through the reflected sphere, W22).' }),
