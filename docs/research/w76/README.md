@@ -69,7 +69,15 @@ Data: data/ident-*.log, data/ident-finals.txt. Two harness traps on the way (doc
 
 ## Checks whose expectations changed
 
-CHECKS_CHANGED
+Each failed at the new defaults first, then was changed (scripts/run-headless.mjs):
+
+- **sssr-core**: subgroup / workgroup parity and the X1 identities compared a tracer still on 'off' (the cone builds asynchronously) with one on 'cone'; the page now warms the cone before comparing (`warm()`). New: the W76 default cases (absent = explicit cone + compensation 0.5; 'off' alone = the pre-W76 explicit path; `missesTraced` = 'relative' 0.02; `missesTraced` + mode 'add' or factor 0 = RT off's thickness) and that the defaults act. `hitLobeFilterGrazing` / `historyEdgeConfidence` identities replaced by `hitColorConeGrazing`.
+- **ssr, W72 hitColorFilter check**: it encoded "unset = 'off'"; now unset = explicit cone + compensation 0.5 = 'cone', 'off' = 'off' + compensation (ignored). The glossy raw-radiance mean bound: the cone alone stays within 10 % of off (1.003); the compensated default reads +13 % (the narrower sample validates more hits, and raw radiance is confidence x hit over a black fallback), bound 0.9-1.25. The rt=1 case: unset = explicit default, stable.
+- **ssr, rayReuse and mirrorBias (D49) checks**: run with `hitColorFilter: 'off'` (they test the copy path and D49's truncation; the async cone changed the hash mid-check, and with compensation the bias narrows instead of truncating).
+- **ssr-rt / ssr-rt-bvh**: D901's hit shading vs on-screen colour (contact, @pmndrs/bvh 1.08 -> 1.10 against a 10 % bound) and D4702's mixed-size atlas check (each probe set rebuilds the tracer, whose cone comes up a few frames later) run on the pre-W76 rays: they test hit shading and atlases, calibrated on that ray set.
+- **hybrid, half-res**: the 'mixed' check went with `halfResMinRoughness`; shots wait for the cone after a resolution switch (the pass recreates its tracer on the next trace, and the old tracer's flag passed the wait: full -> half -> full max 133/255 until fixed, 0 after).
+- **ssr-exp-x1**: no `historyEdgeConfidence` edge-pan check; with RT the X1 defaults compared are W76's ('relative' 0.02).
+- **New adapter checks**: pixi3d arcade and babylon run the cone at 0.5 with compensation without any settings, and 'off' still switches it off (pixi).
 
 ## Performance
 
