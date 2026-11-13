@@ -229,6 +229,7 @@ For the fine-tune pass once the phases are built and running. Nothing here block
 - W72: agents share the session scratchpad directory; another agent's server log overwrote `scratchpad/vite.log`. Use a per-agent subfolder.
 - Flaky: hybrid's half-res + ratio + half-rate smoke line failed once right after a branch switch, then passed twice (W72); likely the async fill pipelines not ready (W75's halfRateReady note). Make the check wait for `halfRateReady`. Again on W80's merge check (5452, shared GPU): `half-rate skipped 0, filled 0`, then passed twice with 940 / 3594 (the same numbers as main).
 - Flaky under GPU load: `ssr` 'rayReuse ... then changes the radiance' failed once on main after the W77 merge (ratio's async pipelines not built inside the check's frame window), passed on re-run. Make the check wait for the ratio pipelines to be ready (a readiness flag) instead of a frame count.
+- Flaky under GPU load: after the W78 merge `--only hybrid` exited 2 once with no FAIL line (runner / browser exit, not an assertion), passed in full on re-run. Watch for a pattern.
 - Within one page, contact under the upscaler varies more than "exact after a reset" (drift 0.745 vs 0.793, orbit 9.75 vs 9.44 for the same setting).
 
 **From the external SSR sources (2026-11-12, DiligentFX / JBU / Stochastic SSR)**
