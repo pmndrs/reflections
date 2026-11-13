@@ -207,7 +207,7 @@ export const SETTINGS: Setting[] = [
     appliesTo: OURS_SSR, api: 'settings.thicknessDepthFactor (RT_THICKNESS_DEPTH_FACTOR)',
     rtDefault: 0.02, defaultNote: 'with RT on and the mode \'relative\': 0.02 (W76)',
     rtWhy: 'W76 (maintainer\'s call on X1 #2, D5001): the relative test at 0.02 x view depth stops thin geometry turning into a slab (lineSpreadThin x4.25 -> x1.45..x2.2 of the PT\'s width) and is flat on carConcept, toyCar, chess, Sponza with RT (within 0.15 MAD); the rays it rejects go to the RT pass. Without RT they would take the probe (Sponza +1 %, more misses), so the default stays 0 there. `thicknessDepthFactor: 0` (or mode \'add\') restores the old test.',
-    cost: 'intersect +0.008 ms at 1080p (add, k 0.01); relative: none measured (contact + RT, W71). Relative 0.01 sends 9-13 % more rays to the miss list',
+    cost: 'intersect +0.008 ms at 1080p (add, k 0.01); relative: none measured (contact + RT, W71). Relative 0.01 sends 9-13 % more rays to the miss list. W76, the RT default (relative 0.02, rough: re-time on a quiet machine): traced rays Sponza +15 % (rt trace ~+0.1 ms at 1080p), mirrorWall +3 %, carConcept 0',
     tradeoff: 'W71 (X1 #2, D5001): thickness += k x the hit\'s view depth, so one value scales from a toy car to a hall (with mode \'relative\' it is the whole thickness: Diligent\'s distance / viewZ < 0.025 is k 0.025). 0 = off.',
   }),
   sel('s.thicknessDepthMode', 'sssr', 'Thickness depth mode', [['add', 'add (to the constant, alpha and length terms)'], ['relative', 'relative (k x view depth alone, Diligent)']], 'add', {
@@ -251,7 +251,7 @@ export const SETTINGS: Setting[] = [
     appliesTo: OURS_SSR, api: 'settings.hitColorFilter (DEFAULT_HIT_COLOR_FILTER; the tracer builds its variant async on the first \'cone\' frame)',
     defaultNote: 'W76: `cone` with compensation at mirror bias 0.5; `off` is the one switch back to the pre-W76 tracer (bit for bit)',
     tradeoff: 'W72 (X2 #5, D5020): a screen-space hit reads its screen colour (the re-shade\'s diffuse) from an 8-level pyramid at log2 of the lobe cone\'s width in px where the ray hits: long rays blur, contacts stay sharp (SSSR 2015). Raw fireflies go (r 0.35 sphere p999 23.9 -> 3.2 x mean, grazing emissive wall raw MAD 32 -> 8 at 5 deg); no widening on the line spread (r 0.05 x1.24 -> 1.22) and no leakage at silhouettes, but alone it brings no lost glossy reflection back and the denoised grazing floor gets blurrier (gradient x0.79 -> 0.40). Use it with Compensate mirror bias.',
-    cost: '1080p (mirrorWall, glossy floor, shared GPU, A/B): pyramid pass +0.24-0.26 ms, intersect within noise (W72)',
+    cost: 'W76 (rough, shared GPU: re-time on a quiet machine): hit colour pyramid pass 0.24-0.27 ms at 1080p, 0.43-0.63 ms at 1440p (carConcept, Sponza, mirrorWall, RT on, loop stopped, interleaved A/B); intersect within the noise. W72: +0.24-0.26 ms at 1080p',
   }),
   num('s.hitColorConeGrazing', 'sssr', 'Hit colour cone grazing shrink', 0, 1, 0.05, 0, {
     appliesTo: OURS_SSR, api: 'settings.hitColorConeGrazing (DEFAULT_HIT_COLOR_CONE_GRAZING)',
@@ -266,7 +266,7 @@ export const SETTINGS: Setting[] = [
   bool('s.mirrorBiasCompensate', 'sssr', 'Compensate mirror bias', true, {
     appliesTo: OURS_SSR, api: 'settings.mirrorBiasCompensate (DEFAULT_MIRROR_BIAS_COMPENSATE; the RT pass follows the tracer, mirrorBiasSplit)',
     tradeoff: 'W72 (X2 #6, D5021-D5022; needs Hit colour filter cone): Mirror bias f narrows the sampled lobe to alpha sqrt(1 - f) instead of truncating it, and the cone and the lobe filter (SSR and RT) supply alpha sqrt(f): less noise at the same total width. At f 0.5 the line spread\'s r 0.15 reflection, lost at the defaults, comes back at x0.99 of the PT (AA off x0.95) and r 0.05 narrows x1.24 -> 1.18; truncation (no compensation) brings it back at x0.55 (too sharp). Grazing denoised MAD -0.7..-1.0 at 5-15 deg but blurrier. f 0.7 x0.93 (AA off x0.88).',
-    cost: 'free on top of the cone (scales in the sample and the lobe filter)',
+    cost: 'free on top of the cone (scales in the sample and the lobe filter); the default cone + compensation together: the cone\'s pyramid pass (W76, rough: re-time on a quiet machine)',
   }),
   sel('s.fallbackRoughness', 'sssr', 'Miss fallback roughness', [['surface', 'surface (the pixel\'s roughness)'], ['mirror', 'mirror (FFX: the ray\'s direction, sharp)']], 'surface', {
     appliesTo: OURS_SSR, api: 'settings.fallbackRoughness (+ traceSettings.fallbackRoughness)',

@@ -586,6 +586,9 @@ const REGION_DELTA = `async (full, probe, test) => {
  * switch that must end identical to the first full frame. (W75's 'mixed' check went with halfResMinRoughness:
  * W76, D5084.)
  */
+/** W76: step the page until its tracer runs the cone (the default, built asynchronously), at most ~6 s; a no-op with it off. */
+// (a frame first: after a resolution switch the pass recreates its tracer on the next trace, and the old one's flag would pass)
+const CONE_READY = `(async () => { const p = window.__p; for (let i = 0; i < 60; i++) { await p.step(1); if ((p.ssr.settings.hitColorFilter ?? 'cone') !== 'cone' || p.ssr.tracer?.outputs.hitColorFilterActive) break; await new Promise((r) => setTimeout(r, 100)); } return true; })()`;
 async function halfResChecks(pages) {
   const full = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1`);
   const half = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&denoise=1&rt=1&res=half`);
@@ -593,6 +596,7 @@ async function halfResChecks(pages) {
   pages.push(full, half, odd);
   const shotOf = async (p, prep = '') => {
     if (prep) await p.T(prep);
+    await p.T(CONE_READY); // W76: the default cone builds async; a shot before it runs 'off'
     await p.T('(window.__p.ssr.settings.frameIndex = 5, window.__p.ssr.settings.minTraversalOccupancy = 0, window.__p.ssr.resetHistory(), window.__p.hybrid.resetHistory(), true)');
     await p.T('window.__p.step(24)');
     return p.T('window.__p.shot()');
@@ -833,7 +837,8 @@ async function rayReuseChecks(pages) {
   pages.push(p);
   await p.T("window.__p.load('roughnessRamp')");
   await p.T("window.__p.setPose('strips')");
-  await p.T('window.__p.setSettings({ minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false })');
+  // W76: the cone (default) builds async and would change the hash mid-check; this tests rayReuse, so the cone is off
+  await p.T("window.__p.setSettings({ minTraversalOccupancy: 0, temporalVarianceGuidedTracing: false, hitColorFilter: 'off' })");
   await p.T('window.__p.step(4)');
   const h = {};
   for (const [k, v] of [['unset', null], ['copy', "'copy'"], ['ratio (first frame)', "'ratio'"], ['ratio', "'ratio'"], ['copy again', "'copy'"]]) {
@@ -982,7 +987,9 @@ async function hitColorFilterChecks(pages) {
     h.unset === h['cone + compensate 0.5 (explicit)'] && h.unset === h.cone && h.unset === h['unset again'] && a.out.unset.active
     && h.off === h['off + compensate (ignored)'] && h['off + bias 0.5'] === h['off + bias 0.5 + compensate (ignored)'] && h.off !== h['off + bias 0.5']
     && a.out['cone alone'].active && h['cone alone'] !== h.off && h['cone alone'] !== h.unset && h.unset !== h.off
-    && Math.abs(ratioMean - 1) < 0.1 && Math.abs(compMean - 1) < 0.1 && a.errors === 0,
+    // the cone alone keeps the mean (a black or wrong pyramid fails); with compensation the narrower sample validates more
+    // hits, and raw radiance is confidence x hit over a black fallback, so its mean rises (+13 % on these strips)
+    && Math.abs(ratioMean - 1) < 0.1 && compMean > 0.9 && compMean < 1.25 && a.errors === 0,
     `${JSON.stringify(h)}; glossy mean cone alone / off ${ratioMean.toFixed(4)}, default / off ${compMean.toFixed(4)}; GPU errors ${a.errors}`);
   check("ssr hitColorFilter 'cone' with rayReuse 'ratio' (W72 + W73): the ratio intersect variant reads the pyramid",
     a.out['ratio (default cone)'].active && h['ratio, off'] !== h.off && h['ratio (default cone)'] !== h['ratio, off'] && h['ratio, cone alone'] !== h['ratio (default cone)'] && a.errors === 0,
@@ -1293,6 +1300,10 @@ async function rtShadingNormalChecks(p, label) {
  * reference frame, both shadings on the same rays). A shadow ray can only darken a hit.
  */
 async function rtHitShadingLines(p, id) {
+  // W76: these compare hit shading on the same rays, calibrated on the pre-W76 ray set (D901's +-10 %): the new
+  // defaults (narrower compensated sample, 'relative' thickness with RT) move which pixels are traced (contact
+  // @pmndrs/bvh 1.08 -> 1.10), so this runs the pre-W76 tracer
+  await p.T("(window.__p.setSettings({ hitColorFilter: 'off', thicknessDepthFactor: 0 }), true)");
   const fmt = (hs) => `mean ${hs.meanShaded.toFixed(3)} vs ${hs.meanScreen.toFixed(3)} (ratio ${hs.ratio.toFixed(3)}), mean abs rel ${hs.meanAbsRel.toFixed(3)}`;
   // off, on, off again: the second 'off' is the frame-to-frame noise of this per-pixel comparison
   // (not zero with reuse off on 'contact'); information, the check is on the shaded hits below
@@ -1313,6 +1324,7 @@ async function rtHitShadingLines(p, id) {
   check(`rt ${id}: traced hits lit by the probes at the hit match the on-screen brightness (D901)`,
     hs.source === 'probes' && env.source === 'environment' && Math.abs(1 - on.ratio) <= 0.1 && Math.abs(1 - on.ratio) < Math.abs(1 - env.ratio),
     `${hs.source}: ${fmt(on)}; environment mean: ${fmt(env)}`);
+  await p.T("(['hitColorFilter', 'thicknessDepthFactor'].forEach((k) => delete window.__p.ssr.settings[k]), true)");
   return { on, off, fx, env };
 }
 
@@ -2396,6 +2408,9 @@ async function offscreenFillChecks(pages) {
 const RT_HIT_ATLASES = `async (poses) => {
   const p = window.__p;
   p.setHitColor('current'); p.setDenoise(false); p.setRT(true); p.setView('final');
+  // W76: each probe set rebuilds the tracer, whose default cone then builds asynchronously (its first frames run
+  // 'off'), and the traced rays follow the sample width: this compares probe atlases, so the cone is off
+  p.setSettings({ hitColorFilter: 'off' });
   const variants = { kit: {}, all512: { sizes: [512, 512, 512], resolution: 512 }, room: { probes: [0] } };
   const runs = {};
   for (const [name, v] of Object.entries(variants)) {
@@ -2443,6 +2458,7 @@ const RT_HIT_ATLASES = `async (poses) => {
     };
   }
   await p.setProbeVolumes(null);
+  delete p.ssr.settings.hitColorFilter;
   return out;
 }`;
 /** examples/ssr offscreen, `bvh` '' (three-mesh-bvh) or 'pmndrs': the {@link RT_HIT_ATLASES} check. JSON to out/w47-rt-hit-atlases[-pmndrs].json. */
