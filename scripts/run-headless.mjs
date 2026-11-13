@@ -291,6 +291,9 @@ async function x1CoreChecks(s, hasSubgroups) {
   const W76_CASES = [
     ['absent = cone + compensate + bias 0.5', {}, { hitColorFilter: 'cone', mirrorBiasCompensate: true, mirrorBias: 0.5 }],
     ["hitColorFilter 'off' = the pre-W76 explicit path", { hitColorFilter: 'off' }, { hitColorFilter: 'off', mirrorBiasCompensate: false, mirrorBias: 0 }],
+    // review: an explicit mirrorBias keeps D49's truncation (compensation defaults off with it); a bias of 0 is never compensated
+    ['explicit mirrorBias 0.5 = cone + truncation (no compensation)', { mirrorBias: 0.5 }, { hitColorFilter: 'cone', mirrorBiasCompensate: false, mirrorBias: 0.5 }],
+    ['explicit mirrorBias 0 + compensate = the cone alone', { mirrorBias: 0, mirrorBiasCompensate: true }, { mirrorBiasCompensate: false, mirrorBias: 0 }],
     ["missesTraced: unset thickness = 'relative' 0.02", { missesTraced: true }, { missesTraced: true, thicknessDepthMode: 'relative', thicknessDepthFactor: 0.02 }],
     ["missesTraced + thicknessDepthMode 'add' = RT off's thickness", { missesTraced: true, thicknessDepthMode: 'add' }, {}],
     ['missesTraced + thicknessDepthFactor 0 = RT off\'s thickness', { missesTraced: true, thicknessDepthFactor: 0 }, {}],

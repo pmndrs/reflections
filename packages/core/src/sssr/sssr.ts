@@ -138,16 +138,17 @@ export const HIT_COLOR_PYRAMID_LEVELS = 8;
  * W72 (X2 #6, D5021, D5022): how a glossy pixel's lobe (alpha) is split between the ray's sample
  * and the filters that stand in for the rest of it (the cone at screen-space hits, `hitLobeFilter`
  * at re-shaded and traced hits). Blur adds in squares, alpha^2 = alpha_sample^2 + alpha_filter^2:
- * with `mirrorBiasCompensate` (and the cone filter on) the sample takes alpha x sqrt(1 - f) and the
- * filters alpha x sqrt(f), f = mirrorBias, and the bias truncates nothing. Otherwise the sample is
- * the full lobe truncated by `mirrorBias` (D49) and the filters keep their full widths (1).
+ * with `mirrorBiasCompensate` (and the cone filter on, and f > 0) the sample takes alpha x sqrt(1 - f)
+ * and the filters alpha x sqrt(f), f = mirrorBias, and the bias truncates nothing. Otherwise the sample
+ * is the full lobe truncated by `mirrorBias` (D49) and the filters keep their full widths (1): f 0 is
+ * uncompensated (a zero filter share would zero `hitLobeFilter` and the cone, W76 review).
  */
 export function mirrorBiasSplit(s0: Pick<ScreenSpaceReflectionsSettings, 'mirrorBias' | 'mirrorBiasCompensate' | 'hitColorFilter'>): { sample: number; filter: number; compensated: boolean } {
   const s = resolveScreenSpaceSettings(s0);
   // compensated, f stops at MAX_COMPENSATED_BIAS: at f 1 the sample's alpha is 0, and a blue-noise U1 of
   // 1.0 (unorm8) puts the VNDF's normal in the tangent plane, normalize(vec3f(0)) = NaN (W72 review)
   const f = Math.min(s.mirrorBiasCompensate ? MAX_COMPENSATED_BIAS : 1, Math.max(0, s.mirrorBias ?? 0));
-  const compensated = !!s.mirrorBiasCompensate && s.hitColorFilter === 'cone';
+  const compensated = !!s.mirrorBiasCompensate && s.hitColorFilter === 'cone' && f > 0;
   return compensated ? { sample: Math.sqrt(1 - f), filter: Math.sqrt(f), compensated } : { sample: 1, filter: 1, compensated };
 }
 
@@ -167,7 +168,12 @@ export const DEFAULT_HIT_COLOR_FILTER: 'off' | 'cone' = 'cone';
  * (AA on; AA off x0.96 -> x0.93 / x0.86). So it stays an option of the cone, off by default.
  */
 export const DEFAULT_HIT_COLOR_CONE_GRAZING = 0;
-/** W76: `mirrorBiasCompensate` when unset (it acts only with `hitColorFilter: 'cone'`). */
+/**
+ * W76: `mirrorBiasCompensate` when unset **and `mirrorBias` is unset too** (it acts only with
+ * `hitColorFilter: 'cone'`). An app that sets `mirrorBias` keeps D49's meaning (truncation) unless it
+ * also sets `mirrorBiasCompensate: true` (W76 review: an explicit 0.5 / 0.7 must not silently change
+ * from truncation to compensation, and an explicit 0 must not zero the filters).
+ */
 export const DEFAULT_MIRROR_BIAS_COMPENSATE = true;
 /** W76: `mirrorBias` when unset and compensation is on (cone + `mirrorBiasCompensate`); 0 otherwise (D49's truncation stays opt-in). */
 export const DEFAULT_COMPENSATED_MIRROR_BIAS = 0.5;
@@ -183,9 +189,11 @@ export const RT_THICKNESS_DEPTH_FACTOR = 0.02;
 /**
  * The settings a dispatch runs with: every W76 default resolved (W76, `docs/SETTINGS.md` "What
  * changes when ray tracing is on"). An explicit value always wins.
- * - `hitColorFilter` {@link DEFAULT_HIT_COLOR_FILTER}, `mirrorBiasCompensate`
- *   {@link DEFAULT_MIRROR_BIAS_COMPENSATE}; `mirrorBias` {@link DEFAULT_COMPENSATED_MIRROR_BIAS} when
- *   both are on, else 0.
+ * - `hitColorFilter` {@link DEFAULT_HIT_COLOR_FILTER}.
+ * - `mirrorBias` and `mirrorBiasCompensate` as a pair: both unset -> compensation on at
+ *   {@link DEFAULT_COMPENSATED_MIRROR_BIAS} (with the cone; else bias 0). `mirrorBias` set alone ->
+ *   compensation off (D49's truncation, its pre-W76 meaning). `mirrorBiasCompensate` set alone -> that,
+ *   with the bias at 0.5 when compensating, else 0. A bias of 0 is never compensated (`mirrorBiasSplit`).
  * - With `missesTraced` (ray tracing on): `thicknessDepthMode` 'relative' and, only when the mode
  *   resolves to 'relative', `thicknessDepthFactor` {@link RT_THICKNESS_DEPTH_FACTOR}. So
  *   `thicknessDepthMode: 'add'` or `thicknessDepthFactor: 0` alone gives the pre-W76 thickness.
@@ -193,7 +201,7 @@ export const RT_THICKNESS_DEPTH_FACTOR = 0.02;
  */
 export function resolveScreenSpaceSettings<T extends Partial<ScreenSpaceReflectionsSettings>>(s: T): T {
   const hitColorFilter = s.hitColorFilter ?? DEFAULT_HIT_COLOR_FILTER;
-  const mirrorBiasCompensate = s.mirrorBiasCompensate ?? DEFAULT_MIRROR_BIAS_COMPENSATE;
+  const mirrorBiasCompensate = s.mirrorBiasCompensate ?? (s.mirrorBias === undefined ? DEFAULT_MIRROR_BIAS_COMPENSATE : false);
   const compensated = mirrorBiasCompensate && hitColorFilter === 'cone';
   const out: T = { ...s, hitColorFilter, mirrorBiasCompensate, mirrorBias: s.mirrorBias ?? (compensated ? DEFAULT_COMPENSATED_MIRROR_BIAS : 0) };
   if (s.missesTraced) {
@@ -353,11 +361,12 @@ export interface ScreenSpaceReflectionsSettings {
   /** W72 (D5020): scales the cone's width (1 = the reflected lobe's full width at half maximum). Default 1. */
   hitColorConeScale?: number;
   /**
-   * W72 (X2 #6, D5022; needs `hitColorFilter: 'cone'`, ignored without): `mirrorBias` f narrows the
+   * W72 (X2 #6, D5022; needs `hitColorFilter: 'cone'` and f > 0, ignored without): `mirrorBias` f narrows the
    * sampled lobe to alpha x sqrt(1 - f) instead of truncating it, and the cone and `hitLobeFilter`
    * supply alpha x sqrt(f), so the blur the bias removes comes back as filtering (less noise, the same
    * total lobe width; SSSR 2015 shipped f 0.7 with its cone). See {@link mirrorBiasSplit}. Default
-   * (W76) true; false keeps the cone with D49's truncation (and `mirrorBias` 0 unless set).
+   * (W76) true when `mirrorBias` is unset too, false when the app sets `mirrorBias` (it keeps D49's
+   * truncation); false keeps the cone with D49's truncation (and `mirrorBias` 0 unless set).
    */
   mirrorBiasCompensate?: boolean;
   /**
