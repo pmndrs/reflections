@@ -239,7 +239,7 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W52 (D3642): a re-shaded hit marches the depth buffer along R and darkens where blocked (the re-shade had no occlusion, W44). Wheel 43 -> 37 (PT 26); works without RT. Untuned.',
     cost: 'intersect +0.04 ms (W52)',
   }),
-  num('s.mirrorBias', 'sssr', 'Mirror bias', 0, 1, 0.01, 0, {
+  num('s.mirrorBias', 'sssr', 'Mirror bias', 0, 0.99, 0.01, 0, { // W72: capped (compensated, f stops at 0.99: MAX_COMPENSATED_BIAS)
     appliesTo: OURS_SSR, api: 'settings.mirrorBias',
     tradeoff: 'D49: truncates the GGX lobe toward the mirror direction: less noise, a sharper (biased) reflection. W32 / W39: no gain with the denoiser on a still or orbiting camera; W40: 0.7 halves rest shimmer on the carConcept floor (0.31 -> 0.14/255).',
     cost: 'free (one multiply in the sample)',

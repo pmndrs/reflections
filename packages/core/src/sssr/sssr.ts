@@ -118,6 +118,9 @@ export interface ScreenSpaceReflectionsOptions {
   hitSource?: boolean;
 }
 
+/** The largest `mirrorBias` `mirrorBiasCompensate` uses (W72): the sample keeps alpha x 0.1. */
+export const MAX_COMPENSATED_BIAS = 0.99;
+
 /** Levels of the hit-colour pyramid (W72): mip 0 (a converting copy) plus seven reductions, so cones up to 128 px wide (6 levels capped the r 0.35 sphere at 32 px: raw fireflies 1.72 % vs 1.22 % at 8, line spread unchanged). */
 export const HIT_COLOR_PYRAMID_LEVELS = 8;
 
@@ -130,7 +133,9 @@ export const HIT_COLOR_PYRAMID_LEVELS = 8;
  * the full lobe truncated by `mirrorBias` (D49) and the filters keep their full widths (1).
  */
 export function mirrorBiasSplit(s: Pick<ScreenSpaceReflectionsSettings, 'mirrorBias' | 'mirrorBiasCompensate' | 'hitColorFilter'>): { sample: number; filter: number; compensated: boolean } {
-  const f = Math.min(1, Math.max(0, s.mirrorBias ?? 0));
+  // compensated, f stops at MAX_COMPENSATED_BIAS: at f 1 the sample's alpha is 0, and a blue-noise U1 of
+  // 1.0 (unorm8) puts the VNDF's normal in the tangent plane, normalize(vec3f(0)) = NaN (W72 review)
+  const f = Math.min(s.mirrorBiasCompensate ? MAX_COMPENSATED_BIAS : 1, Math.max(0, s.mirrorBias ?? 0));
   const compensated = !!s.mirrorBiasCompensate && (s.hitColorFilter ?? 'off') === 'cone';
   return compensated ? { sample: Math.sqrt(1 - f), filter: Math.sqrt(f), compensated } : { sample: 1, filter: 1, compensated };
 }
