@@ -94,6 +94,10 @@ const downsamplerRepo = existsSync(downsamplerLink) ? realpathSync(downsamplerLi
 // @pmndrs/bvh is linked the same way (the bvh repo's main checkout next to this one, ../bvh; W48).
 const bvhLink = resolve(root, '../packages/core/node_modules/@pmndrs/bvh');
 const bvhRepo = existsSync(bvhLink) ? realpathSync(bvhLink) : null;
+// @pmndrs/raytracer the same way (pmndrs/pathtracer's checkout next to this one, ../pathtracer; P1.5). Its sources import
+// @pmndrs/bvh from its own node_modules, which resolve to the same bvh checkout as ours.
+const raytracerLink = resolve(root, '../packages/core/node_modules/@pmndrs/raytracer');
+const raytracerRepo = existsSync(raytracerLink) ? resolve(realpathSync(raytracerLink), '../..') : null;
 
 export default defineConfig({
   root,
@@ -109,7 +113,7 @@ export default defineConfig({
   }, sharedDeps, serveTzas],
   server: {
     port: Number(process.env.REFLECTIONS_PORT ?? 5370), strictPort: true, host: '127.0.0.1',
-    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : []), ...(pathTracerRepo ? [pathTracerRepo] : []), ...(downsamplerRepo ? [downsamplerRepo] : []), ...(bvhRepo ? [bvhRepo] : [])] },
+    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : []), ...(pathTracerRepo ? [pathTracerRepo] : []), ...(downsamplerRepo ? [downsamplerRepo] : []), ...(bvhRepo ? [bvhRepo] : []), ...(raytracerRepo ? [raytracerRepo] : [])] },
   },
   define: { __DENOISER_SOURCE__: JSON.stringify(denoiserRepo ?? ''), __PATHTRACER_SOURCE__: JSON.stringify(pathTracerRepo ?? '') },
   resolve: {

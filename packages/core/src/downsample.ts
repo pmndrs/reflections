@@ -43,6 +43,13 @@ export const REFLECTIONS_COLOR_BYTES_PER_SAMPLE = 64;
 export const REFLECTIONS_SAMPLED_TEXTURES_PER_STAGE = 32;
 
 /**
+ * Storage buffers per shader stage {@link reflectionsRequiredLimits} asks for, when the adapter has them (P1.5, D5200):
+ * the traced pass (3) + a probe radiance fallback (1) + the @pmndrs/raytracer provider (5: walk 3, scene copy 2) +
+ * probe hit shading (1). WebGPU's default is 8.
+ */
+export const REFLECTIONS_STORAGE_BUFFERS_PER_STAGE = 10;
+
+/**
  * Limits to request when creating the device (merge into `requestDevice({ requiredLimits })`, or
  * three's `new WebGPURenderer({ requiredLimits })`), each capped at what `adapter` supports, so the
  * request never fails:
@@ -54,7 +61,9 @@ export const REFLECTIONS_SAMPLED_TEXTURES_PER_STAGE = 32;
  * - up to 32 sampled textures per stage (WebGPU's default is 16), so probe sets of several sizes
  *   (one atlas binding per size, D4700) leave room for the material's own maps and the passes'
  *   G-buffer inputs (D4900). At the default 16 a four-size set still fits three's composite; the
- *   core passes check their count at build and say what to request.
+ *   core passes check their count at build and say what to request;
+ * - up to 10 storage buffers per stage (default 8), so the @pmndrs/raytracer trace provider (5) fits next to probe
+ *   fallbacks and probe hit shading (P1.5, D5200).
  */
 export function reflectionsRequiredLimits(adapter: GPUAdapter): Record<string, number> {
   const limits: Record<string, number> = { ...Downsampler.requiredLimits(adapter) };
@@ -62,5 +71,7 @@ export function reflectionsRequiredLimits(adapter: GPUAdapter): Record<string, n
   if (typeof maxBytes === 'number' && maxBytes > 32) limits.maxColorAttachmentBytesPerSample = Math.min(maxBytes, REFLECTIONS_COLOR_BYTES_PER_SAMPLE);
   const maxSampled = adapter.limits.maxSampledTexturesPerShaderStage;
   if (typeof maxSampled === 'number' && maxSampled > 16) limits.maxSampledTexturesPerShaderStage = Math.min(maxSampled, REFLECTIONS_SAMPLED_TEXTURES_PER_STAGE);
+  const maxStorage = adapter.limits.maxStorageBuffersPerShaderStage;
+  if (typeof maxStorage === 'number' && maxStorage > 8) limits.maxStorageBuffersPerShaderStage = Math.max(limits.maxStorageBuffersPerShaderStage ?? 0, Math.min(maxStorage, REFLECTIONS_STORAGE_BUFFERS_PER_STAGE));
   return limits;
 }

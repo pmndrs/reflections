@@ -44,6 +44,9 @@ export {
   bvhTraceSceneFromObjects, createPmndrsBvhTraceProviderFromObjects,
   type PmndrsBvhFromObjectsOptions, type ThreeBvhTraceScene, type ThreePmndrsBvhTraceProvider,
 } from './trace/PmndrsBvhTraceProvider';
+export {
+  createRaytracerTraceProviderFromObjects, sunFromObjects, type RaytracerFromObjectsOptions, type ThreeRaytracerTraceProvider,
+} from './trace/RaytracerTraceProvider';
 
 // Hybrid resolve (phase 5): SSR -> RT -> probes -> environment, denoised through the denoise seam
 // (any denoiser-core-shaped TemporalDenoiser<SpecularInputs>, e.g. denoiser/ffx's FfxReflectionDenoiser).

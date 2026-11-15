@@ -14,14 +14,19 @@
     "downsampler": "link:../../../downsampler-reflections"
   },
   "peerDependencies": {
-    "@pmndrs/bvh": "*"
+    "@pmndrs/bvh": "*",
+    "@pmndrs/raytracer": "*"
   },
   "peerDependenciesMeta": {
     "@pmndrs/bvh": {
       "optional": true
+    },
+    "@pmndrs/raytracer": {
+      "optional": true
     }
   },
   "devDependencies": {
-    "@pmndrs/bvh": "link:../../../bvh"
+    "@pmndrs/bvh": "link:../../../bvh",
+    "@pmndrs/raytracer": "link:../../../pathtracer/packages/raytracer"
   }
 }

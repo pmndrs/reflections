@@ -14,6 +14,9 @@ importers:
       '@pmndrs/bvh':
         specifier: link:../bvh
         version: link:../bvh
+      '@pmndrs/raytracer':
+        specifier: link:../pathtracer/packages/raytracer
+        version: link:../pathtracer/packages/raytracer
       '@pmndrs/reflections-babylon':
         specifier: workspace:*
         version: link:packages/babylon
@@ -85,6 +88,9 @@ importers:
       '@pmndrs/bvh':
         specifier: link:../../../bvh
         version: link:../../../bvh
+      '@pmndrs/raytracer':
+        specifier: link:../../../pathtracer/packages/raytracer
+        version: link:../../../pathtracer/packages/raytracer
 
   packages/pixi:
     dependencies:

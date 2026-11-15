@@ -40,7 +40,7 @@ import { PROBE_LOOKUP_EXPERIMENT } from '@pmndrs/reflections-core/probes/lookup'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   HybridReflections, MeshBVHTraceProvider, ReflectionProbe, applyReflectionsPreset, defaultHitMaterial, type DenoiserHitSourceMode, type ReflectionsPresetName, ReflectionProbes, type BakeOptions, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
-  createPmndrsBvhTraceProviderFromObjects, type ThreePmndrsBvhTraceProvider,
+  createPmndrsBvhTraceProviderFromObjects, type ThreePmndrsBvhTraceProvider, createRaytracerTraceProviderFromObjects,
 } from '@pmndrs/reflections/three';
 import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
 import {
@@ -91,6 +91,8 @@ const bvhKind: BvhKind = q.get('bvh') === 'three-mesh-bvh' ? 'three-mesh-bvh' : 
 const bvhBuilder = (q.get('bvhBuilder') ?? 'auto') as BvhBuilderPreference;
 /** `&bvhRayMasks=1`: @pmndrs/bvh's walk with its instance-mask test compiled in (W48; default off, D3591). */
 const bvhRayMasks = q.get('bvhRayMasks') === '1';
+/** P1.5: `&bvhCore=raytracer` builds core's provider over @pmndrs/raytracer's trace core instead of the @pmndrs/bvh wrapper (A/B). */
+const bvhCore = q.get('bvhCore') === 'raytracer' ? 'raytracer' : 'bvh';
 /** `&shadingNormals=0`: traced hits shaded with the flat geometric normal (D1700 A/B). */
 const shadingNormals = q.get('shadingNormals') !== '0';
 const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
@@ -458,6 +460,11 @@ async function main() {
   };
   async function buildProvider(kind: BvhKind, meshes: THREE.Mesh[]) {
     const t0 = performance.now();
+    if (kind === 'pmndrs' && bvhCore === 'raytracer') {
+      const built = await createRaytracerTraceProviderFromObjects(device, meshes, { builder: bvhBuilder, shadingNormals, rayMasks: bvhRayMasks });
+      const i = built.provider.info;
+      return { provider: built.provider as ExampleProvider, pmndrs: built as unknown as ThreePmndrsBvhTraceProvider, refit: built.refit, info: { kind, meshes: meshes.length, triangles: i.triangles, buildMs: performance.now() - t0, builder: i.builder, fallbackReason: i.fallbackReason } };
+    }
     if (kind === 'pmndrs') {
       const built = await createPmndrsBvhTraceProviderFromObjects(device, meshes, { builder: bvhBuilder, shadingNormals, rayMasks: bvhRayMasks });
       const i = built.provider.info;
@@ -893,7 +900,7 @@ async function main() {
       setHitProbes(on: boolean) { const o = (ssr as N).traceOptions; if (o) { if (on) delete o.probes; else o.probes = null; } },
       get hitShadingSource() { return ssr.hitShadingSource; },
       traceStats: () => ssr.readTraceStats(),
-      get bvh() { return bvhInfo; },
+      get bvh() { return bvhInfo && { ...bvhInfo, provider: provider?.name }; },
       tileCapCheck: () => tileCapCheck(),
       rtOracle: (n?: number, rays?: RayKind, which?: BvhKind) => rtOracle(n, rays, which),
       rtCompare: (n?: number, rays?: RayKind) => rtCompare(n, rays),

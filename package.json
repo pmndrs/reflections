@@ -58,6 +58,7 @@
   "peerDependencies": {
     "@babylonjs/core": ">=9.35.0 <10",
     "@pmndrs/bvh": "*",
+    "@pmndrs/raytracer": "*",
     "pixi.js": ">=8.22.0 <9",
     "three": ">=0.187.0",
     "three-mesh-bvh": ">=0.9.18"
@@ -67,6 +68,9 @@
       "optional": true
     },
     "@pmndrs/bvh": {
+      "optional": true
+    },
+    "@pmndrs/raytracer": {
       "optional": true
     },
     "pixi.js": {
@@ -81,8 +85,9 @@
   },
   "devDependencies": {
     "@babylonjs/core": "9.35.0",
-    "@pmndrs/reflections-babylon": "workspace:*",
     "@pmndrs/bvh": "link:../bvh",
+    "@pmndrs/raytracer": "link:../pathtracer/packages/raytracer",
+    "@pmndrs/reflections-babylon": "workspace:*",
     "@pmndrs/reflections-core": "workspace:*",
     "@pmndrs/reflections-pixi": "workspace:*",
     "@pmndrs/reflections-three": "workspace:*",

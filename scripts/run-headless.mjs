@@ -115,8 +115,15 @@ function killChrome(chrome) {
 const killAllChromes = () => { for (const c of [...liveChromes.keys()]) killChrome(c); };
 process.on('exit', killAllChromes);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { killAllChromes(); process.exit(130); });
+/**
+ * P1.5: `--rt-core raytracer` runs every `bvh=pmndrs` page on core's @pmndrs/raytracer provider (`&bvhCore=raytracer`),
+ * so the @pmndrs/bvh checks and timings A/B the two providers on the same scenes.
+ */
+const RT_CORE = args.includes('--rt-core') ? args[args.indexOf('--rt-core') + 1] : null;
+const withRtCore = (url) => (RT_CORE && /[?&]bvh=pmndrs\b/.test(url) && !/bvhCore=/.test(url) ? url.replace(/([?&]bvh=pmndrs)\b/, `$1&bvhCore=${RT_CORE}`) : url);
 /** Open `url` in a fresh headless Chrome; resolves once `window.__p` exists. */
-async function openPage(url, extraArgs = []) {
+async function openPage(url0, extraArgs = []) {
+  const url = withRtCore(url0);
   // Port 0: Chrome picks a free port and writes it to DevToolsActivePort. A random fixed port could
   // collide with another worktree's Chrome, and then this run drove that run's page (F2).
   const userDataDir = path.join(os.tmpdir(), `reflections-${Date.now()}-${process.pid}-${Math.floor(Math.random() * 1e9)}`);
@@ -158,7 +165,8 @@ async function openPage(url, extraArgs = []) {
   const T = (expr) => cdp.evalJs(`(async () => JSON.stringify(await (${expr})))()`).then((s) => (s === undefined ? undefined : JSON.parse(s)));
   const close = () => { try { ws.close(); } catch { /* noop */ } killChrome(chrome); };
   /** Load another URL in the same browser (same profile, so IndexedDB carries over); resolves once its `__p` exists. */
-  const navigate = async (next) => {
+  const navigate = async (next0) => {
+    const next = withRtCore(next0);
     await cdp.send('Page.navigate', { url: next });
     const until = Date.now() + 180_000;
     while (Date.now() < until) {
@@ -2698,6 +2706,7 @@ async function ssrRtBvhChecks(pages) {
     const before = results.logs.length;
     await p.T("window.__p.load('offscreen')");
     const bvh = await p.T('window.__p.bvh');
+    console.log(`  (info) provider: ${bvh.provider}`);
     for (const kind of ['camera', 'scene']) {
       const o = await p.T(`window.__p.rtOracle(4096, '${kind}')`);
       check(`rt @pmndrs/bvh (${bvh.builder}) agrees with THREE.Raycaster, ${kind} rays`, oracleOk(o),
@@ -2782,7 +2791,8 @@ async function ssrRtBvhChecks(pages) {
  */
 async function rtBvhTiming(pages) {
   const rounds = args.includes('--rt-bvh-rounds') ? Number(args[args.indexOf('--rt-bvh-rounds') + 1]) : 3;
-  const variants = [['three-mesh-bvh', '&bvh=three-mesh-bvh'], ['@pmndrs/bvh', '&bvh=pmndrs'], ['@pmndrs/bvh rayMasks on', '&bvh=pmndrs&bvhRayMasks=1']];
+  const variants = [['three-mesh-bvh', '&bvh=three-mesh-bvh'], ['@pmndrs/bvh', '&bvh=pmndrs&bvhCore=bvh'], ['@pmndrs/bvh rayMasks on', '&bvh=pmndrs&bvhCore=bvh&bvhRayMasks=1'],
+    ['@pmndrs/raytracer', '&bvh=pmndrs&bvhCore=raytracer']]; // P1.5: core's provider over @pmndrs/raytracer
   const scenes = [['offscreen', 'mirror'], ['mirrorWall', ''], ['contact', ''], ['moving', ''], ['boxRoom', ''],
     ...(fs.existsSync(path.join(ROOT, 'examples/assets/Sponza')) ? [['sponza', '']] : [])];
   const url = (param, scene, pose) => `http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1${param}&scene=${scene}${pose ? `&pose=${pose}` : ''}`;
