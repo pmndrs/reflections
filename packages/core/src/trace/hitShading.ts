@@ -445,7 +445,7 @@ fn rtpShadeHash(v: u32) -> u32 {
 fn rtpShadeRand(seed: u32, k: u32) -> f32 { return f32(rtpShadeHash(seed ^ rtpShadeHash(k + 0x9e3779b9u)) >> 8u) * 5.9604644775390625e-8; }
 fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f {
   let origin = P - dir * hit.t;
-  let seed = rtpShadeHash(hsoPixel.x * 0x8da6b343u ^ hsoPixel.y * 0xd8163841u ^ rtpShadeHash(rtpShadeFrame.x));
+  let seed = rtpShadeHash((hsoPixel.x * 0x8da6b343u) ^ (hsoPixel.y * 0xd8163841u) ^ rtpShadeHash(rtpShadeFrame.x));
   var L = vec3f(0.0);
   for (var i = 0u; i < RTP_SHADE_SAMPLES; i++) {
     let u = vec3f(rtpShadeRand(seed, 3u * i), rtpShadeRand(seed, 3u * i + 1u), rtpShadeRand(seed, 3u * i + 2u));

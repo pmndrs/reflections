@@ -2794,7 +2794,8 @@ async function rtBvhTiming(pages) {
   const variants = [['three-mesh-bvh', '&bvh=three-mesh-bvh'], ['@pmndrs/bvh', '&bvh=pmndrs&bvhCore=bvh'], ['@pmndrs/bvh rayMasks on', '&bvh=pmndrs&bvhCore=bvh&bvhRayMasks=1'],
     ['@pmndrs/raytracer', '&bvh=pmndrs&bvhCore=raytracer']]; // P1.5: core's provider over @pmndrs/raytracer
   const scenes = [['offscreen', 'mirror'], ['mirrorWall', ''], ['contact', ''], ['moving', ''], ['boxRoom', ''],
-    ...(fs.existsSync(path.join(ROOT, 'examples/assets/Sponza')) ? [['sponza', '']] : [])];
+    ...(fs.existsSync(path.join(ROOT, 'examples/assets/Sponza')) ? [['sponza', '']] : [])]
+    .filter(([scene]) => !args.includes('--rt-bvh-scenes') || args[args.indexOf('--rt-bvh-scenes') + 1].split(',').includes(scene));
   const url = (param, scene, pose) => `http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1${param}&scene=${scene}${pose ? `&pose=${pose}` : ''}`;
   const page = await openPage(url(variants[0][1], ...scenes[0]));
   pages.push(page);
