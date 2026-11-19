@@ -1,7 +1,7 @@
 // The examples' denoiser: denoiser/ffx's FfxReflectionDenoiser from the sibling Denoiser repo when
 // examples/vite.config.ts found one, else null (the hybrid resolve then runs undenoised).
 import { FfxReflectionDenoiser, type FfxReflectionDenoiserOptions } from '@pmndrs/denoiser-ffx';
-import type { SpecularInputs, TemporalDenoiser } from '@pmndrs/reflections/core';
+import { type ScreenSpaceReflectionsSettings, type SpecularInputs, type TemporalDenoiser } from '@pmndrs/reflections/core';
 
 export const denoiserAvailable = FfxReflectionDenoiser !== null;
 export const denoiserSource = __DENOISER_SOURCE__;
@@ -44,4 +44,46 @@ export function setDenoiserHitSource(hybrid: { denoiserHitSource: boolean; denoi
     ...(s.hitDistanceWeight !== undefined ? { hitDistanceWeight: s.hitDistanceWeight } : {}),
   });
   hybrid.resetHistory();
+}
+
+/**
+ * W78 (X3 phase B, D5140-D5145): BRDF / pdf weights in FFX's prefilter (`brdfWeights`), off by default.
+ * 'replace': they replace FFX's luminance weight; 'combine': both multiply. `?brdf=replace|combine`
+ * (`1` = replace).
+ */
+export type DenoiserBrdf = 'off' | 'replace' | 'combine';
+export function brdfFromQuery(q: URLSearchParams): DenoiserBrdf {
+  const v = q.get('brdf');
+  return v === 'replace' || v === 'combine' ? v : v === '1' ? 'replace' : 'off';
+}
+
+/**
+ * `minRoughness` (W78, `?brdfMin=<perceptual>`): the BRDF weights only from this perceptual roughness up
+ * (FFX `brdfMinAlpha` = its square); smoother pixels keep FFX's weights. Default 0.1 (FFX's own default,
+ * `brdfMinAlpha` 0.01).
+ * `keepBlack` (W78, on by default, `?keepBlack=0` turns it off): `HybridReflections.denoiserKeepHistoryOnBlack`
+ * (FFX's `keepHistoryOnBlack`), black samples accumulate instead of
+ * dropping the resolve's history (a dark environment, sparse glossy hits).
+ *
+ * Apply a BRDF mode on a page: the tracer writes its sample directions (`settings.sampleDirection`, a
+ * tracer rebuild on a flip), the hybrid hands them to the denoiser, and FFX weights by them; the hybrid
+ * also sets the target lobe to the alpha the tracer sampled (`brdfAlphaScale`, D5023's rule). Cheap: call it every frame before the tracer runs, so
+ * settings changes (mirror bias, compensation) follow. Returns true when the mode flipped (reset history then).
+ */
+export function syncDenoiserBrdf(
+  ssr: { settings: ScreenSpaceReflectionsSettings & { sampleDirection?: boolean } },
+  hybrid: { denoiserSampleDirection: boolean; denoiserKeepHistoryOnBlack: boolean; denoiser: unknown },
+  mode: DenoiserBrdf,
+  keepBlack = true,
+  minRoughness = 0.1,
+): boolean {
+  const on = mode !== 'off';
+  const flipped = !!ssr.settings.sampleDirection !== on;
+  if (on) ssr.settings.sampleDirection = true; else delete ssr.settings.sampleDirection;
+  hybrid.denoiserSampleDirection = on;
+  // only on a denoiser that has the options (FFX from the Denoiser repo after W78): main's would just store them
+  const d = hybrid.denoiser as { options?: object; setOptions?: (o: FfxReflectionDenoiserOptions) => void } | null;
+  if (d?.setOptions && d.options && 'brdfWeights' in d.options) d.setOptions({ brdfWeights: mode, brdfMinAlpha: minRoughness * minRoughness });
+  hybrid.denoiserKeepHistoryOnBlack = keepBlack;
+  return flipped;
 }

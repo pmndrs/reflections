@@ -93,3 +93,20 @@ These are the final numbers, after the review fixes and the merge with main. The
 3. X3 phase B: a denoiser-repo branch putting BRDF/pdf weights in FFX's prefilter (seam carries per-sample direction)?
 4. X5: a "performance" preset (half res + `hitSource: 'hits'`), and a denoiser-repo option to scale the spatial radius at half res?
 5. Keep or remove the code for the options that measured as no-ops (X1 #3 grazing shrink, X1 #4 history edge confidence, X5 `halfResMinRoughness`)?
+
+## What W76 made of decisions 1, 2 and 5
+
+- **Default: cone + compensation at `mirrorBias` 0.5** (`hitColorFilter: 'off'` is the one switch back, bit for bit vs main). The pyramid pass costs 0.24-0.27 ms at 1080p and 0.43-0.63 ms at 1440p; the intersect moves within the noise. Details and the baseline at the new defaults: `docs/research/w76/README.md`.
+- **Default with RT: 'relative' thickness 0.02** (explicit values win); docs/SETTINGS.md lists every RT-dependent default under "What changes when ray tracing is on".
+- **The grazing shrink on the cone**: an option, off. It recovers half of the grazing sharpness the cone costs, but takes the r 0.15 line out of the gate.
+
+## Removed options (W76, 2026-11-13)
+
+The maintainer's decision 5: options that measured as no-ops go, with the experiment written down here and in their DIVERGES rows (status "removed"). Their Params words stay as padding (SSSR 143 now carries the cone's grazing shrink, 144 bit 0 stays 0, 157 padding; RT 67 padding; upsample 37 padding).
+
+| Option (stream) | What was tried | Numbers | Why removed |
+|---|---|---|---|
+| `historyEdgeConfidence` (W71, X1 #4, D5003) | Diligent's screen-edge rule for hits coloured from last frame: confidence x min(vignette now, vignette at the previous position), and 0 where the previous texel was off screen (probe / RT instead of this frame's specular-free colour). | X0 edgePan, border-reflection d2 (off -> on): facingMirrors 11.68 -> 11.81, mirrorWall 7.44 -> 7.45, carConcept (re-shade off) 0.598 -> 0.602; offscreen inside its own 12 % run-to-run spread. At rest max 0/255. Traced rays +0.03-0.17 % while panning. | No measurable change on any page, and it only acts with `hitColor: 'history'` and `hitShading: 'off'`, which is not the default (the re-shade reads this frame's colour). |
+| `halfResMinRoughness` and the full-res mirror path (W75, X5 step 2, D5084) | Under `reflectionResolution: 'half'`, pixels below this roughness traced by a second full-res tracer (spq 4, its own RT pass and history, no denoiser) and composited at full res. | At 0.05: carConcept's 0.03 floor lands on the undenoised path, 1080p 28.0 ms vs full 23.1 (mirror RT trace 5.3 ms). At 0.01: mirrorWall / facingMirrors MAD vs full 1.36 -> 0.69 / 1.24 -> 0.61, at full res's cost (8.4 vs 8.2 ms), orbit std 0.48 -> 0.88 / 0.62 -> 1.10. | It buys mirror sharpness only by dropping the denoiser (orbit flicker x2) and costs as much as full res, so the performance preset never wants it. A denoised mirror path would be a new design. |
+| `hitLobeFilterGrazing` (W71, X1 #3, D5002) | SSSR 2015 slide 85's grazing shrink on `hitLobeFilter` (re-shaded SSR hits and traced hits), g 0 / 0.5 / 1, with and without `hitLobeFilterMixed`. | X0 grazing (r 0.15 floor, 5-60 deg): denoised MAD within 0.06 and gradient ratio within 0.005 of off, + RT within 0.04; the bench sweep on toyCar, carConcept, chess within 0.06; line spread r 0.05 unchanged. | The lobe filter only widens the probe / environment lookup at a hit, a fraction of a mip; the blur at grazing is the cone's and the denoiser's. The formula moved to the cone (`hitColorConeGrazing`, D5100), where it does move the grazing floor (gradient x0.53 -> x0.67 at 5 deg) but narrows the line-spread gate's r 0.15 line out of the gate (x1.01 -> x0.84, AA on), so it is off there too; with the lobe-filter half the numbers are the same to 0.01. The RT pass's second trace pipeline went with it. |
+

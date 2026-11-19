@@ -22,11 +22,7 @@ import type { FrameInputs } from '../frame/contract';
 export interface ReflectionUpsampleSettings extends Partial<BilateralFillWeights> {
   /** Where no bilinear tap fits, gather a 4x4 tent of samples around the pixel before giving up. Default true. */
   wideFallback?: boolean;
-  /**
-   * Samples below this perceptual roughness never tap (X5 step 2: those pixels were traced by the
-   * full-res mirror path, their half-res texels hold no reflection). Default 0.
-   */
-  minRoughness?: number;
+  // (W75's `minRoughness`, for X5 step 2's full-res mirror path, was removed by W76: D5084)
 }
 
 /** The upsample's default weights: bilateralFill's, with every source accepted (codes 0-7). */
@@ -88,7 +84,7 @@ struct U {
   // BilateralWeights flattened (words 32-36): a struct member of a uniform struct must be followed by a
   // 16-byte-rounded gap in core WGSL (without uniform_buffer_standard_layout), so no struct here
   wPlaneTolerance: f32, wNormalPower: f32, wRoughnessTolerance: f32, wSourceMask: u32,
-  wMinWeightSum: f32, tapMinRoughness: f32, weightInAlpha: u32,
+  wMinWeightSum: f32, _pad37: f32, weightInAlpha: u32, // 37: was tapMinRoughness (X5 step 2, removed by W76)
 };
 fn upsampleWeights() -> BilateralWeights {
   return BilateralWeights(u.wPlaneTolerance, u.wNormalPower, u.wRoughnessTolerance, u.wSourceMask, u.wMinWeightSum);
@@ -132,7 +128,6 @@ fn bilateralTap(cell: vec2i, pixel: vec2i) -> BilateralTap {
   t.spatial = k.x * k.y;
   if (t.spatial <= 0.0) { return t; }
   t.surface = surfaceAt(min(cell * 2, vec2i(u.fullSize) - 1));
-  if (t.surface.roughness < u.tapMinRoughness) { t.spatial = 0.0; return t; }
   t.radiance = textureLoad(tRadiance, cell, 0);
   if (u.weightInAlpha != 0u) { t.confidence = t.radiance.a; t.radiance.a = 0.0; }
   t.hitDistance = textureLoad(tHit, cell, 0).x;
@@ -231,7 +226,7 @@ export function createReflectionUpsample(device: GPUDevice, options: { width: nu
       f[28] = c.roughnessUnpack?.mul ?? 1; f[29] = c.roughnessUnpack?.add ?? 0;
       u[30] = inputs.source ? 1 : 0; u[31] = settings.wideFallback ?? true ? 1 : 0;
       bilateralFillWeightWords(w, f, u, 32);
-      f[37] = Math.max(0, settings.minRoughness ?? 0);
+      // 37: padding (was X5 step 2's minRoughness)
       u[38] = inputs.weightInAlpha ? 1 : 0;
       device.queue.writeBuffer(uniforms, 0, data);
       const depth = frame.textures.depth;

@@ -1,0 +1,12 @@
+  [PASS] babylon: W76 defaults reach the adapter (cone + compensation at mirrorBias 0.5, active, no GPU errors) - {"active":true,"hitColorFilter":"cone","mirror
+  [PASS] preset 'default' after 'performance': the tracer runs the package defaults from core's resolution (W76: cone + compensation at 0.5; 'relative' 0.02 wit
+  [PASS] preset 'default' after 'performance': the tracer runs the package defaults from core's resolution (W76: cone + compensation at 0.5; 'relative' 0.02 wit
+  [PASS] ssr hitColorFilter / mirrorBiasCompensate (W72, W76 defaults): unset = cone + compensation 0.5 bit for bit, 'off' = the old path (compensation ignored)
+  [PASS] pixi3d arcade: the cone + compensation 0.5 is the default without settings, 'off' turns it off without a rebuild (W72, W76) - {"active":true,"off":true
+  [PASS] sssr W76 defaults: absent = cone + compensate + bias 0.5, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: hitColorFilter 'off' = the pre-W76 explicit path, bit for bit - rays 123689 / 123689, misses 4210 / 4210, differing px radiance 0, h
+  [PASS] sssr W76 defaults: missesTraced: unset thickness = 'relative' 0.02, bit for bit - rays 123689 / 123689, misses 3381 / 3381, differing px radiance 0, hi
+  [PASS] sssr W76 defaults: missesTraced + thicknessDepthMode 'add' = RT off's thickness, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px r
+  [PASS] sssr W76 defaults: missesTraced + thicknessDepthFactor 0 = RT off's thickness, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px rad
+  [PASS] sssr W76 defaults act: RT on changes the thickness (more misses), the cone default changes the hits vs off - misses 3363 to 3381 with missesTraced; off
+  [PASS] sssr W76 hitColorConeGrazing 1 (default 0) changes the cone hits only (cube environment: same lists) - radiance 48096 px differ, hit distance 0, lists 

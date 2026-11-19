@@ -52,8 +52,8 @@ Row ids per cell. Out-of-scope rows are left out.
 | impact \ effort | S | M | L |
 |---|---|---|---|
 | **high** | T1, T2, T53 | T3, T10, T30 | T4 |
-| **med** | T5, T12, T16, T17, T21, T22, T24, T29 | T6, T11, T14, T15, T23, T25, T26, T27, T40, T41, T54, T58 | T7, T18, T35, T36, T37, T38, T42, T48, T52, T59 |
-| **low** | T8, T9, T13, T19, T32, T33, T43, T45, T47, T49, T55, T56, T57, T60, T61, T62, T63, T64 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
+| **med** | T5, T12, T16, T17, T21, T22, T24, T29, T69 | T6, T11, T14, T15, T23, T25, T26, T27, T40, T41, T54, T58, T70 | T7, T18, T35, T36, T37, T38, T42, T48, T52, T59 |
+| **low** | T8, T9, T13, T19, T32, T33, T43, T45, T47, T49, T55, T56, T57, T60, T61, T62, T63, T64, T71 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
 
 ## The full table
 
@@ -172,6 +172,9 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | T62 | Compatibility-mode probe bake (the downsampler reads and writes mips of one texture in one dispatch) | low | S | waiting | D4100, W35 | Waiting on a compat path in the downsampler; then re-run probe-core's compat(). |
 | T63 | @pmndrs/upscaler keeps presenting its first frame when its GPU timer can't allocate | low | S | waiting | D3624, W51, W48 | Report to the upscaler repo; then turn the bench's upscaler timings back on. |
 | T64 | 75/255 point-light highlight flake on instanced lit spheres (likely Dawn / Metal) | low | S | platform | D1 (debug row), docs/research/d1/ | Send the drafted upstream report in the D1 row. |
+| T69 | Review and merge W81: core's trace provider on @pmndrs/raytracer (pmndrs/pathtracer P1.5), branch `p1.5-raytracer-core` at ba370e5; the @pmndrs/bvh wrapper deleted | med | S | ready | W81, D5200-D5204, docs/research/w81/ (on the branch) | The pathtracer side is merged there (pathtracer main eacab97). On the branch: `ssr-rt-bvh` 38/38, full `pnpm check` green except T71 (fails identically on main); trace cost = the wrapper within -3..+6% (best effort). Apps that build their device without `reflectionsRequiredLimits` need `maxStorageBuffersPerShaderStage` >= 9 with probe hit shading (D5200; the showcase was fixed on the branch). Review, merge (the lead's call), then add the quiet-pass timing below. |
+| T70 | W81 open choices: default hit shading with RT, the hit material model, storage-buffer packing | med | M | decide | W81, D901, D903, D5200, D5201, pathtracer P1.5b / P1.3c | Recommendations from the pathtracer side (the maintainer's view; settle them in this repo's process): **hit shading** = staged combination: keep the probes as default now, expose `raytracerHitShading` (rtShade) as a three setting, then build bounce-only probes (no emitters, no sky) + rtShade and make that the default if it wins on both the on-screen agreement (D901 line) and a path-traced reference (the provider's scene copy can feed @pmndrs/pathtracer); **material model** = rtShade's built-in BSDF for reflections (three-consistent: a red plastic reads 1.11x Lambert, 1.62x pathtracer's OpenPBR), pathtracer's OpenPBR model only for consumers whose ground truth is the path tracer; **storage buffers** = pack where possible (pathtracer packs its scene copy into one buffer, bvh is working on its own packing) and keep requesting higher limits. Not yet on the Decisions page. |
+| T71 | probe-core: 'sssr probe fallback + hit shading on one set (1 atlas)' fails (12403 px differ from the fallback alone; the 4-atlas case passes) | low | S | experiment | D4901, W64, W81 log | Found by W81's full check and reproduced on main b79e2e1 (not W81's). Bisect from W64's merge; probably W76/W78 changed the one-atlas SSSR fallback seam. |
 
 ### Out of scope
 
