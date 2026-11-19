@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | quickstart | r3f | bench | probe-layouts)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | nrc | showcase | showcase-compare | quickstart | r3f | bench | probe-layouts)
 //   pnpm check -- --only ssr-exp-metrics         # X0 (W70): the experiment metrics smoke (examples/shared/metrics); ssr-exp-baseline = the full baseline (scripts/ssr-exp.mjs)
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
 //   pnpm check -- --only ssr-exp-x1              # W71 (X1): each X1 setting at its default = absent on examples/ssr; (W76: historyEdgeConfidence and hitLobeFilterGrazing removed)
@@ -3746,6 +3746,24 @@ async function main() {
     if (only === 'ssr-exp-metrics') await ssrExpMetricsSmoke({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)
     if (only === 'ssr-exp-baseline') await ssrExpBaseline({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)
     if (only === 'ssr-exp-run') await ssrExpRun({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70): one metric call on one page (SSR_EXP_URL, SSR_EXP_EVAL)
+
+    if (only === 'nrc') {
+      // W86 (examples/nrc, experimental): NRC / probes / rtShade hit shading of mirror reflections vs a path-traced reference. Needs the sibling
+      // pathtracer checkout (its bench/nrc modules); run on request only (`--only nrc`), the numbers are in docs/research/w86.
+      console.log('examples/nrc:');
+      const np = await openPage(`http://127.0.0.1:${PORT}/nrc/`);
+      pages.push(np);
+      await np.T(`new Promise((res) => { const t = setInterval(() => { if (window.__p) { clearInterval(t); res(1); } }, 200); })`);
+      if (!(await np.T('window.__p.available'))) console.log('  (info) nrc check skipped: the pathtracer sibling (bench/nrc, @pmndrs/pathtracer) does not resolve here');
+      else {
+        const r = await np.T('window.__p.smoke()');
+        const arms = Object.keys(r.rows);
+        check('nrc: all five hit shadings render finite output on the offscreen mirror', arms.length === 5 && arms.every((a) => Number.isFinite(r.rows[a].relMse) && Number.isFinite(r.rows[a].relBias)),
+          arms.map((a) => `${a} relMSE ${r.rows[a].relMse.toFixed(3)}`).join(', '));
+        check('nrc: the warmed cache bias is bounded (smoke size, 8 training frames)', Math.abs(r.rows.nrc.relBias) < 0.5, `nrc bias ${(r.rows.nrc.relBias * 100).toFixed(1)}%`);
+        check('nrc: no device errors', r.deviceErrors.length === 0, r.deviceErrors.join(' | ').slice(0, 200));
+      }
+    }
 
     if (runs('probe-core')) {
       // examples/probe-core: the phase 2 probe core on a bare device (layouts x formats, CPU weights,

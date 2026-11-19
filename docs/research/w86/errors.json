@@ -1,0 +1,86 @@
+{
+ "mirror/offscreen": {
+  "probes": {
+   "relMse": 0.04762118777316546,
+   "relBias": 0.05048718237660732,
+   "raysPerPixel": 2
+  },
+  "rtshade": {
+   "relMse": 0.059698409790341585,
+   "relBias": -0.3058121225809478,
+   "raysPerPixel": 3
+  },
+  "nrc": {
+   "relMse": 0.010093454036822989,
+   "relBias": -0.007497902471638174,
+   "raysPerPixel": 3,
+   "trainRaysPerPixel": 3.79
+  },
+  "nrc-frozen": {
+   "relMse": 0.010093454036822989,
+   "relBias": -0.007497902471638174,
+   "raysPerPixel": 3
+  },
+  "traced": {
+   "relMse": 0.04356712492354682,
+   "relBias": 0.0011626008149623335,
+   "raysPerPixel": 4.79
+  }
+ },
+ "thin/red": {
+  "probes": {
+   "relMse": 0.22745439738352596,
+   "relBias": -0.6780506361915775,
+   "raysPerPixel": 2
+  },
+  "rtshade": {
+   "relMse": 0.0972118811901472,
+   "relBias": -0.42089989807171324,
+   "raysPerPixel": 3
+  },
+  "nrc": {
+   "relMse": 0.00825141219617257,
+   "relBias": 0.002922266194139933,
+   "raysPerPixel": 2.83,
+   "trainRaysPerPixel": 3.41
+  },
+  "nrc-frozen": {
+   "relMse": 0.00825141219617257,
+   "relBias": 0.002922266194139933,
+   "raysPerPixel": 2.83
+  },
+  "traced": {
+   "relMse": 0.040719420446701994,
+   "relBias": 0.0013782596244007461,
+   "raysPerPixel": 4.29
+  }
+ },
+ "thin/blue": {
+  "probes": {
+   "relMse": 0.22767019712165226,
+   "relBias": -0.6782920609820187,
+   "raysPerPixel": 2
+  },
+  "rtshade": {
+   "relMse": 0.1049229739255096,
+   "relBias": -0.421685855691712,
+   "raysPerPixel": 3
+  },
+  "nrc": {
+   "relMse": 0.016243794354177804,
+   "relBias": 0.0005191156653594486,
+   "raysPerPixel": 2.67,
+   "trainRaysPerPixel": 3.41
+  },
+  "nrc-frozen": {
+   "relMse": 0.016243794354177804,
+   "relBias": 0.0005191156653594486,
+   "raysPerPixel": 2.67
+  },
+  "traced": {
+   "relMse": 0.04565281295458336,
+   "relBias": -0.020060599812553814,
+   "raysPerPixel": 4.13
+  }
+ }
+}
