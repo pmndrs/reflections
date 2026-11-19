@@ -48,3 +48,9 @@ export {
 // Hybrid resolve (phase 5): SSR -> RT -> probes -> environment, denoised through the denoise seam
 // (any denoiser-core-shaped TemporalDenoiser<SpecularInputs>, e.g. denoiser/ffx's FfxReflectionDenoiser).
 export { HybridReflections, HYBRID_SOURCE, type HybridReflectionsOptions } from './sssr/HybridReflections';
+
+// One-object setup: the G-buffer, SSR, probes, optional RT fallback and denoiser, hybrid composite, in a RenderPipeline.
+export {
+  Reflections, createReflectionsRenderer,
+  type ReflectionsOptions, type ReflectionsQuality, type ReflectionsDenoiserInfo,
+} from './Reflections';

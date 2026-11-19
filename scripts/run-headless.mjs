@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | bench | probe-layouts)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | quickstart | r3f | bench | probe-layouts)
 //   pnpm check -- --only ssr-exp-metrics         # X0 (W70): the experiment metrics smoke (examples/shared/metrics); ssr-exp-baseline = the full baseline (scripts/ssr-exp.mjs)
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
 //   pnpm check -- --only ssr-exp-x1              # W71 (X1): each X1 setting at its default = absent on examples/ssr; historyEdgeConfidence at rest / panning
@@ -3076,6 +3076,54 @@ async function pixi3dChecks(pages) {
   }
 }
 
+/**
+ * Drop-in pages (examples/quickstart, quickstart/probes.html, r3f): the page renders with no GPU
+ * errors, the frame is not black, and the reflections are really there: the lower part of the frame
+ * (the glossy floor and what stands on it) differs between reflections off and on. `window.__p`:
+ * `shot(n)` (n frames, then a PNG data URL), `setOn(bool)` or `setProbes(bool)` (the baseline), `info()`.
+ */
+const DROP_IN_DIFF = `async (a, b) => {
+  const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return [i.width, i.height, g.getImageData(0, 0, i.width, i.height).data]; };
+  const [w, h, A] = await px(a); const [, , B] = await px(b);
+  let lum = 0, lo = 255, hi = 0, n = 0, sum = 0, over = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const k = 4 * (y * w + x), l = (A[k] + A[k + 1] + A[k + 2]) / 3; lum += l; if (l < lo) lo = l; if (l > hi) hi = l;
+    if (y < h * 0.4) continue; // the floor and the objects' reflections
+    const d = (Math.abs(A[k] - B[k]) + Math.abs(A[k + 1] - B[k + 1]) + Math.abs(A[k + 2] - B[k + 2])) / 3; n++; sum += d; if (d > 12) over++;
+  }
+  return { lum: lum / (w * h), lo, hi, regionMean: sum / n, regionOver: over / n };
+}`;
+async function dropInChecks(pages, name, url, { frames = 30 } = {}) {
+  console.log(`${name}:`);
+  const slug = name.replace(/[^a-z0-9]+/gi, '-');
+  const before = results.logs.length;
+  const p = await openPage(`http://127.0.0.1:${PORT}${url}`);
+  pages.push(p);
+  await p.T('window.__p.stop()');
+  const info = await p.T('window.__p.info()');
+  const toggle = await p.T("typeof window.__p.setOn === 'function' ? 'setOn' : typeof window.__p.setProbes === 'function' ? 'setProbes' : null");
+  if (toggle) await p.T(`window.__p.${toggle}(true)`);
+  const on = await p.T(`window.__p.shot(${frames})`);
+  savePng(`${slug}-on.png`, on);
+  let off = null;
+  if (toggle) {
+    await p.T(`window.__p.${toggle}(false)`);
+    off = await p.T('window.__p.shot(3)');
+    savePng(`${slug}-off.png`, off);
+    await p.T(`window.__p.${toggle}(true)`);
+  }
+  const st = await p.T(`(${DROP_IN_DIFF})(${JSON.stringify(on)}, ${JSON.stringify(off ?? on)})`);
+  const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+  check(`${name}: renders a non-black frame, no GPU errors`, st.lum > 8 && st.hi - st.lo > 60 && errs.length === 0,
+    `mean ${st.lum.toFixed(0)}/255, range ${st.lo.toFixed(0)}-${st.hi.toFixed(0)}; ${JSON.stringify(info)}${errs.length ? '; ' + errs[0] : ''}`);
+  if (off) {
+    check(`${name}: reflections are present (floor region differs, on vs off)`, st.regionMean > 1.5 && st.regionOver > 0.01,
+      `mean |on - off| ${st.regionMean.toFixed(2)} / 255, ${(st.regionOver * 100).toFixed(1)} % of px over 12`);
+  }
+  return { p, st, info };
+}
+
 async function main() {
   setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' || only === 'ssr-exp-baseline' || only === 'ssr-exp-grazing' ? 3_600_000 : 600_000).unref();
   let server = null;
@@ -3403,6 +3451,10 @@ async function main() {
     if (runs('pixi3d')) await pixi3dChecks(pages);
     if (ssrBenchFull) await ssrBench();
     else if (runs('ssr-bench')) await ssrBenchSmoke(pages);
+    if (runs('quickstart')) {
+      await dropInChecks(pages, 'examples/quickstart', '/quickstart/?manual');
+      await dropInChecks(pages, 'examples/quickstart probes only', '/quickstart/probes.html?manual');
+    }
     if (runs('showcase')) await showcaseChecks(pages);
     if (runs('showcase-compare')) await showcaseCompareChecks(pages);
     if (runs('bench')) await benchChecks(pages); // W51: the tuning bench

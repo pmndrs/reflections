@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Quick start: probes only</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; padding: 16px; background: #111; color: #ddd; font: 14px/1.45 system-ui, sans-serif; }
+      a { color: #8cf; }
+      .page { max-width: 1020px; }
+      code { background: #0006; padding: 0 .3em; border-radius: 4px; }
+      canvas { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; border: 1px solid #333; border-radius: 8px; display: block; touch-action: none; }
+      #status { font-size: .8rem; white-space: pre-wrap; color: #9a9; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Quick start: probes only</h1>
+      <p>
+        The cheapest path: one baked reflection probe and <code>renderer.render()</code> as usual, no extra passes. Code:
+        <a href="https://github.com/pmndrs/reflections/blob/main/examples/quickstart/src/probes.ts">src/probes.ts</a>.
+        With screen-space reflections too: <a href="./">index.html</a>.
+      </p>
+      <canvas id="view" width="960" height="540"></canvas>
+      <pre id="status">starting...</pre>
+    </div>
+    <script type="module" src="./src/probes.ts"></script>
+  </body>
+</html>
