@@ -36,15 +36,17 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, bvhTraceSceneFromObjects,
   createPmndrsBvhTraceProviderFromObjects, installCubeArraySupport, reflectionProbes, sampleReflectionProbes,
+  applyReflectionsPreset, denoiserHitSourceModeOf, isReflectionsPresetName, reflectionsPreset, type ReflectionsPresetName,
 } from '@pmndrs/reflections/three';
 import { availableAssets, probeAtlasBytes } from '../../shared';
-import { createReflectionDenoiser, denoiserAvailable, hitSourceDenoiserOptions, hitSourceFromQuery, setDenoiserHitSource, type DenoiserHitSourceSettings } from '../../shared/denoiser';
+import { brdfFromQuery, createReflectionDenoiser, denoiserAvailable, hitSourceDenoiserOptions, hitSourceFromQuery, setDenoiserHitSource, syncDenoiserBrdf, type DenoiserBrdf, type DenoiserHitSourceSettings } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
 import { LINEAR_VIEWS, VIEWS, VIEW_IDS, VIEW_LEGENDS, buildDebugViews, type View } from './debugViews';
 import { SHOWCASE, type FloorKind, type ShowcaseEntry, type ShowcaseScene } from './scenes';
 import { geometryRoughnessFromQuery, setGeometryRoughness } from './geometryRoughness';
 import { SPEC_AA_DEFAULT, setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } from './specAA';
+import { ssrSettingsFromQuery } from '../../shared/ssrQuery';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -84,7 +86,16 @@ async function main() {
   if (q.get('shim') !== '0') await installCubeArraySupport(renderer);
 
   // W75 (X5, D5080): ?res=half traces, denoises at half res and upsamples
-  const ssr = new ScreenSpaceReflectionsPass(renderer, { missList: true, timestamps: true, gbufferOptions: { width: RW, height: RH }, ...(q.get('res') === 'half' || q.get('res') === 'mixed' ? { settings: { reflectionResolution: 'half' as const, halfResMinRoughness: q.get('res') === 'mixed' ? Number(q.get('halfResMin') ?? 0.05) : 0 } } : {}) });
+  // W77: ?preset=performance|default (core REFLECTION_PRESETS); ?res= / ?hitSource= given explicitly win
+  // an unknown ?preset= is passed on: the pass and the hybrid warn once and ignore it
+  const presetName = (q.get('preset') as ReflectionsPresetName | null) ?? null;
+  const ssr = new ScreenSpaceReflectionsPass(renderer, {
+    missList: true, timestamps: true, gbufferOptions: { width: RW, height: RH }, ...(presetName ? { preset: presetName } : {}),
+    ...(q.get('res') === 'half' || q.get('res') === 'mixed' ? { settings: { reflectionResolution: 'half' as const } } : {}),
+    ...(q.get('res') === 'full' ? { settings: { reflectionResolution: 'full' as const } } : {}),
+  });
+  Object.assign(ssr.settings, ssrSettingsFromQuery(q)); // W76: ?s.<field>=<value> from the first frame
+  if (q.get('res') === 'mixed' || q.has('halfResMin')) console.warn("?res=mixed / ?halfResMin= were removed (W76, D5084: halfResMinRoughness and the full-res mirror path); running ?res=half");
   const device = ssr.device;
   const gpuErrors: string[] = [];
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });
@@ -92,9 +103,25 @@ async function main() {
   // hybrid resolve + denoise seam: FFX's reflection denoiser gated at the tracer's roughness threshold
   // W53 (D3660): ?hitSource=hits|all / ?hitDistW=<k>, off by default
   const hs = hitSourceFromQuery(q);
+  const syncHitSource = (mode: 'off' | 'hits' | 'all') => { hs.hitSource = mode !== 'off'; hs.missesMatchAnySource = mode === 'hits'; };
+  const presetHitSource = isReflectionsPresetName(presetName) ? reflectionsPreset(presetName).denoiser.hitSource : undefined;
+  if (presetHitSource && !q.has('hitSource')) syncHitSource(presetHitSource); // W77 (no preset has one today)
   const denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, timestampsOn, hitSourceDenoiserOptions(hs)) : null;
   const hybrid = new HybridReflections(ssr, { denoiser, denoiserHitSource: hs.hitSource });
   hybrid.denoise = q.get('denoise') !== '0' && !!denoiser;
+  // W78 (D5140): ?brdf=replace|combine, BRDF / pdf weights in FFX's prefilter; the example-only key
+  // `ssr.settings.denoiserBrdf` overrides it per frame. ?keepSample=1 keeps the tracer's sample output on
+  // whatever the mode (no tracer rebuild between modes, for A/B runs).
+  const brdfMode = brdfFromQuery(q);
+  let brdfApplied = 'off' + false;
+  const syncBrdf = () => {
+    const mode = ((ssr.settings as N).denoiserBrdf as DenoiserBrdf | undefined) ?? brdfMode;
+    const keepBlack = ((ssr.settings as N).denoiserKeepBlack as boolean | undefined) ?? q.get('keepBlack') !== '0';
+    const brdfMin = ((ssr.settings as N).denoiserBrdfMin as number | undefined) ?? (q.has('brdfMin') ? Number(q.get('brdfMin')) : undefined);
+    syncDenoiserBrdf(ssr, hybrid, mode, keepBlack, brdfMin);
+    if (q.get('keepSample') === '1') ssr.settings.sampleDirection = true;
+    if (mode + keepBlack !== brdfApplied) { hybrid.resetHistory(); brdfApplied = mode + keepBlack; }
+  };
   const nextNodeFrame = () => (renderer as N)._nodes.nodeFrame.update();
 
   // ---- state ---------------------------------------------------------------------------------------
@@ -366,6 +393,7 @@ async function main() {
     }
     controls.update();
     kit.camera.aspect = W / H; kit.camera.updateProjectionMatrix(); kit.camera.updateMatrixWorld();
+    syncBrdf();
     ssr.render(kit.scene, kit.camera, aa.begin(kit.camera));
     aa.end(kit.camera);
     hybrid.update();
@@ -558,15 +586,19 @@ async function main() {
       poses: () => Object.keys(kit!.views),
       setPose,
       setView: (v: View) => setView(v),
-      /**
-       * W75 (X5): reflection resolution, rebuilding the composites ('mixed' = half with the full-res mirror
-       * path below `minRoughness`, step 2).
-       */
-      async setResolution(r: 'full' | 'half' | 'mixed', minRoughness = 0.05) {
-        ssr.settings.reflectionResolution = r === 'full' ? 'full' : 'half';
-        ssr.settings.halfResMinRoughness = r === 'mixed' ? minRoughness : 0;
+      /** W75 (X5): reflection resolution, rebuilding the composites (W76 removed step 2's 'mixed', D5084). */
+      async setResolution(r: 'full' | 'half') {
+        ssr.settings.reflectionResolution = r;
         hybrid.rebuild(); buildDisplay();
         ssr.resetHistory(); hybrid.resetHistory();
+      },
+      /** W77: apply a named preset at runtime (three `applyReflectionsPreset`; `overrides` win), rebuilding the composites. */
+      setPreset(name: ReflectionsPresetName, overrides: Parameters<typeof applyReflectionsPreset>[2] = {}) {
+        const r = applyReflectionsPreset({ ssr, hybrid }, name, overrides);
+        // the UI follows what the hybrid and its denoiser now run (the preset's hit source, or the page's own)
+        syncHitSource(hybrid.denoiserHitSource ? denoiserHitSourceModeOf((denoiser as N)?.options) : 'off'); hitSourceSel.value = hitSourceMode();
+        hybrid.rebuild(); buildDisplay(); aa.reset();
+        return r;
       },
       /** The orbit camera as [pos, target] (scene units), and setting it (same convention as compare.html's `view()` / `setView()`). */
       camera: () => [kit!.camera.position.toArray(), controls.target.toArray()],

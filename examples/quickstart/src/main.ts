@@ -6,7 +6,7 @@
 // into the final image. You call `reflections.render(camera)` where you called `renderer.render()`.
 //
 // Needs: three >= 0.187 and a browser with WebGPU. `?rt=1` adds the ray-traced fallback,
-// `?denoise=0` turns the denoiser off, `?quality=low|medium|high`.
+// `?denoise=0` turns the denoiser off, `?preset=performance`.
 import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Reflections, createReflectionsRenderer } from '@pmndrs/reflections/three';
@@ -36,7 +36,7 @@ async function main() {
   const Ffx = q.get('denoise') !== '0' ? FfxReflectionDenoiser : null;
   // 3. Reflections: one object. Everything but the renderer and the scene is optional.
   const reflections = await Reflections.create(renderer, scene, {
-    quality: (q.get('quality') as 'low' | 'medium' | 'high') ?? 'medium',
+    preset: q.get('preset') === 'performance' ? 'performance' : 'default',
     rayTracing: q.get('rt') === '1', // rays for what neither the screen nor the probe has (needs @pmndrs/bvh)
     denoiser: Ffx && ((device, { roughnessThreshold }) => new Ffx(device, { roughnessThreshold: roughnessThreshold ** 2 })),
   });

@@ -109,21 +109,18 @@ export interface TracedReflectionsSettings {
    * the pass keeps a copy of last frame's `source` (r32float, render size). Default 1 (no change).
    */
   hitLobeFilterMixed?: number;
+  // (W71's hitLobeFilterGrazing, X1 #3, was removed by W76: a no-op on the lobe filter, D5002)
   /**
-   * W71 (X1 #3, D5002), as the SSSR tracer's `hitLobeFilterGrazing` (pass the tracer's): the lobe
-   * filter's spread at a traced hit shrinks at grazing angles of the reflecting pixel. 0..1, default 0.
-   */
-  hitLobeFilterGrazing?: number;
-  /**
-   * W72 (X2 #6, D5021): the SSSR tracer's `mirrorBias`, `mirrorBiasCompensate` and `hitColorFilter`
-   * (pass the tracer's). With compensation the traced directions come from the narrowed lobe
-   * (alpha x sqrt(1 - mirrorBias)), so the lobe filter here widens by hitLobeFilter x sqrt(mirrorBias)
-   * of the pixel's alpha (`mirrorBiasSplit`). Defaults 0 / false / 'off' (no change).
+   * W72 (X2 #6, D5021): the SSSR tracer's `mirrorBias`, `mirrorBiasCompensate` and `hitColorFilter`.
+   * With compensation the traced directions come from the narrowed lobe (alpha x sqrt(1 - mirrorBias)),
+   * so the lobe filter here widens by hitLobeFilter x sqrt(mirrorBias) of the pixel's alpha
+   * (`mirrorBiasSplit`). Default (W76): what the tracer's last dispatch ran (`outputs.settings`), so the
+   * split always matches the rays; set them only to override.
    */
   mirrorBias?: number;
   mirrorBiasCompensate?: boolean;
   hitColorFilter?: 'off' | 'cone';
-  /** W72 (D5024): the SSSR tracer's `hitColorConeScale` (pass the tracer's). Default 1. */
+  /** W72 (D5024): the SSSR tracer's `hitColorConeScale`. Default (W76): the tracer's last dispatch's. */
   hitColorConeScale?: number;
   /** The SSSR tracer's `roughnessThreshold` (perceptual; pass the tracer's), read by `hitLobeFilterMixed` only. Default 0.447. */
   roughnessThreshold?: number;
@@ -304,11 +301,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   });
   const empty = device.createBindGroupLayout({ label: 'rt empty', entries: [] });
   const emptyGroup = device.createBindGroup({ layout: empty, entries: [] });
-  // W71 (X1 #3): the grazing lobe-filter shrink lives in a second pipeline (with the branch present the default
-  // shader's output moved, D5002). It is built with createComputePipelineAsync on first use
-  // (hitLobeFilterGrazing > 0), and the default pipeline keeps tracing until it resolves, so no frame stalls
-  // on the compile (D3D12 compiles slowly); the first few frames trace without the shrink.
-  const traceDescriptor = (lobeGrazing: boolean): GPUComputePipelineDescriptor => {
+  const traceDescriptor = (): GPUComputePipelineDescriptor => {
     const code = rtTraceWgsl({
       fallbackWgsl: fallback.wgsl,
       providerWgsl: provider.code({ group: 2, firstBinding: 0 }),
@@ -316,29 +309,16 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
       anyHitWgsl: provider.capabilities.anyHit ? '' : DEFAULT_TRACE_ANY_WGSL,
       shadingNormalWgsl: provider.capabilities.shadingNormal ? '' : DEFAULT_SHADING_NORMAL_WGSL,
       hitShadingWgsl: shading.wgsl,
-      lobeGrazing,
     });
     // the fallback and the hit shading may both carry the probe lookup's includes (D4901): keep one copy
-    const label = `rt trace (${provider.name}${lobeGrazing ? ', lobe grazing' : ''})`;
+    const label = `rt trace (${provider.name})`;
     return {
       label,
       layout: device.createPipelineLayout({ bindGroupLayouts: [traceBgl, fallback.layout ?? empty, providerBgl, shading.layout ?? empty] }),
       compute: { module: device.createShaderModule({ label, code: dedupeWgslChunks(code) }), entryPoint: 'main' },
     };
   };
-  const tracePipe = device.createComputePipeline(traceDescriptor(false));
-  let grazingPipe: GPUComputePipeline | null = null;
-  let grazingPending = false;
-  const tracePipeFor = (lobeGrazing: boolean) => {
-    if (!lobeGrazing) return tracePipe;
-    if (grazingPipe) return grazingPipe;
-    if (!grazingPending) {
-      grazingPending = true;
-      device.createComputePipelineAsync(traceDescriptor(true)).then((p) => { grazingPipe = p; })
-        .catch((e) => { console.error('rt trace: the lobe-grazing pipeline failed to build; tracing without it', e); });
-    }
-    return tracePipe;
-  };
+  const tracePipe = device.createComputePipeline(traceDescriptor());
 
   let providerGroup: GPUBindGroup | null = null, providerVersion = -1;
   const providerBindGroup = () => {
@@ -433,7 +413,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     u[64] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
     f[65] = Math.min(1, Math.max(0, s.hitLobeFilterMixed ?? 1));
     f[66] = (s.roughnessThreshold ?? 0.447) ** 2;
-    f[67] = Math.min(1, Math.max(0, s.hitLobeFilterGrazing ?? 0)); // W71 (X1 #3)
+    // 67: padding (was W71's hitLobeFilterGrazing, removed by W76)
     // 68-75: W74 (X4) the half-rate fill
     bilateralFillWeightWords(resolveBilateralFillWeights({
       planeTolerance: s.fillPlaneTolerance, normalPower: s.fillNormalPower, roughnessTolerance: s.fillRoughnessTolerance,
@@ -450,9 +430,16 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     device.queue.writeBuffer(params, 0, data);
   }
 
-  function dispatch(cmd: GPUCommandEncoder, frame: TracedReflectionsDispatch, settings: TracedReflectionsSettings = {}) {
+  function dispatch(cmd: GPUCommandEncoder, frame: TracedReflectionsDispatch, settings0: TracedReflectionsSettings = {}) {
     const { tracer, inputs } = frame;
     const out = tracer.outputs;
+    // W76: the lobe split (and the cone) follow what the tracer ran unless given here
+    const ran = out.settings ?? {};
+    const settings: TracedReflectionsSettings = {
+      ...settings0,
+      mirrorBias: settings0.mirrorBias ?? ran.mirrorBias, mirrorBiasCompensate: settings0.mirrorBiasCompensate ?? ran.mirrorBiasCompensate,
+      hitColorFilter: settings0.hitColorFilter ?? ran.hitColorFilter, hitColorConeScale: settings0.hitColorConeScale ?? ran.hitColorConeScale,
+    };
     if (tracer.width !== W || tracer.height !== H) throw new Error(`rt: tracer is ${tracer.width}x${tracer.height}, pass is ${W}x${H}`);
     if (!out.missList || !out.missCounter || !out.missArgs) throw new Error('rt: the SSSR tracer was created without `missList: true`');
     if (fallback.layout && !frame.fallbackBindGroup) throw new Error('rt: the radiance fallback needs fallbackBindGroup');
@@ -495,7 +482,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     let p = cmd.beginComputePass({ label: 'rt begin', timestampWrites: timer?.pass('rt begin') });
     p.setPipeline(beginPipe); p.setBindGroup(0, beginGroup); p.dispatchWorkgroups(1); p.end();
     p = cmd.beginComputePass({ label: 'rt trace', timestampWrites: timer?.pass('rt trace') });
-    p.setPipeline(tracePipeFor((settings.hitLobeFilterGrazing ?? 0) > 0));
+    p.setPipeline(tracePipe);
     p.setBindGroup(0, traceGroup);
     p.setBindGroup(1, frame.fallbackBindGroup ?? emptyGroup);
     p.setBindGroup(2, providerBindGroup());

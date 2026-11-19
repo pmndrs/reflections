@@ -6,13 +6,13 @@
 // `pipeline`) for anything the options do not cover.
 //
 //   const renderer = await createReflectionsRenderer({ canvas });
-//   const reflections = await Reflections.create(renderer, scene, { quality: 'medium' });
+//   const reflections = await Reflections.create(renderer, scene, { preset: 'default' });
 //   renderer.setAnimationLoop(() => reflections.render(camera));   // instead of renderer.render(scene, camera)
 //
 // Without a denoiser glossy reflections are one noisy sample per 2x2 quad; pass one (the options) for
 // a steady image.
 import * as THREE from 'three/webgpu';
-import { reflectionsRequiredLimits, type SpecularInputs, type TemporalDenoiser } from '@pmndrs/reflections-core';
+import { reflectionsRequiredLimits, type ReflectionsPresetName, type SpecularInputs, type TemporalDenoiser } from '@pmndrs/reflections-core';
 import { ReflectionProbe, ReflectionProbes } from './probes/ReflectionProbes';
 import { reflectionProbes } from './probes/ReflectionProbesNode';
 import { installCubeArraySupport } from './compat/cubeArray';
@@ -20,18 +20,12 @@ import { ScreenSpaceReflectionsPass, type ScreenSpaceReflectionsPassSettings } f
 import { HybridReflections } from './sssr/HybridReflections';
 import { createPmndrsBvhTraceProviderFromObjects } from './trace/PmndrsBvhTraceProvider';
 
-/**
- * 'low': half-resolution reflections and a shorter march. 'medium' (default): the package defaults.
- * 'high': two rays per 2x2 quad. Starting points, not measured tiers: `settings` overrides any of them.
- */
-export type ReflectionsQuality = 'low' | 'medium' | 'high';
-
 /** The perceptual roughness above which a pixel skips the trace (the denoiser gates at the same value). */
 export interface ReflectionsDenoiserInfo { roughnessThreshold: number }
 
 export interface ReflectionsOptions {
-  /** Default 'medium'. */
-  quality?: ReflectionsQuality;
+  /** A named preset (core `REFLECTION_PRESETS`, docs/SETTINGS.md "Presets"): 'default' or 'performance'. Default 'default'. */
+  preset?: ReflectionsPresetName;
   /**
    * What fills the reflection where the screen has no hit. `true` (default): one probe sized to the
    * scene's bounds, baked once at `create()` (call `bake()` after the scene or its environment changes);
@@ -39,7 +33,7 @@ export interface ReflectionsOptions {
    * environment alone. A real project usually places a probe per room, `true` is the quick start.
    */
   probes?: boolean | ReflectionProbes;
-  /** Cube face size of the automatic probe. Default 256 (128 at quality 'low'). */
+  /** Cube face size of the automatic probe. Default 256 (128 with the 'performance' preset). */
   probeResolution?: number;
   /**
    * Ray-traced fallback for rays the screen cannot answer (needs `@pmndrs/bvh`, an optional peer).
@@ -53,17 +47,11 @@ export interface ReflectionsOptions {
    * roughness squared). Or an instance made on this renderer's device. Default none.
    */
   denoiser?: TemporalDenoiser<SpecularInputs> | ((device: GPUDevice, info: ReflectionsDenoiserInfo) => TemporalDenoiser<SpecularInputs> | null) | null;
-  /** Overrides over the quality preset's tracer settings (core `ScreenSpaceReflectionsSettings`, docs/SETTINGS.md). */
+  /** Overrides over the preset's tracer settings (core `ScreenSpaceReflectionsSettings`, docs/SETTINGS.md). */
   settings?: ScreenSpaceReflectionsPassSettings;
   /** Install the cube-array shim for the probes on three r187 (default true; harmless where three has cube arrays). */
   cubeArrays?: boolean;
 }
-
-const PRESETS: Record<ReflectionsQuality, ScreenSpaceReflectionsPassSettings> = {
-  low: { reflectionResolution: 'half', maxTraversalIntersections: 64 },
-  medium: {},
-  high: { samplesPerQuad: 2 },
-};
 
 /**
  * A `WebGPURenderer` with the device limits the reflection passes need (`reflectionsRequiredLimits`),
@@ -111,12 +99,12 @@ export class Reflections {
    * meshes and environment are in place; `bake()` again after they change.
    */
   static async create(renderer: THREE.WebGPURenderer, scene: THREE.Scene, options: ReflectionsOptions = {}): Promise<Reflections> {
-    const quality = options.quality ?? 'medium';
+    const preset = options.preset ?? 'default';
     if (!(renderer as { hasInitialized?(): boolean }).hasInitialized?.()) await renderer.init();
     const wantProbes = options.probes ?? true;
     if (wantProbes && options.cubeArrays !== false) await installCubeArraySupport(renderer);
 
-    const ssr = new ScreenSpaceReflectionsPass(renderer, { settings: { ...PRESETS[quality], ...options.settings } });
+    const ssr = new ScreenSpaceReflectionsPass(renderer, { preset, settings: options.settings });
     const device = ssr.device;
     const threshold = ssr.settings.roughnessThreshold ?? 0.447;
     const denoiser = typeof options.denoiser === 'function' ? options.denoiser(device, { roughnessThreshold: threshold }) : (options.denoiser ?? null);
@@ -124,7 +112,7 @@ export class Reflections {
     let probes: ReflectionProbes | null = null;
     let bounds: THREE.Box3 | null = null;
     const ownsProbes = wantProbes === true;
-    const probeResolution = options.probeResolution ?? (quality === 'low' ? 128 : 256);
+    const probeResolution = options.probeResolution ?? (preset === 'performance' ? 128 : 256);
     if (wantProbes instanceof ReflectionProbes) probes = wantProbes;
     else if (wantProbes) {
       // one probe over the scene's bounds, projected onto a box well past them so that the environment
@@ -146,7 +134,7 @@ export class Reflections {
       trace = { provider: built.provider as { destroy(): void }, refit: built.refit };
     }
 
-    const hybrid = new HybridReflections(ssr, { denoiser });
+    const hybrid = new HybridReflections(ssr, { denoiser, preset });
     const self = new Reflections(renderer, scene, ssr, hybrid, new THREE.RenderPipeline(renderer), probes, ownsProbes, probeResolution, bounds, trace);
     if (ownsProbes) self.bake();
     else if (probes) scene.environmentNode = reflectionProbes(probes) as never;

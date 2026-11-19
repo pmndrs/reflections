@@ -4,7 +4,7 @@
 // floor; time(n) gives median GPU ms per pass with the loop stopped (there is no loop: frames render
 // on demand); shot() returns the canvas as a PNG data URL.
 import {
-  createScreenSpaceReflections, DEFAULT_ROUGHNESS_THRESHOLD, environmentRadianceFallback, screenSpaceInputsFromFrame, type FrameInputs, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs,
+  createScreenSpaceReflections, DEFAULT_ROUGHNESS_THRESHOLD, environmentRadianceFallback, resolveScreenSpaceSettings, screenSpaceInputsFromFrame, type FrameInputs, type RadianceFallback, type ScreenSpaceReflections, type ScreenSpaceReflectionsInputs,
   type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant, reflectionsRequiredLimits,
 } from '@pmndrs/reflections/core';
 import { lookAt, perspective, SCENE_WGSL } from './scene';
@@ -314,11 +314,28 @@ async function main() {
     return a.length === b.length ? n : -1;
   };
 
+  /**
+   * W76: 'cone' (the default hit colour filter) builds its intersect variant asynchronously and a tracer runs
+   * 'off' until it resolves: dispatch `t` until it runs what `s` asks for, so a comparison never sets a
+   * tracer still on 'off' against one on 'cone'.
+   */
+  async function warm(t: ScreenSpaceReflections, s: ScreenSpaceReflectionsSettings) {
+    if (resolveScreenSpaceSettings(s).hitColorFilter !== 'cone') return;
+    for (let i = 0; i < 200 && !t.outputs.hitColorFilterActive; i++) {
+      const enc = device.createCommandEncoder();
+      t.dispatch(enc, inputs, s);
+      device.queue.submit([enc.finish()]);
+      await device.queue.onSubmittedWorkDone();
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  }
+
   /** Run both variants on the same frame and compare. */
   async function parity(extra: ScreenSpaceReflectionsSettings = {}) {
     if (!hasSubgroups) return { skipped: 'device has no subgroups feature' };
     const b = getOther();
     const s = { ...settings, frameIndex: 7, ...extra };
+    await warm(main, s); await warm(b, s);
     const enc = device.createCommandEncoder();
     main.dispatch(enc, inputs, s);
     b.dispatch(enc, inputs, s);
@@ -350,6 +367,7 @@ async function main() {
   async function identity(a: ScreenSpaceReflectionsSettings = {}, b: ScreenSpaceReflectionsSettings = {}) {
     const base = { ...settings, frameIndex: 7, minTraversalOccupancy: 0 };
     const run = async (x: ScreenSpaceReflectionsSettings) => {
+      await warm(main, { ...base, ...x });
       const enc = device.createCommandEncoder();
       main.dispatch(enc, inputs, { ...base, ...x });
       device.queue.submit([enc.finish()]);
@@ -366,6 +384,7 @@ async function main() {
   }
   /** W71 (X1 #1): which quad corner the rays that carry copies trace from, as counts [tl, tr, bl, br], for one frame. */
   async function quadCorners(extra: ScreenSpaceReflectionsSettings = {}) {
+    await warm(main, { ...settings, minTraversalOccupancy: 0, ...extra });
     const enc = device.createCommandEncoder();
     main.dispatch(enc, inputs, { ...settings, minTraversalOccupancy: 0, ...extra });
     device.queue.submit([enc.finish()]);
@@ -432,6 +451,7 @@ async function main() {
   async function fallbackRoughness() {
     const base = { ...settings, frameIndex: 7, minTraversalOccupancy: 0, hitShading: 'off' as const }; // hits as the screen colour (W44): the check isolates the fallback
     const run = async (s: ScreenSpaceReflectionsSettings) => {
+      await warm(main, { ...base, ...s });
       const enc = device.createCommandEncoder();
       main.dispatch(enc, inputs, { ...base, ...s });
       device.queue.submit([enc.finish()]);
@@ -488,6 +508,7 @@ async function main() {
 
   /** Median GPU ms per pass over n on-demand frames (each submitted and awaited alone). */
   async function time(n = 20) {
+    await warm(main, settings);
     const runs: Record<string, number[]> = {};
     for (let i = 0; i < n; i++) {
       const enc = device.createCommandEncoder();
