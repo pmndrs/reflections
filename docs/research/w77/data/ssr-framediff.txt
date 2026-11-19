@@ -1,0 +1,12 @@
+mirrorWall native      default     MAD 0.00 over8 0.00%
+mirrorWall native      performance MAD 1.11 over8 2.44%
+mirrorWall quality     default     MAD 1.39 over8 3.74%
+mirrorWall quality     performance MAD 2.24 over8 5.98%
+mirrorWall performance default     MAD 2.47 over8 6.34%
+mirrorWall performance performance MAD 3.80 over8 9.82%
+contact    native      default     MAD 0.00 over8 0.00%
+contact    native      performance MAD 5.57 over8 15.81%
+contact    quality     default     MAD 3.94 over8 10.99%
+contact    quality     performance MAD 7.80 over8 24.22%
+contact    performance default     MAD 5.31 over8 16.39%
+contact    performance performance MAD 7.63 over8 24.18%

@@ -1,0 +1,1485 @@
+{
+ "date": "2026-11-13T10:19:25.445Z",
+ "ssr": {
+  "mirrorWall": {
+   "host": {
+    "page": "ssr",
+    "scene": "mirrorWall",
+    "aa": "upscaler",
+    "ratio": 1,
+    "render": [
+     960,
+     540
+    ],
+    "display": [
+     960,
+     540
+    ],
+    "denoiser": "ffx-reflections",
+    "rt": false,
+    "hit": "current",
+    "effective": {
+     "hitColorFilter": "cone",
+     "mirrorBias": 0.5,
+     "mirrorBiasCompensate": true
+    }
+   },
+   "size": [
+    960,
+    540
+   ],
+   "restDrift": {
+    "frames": [
+     120,
+     240
+    ],
+    "jitterPhases": 8,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 0.1626,
+      "pctOver": 0.0201,
+      "p99": 3
+     },
+     "reflection": {
+      "px": 200974,
+      "mean": 0.3079,
+      "pctOver": 0.0513,
+      "p99": 4
+     }
+    },
+    "rest": {
+     "whole": {
+      "mean": 0.0072,
+      "pctOver1": 0.0002
+     },
+     "reflection": {
+      "mean": 0.0093,
+      "pctOver1": 0
+     }
+    }
+   },
+   "orbitFlicker": {
+    "deg": 0.1,
+    "half": 10,
+    "passes": 12,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "std": 0.3667,
+      "d2": 0.4141,
+      "pctD2Over": 1.5543,
+      "mean": 148.5385
+     },
+     "reflection": {
+      "px": 201545,
+      "std": 0.4674,
+      "d2": 0.7473,
+      "pctD2Over": 3.1387,
+      "mean": 138.7448
+     }
+    }
+   },
+   "quadEnergy": {
+    "warm": 60,
+    "frames": 8,
+    "display": {
+     "whole": {
+      "pairs": 1035300,
+      "power": -5.1287,
+      "ratio": -0.0275
+     },
+     "reflection": {
+      "pairs": 402201,
+      "power": 3.0167,
+      "ratio": 0.0243
+     }
+    },
+    "signal": {
+     "whole": {
+      "pairs": 1035300,
+      "power": 0.0005,
+      "ratio": 0.1741
+     },
+     "reflection": {
+      "pairs": 402201,
+      "power": 0.001,
+      "ratio": 0.1646
+     }
+    }
+   },
+   "edgePan": {
+    "deg": 0.25,
+    "frames": 24,
+    "border": 0.1,
+    "regions": {
+     "border": {
+      "px": 186624,
+      "d1": 3.0317,
+      "d2": 4.1226,
+      "pctD2Over": 12.4536
+     },
+     "borderReflection": {
+      "px": 84327,
+      "d1": 5.8349,
+      "d2": 7.6795,
+      "pctD2Over": 24.6916
+     },
+     "centre": {
+      "px": 331776,
+      "d1": 7.4228,
+      "d2": 11.534,
+      "pctD2Over": 25.2234
+     },
+     "centreReflection": {
+      "px": 117337,
+      "d1": 7.1877,
+      "d2": 10.0349,
+      "pctD2Over": 29.3655
+     }
+    }
+   },
+   "speckle": {
+    "source": "signal",
+    "sigma": 3,
+    "frames": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "pct": 0.0061
+     },
+     "reflection": {
+      "px": 201603,
+      "pct": 0.0157
+     }
+    }
+   },
+   "energy": {
+    "frames": 64,
+    "size": [
+     960,
+     540
+    ],
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "raw": 0.2624,
+      "denoised": 0.2619,
+      "loss": 0.0018
+     },
+     "reflection": {
+      "px": 201031,
+      "raw": 0.3158,
+      "denoised": 0.3143,
+      "loss": 0.0046
+     }
+    }
+   },
+   "restDrift2": {
+    "frames": [
+     120,
+     240
+    ],
+    "jitterPhases": 8,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 0.1629,
+      "pctOver": 0.0216,
+      "p99": 3
+     },
+     "reflection": {
+      "px": 200974,
+      "mean": 0.3086,
+      "pctOver": 0.0552,
+      "p99": 4
+     }
+    },
+    "rest": {
+     "whole": {
+      "mean": 0.0072,
+      "pctOver1": 0.0002
+     },
+     "reflection": {
+      "mean": 0.0093,
+      "pctOver1": 0
+     }
+    }
+   },
+   "orbitFlicker2": {
+    "deg": 0.1,
+    "half": 10,
+    "passes": 12,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "std": 0.367,
+      "d2": 0.4141,
+      "pctD2Over": 1.5543,
+      "mean": 148.539
+     },
+     "reflection": {
+      "px": 201545,
+      "std": 0.4678,
+      "d2": 0.7474,
+      "pctD2Over": 3.1393,
+      "mean": 138.746
+     }
+    }
+   },
+   "restDrift3": {
+    "frames": [
+     120,
+     240
+    ],
+    "jitterPhases": 8,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 0.1626,
+      "pctOver": 0.0201,
+      "p99": 3
+     },
+     "reflection": {
+      "px": 200974,
+      "mean": 0.3079,
+      "pctOver": 0.0513,
+      "p99": 4
+     }
+    },
+    "rest": {
+     "whole": {
+      "mean": 0.0072,
+      "pctOver1": 0.0002
+     },
+     "reflection": {
+      "mean": 0.0093,
+      "pctOver1": 0
+     }
+    }
+   },
+   "orbitFlicker3": {
+    "deg": 0.1,
+    "half": 10,
+    "passes": 12,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "std": 0.3667,
+      "d2": 0.4141,
+      "pctD2Over": 1.5543,
+      "mean": 148.5385
+     },
+     "reflection": {
+      "px": 201545,
+      "std": 0.4673,
+      "d2": 0.7473,
+      "pctD2Over": 3.1385,
+      "mean": 138.7446
+     }
+    }
+   },
+   "restDriftAAOff": {
+    "frames": [
+     120,
+     240
+    ],
+    "jitterPhases": 1,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 0.013,
+      "pctOver": 0.005,
+      "p99": 0
+     },
+     "reflection": {
+      "px": 201526,
+      "mean": 0.0335,
+      "pctOver": 0.0129,
+      "p99": 1
+     }
+    },
+    "rest": {
+     "whole": {
+      "mean": 0.0012,
+      "pctOver1": 0.0096
+     },
+     "reflection": {
+      "mean": 0.003,
+      "pctOver1": 0.0248
+     }
+    },
+    "host": {
+     "aa": "off",
+     "ratio": 1
+    }
+   },
+   "restDriftUpscale": {
+    "frames": [
+     114,
+     240
+    ],
+    "jitterPhases": 18,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 0.2214,
+      "pctOver": 0.0324,
+      "p99": 3
+     },
+     "reflection": {
+      "px": 201530,
+      "mean": 0.3877,
+      "pctOver": 0.0834,
+      "p99": 4
+     }
+    },
+    "rest": {
+     "whole": {
+      "mean": 0.008,
+      "pctOver1": 0.001
+     },
+     "reflection": {
+      "mean": 0.0096,
+      "pctOver1": 0
+     }
+    },
+    "host": {
+     "aa": "upscaler",
+     "ratio": 1.5
+    }
+   },
+   "restDriftUpscaleUnaligned": {
+    "frames": [
+     120,
+     240
+    ],
+    "jitterPhases": 18,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 0.2086,
+      "pctOver": 0.0282,
+      "p99": 3
+     },
+     "reflection": {
+      "px": 201691,
+      "mean": 0.3653,
+      "pctOver": 0.0724,
+      "p99": 4
+     }
+    },
+    "rest": {}
+   }
+  },
+  "contact": {
+   "host": {
+    "page": "ssr",
+    "scene": "contact",
+    "aa": "upscaler",
+    "ratio": 1,
+    "render": [
+     960,
+     540
+    ],
+    "display": [
+     960,
+     540
+    ],
+    "denoiser": "ffx-reflections",
+    "rt": false,
+    "hit": "current",
+    "effective": {
+     "hitColorFilter": "cone",
+     "mirrorBias": 0.5,
+     "mirrorBiasCompensate": true
+    }
+   },
+   "size": [
+    960,
+    540
+   ],
+   "restDrift": {
+    "frames": [
+     120,
+     240
+    ],
+    "jitterPhases": 8,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 0.4997,
+      "pctOver": 0.2297,
+      "p99": 5
+     },
+     "reflection": {
+      "px": 279730,
+      "mean": 0.785,
+      "pctOver": 0.4254,
+      "p99": 6
+     }
+    },
+    "rest": {
+     "whole": {
+      "mean": 2.4475,
+      "pctOver1": 20.0656
+     },
+     "reflection": {
+      "mean": 4.5027,
+      "pctOver1": 37.1859
+     }
+    }
+   },
+   "orbitFlicker": {
+    "deg": 0.1,
+    "half": 10,
+    "passes": 12,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "std": 5.2664,
+      "d2": 7.1681,
+      "pctD2Over": 22.2843,
+      "mean": 141.6323
+     },
+     "reflection": {
+      "px": 278974,
+      "std": 9.4371,
+      "d2": 11.6537,
+      "pctD2Over": 32.2588,
+      "mean": 120.1637
+     }
+    }
+   },
+   "quadEnergy": {
+    "warm": 60,
+    "frames": 8,
+    "display": {
+     "whole": {
+      "pairs": 1035300,
+      "power": -13.8594,
+      "ratio": -0.0674
+     },
+     "reflection": {
+      "pairs": 557547,
+      "power": 1.2818,
+      "ratio": 0.0161
+     }
+    },
+    "signal": {
+     "whole": {
+      "pairs": 1035300,
+      "power": 0.0712,
+      "ratio": 0.6809
+     },
+     "reflection": {
+      "pairs": 557547,
+      "power": 0.1321,
+      "ratio": 0.6837
+     }
+    }
+   },
+   "edgePan": {
+    "deg": 0.25,
+    "frames": 24,
+    "border": 0.1,
+    "regions": {
+     "border": {
+      "px": 186624,
+      "d1": 10.0631,
+      "d2": 16.6486,
+      "pctD2Over": 41.1615
+     },
+     "borderReflection": {
+      "px": 89237,
+      "d1": 10.236,
+      "d2": 16.2835,
+      "pctD2Over": 57.1131
+     },
+     "centre": {
+      "px": 331776,
+      "d1": 9.5457,
+      "d2": 15.135,
+      "pctD2Over": 36.82
+     },
+     "centreReflection": {
+      "px": 190295,
+      "d1": 10.5101,
+      "d2": 16.1213,
+      "pctD2Over": 46.605
+     }
+    }
+   },
+   "speckle": {
+    "source": "signal",
+    "sigma": 3,
+    "frames": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "pct": 0.0094
+     },
+     "reflection": {
+      "px": 279484,
+      "pct": 0.0173
+     }
+    }
+   },
+   "energy": {
+    "frames": 64,
+    "size": [
+     960,
+     540
+    ],
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "raw": 0.2791,
+      "denoised": 0.2762,
+      "loss": 0.0105
+     },
+     "reflection": {
+      "px": 279781,
+      "raw": 0.2806,
+      "denoised": 0.2752,
+      "loss": 0.0194
+     }
+    }
+   },
+   "restDrift2": {
+    "frames": [
+     120,
+     240
+    ],
+    "jitterPhases": 8,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 0.4937,
+      "pctOver": 0.2155,
+      "p99": 5
+     },
+     "reflection": {
+      "px": 279730,
+      "mean": 0.7746,
+      "pctOver": 0.3993,
+      "p99": 6
+     }
+    },
+    "rest": {
+     "whole": {
+      "mean": 2.4468,
+      "pctOver1": 20.0754
+     },
+     "reflection": {
+      "mean": 4.5015,
+      "pctOver1": 37.2041
+     }
+    }
+   },
+   "orbitFlicker2": {
+    "deg": 0.1,
+    "half": 10,
+    "passes": 12,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "std": 5.2652,
+      "d2": 7.1691,
+      "pctD2Over": 22.2863,
+      "mean": 141.6311
+     },
+     "reflection": {
+      "px": 278974,
+      "std": 9.4349,
+      "d2": 11.6551,
+      "pctD2Over": 32.2637,
+      "mean": 120.1609
+     }
+    }
+   },
+   "restDrift3": {
+    "frames": [
+     120,
+     240
+    ],
+    "jitterPhases": 8,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 0.5181,
+      "pctOver": 0.2226,
+      "p99": 5
+     },
+     "reflection": {
+      "px": 279590,
+      "mean": 0.8211,
+      "pctOver": 0.4127,
+      "p99": 6
+     }
+    },
+    "rest": {
+     "whole": {
+      "mean": 2.448,
+      "pctOver1": 20.064
+     },
+     "reflection": {
+      "mean": 4.5061,
+      "pctOver1": 37.2016
+     }
+    }
+   },
+   "orbitFlicker3": {
+    "deg": 0.1,
+    "half": 10,
+    "passes": 12,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "std": 5.3951,
+      "d2": 7.1944,
+      "pctD2Over": 22.5178,
+      "mean": 141.5654
+     },
+     "reflection": {
+      "px": 279865,
+      "std": 9.6628,
+      "d2": 11.6707,
+      "pctD2Over": 32.6202,
+      "mean": 120.1941
+     }
+    }
+   },
+   "restDriftAAOff": {
+    "frames": [
+     120,
+     240
+    ],
+    "jitterPhases": 1,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 0.1031,
+      "pctOver": 0.0243,
+      "p99": 2
+     },
+     "reflection": {
+      "px": 279619,
+      "mean": 0.1911,
+      "pctOver": 0.0451,
+      "p99": 3
+     }
+    },
+    "rest": {
+     "whole": {
+      "mean": 0.039,
+      "pctOver1": 0.5706
+     },
+     "reflection": {
+      "mean": 0.0723,
+      "pctOver1": 1.0579
+     }
+    },
+    "host": {
+     "aa": "off",
+     "ratio": 1
+    }
+   },
+   "restDriftUpscale": {
+    "frames": [
+     114,
+     240
+    ],
+    "jitterPhases": 18,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 0.5321,
+      "pctOver": 0.4034,
+      "p99": 6
+     },
+     "reflection": {
+      "px": 279458,
+      "mean": 0.8831,
+      "pctOver": 0.7472,
+      "p99": 7
+     }
+    },
+    "rest": {
+     "whole": {
+      "mean": 2.1173,
+      "pctOver1": 17.6991
+     },
+     "reflection": {
+      "mean": 3.8868,
+      "pctOver1": 32.8296
+     }
+    },
+    "host": {
+     "aa": "upscaler",
+     "ratio": 1.5
+    }
+   },
+   "restDriftUpscaleUnaligned": {
+    "frames": [
+     120,
+     240
+    ],
+    "jitterPhases": 18,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 3.5862,
+      "pctOver": 9.1576,
+      "p99": 76
+     },
+     "reflection": {
+      "px": 279517,
+      "mean": 6.5315,
+      "pctOver": 16.9836,
+      "p99": 92
+     }
+    },
+    "rest": {}
+   }
+  }
+ },
+ "showcase": {
+  "carConcept": {
+   "pose": "w50",
+   "measure": {
+    "referenceSamples": 128,
+    "frames": 16,
+    "rows": [
+     {
+      "region": "frame",
+      "px": 518400,
+      "refLuma": 148.24166358464657,
+      "refQuad": -0.01602753102405117,
+      "methods": {
+       "ours-denoised": {
+        "mad": 12.404291530026029,
+        "luma": 155.72790238372292,
+        "frameMad": 12.404320625962091,
+        "std": 0.046545745201119613,
+        "quad": 0.028352231823108278,
+        "speckle": 0.002242476851851852
+       },
+       "ours-raw": {
+        "mad": 11.73287169656444,
+        "luma": 154.8215513820363,
+        "frameMad": 11.73771255304574,
+        "std": 0.16637800601514677,
+        "quad": -0.03217362376345649,
+        "speckle": 0.013129340277777776
+       },
+       "ours-rt": {
+        "mad": 8.06565401556063,
+        "luma": 152.69874886378693,
+        "frameMad": 8.065886140046757,
+        "std": 0.15540095606145304,
+        "quad": 0.027161876063676125,
+        "speckle": 0.003821855709876543
+       }
+      }
+     },
+     {
+      "region": "glossy",
+      "px": 458630,
+      "refLuma": 148.29985613469955,
+      "refQuad": -0.010396640401003807,
+      "methods": {
+       "ours-denoised": {
+        "mad": 13.597812643087073,
+        "luma": 156.57040824075506,
+        "frameMad": 13.597843804734925,
+        "std": 0.05034850455076872,
+        "quad": 0.047986424192272635,
+        "speckle": 0.002534722979307939
+       },
+       "ours-raw": {
+        "mad": 12.841197833763953,
+        "luma": 155.5430489764209,
+        "frameMad": 12.846666657579615,
+        "std": 0.18562501716706054,
+        "quad": -0.03879533703816391,
+        "speckle": 0.014840394217560997
+       },
+       "ours-rt": {
+        "mad": 8.660217159438629,
+        "luma": 152.99918235235458,
+        "frameMad": 8.66046618007319,
+        "std": 0.16341504569820534,
+        "quad": 0.048504874581759616,
+        "speckle": 0.0038838497263589387
+       }
+      }
+     },
+     {
+      "region": "lip",
+      "px": 1368,
+      "refLuma": 45.4969516081872,
+      "refQuad": 0.00035705863409824857,
+      "methods": {
+       "ours-denoised": {
+        "mad": 114.11304519980528,
+        "luma": 147.38584524853835,
+        "frameMad": 114.11304519980521,
+        "std": 0.13332852849483076,
+        "quad": -0.03125500444206766,
+        "speckle": 0
+       },
+       "ours-raw": {
+        "mad": 109.62536549707602,
+        "luma": 148.5089290570177,
+        "frameMad": 109.62603557504877,
+        "std": 0.21678132053234347,
+        "quad": -0.04103116695262081,
+        "speckle": 0
+       },
+       "ours-rt": {
+        "mad": 52.793113425925874,
+        "luma": 88.16098493238313,
+        "frameMad": 52.793265716374286,
+        "std": 0.33466640617619525,
+        "quad": -0.11243800202232067,
+        "speckle": 0.08680555555555552
+       }
+      }
+     },
+     {
+      "region": "band",
+      "px": 3242,
+      "refLuma": 3.959087723627373,
+      "refQuad": 0.07035090493976028,
+      "methods": {
+       "ours-denoised": {
+        "mad": 161.10078655151077,
+        "luma": 165.04801764729177,
+        "frameMad": 161.10078655151065,
+        "std": 0.03127272519621024,
+        "quad": 0.49281411580985535,
+        "speckle": 0
+       },
+       "ours-raw": {
+        "mad": 159.88092484063313,
+        "luma": 163.83341332511435,
+        "frameMad": 159.88092484063316,
+        "std": 0.05255737626595877,
+        "quad": 0.1060483458311929,
+        "speckle": 0
+       },
+       "ours-rt": {
+        "mad": 24.8544686921654,
+        "luma": 28.638867485348424,
+        "frameMad": 24.854468692165632,
+        "std": 0.26049816368339507,
+        "quad": 0.04583323512279891,
+        "speckle": 0
+       }
+      }
+     },
+     {
+      "region": "wheel",
+      "px": 9900,
+      "refLuma": 25.52024923232273,
+      "refQuad": -0.03428438639557746,
+      "methods": {
+       "ours-denoised": {
+        "mad": 56.51242213804687,
+        "luma": 74.86159614141403,
+        "frameMad": 56.51247264309737,
+        "std": 0.22596454902931373,
+        "quad": 0.20096259836914548,
+        "speckle": 0
+       },
+       "ours-raw": {
+        "mad": 48.63654671717147,
+        "luma": 60.21982439520189,
+        "frameMad": 48.70099116161575,
+        "std": 1.6976000544117433,
+        "quad": -0.3426012476520904,
+        "speckle": 0.08333333333333334
+       },
+       "ours-rt": {
+        "mad": 31.120324074074055,
+        "luma": 48.90905611616179,
+        "frameMad": 31.12064393939386,
+        "std": 0.31360251361699437,
+        "quad": 0.5528078674104293,
+        "speckle": 0
+       }
+      }
+     },
+     {
+      "region": "door",
+      "px": 8468,
+      "refLuma": 118.23267694851202,
+      "refQuad": 0.05248690336481466,
+      "methods": {
+       "ours-denoised": {
+        "mad": 13.786842131160439,
+        "luma": 109.9631136617267,
+        "frameMad": 13.786876574555192,
+        "std": 0.12689654705713146,
+        "quad": 0.2926310002748449,
+        "speckle": 0
+       },
+       "ours-raw": {
+        "mad": 14.164174441032927,
+        "luma": 108.81257180414526,
+        "frameMad": 14.171161529680399,
+        "std": 0.2893825360465944,
+        "quad": 0.23840905864579065,
+        "speckle": 0.028784837033538017
+       },
+       "ours-rt": {
+        "mad": 11.342514958274268,
+        "luma": 115.86385131229326,
+        "frameMad": 11.343193985199195,
+        "std": 0.3152614906294606,
+        "quad": 0.19678357696077975,
+        "speckle": 0
+       }
+      }
+     },
+     {
+      "region": "car",
+      "px": 85400,
+      "refLuma": 104.94680852693752,
+      "refQuad": -0.039628328777508826,
+      "methods": {
+       "ours-denoised": {
+        "mad": 31.34931157299359,
+        "luma": 125.521380905889,
+        "frameMad": 31.34934523809887,
+        "std": 0.10798639989610184,
+        "quad": 0.11200780445249599,
+        "speckle": 0.001244145199063232
+       },
+       "ours-raw": {
+        "mad": 29.316829869247638,
+        "luma": 120.87777404420302,
+        "frameMad": 29.337463651449276,
+        "std": 0.5522509715062126,
+        "quad": -0.13723403149733313,
+        "speckle": 0.028761709601873527
+       },
+       "ours-rt": {
+        "mad": 14.90271101678253,
+        "luma": 111.4167793094268,
+        "frameMad": 14.9031852556577,
+        "std": 0.23213955348367477,
+        "quad": 0.20040104856666366,
+        "speckle": 0.002488290398126464
+       }
+      }
+     }
+    ]
+   },
+   "host": {
+    "page": "bench",
+    "scene": "carConcept",
+    "pose": "w50",
+    "method": "ours-denoised",
+    "settings": "scene=carConcept&pose=w50",
+    "status": "denoiser ffx-reflections | AA upscaler",
+    "effective": {
+     "s.hitColorFilter": "cone",
+     "s.mirrorBias": "0.5",
+     "s.mirrorBiasCompensate": "1",
+     "s.thicknessDepthMode": null,
+     "s.thicknessDepthFactor": null
+    }
+   },
+   "size": [
+    960,
+    540
+   ],
+   "restDrift": {
+    "frames": [
+     120,
+     240
+    ],
+    "jitterPhases": 8,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 0.2473,
+      "pctOver": 0.005,
+      "p99": 3
+     },
+     "reflection": {
+      "px": 458630,
+      "mean": 0.2715,
+      "pctOver": 0.0052,
+      "p99": 3
+     },
+     "lip": {
+      "px": 1368,
+      "mean": 0.4173,
+      "pctOver": 0.0731,
+      "p99": 5
+     },
+     "band": {
+      "px": 3242,
+      "mean": 0.1218,
+      "pctOver": 0,
+      "p99": 2
+     },
+     "wheel": {
+      "px": 9900,
+      "mean": 1.2831,
+      "pctOver": 0.0101,
+      "p99": 5
+     },
+     "door": {
+      "px": 8468,
+      "mean": 0.6317,
+      "pctOver": 0,
+      "p99": 3
+     },
+     "car": {
+      "px": 85400,
+      "mean": 0.5873,
+      "pctOver": 0.0035,
+      "p99": 4
+     }
+    },
+    "rest": {
+     "whole": {
+      "mean": 0.0073,
+      "pctOver1": 0.0108
+     },
+     "reflection": {
+      "mean": 0.0072,
+      "pctOver1": 0.0102
+     },
+     "lip": {
+      "mean": 0.0238,
+      "pctOver1": 0
+     },
+     "band": {
+      "mean": 0.0017,
+      "pctOver1": 0
+     },
+     "wheel": {
+      "mean": 0.0242,
+      "pctOver1": 0
+     },
+     "door": {
+      "mean": 0.0096,
+      "pctOver1": 0
+     },
+     "car": {
+      "mean": 0.0116,
+      "pctOver1": 0.0012
+     }
+    }
+   },
+   "orbitFlicker": {
+    "deg": 0.1,
+    "half": 10,
+    "passes": 12,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "std": 0.381,
+      "d2": 0.3209,
+      "pctD2Over": 0.7347,
+      "mean": 155.5646
+     },
+     "reflection": {
+      "px": 458630,
+      "std": 0.3932,
+      "d2": 0.3273,
+      "pctD2Over": 0.6975,
+      "mean": 156.3474
+     },
+     "lip": {
+      "px": 1368,
+      "std": 0.7151,
+      "d2": 0.27,
+      "pctD2Over": 0.034,
+      "mean": 146.4259
+     },
+     "band": {
+      "px": 3242,
+      "std": 0.1998,
+      "d2": 0.0922,
+      "pctD2Over": 0.0011,
+      "mean": 164.6214
+     },
+     "wheel": {
+      "px": 9900,
+      "std": 2.1661,
+      "d2": 1.6,
+      "pctD2Over": 8.1804,
+      "mean": 72.8816
+     },
+     "door": {
+      "px": 8468,
+      "std": 0.5063,
+      "d2": 0.3706,
+      "pctD2Over": 0.035,
+      "mean": 109.6309
+     },
+     "car": {
+      "px": 85400,
+      "std": 0.7824,
+      "d2": 0.6399,
+      "pctD2Over": 2.3125,
+      "mean": 125.2821
+     }
+    }
+   },
+   "quadEnergy": {
+    "warm": 60,
+    "frames": 8,
+    "display": {
+     "whole": {
+      "pairs": 1035300,
+      "power": 2.7908,
+      "ratio": 0.0296
+     },
+     "reflection": {
+      "pairs": 913694,
+      "power": 3.6888,
+      "ratio": 0.0496
+     },
+     "lip": {
+      "pairs": 2431,
+      "power": -8.6717,
+      "ratio": -0.0189
+     },
+     "band": {
+      "pairs": 6146,
+      "power": 4.5497,
+      "ratio": 0.4927
+     },
+     "wheel": {
+      "pairs": 19600,
+      "power": 25.8006,
+      "ratio": 0.2026
+     },
+     "door": {
+      "pairs": 16686,
+      "power": 13.104,
+      "ratio": 0.2967
+     },
+     "car": {
+      "pairs": 170050,
+      "power": 8.885,
+      "ratio": 0.1128
+     }
+    },
+    "signal": {
+     "whole": {
+      "pairs": 1035300,
+      "power": 0.3482,
+      "ratio": 0.8767
+     },
+     "reflection": {
+      "pairs": 913694,
+      "power": 0.3921,
+      "ratio": 0.8947
+     },
+     "lip": {
+      "pairs": 2431,
+      "power": 2.2629,
+      "ratio": 0.9008
+     },
+     "band": {
+      "pairs": 6146,
+      "power": 0.0471,
+      "ratio": 0.9798
+     },
+     "wheel": {
+      "pairs": 19600,
+      "power": 0.4736,
+      "ratio": 1
+     },
+     "door": {
+      "pairs": 16686,
+      "power": 0.1017,
+      "ratio": 1
+     },
+     "car": {
+      "pairs": 170050,
+      "power": 0.145,
+      "ratio": 0.982
+     }
+    }
+   },
+   "edgePan": {
+    "deg": 0.25,
+    "frames": 24,
+    "border": 0.1,
+    "regions": {
+     "border": {
+      "px": 186624,
+      "d1": 0.7102,
+      "d2": 0.5704,
+      "pctD2Over": 2.3077
+     },
+     "borderReflection": {
+      "px": 135464,
+      "d1": 0.9153,
+      "d2": 0.6787,
+      "pctD2Over": 3.0877
+     },
+     "centre": {
+      "px": 331776,
+      "d1": 5.5123,
+      "d2": 6.6086,
+      "pctD2Over": 25.121
+     },
+     "centreReflection": {
+      "px": 323166,
+      "d1": 5.315,
+      "d2": 6.3033,
+      "pctD2Over": 24.3233
+     }
+    }
+   },
+   "speckle": {
+    "source": "signal",
+    "sigma": 3,
+    "frames": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "pct": 0.0552
+     },
+     "reflection": {
+      "px": 458630,
+      "pct": 0.0567
+     },
+     "lip": {
+      "px": 1368,
+      "pct": 0
+     },
+     "band": {
+      "px": 3242,
+      "pct": 0
+     },
+     "wheel": {
+      "px": 9900,
+      "pct": 0
+     },
+     "door": {
+      "px": 8468,
+      "pct": 0
+     },
+     "car": {
+      "px": 85400,
+      "pct": 0.0111
+     }
+    }
+   },
+   "energy": {
+    "frames": 64,
+    "size": [
+     960,
+     540
+    ],
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "raw": 0.8918,
+      "denoised": 0.8546,
+      "loss": 0.0416
+     },
+     "reflection": {
+      "px": 458630,
+      "raw": 0.9972,
+      "denoised": 0.9554,
+      "loss": 0.0419
+     },
+     "lip": {
+      "px": 1368,
+      "raw": 1.3071,
+      "denoised": 1.0745,
+      "loss": 0.178
+     },
+     "band": {
+      "px": 3242,
+      "raw": 0.68,
+      "denoised": 0.6862,
+      "loss": -0.0092
+     },
+     "wheel": {
+      "px": 9900,
+      "raw": 0.1987,
+      "denoised": 0.1715,
+      "loss": 0.137
+     },
+     "door": {
+      "px": 8468,
+      "raw": 0.5088,
+      "denoised": 0.4683,
+      "loss": 0.0796
+     },
+     "car": {
+      "px": 85400,
+      "raw": 0.5382,
+      "denoised": 0.5186,
+      "loss": 0.0364
+     }
+    }
+   },
+   "restDrift2": {
+    "frames": [
+     120,
+     240
+    ],
+    "jitterPhases": 8,
+    "threshold": 8,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "mean": 0.2463,
+      "pctOver": 0.0087,
+      "p99": 3
+     },
+     "reflection": {
+      "px": 458630,
+      "mean": 0.2703,
+      "pctOver": 0.0089,
+      "p99": 3
+     },
+     "lip": {
+      "px": 1368,
+      "mean": 0.4026,
+      "pctOver": 0.0731,
+      "p99": 5
+     },
+     "band": {
+      "px": 3242,
+      "mean": 0.1132,
+      "pctOver": 0,
+      "p99": 2
+     },
+     "wheel": {
+      "px": 9900,
+      "mean": 1.183,
+      "pctOver": 0,
+      "p99": 5
+     },
+     "door": {
+      "px": 8468,
+      "mean": 0.6268,
+      "pctOver": 0,
+      "p99": 3
+     },
+     "car": {
+      "px": 85400,
+      "mean": 0.5749,
+      "pctOver": 0.0222,
+      "p99": 4
+     }
+    },
+    "rest": {
+     "whole": {
+      "mean": 0.0073,
+      "pctOver1": 0.0116
+     },
+     "reflection": {
+      "mean": 0.0072,
+      "pctOver1": 0.0107
+     },
+     "lip": {
+      "mean": 0.0203,
+      "pctOver1": 0
+     },
+     "band": {
+      "mean": 0.0015,
+      "pctOver1": 0
+     },
+     "wheel": {
+      "mean": 0.0241,
+      "pctOver1": 0
+     },
+     "door": {
+      "mean": 0.0092,
+      "pctOver1": 0
+     },
+     "car": {
+      "mean": 0.0115,
+      "pctOver1": 0
+     }
+    }
+   },
+   "orbitFlicker2": {
+    "deg": 0.1,
+    "half": 10,
+    "passes": 12,
+    "regions": {
+     "whole": {
+      "px": 518400,
+      "std": 0.3815,
+      "d2": 0.3212,
+      "pctD2Over": 0.7344,
+      "mean": 155.5658
+     },
+     "reflection": {
+      "px": 458630,
+      "std": 0.3935,
+      "d2": 0.3277,
+      "pctD2Over": 0.697,
+      "mean": 156.3486
+     },
+     "lip": {
+      "px": 1368,
+      "std": 0.7189,
+      "d2": 0.2724,
+      "pctD2Over": 0.0345,
+      "mean": 146.4334
+     },
+     "band": {
+      "px": 3242,
+      "std": 0.198,
+      "d2": 0.0913,
+      "pctD2Over": 0.0009,
+      "mean": 164.6364
+     },
+     "wheel": {
+      "px": 9900,
+      "std": 2.1163,
+      "d2": 1.6101,
+      "pctD2Over": 8.2208,
+      "mean": 72.83
+     },
+     "door": {
+      "px": 8468,
+      "std": 0.5114,
+      "d2": 0.3687,
+      "pctD2Over": 0.0363,
+      "mean": 109.6273
+     },
+     "car": {
+      "px": 85400,
+      "std": 0.7783,
+      "d2": 0.6409,
+      "pctD2Over": 2.3107,
+      "mean": 125.2821
+     }
+    }
+   }
+  }
+ },
+ "seconds": 92.311
+}
