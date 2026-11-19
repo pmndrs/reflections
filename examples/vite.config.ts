@@ -39,6 +39,11 @@ function findDenoiser(): string | null {
   return null;
 }
 const denoiserRepo = findDenoiser();
+// The public site build (tools/site-build.ts, EXAMPLES_SITE=1) must not silently run undenoised (it flickers): fail here.
+// It also leaves out the pages that need the Denoiser repo's OIDN package or the closed pixi-3d beta (compare, bench, pixi3d).
+const siteBuild = process.env.EXAMPLES_SITE === '1';
+if (siteBuild && !denoiserRepo) throw new Error('EXAMPLES_SITE=1 needs the denoiser source: set DENOISER_REPO to a pmndrs/denoiser checkout (packages/denoiser-ffx/src/index.ts must exist).');
+if (siteBuild) for (const k of Object.keys(pages)) if (k === 'pixi' || k.startsWith('pixi3d-')) delete pages[k]; // (pixi/ only redirects to pixi3d/arcade)
 // denoiser/three's `ffxReflections()` TSL helper (examples/showcase compare page, method "three SSR +
 // FFX"), from the same Denoiser checkout. Only its temporal/ffx.ts module graph is used.
 const denoiserThreeFfx = denoiserRepo && existsSync(resolve(denoiserRepo, 'packages/denoiser-three/src/temporal/ffx.ts'))
@@ -109,6 +114,7 @@ const sharedDeps = {
 
 export default defineConfig({
   root,
+  base: process.env.EXAMPLES_BASE ?? '/', // the site build serves the examples under /examples/ (or /<repo>/examples/)
   plugins: [{
     // Without the beta, a pixi-3d example's main.ts is replaced by the notice. Its source, not an
     // import of it: the root package.json's `sideEffects: false` lets a build drop a bare import.
@@ -137,6 +143,8 @@ export default defineConfig({
       { find: /^@pmndrs\/reflections\/babylon$/, replacement: resolve(root, '../src/babylon.ts') },
       { find: /^@pmndrs\/reflections\/pixi$/, replacement: resolve(root, '../src/pixi.ts') },
       { find: /^@pmndrs\/reflections$/, replacement: resolve(root, '../src/index.ts') },
+      // denoiser-ffx imports denoiser-core: from source too, so the checkout needs no install (CI)
+      ...(denoiserRepo ? [{ find: /^@pmndrs\/denoiser-core$/, replacement: resolve(denoiserRepo, 'packages/denoiser-core/src/index.ts') }] : []),
       {
         find: /^@pmndrs\/denoiser-ffx$/,
         replacement: denoiserRepo ? resolve(denoiserRepo, 'packages/denoiser-ffx/src/index.ts') : resolve(root, 'shared/denoiser-missing.ts'),
@@ -154,5 +162,5 @@ export default defineConfig({
   // Behind an alias, vite would pre-bundle the tracer with its own copy of
   // three (two three instances: broken TSL). Served as source instead, `sharedDeps` resolves its three.
   optimizeDeps: { exclude: ['three-gpu-pathtracer-webgpu'] },
-  build: { outDir: resolve(root, 'dist'), emptyOutDir: true, rollupOptions: { input: { ...pages, 'showcase-compare': resolve(root, 'showcase/compare.html'), 'showcase-bench': resolve(root, 'showcase/bench.html'), 'quickstart-probes': resolve(root, 'quickstart/probes.html') } } },
+  build: { target: 'esnext', outDir: resolve(root, process.env.EXAMPLES_OUT ?? 'dist'), emptyOutDir: true, rollupOptions: { input: { ...pages, 'quickstart-probes': resolve(root, 'quickstart/probes.html'), ...(siteBuild ? {} : { 'showcase-compare': resolve(root, 'showcase/compare.html'), 'showcase-bench': resolve(root, 'showcase/bench.html') }) } } },
 });

@@ -6,8 +6,14 @@ import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { type KitScene, type SceneOptions, type Vec3, floor, gradientEnvironment, makeCamera, mirror, newScene, std, studioLights, toVec3 } from './kit';
 
-/** URL of a file under examples/assets/ as served by the examples dev server. */
-export const assetUrl = (dir: string, file: string) => `${import.meta.env.BASE_URL}assets/${dir ? dir + '/' : ''}${file}`;
+/**
+ * The public site build serves the models from a CDN (tools/site-build.ts sets VITE_REMOTE_ASSETS to a JSON map
+ * of asset folder -> base URL with a trailing slash); anything not in the map is under examples/assets/.
+ */
+const REMOTE: Record<string, string> = JSON.parse(import.meta.env.VITE_REMOTE_ASSETS || '{}');
+
+/** URL of a file under examples/assets/ as served by the examples dev server (or by the CDN, see REMOTE). */
+export const assetUrl = (dir: string, file: string) => `${REMOTE[dir] ?? `${import.meta.env.BASE_URL}assets/${dir ? dir + '/' : ''}`}${file}`;
 
 export interface AssetEntry { dir: string; file: string; license: string; devOnly: boolean }
 

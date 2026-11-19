@@ -1,0 +1,38 @@
+---
+title: pixi.js
+description: Reflections for pixi-3d scenes on a pixi v8 WebGPURenderer. Experimental, and it needs a closed beta.
+nav: 22
+sourcecode: packages/pixi/src
+---
+
+> [!WARNING]
+> The pixi adapter is experimental, and it works with **pixi-3d** (`@pixi/3d`), which is in a closed beta and not on
+> npm. This repository never bundles it, and the live examples site does not include the pixi example.
+
+pixi has no G-buffer, so the adapter builds the [frame contract](/concepts/frame-contract) from what a pixi-3d
+`View3D` provides (colour, depth, motion, camera) plus one extra pass for normals and material values. The adapter
+never imports `@pixi/3d`. It takes pixi textures and plain structural types, so it builds and type-checks without
+the beta.
+
+{/* snippet: pixi-imports */}
+```ts
+import { PixiProbeSet, ReflectionsView, ScreenSpaceReflections as PixiScreenSpaceReflections, requestReflectionsDevice } from '@pmndrs/reflections/pixi';
+```
+
+## The parts
+
+| Piece | What it does |
+| --- | --- |
+| `requestReflectionsDevice` | Creates the device with the limits the library needs, for pixi's renderer to use. |
+| `Pixi3DFrame` | The frame contract from a pixi-3d `View3D`'s outputs. |
+| `PixiProbeSet` | The core probe set, captured from pixi-3d renders. |
+| `ScreenSpaceReflections` | The core tracer on pixi's device. |
+| `ReflectionsFilter` | The composite as a pixi `Filter`. |
+| `ReflectionsView` | An all-in-one sprite that ties the parts together. |
+
+## Try it
+
+The example `examples/pixi3d/arcade` is a neon arcade built with pixi-3d. To run it you need the beta tarball
+unpacked into `examples/pixi3d/vendor/`. The steps are in
+[`examples/pixi3d/README.md`](https://github.com/pmndrs/reflections/blob/main/examples/pixi3d/README.md). Without the
+beta, the page shows a setup notice.

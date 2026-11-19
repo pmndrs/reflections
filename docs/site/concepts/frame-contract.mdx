@@ -1,0 +1,41 @@
+---
+title: The frame contract
+description: What every screen-space pass reads, and how an engine adapter fills it.
+nav: 15
+sourcecode: packages/core/src/frame
+---
+
+Every screen-space and hybrid pass reads the same inputs. The core never guesses at an engine's conventions: each
+choice is an explicit flag, and an adapter fills in the inputs.
+
+| Input | Format and convention | Notes |
+| --- | --- | --- |
+| depth | The engine's depth texture, or r32f linear | A `depthInverted` flag says whether it is reverse-Z. |
+| normal | World space, rgba16f or packed | Unpack factors are explicit. |
+| roughness | A channel of a material texture | A flag says whether it is perceptual (three: yes) or alpha. |
+| metalness, F0, albedo | Material texture | Used for the lobe weight and the composite. |
+| motion | UV-space velocity | `motionVectorScale` maps engine conventions. |
+| scene colour | HDR, direct and diffuse lighting only | Hit radiance for the tracer. Last frame's colour is allowed, reprojected. |
+| camera | View, projection, previous view-projection, jitter | The same struct the denoiser uses. |
+
+The output is a reflection radiance, a hit distance, a confidence and a source map. The hybrid resolve and the
+denoiser read those.
+
+## Why it matters to you
+
+- **Writing an adapter.** Fill the inputs and call the core. The Babylon and pixi adapters are examples of this.
+- **Using the core directly.** `@pmndrs/reflections/core` runs on a bare `GPUDevice`. You give it textures that follow
+  the contract. The `sssr-core` developer page in the [examples](/examples/) does this on exact analytic inputs.
+- **Debugging.** Most "my reflections look wrong" reports are a convention mismatch: reverse-Z, a flipped Y, motion
+  in the wrong scale, or roughness in the wrong space. The adapters set these for their engine. A custom setup must
+  set them itself.
+
+## What each adapter handles for you
+
+| Adapter | What it does |
+| --- | --- |
+| three | `FrameGBuffer` renders your scene once with multiple render targets into the contract. |
+| Babylon | Maps handedness, Y-flipped targets, velocity, gloss and F0 from a Babylon geometry render. |
+| pixi | Builds the frame from a pixi-3d `View3D`'s outputs, plus one extra pass for normals and materials. |
+
+Three owns the meshes, materials and the capture render. The core owns textures, passes and lookups.

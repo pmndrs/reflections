@@ -1,0 +1,91 @@
+---
+title: First frame, step by step
+description: SSR, the hybrid resolve and a composite in a three.js render loop, with each part explained.
+nav: 3
+---
+
+This page builds the screen-space path with the hybrid resolve. For the shortest version, see the
+[quick start](/getting-started/quick-start). You need a three.js scene that uses `MeshStandardMaterial` or
+`MeshPhysicalMaterial`, a `WebGPURenderer` created with the [device limits](/getting-started/installation#ask-for-the-right-device-limits),
+and ideally an `environment` on the scene.
+
+## The frame
+
+{/* snippet: first-frame */}
+```ts
+// G-buffer + screen-space trace, on the renderer's own device.
+const ssr = new ScreenSpaceReflectionsPass(renderer);
+
+// The hybrid resolve: the denoiser is optional (see "Denoising and upscaling").
+const hybrid = new HybridReflections(ssr, { denoiser, environment: scene.environment });
+
+// One full-screen pass puts the result in the frame.
+const pipeline = new THREE.RenderPipeline(renderer);
+pipeline.outputColorTransform = false;
+pipeline.outputNode = renderOutput(hybrid.composite().final, THREE.AgXToneMapping, THREE.SRGBColorSpace);
+
+function frame() {
+  ssr.render(scene, camera); // G-buffer and trace
+  hybrid.update(); // resolve and denoise
+  pipeline.render(); // composite on screen
+  requestAnimationFrame(frame);
+}
+frame();
+```
+
+## What each part does
+
+**`ScreenSpaceReflectionsPass`** renders your scene once into a G-buffer (depth, normals, roughness, metalness,
+motion, and the scene colour without its specular reflections). Then it runs the screen-space tracer on the renderer's
+own `GPUDevice`. It owns the textures it makes, and gives you the results as three textures. See
+[Screen-space reflections](/concepts/screen-space-reflections).
+
+**`HybridReflections`** takes that pass and adds the rest: the probes, the environment, optional ray-traced hits, and
+a denoiser. `update()` builds the noisy reflection signal, runs the denoiser on it, and keeps the result. Without a
+denoiser, `update()` still works and the composite shows the raw signal.
+
+**`composite()`** returns TSL nodes. `.final` is the lit image with the reflections in place of three's own specular
+environment term. Put it where your output goes. The result is linear HDR, so tone-map it as in the sample. If you
+use post-processing, feed `.final` into the chain instead.
+
+The G-buffer pass renders your scene, so `ssr.render()` replaces your own `renderer.render(scene, camera)` call.
+
+## Add probes
+
+Probes cover everything outside the screen and the rough surfaces SSR does not trace. They are baked once, or
+re-captured when you ask. See [Reflection probes](/concepts/reflection-probes).
+
+{/* snippet: probes */}
+```ts
+// Optional: lets the probes live in a real cube array on three r187.
+await installCubeArraySupport(renderer);
+
+const probes = new ReflectionProbes();
+const room = new ReflectionProbe(6, 3, 6); // influence box: width, height, depth
+room.position.set(0, 1.5, 0);
+probes.add(room);
+scene.add(probes);
+
+probes.bake(renderer, scene, { resolution: 128 });
+scene.environmentNode = reflectionProbes(probes) as never; // every physical material uses them (`as never`: three's typings are narrower than the node)
+```
+
+Pass the same `probes` to `HybridReflections({ probes })`, so the composite removes exactly the term three added.
+
+## Add the ray-traced fallback
+
+The ray tracer needs a BVH of your meshes. The three.js adapter builds one with `three-mesh-bvh`:
+
+{/* snippet: ray-traced */}
+```ts
+const provider = await MeshBVHTraceProvider.fromObjects(getDevice(renderer), meshes);
+const ssr = new ScreenSpaceReflectionsPass(renderer, { trace: { provider } });
+```
+
+Only the rays SSR missed are traced. See [Ray-traced fallback](/concepts/ray-traced-fallback).
+
+## Next
+
+- [Performance and quality](/guides/performance-and-quality) for presets and what each setting costs.
+- [Flicker and stability](/guides/flicker-and-stability) if something shimmers.
+- The [showcase](/examples/showcase/) runs all of this on real scenes. Its source is `examples/showcase` in the repository.

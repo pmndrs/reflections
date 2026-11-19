@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const KHRONOS = 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models';
+export const KHRONOS = 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models';
 
 // prettier-ignore
 export const ASSETS = [
@@ -104,4 +104,5 @@ async function main() {
   process.exit(failed ? 1 : 0);
 }
 
-main();
+// imported (tools/site-build.ts reads ASSETS) without downloading anything
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

@@ -1,0 +1,85 @@
+---
+title: Troubleshooting
+description: Device limit errors, storage buffer limits, and materials that get no reflections.
+nav: 25
+---
+
+## A texture or storage limit error
+
+The passes count their bindings when they are built. If a pass plus the parts plugged into it (the probes' fallback,
+hit shading, a trace provider) pass a per-stage limit, the build throws with the numbers and what to change. It looks
+like this:
+
+```text
+rt: the trace pipeline binds 11 storage buffers in the compute stage (...); the device allows 10 (maxStorageBuffersPerShaderStage).
+Request more at requestDevice ...
+```
+
+The default WebGPU limits are small, and the library needs more. Three fixes, in order:
+
+1. **Request the limits at device creation.** `reflectionsRequiredLimits(adapter)` asks for what the library wants,
+   clamped to the adapter. See [Installation](/getting-started/installation#ask-for-the-right-device-limits).
+2. **Ask for a specific limit** if you know which one failed, for example
+   `{ maxStorageBuffersPerShaderStage: adapter.limits.maxStorageBuffersPerShaderStage }`. With three:
+   `new WebGPURenderer({ requiredLimits: { ... } })`.
+3. **Use a part that binds less.** A simpler hit shading, or fewer probe sizes, or a fallback with fewer bindings.
+
+### Sampled textures
+
+Probe sets of several sizes use one texture binding per size. At the default 16 sampled textures per stage, a
+four-size set still fits three's composite, but a material with many maps may not. `reflectionsRequiredLimits` asks
+for up to 32. If your adapter cannot give 32, use fewer probe sizes (one or two sizes cover most scenes).
+
+### Colour attachment bytes
+
+The G-buffer's lit target and three's exact specular weights need more than 32 bytes per sample. Without the extra
+limit, those targets stay off and the composite falls back to an estimate of three's specular term. The result is
+close, but not exact. Request `maxColorAttachmentBytesPerSample` (up to 64) with the helper.
+
+## WebGPU is not available
+
+The library has no WebGL path. Check `navigator.gpu` before you build anything, and tell the user which browser to
+use. The live examples show a message when it is missing.
+
+## A material gets no reflections
+
+The library replaces three's specular environment term, so a material needs one. These work:
+`MeshStandardMaterial`, `MeshPhysicalMaterial`, and their node versions.
+
+These do not, on purpose: `MeshBasicMaterial`, `MeshLambertMaterial`, `MeshPhongMaterial`. They have no physically
+based specular term to replace, and adding one would make a material that says "not shiny" shiny. A basic material's
+classic `envMap` and `reflectivity` still render the way three draws them, but SSR and the ray-traced pass do not
+feed them. Give the surface a standard material. `roughness` and `metalness` replace Phong's `shininess` and
+`specular`.
+
+Other reasons a surface looks flat:
+
+- **It is very rough.** Above `roughnessThreshold` (0.447) a pixel skips the trace and shows only the probe or
+  environment. That is by design.
+- **There is nothing to reflect.** SSR shows what is on screen. Add probes or the ray-traced fallback for the rest.
+- **The probe's box does not cover it.** Outside every probe's influence box, the lookup uses the environment. Check
+  the box with `ReflectionProbesHelper`.
+- **The scene has no environment.** Misses show the probe or the environment, so a scene with neither shows black
+  there.
+
+## Reflections flicker or look grainy
+
+The usual cause is a missing denoiser. Check that you pass `denoiser` to
+`HybridReflections` and that `hybrid.denoise` is true. Then see [Flicker and stability](/guides/flicker-and-stability).
+
+## Reflections are wrong after a change
+
+- **After you change `reflectionResolution`** (or apply a preset that does), build the composites again:
+  `hybrid.rebuild()` and then `hybrid.composite()`. The library warns once if you forget.
+- **After a resize**, resize the G-buffer and reset the history. See [three.js](/guides/three#resizing).
+- **After a camera cut**, call `resetHistory()` on the pass and the hybrid.
+
+## Probes look seamed or wrong on a cube
+
+On three r187 without `installCubeArraySupport(renderer)`, probes use a 2D array with a seam fix. If you see seams,
+check the layout: `probes.bakedLayout` says what was used. Install the cube array support, or set `seamFix`.
+
+## Still stuck
+
+Open an issue at [github.com/pmndrs/reflections](https://github.com/pmndrs/reflections/issues). Say which
+adapter, the browser and GPU, the output of `adapter.limits` for the limits above, and the first line of the error.

@@ -1,0 +1,67 @@
+---
+title: Reflection probes
+description: Baked cube captures, prefiltered by roughness, box-projected and blended by volume.
+nav: 10
+sourcecode: packages/three/src/probes/ReflectionProbes.ts
+---
+
+A reflection probe is a picture of the room taken from one point, in all six directions. The library bakes it into a
+cube map, blurs it for each roughness level (a GGX prefilter), and looks it up at runtime. It is the cheapest
+reflection there is, and it works everywhere on screen and off.
+
+## What a probe knows
+
+- **The room as it was when you baked.** A moving object is not in the probe unless you re-capture. A probe can be
+  live (captured every frame, or time-sliced), but then you pay for the capture.
+- **The room from one point.** If you look at a floor from far away from the capture point, the reflection is
+  slightly wrong. Box projection fixes most of it. You give each probe an *influence box* shaped like its room, and
+  the lookup ray is intersected with that box, so the reflection lines up with the walls.
+- **Blur by roughness.** Rough surfaces read a blurrier mip. Mirror-like surfaces read the sharp one.
+
+## Using probes
+
+{/* snippet: probes */}
+```ts
+// Optional: lets the probes live in a real cube array on three r187.
+await installCubeArraySupport(renderer);
+
+const probes = new ReflectionProbes();
+const room = new ReflectionProbe(6, 3, 6); // influence box: width, height, depth
+room.position.set(0, 1.5, 0);
+probes.add(room);
+scene.add(probes);
+
+probes.bake(renderer, scene, { resolution: 128 });
+scene.environmentNode = reflectionProbes(probes) as never; // every physical material uses them (`as never`: three's typings are narrower than the node)
+```
+
+Put one probe per room or region. Where boxes overlap, the lookup blends the probes by coverage. Outside every box
+the lookup uses the environment, so a scene without probes keeps working.
+
+The API follows the three.js proposal [#35046](https://github.com/mrdoob/three.js/pull/35046) by Ben Houston, so code
+can move between this library and three. The extras on top are `sampleReflectionProbes` (use the lookup in any
+shader, such as a traced ray's miss), `originOffset`, live and time-sliced `bake`, `bake({ exclude })` to keep moving
+mirrors out of captures, `bake({ environment: false })`, `seamFix`, and irradiance re-fit.
+
+## Storage
+
+On three r187, which cannot bind cube arrays yet, `await installCubeArraySupport(renderer)` adds the support with a
+self-tested runtime patch. Without it the probes live in a 2D array with a seam fix. The look is the same within 1/255.
+`probes.layout` is `'auto'`, `'cube-array'` or `'cube2d'`, and `probes.bakedLayout` tells you what was used.
+
+## Which materials get probes
+
+Physically based materials: `MeshStandardMaterial`, `MeshPhysicalMaterial`, and their node versions. The probes
+replace three's own specular environment term, so they follow each material's roughness, metalness and clearcoat.
+`MeshBasicMaterial`, `MeshLambertMaterial` and `MeshPhongMaterial` have no such term and get nothing.
+See [Troubleshooting](/guides/troubleshooting#a-material-gets-no-reflections).
+
+## Settings that matter
+
+| Option | What it trades |
+| --- | --- |
+| `resolution` (default 256) | Face size. 256 for mirror-grade surfaces, 128 for many probes or mobile. |
+| `bounces` (default 2) | Captures that see other probes' reflections. 1 halves the bake where no mirror faces another. |
+| `boxProjection` (default on) | Off gives infinite-distance lookups with no parallax. |
+
+See the [settings reference](/reference/settings) for the rest.

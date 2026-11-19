@@ -1,0 +1,88 @@
+---
+title: Installation
+description: The package, its peer dependencies, WebGPU requirements, and the device limits helper.
+nav: 1
+---
+
+```bash
+npm install @pmndrs/reflections three
+```
+
+> [!NOTE]
+> `@pmndrs/reflections` is not published yet. Until it is, build it from
+> [the repository](https://github.com/pmndrs/reflections) (`pnpm install && pnpm build`) and link it.
+
+## Peer dependencies
+
+Every peer is optional, so you install only what you use.
+
+| Peer | Version | You need it for |
+| --- | --- | --- |
+| `three` | `>=0.187.0` | The three.js adapter. r187 is the floor. |
+| `three-mesh-bvh` | `>=0.9.18` | The ray-traced fallback on three, as the BVH provider. |
+| `@pmndrs/bvh` | any | The ray-traced fallback, as the library's own BVH provider (not on npm yet). |
+| `@babylonjs/core` | `>=9.35.0 <10` | The Babylon adapter. |
+| `pixi.js` | `>=8.22.0 <9` | The pixi adapter. |
+
+The denoiser is not a peer on purpose. It plugs in through a small interface, so you pass an object in. See
+[Denoising and upscaling](/concepts/denoising-and-upscaling).
+
+## Entry points
+
+| Import | What it holds |
+| --- | --- |
+| `@pmndrs/reflections` | The three.js surface. Same as `/three`. |
+| `@pmndrs/reflections/three` | three.js adapter. |
+| `@pmndrs/reflections/core` | Engine-agnostic passes on a `GPUDevice`. |
+| `@pmndrs/reflections/babylon` | Babylon.js adapter (experimental). |
+| `@pmndrs/reflections/pixi` | pixi.js adapter (experimental). |
+
+The package is ES modules only, with `sideEffects: false`.
+
+## Requirements
+
+- **WebGPU.** Current Chrome and Edge, and Safari Technology Preview, have it. There is no WebGL path.
+- **Compute shaders and storage textures.** Everything WebGPU gives you by default.
+- **More device limits than the defaults.** The G-buffer and the composite use more colour-attachment bytes and
+  sampled textures than WebGPU's default limits allow. The next section shows how to ask for them.
+- **Optional features** the library uses when the adapter has them: `subgroups` (a faster tracer variant) and
+  `timestamp-query` (per-pass GPU times).
+
+## Ask for the right device limits
+
+WebGPU gives you the default limits unless you ask for more. `reflectionsRequiredLimits(adapter)` returns the limits
+this library wants, clamped to what your adapter can do:
+
+- up to 64 colour-attachment bytes per sample (the default is 32), so the G-buffer can carry the lit image and
+  three's exact specular weights;
+- up to 32 sampled textures per shader stage (the default is 16), so probe sets of several sizes fit next to a
+  material's own maps;
+- the limits the depth downsampler needs for six-level mip dispatches.
+
+With three, pass them when you create the renderer:
+
+{/* snippet: renderer-limits */}
+```ts
+export async function createRenderer(canvas: HTMLCanvasElement): Promise<THREE.WebGPURenderer> {
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) throw new Error('WebGPU is not available');
+  const renderer = new THREE.WebGPURenderer({
+    canvas,
+    antialias: false,
+    // Asks for the most the adapter allows, up to what the library uses.
+    requiredLimits: reflectionsRequiredLimits(adapter),
+  });
+  await renderer.init();
+  return renderer;
+}
+```
+
+If you create the `GPUDevice` yourself (raw WebGPU, the `core` entry, pixi), pass the same object to
+`adapter.requestDevice({ requiredLimits })`. On an adapter that cannot give the extra limits, the library turns the
+optional G-buffer targets off and falls back to estimates. It does not crash. See
+[Troubleshooting](/guides/troubleshooting) for the messages you may see.
+
+## Bundlers
+
+Vite, webpack 5 and esbuild need no special configuration. With Vite, if you link the package from outside your
+project, add its folder to `server.fs.allow`.

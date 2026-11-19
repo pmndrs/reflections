@@ -1,0 +1,59 @@
+---
+title: Introduction
+description: Reflections for WebGPU. Probes, screen-space reflections and a ray-traced fallback, combined per pixel.
+nav: 0
+---
+
+<Intro>
+  `@pmndrs/reflections` adds specular reflections to a WebGPU scene. It has three sources of reflected light and a
+  resolve that picks the best one for every pixel. It works with three.js `WebGPURenderer` today, and the core knows
+  nothing about any engine.
+</Intro>
+
+> [!IMPORTANT]
+> The package is at version 0.0.0 and is not on npm yet. The API can still change before 0.1.
+
+## The three sources
+
+A reflection answers one question: what does this surface see in this direction? No single method answers it well
+everywhere, so the library uses three and combines them.
+
+| Source | It sees | It misses | Cost |
+| --- | --- | --- | --- |
+| **Reflection probes** | A cube map baked from a point in the room, prefiltered by roughness | Anything that moved or changed since the bake. Details are blurred and a little off, because a probe is one point. | Cheap. A texture lookup. |
+| **Screen-space reflections (SSR)** | Whatever is on screen, found by marching a ray through the depth buffer | Anything off screen or hidden behind something | Medium. A ray march per glossy pixel. |
+| **Ray-traced fallback** | The whole scene, through a BVH, for the rays SSR could not finish | Nothing in the scene. It is the most expensive and the least needed. | Highest. Only the rays SSR missed. |
+
+The **hybrid resolve** puts them together. For each pixel it uses the SSR hit where SSR found one. It asks the ray
+tracer about the misses. It falls back to the probes, then to the environment map. Then it hands the noisy part to a
+temporal denoiser and composites the result into your frame.
+
+## Which one do I need?
+
+- **A static room with glossy floors.** Probes alone. Bake once, pay almost nothing.
+- **Moving objects in glossy surfaces.** Add SSR. The reflections follow what is on screen.
+- **Mirrors, wet floors, car paint, where an off-screen object must show.** Add the ray-traced fallback.
+- **You want the best look and have the GPU time.** All three, through `HybridReflections`, with a denoiser.
+
+You can start with probes and add the others one at a time. Each page in [Concepts](/concepts/reflection-probes)
+covers one source.
+
+## What is in the package
+
+| Import | What it holds |
+| --- | --- |
+| `@pmndrs/reflections` and `@pmndrs/reflections/three` | The three.js adapter: probes, the SSR pass, the hybrid resolve, TSL nodes. Both paths give the same exports. |
+| `@pmndrs/reflections/core` | Engine-agnostic WebGPU passes that run on a bare `GPUDevice`. |
+| `@pmndrs/reflections/babylon` | Babylon.js `WebGPUEngine` adapter. Experimental. |
+| `@pmndrs/reflections/pixi` | pixi.js v8 adapter for pixi-3d scenes. Experimental. |
+
+## Where to go next
+
+1. [Installation](/getting-started/installation): peers, WebGPU requirements, and device limits.
+2. [Quick start](/getting-started/quick-start): reflections in a three.js scene in a few lines.
+3. [First frame, step by step](/getting-started/first-frame): the same thing with every part explained.
+4. [Live examples](/examples/showcase/): the showcase runs the whole pipeline on real models. Switch each source on and off.
+
+The library sits next to a few others from the same group, each with one job: a
+[denoiser](/concepts/denoising-and-upscaling), an upscaler, a BVH, a depth downsampler and motion vectors. You
+do not need them all. The [denoising and upscaling page](/concepts/denoising-and-upscaling) says how they fit.

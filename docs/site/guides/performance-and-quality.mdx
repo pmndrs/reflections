@@ -1,0 +1,69 @@
+---
+title: Performance and quality
+description: Presets, and what each setting costs and gives.
+nav: 23
+---
+
+Reflections cost GPU time, and most of it comes from three places: the rays (screen-space and traced), the denoiser,
+and everything that scales with the pixel count. This page says where to turn first.
+
+## Start with a preset
+
+A preset is a named bundle of settings. There are two:
+
+| Preset | What it sets | Use it when |
+| --- | --- | --- |
+| `default` | Nothing. The package defaults: full-resolution trace and denoise. | You have the GPU time. |
+| `performance` | `reflectionResolution: 'half'`: the tracer, the ray-traced pass and the denoiser run at half size in each axis, and a joint bilateral filter upsamples. | The reflections are a large share of your frame time. |
+
+{/* snippet: preset */}
+```ts
+const { resolutionChanged } = applyReflectionsPreset({ ssr, hybrid }, 'performance');
+if (resolutionChanged) {
+  hybrid.rebuild(); // the resolution changed: build the composite again
+  // ...and call hybrid.composite() again for your own output node
+}
+```
+
+At construction, pass `preset: 'performance'` to both `ScreenSpaceReflectionsPass` and `HybridReflections`. Settings
+you pass explicitly win over the preset, key by key.
+
+What `performance` costs you: mirror edges lose resolution, and a thin bright reflection loses most of its peak. In
+the measurements in the repository, the reflection passes roughly halve at 1080p. It saves nothing at an upscale ratio
+of 2, and a bit over 1 ms at 1.5. If you can choose one, **upscale first** (the whole frame shrinks) and keep the
+reflections at full resolution. See [Denoising and upscaling](/concepts/denoising-and-upscaling).
+
+## What costs what
+
+Measured numbers are in the [settings reference](/reference/settings). The shape of it:
+
+| Lever | Effect on cost | Effect on look |
+| --- | --- | --- |
+| Pixel count (render size, upscaling) | Every reflection pass scales with it. The biggest lever. | Softer at higher upscale ratios. |
+| `reflectionResolution: 'half'` | About half the reflection time. | Less crisp mirrors and thin features. |
+| `roughnessThreshold` | A higher value traces more pixels, so more rays. | Rougher surfaces get real reflections instead of the probe, and more noise. |
+| `samplesPerQuad` (1, 2, 4) | Intersect time grows about linearly with glossy rays. | Less noise with more rays. |
+| `maxCandidates` | About +0.25 ms at 8 on a scene with thin occluders. | Looks past thin foreground objects. |
+| The ray-traced fallback | The most expensive source. Scales with the misses. | Off-screen content appears in reflections. |
+| `maxTracedRaysPerFrame`, `maxRaysPerTile`, `missRoughnessThreshold` | Cap the ray-traced pass. | Capped pixels keep the probe. |
+| Probe `resolution`, `bounces` | Bake cost and memory, not frame cost. | Sharper probes for mirror-like surfaces. |
+| The denoiser | A fixed cost per pixel at its resolution. | Removes the noise. Do not turn it off to save time, as the result flickers. |
+
+## Reading GPU times
+
+Pass `timestamps: true` to `ScreenSpaceReflectionsPass` on a device with `timestamp-query`, then:
+
+```text
+ssr.readTimings().then((t) => console.log(t))   // GPU ms per pass, from a few frames ago
+```
+
+It resolves without blocking the frame. The showcase's panel shows it live. Measure with the render loop stopped
+(`?manual` on the example pages) and compare numbers from the same machine and the same load.
+
+## A reasonable order
+
+1. Turn on the `performance` preset or lower the render size.
+2. Keep the denoiser on.
+3. If you use the ray-traced fallback, cap it (`maxTracedRaysPerFrame`) before removing it.
+4. Look at the source debug view to see which pixels still cost rays.
+5. Only then touch the smaller settings.

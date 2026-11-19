@@ -1,0 +1,99 @@
+name: Build the site and deploy to GitHub Pages
+
+# One Pages site: the docs (pmndrs/docs, the MDX in docs/site/) at /, the TypeDoc API at /api/ and the
+# built examples at /examples/. https://reflections.docs.pmnd.rs once the custom domain is set
+# (Settings > Pages) and pmnd.rs has a CNAME for reflections.docs; until then it also works at
+# https://pmndrs.github.io/reflections/ with BASE_PATH=/reflections (see the env below).
+# Pushes and pull requests only build it, to catch MDX and build errors. Deploying is manual
+# (Actions > this workflow > Run workflow) until Dennis decides to publish.
+# tools/site-build.ts is the build both here and locally (`pnpm docs:api && pnpm site:build`).
+#
+# The denoiser is not on npm, so its source is checked out next to the repo (pinned) and bundled into the
+# examples. Without it the examples run undenoised and flicker, so the build fails if it is missing.
+# The example models load from raw.githubusercontent.com at runtime (Khronos glTF Sample Assets, pinned in tools/site-build.ts).
+
+on:
+  push:
+    branches: ['main']
+    paths:
+      - 'docs/**'
+      - 'src/**'
+      - 'packages/**'
+      - 'examples/**'
+      - 'scripts/fetch-assets.mjs'
+      - 'typedoc.json'
+      - 'tools/**'
+      - '.github/workflows/pages.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'src/**'
+      - 'packages/**'
+      - 'examples/**'
+      - 'scripts/fetch-assets.mjs'
+      - 'typedoc.json'
+      - 'tools/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# A pull request's ref is `refs/pull/<n>/merge`, so its runs never cancel a main deploy.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history and tags for the version label in the sidebar, but blobless.
+      - uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      # pmndrs/denoiser at a pinned commit (the one the examples were checked against), source only.
+      - uses: actions/checkout@v4.2.2
+        with:
+          repository: pmndrs/denoiser
+          ref: 7014384c8117df48622d27a4cb52a4d4a5bf9a54
+          path: denoiser
+      - uses: pnpm/action-setup@v4.1.0
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Every code block of the docs is a type-checked sample in docs/site/snippets.
+      - run: pnpm docs:check
+      - run: pnpm docs:api
+      - run: pnpm site:build _site
+        env:
+          DENOISER_REPO: ${{ github.workspace }}/denoiser
+          # '' on the custom domain; '/reflections' for pmndrs.github.io/reflections.
+          BASE_PATH: ''
+          NEXT_PUBLIC_URL: https://reflections.docs.pmnd.rs
+          MDX_BASEURL: https://github.com/${{ github.repository }}/raw/${{ github.event.pull_request.head.sha || github.sha }}/docs/site
+          SOURCECODE_BASEURL: https://github.com/${{ github.repository }}/tree/${{ github.event.pull_request.head.sha || github.sha }}
+          EDIT_BASEURL: https://github.com/${{ github.repository }}/edit/${{ github.head_ref || 'main' }}/docs/site
+          CONTRIBUTORS_PAT: ${{ secrets.GITHUB_TOKEN }}
+      - if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    # Grant GITHUB_TOKEN the permissions a Pages deployment needs.
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
