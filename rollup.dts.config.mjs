@@ -5,6 +5,6 @@ import { dts } from 'rollup-plugin-dts';
 export default {
   input: { index: 'src/index.ts', three: 'src/three.ts', core: 'src/core.ts', babylon: 'src/babylon.ts', pixi: 'src/pixi.ts' },
   output: { dir: 'dist', format: 'es', chunkFileNames: 'chunks/reflections-[hash].d.ts' },
-  external: [/^three(\/|$)/, /^@babylonjs\/core(\/|$)/, /^@pmndrs\/bvh(\/|$)/, /^pixi\.js(\/|$)/],
+  external: [/^three(\/|$)/, /^@babylonjs\/core(\/|$)/, /^@pmndrs\/bvh(\/|$)/, /^@pmndrs\/raytracer(\/|$)/, /^pixi\.js(\/|$)/],
   plugins: [dts({ respectExternal: true, tsconfig: 'tsconfig.build.json' })],
 };

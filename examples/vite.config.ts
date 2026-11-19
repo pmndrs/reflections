@@ -74,14 +74,30 @@ const serveTzas = {
   },
 };
 
+// `@pmndrs/raytracer` (pmndrs/pathtracer's trace core; opt-in provider, W82 / T69) is not on npm yet. Like the
+// denoiser it is resolved from a sibling checkout (`pathtracer/packages/raytracer` next to this repo or any parent
+// folder, or $RAYTRACER_REPO = the package dir). Without one it aliases to a stub and the pages hide the option
+// (`__RAYTRACER_AVAILABLE__`). Its `@pmndrs/bvh` / `@pmndrs/downsampler` imports resolve from this repo (sharedDeps).
+function findRaytracer(): string | null {
+  const entry = (dir: string) => resolve(dir, 'src/index.ts');
+  const env = process.env.RAYTRACER_REPO;
+  if (env) return existsSync(entry(env)) ? realpathSync(env) : null;
+  for (let dir = resolve(root, '..'); dirname(dir) !== dir; dir = dirname(dir)) {
+    const pkg = resolve(dirname(dir), 'pathtracer/packages/raytracer');
+    if (existsSync(entry(pkg))) return realpathSync(pkg);
+  }
+  return null;
+}
+const raytracerRepo = findRaytracer();
+
 // Sources served as-is from outside the dep optimizer (the Denoiser checkout, the aliased tracer) resolve `three`
 // and `three-mesh-bvh` from here, never from their own node_modules: one three instance per page.
-const outside = [denoiserRepo, pathTracerRepo].filter((x): x is string => !!x);
+const outside = [denoiserRepo, pathTracerRepo, raytracerRepo].filter((x): x is string => !!x);
 const sharedDeps = {
   name: 'reflections-shared-deps',
   enforce: 'pre' as const,
   async resolveId(this: { resolve: (s: string, i?: string, o?: object) => Promise<unknown> }, source: string, importer?: string) {
-    if (!importer || !/^(three|three-mesh-bvh)(\/|$)/.test(source)) return null;
+    if (!importer || !/^(three|three-mesh-bvh|@pmndrs\/bvh)(\/|$)/.test(source)) return null;
     if (!outside.some((r) => importer.startsWith(r + '/'))) return null;
     return this.resolve(source, resolve(root, 'index.html'), { skipSelf: true });
   },
@@ -89,6 +105,7 @@ const sharedDeps = {
 
 // `@pmndrs/downsampler` and `@pmndrs/bvh` come from npm (W82; they were `link:` checkouts before), so
 // nothing outside the repo needs to be on the fs allow list for them.
+
 
 export default defineConfig({
   root,
@@ -104,9 +121,9 @@ export default defineConfig({
   }, sharedDeps, serveTzas],
   server: {
     port: Number(process.env.REFLECTIONS_PORT ?? 5370), strictPort: true, host: '127.0.0.1',
-    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : []), ...(pathTracerRepo ? [pathTracerRepo] : [])] },
+    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : []), ...(pathTracerRepo ? [pathTracerRepo] : []), ...(raytracerRepo ? [raytracerRepo] : [])] },
   },
-  define: { __DENOISER_SOURCE__: JSON.stringify(denoiserRepo ?? ''), __PATHTRACER_SOURCE__: JSON.stringify(pathTracerRepo ?? '') },
+  define: { __RAYTRACER_AVAILABLE__: JSON.stringify(!!raytracerRepo), __DENOISER_SOURCE__: JSON.stringify(denoiserRepo ?? ''), __PATHTRACER_SOURCE__: JSON.stringify(pathTracerRepo ?? '') },
   resolve: {
     alias: [
       ...(hasPixi3d
@@ -124,6 +141,7 @@ export default defineConfig({
         find: /^@pmndrs\/denoiser-ffx$/,
         replacement: denoiserRepo ? resolve(denoiserRepo, 'packages/denoiser-ffx/src/index.ts') : resolve(root, 'shared/denoiser-missing.ts'),
       },
+      { find: /^@pmndrs\/raytracer$/, replacement: raytracerRepo ? resolve(raytracerRepo, 'src/index.ts') : resolve(root, 'shared/raytracer-missing.ts') },
       { find: /^@pmndrs\/denoiser-three-ffx$/, replacement: denoiserThreeFfx ?? resolve(root, 'shared/denoiser-three-missing.ts') },
       { find: /^three-gpu-pathtracer-webgpu$/, replacement: pathTracerRepo ? resolve(pathTracerRepo, 'src/webgpu/index.js') : resolve(root, 'shared/pathtracer-missing.ts') },
       { find: /^@pmndrs\/denoiser-oidn$/, replacement: oidnEntry ?? resolve(root, 'shared/denoiser-oidn-missing.ts') },

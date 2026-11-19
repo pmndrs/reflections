@@ -14,10 +14,14 @@
     "@pmndrs/downsampler": "^0.1.0"
   },
   "peerDependencies": {
-    "@pmndrs/bvh": "^0.1.0"
+    "@pmndrs/bvh": "^0.1.0",
+    "@pmndrs/raytracer": "*"
   },
   "peerDependenciesMeta": {
     "@pmndrs/bvh": {
+      "optional": true
+    },
+    "@pmndrs/raytracer": {
       "optional": true
     }
   },
