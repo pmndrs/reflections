@@ -92,13 +92,8 @@ const sharedDeps = {
   },
 };
 
-// `downsampler` is linked (packages/core: `link:` to a checkout outside this repo); vite serves it
-// from its real path, so that checkout has to be on the allow list.
-const downsamplerLink = resolve(root, '../packages/core/node_modules/downsampler');
-const downsamplerRepo = existsSync(downsamplerLink) ? realpathSync(downsamplerLink) : null;
-// @pmndrs/bvh is linked the same way (the bvh repo's main checkout next to this one, ../bvh; W48).
-const bvhLink = resolve(root, '../packages/core/node_modules/@pmndrs/bvh');
-const bvhRepo = existsSync(bvhLink) ? realpathSync(bvhLink) : null;
+// `@pmndrs/downsampler` and `@pmndrs/bvh` come from npm (W82; they were `link:` checkouts before), so
+// nothing outside the repo needs to be on the fs allow list for them.
 
 export default defineConfig({
   root,
@@ -115,7 +110,7 @@ export default defineConfig({
   }, sharedDeps, serveTzas],
   server: {
     port: Number(process.env.REFLECTIONS_PORT ?? 5370), strictPort: true, host: '127.0.0.1',
-    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : []), ...(pathTracerRepo ? [pathTracerRepo] : []), ...(downsamplerRepo ? [downsamplerRepo] : []), ...(bvhRepo ? [bvhRepo] : [])] },
+    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : []), ...(pathTracerRepo ? [pathTracerRepo] : [])] },
   },
   define: { __DENOISER_SOURCE__: JSON.stringify(denoiserRepo ?? ''), __PATHTRACER_SOURCE__: JSON.stringify(pathTracerRepo ?? '') },
   resolve: {

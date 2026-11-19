@@ -12,8 +12,8 @@ importers:
         specifier: 9.35.0
         version: 9.35.0
       '@pmndrs/bvh':
-        specifier: link:../bvh
-        version: link:../bvh
+        specifier: ^0.1.0
+        version: 0.1.0(@babylonjs/core@9.35.0)(three@0.187.0)
       '@pmndrs/reflections-babylon':
         specifier: workspace:*
         version: link:packages/babylon
@@ -81,13 +81,13 @@ importers:
 
   packages/core:
     dependencies:
-      downsampler:
-        specifier: link:../../../downsampler-reflections
-        version: link:../../../downsampler-reflections
+      '@pmndrs/downsampler':
+        specifier: ^0.1.0
+        version: 0.1.0(three@0.187.0)
     devDependencies:
       '@pmndrs/bvh':
-        specifier: link:../../../bvh
-        version: link:../../../bvh
+        specifier: ^0.1.0
+        version: 0.1.0(@babylonjs/core@9.35.0)(three@0.187.0)
 
   packages/pixi:
     dependencies:
@@ -308,6 +308,25 @@ packages:
 
   '@pixi/colord@2.9.6':
     resolution: {integrity: sha512-nezytU2pw587fQstUu1AsJZDVEynjskwOL+kibwcdxsMBFqPsFFNA7xl0ii/gXuDi6M0xj3mfRJj8pBSc2jCfA==}
+
+  '@pmndrs/bvh@0.1.0':
+    resolution: {integrity: sha512-5pVuSDX4Ud7WMprV197XtGwlMZDwZCVI/SYzMEihg7CZiiUOqH8NcvqQN85aPNRXmTu7taNTLZDNRPxNQF+CCg==}
+    peerDependencies:
+      '@babylonjs/core': '>=9.35.0 <10.0.0'
+      three: '>=0.187.0 <0.188.0'
+    peerDependenciesMeta:
+      '@babylonjs/core':
+        optional: true
+      three:
+        optional: true
+
+  '@pmndrs/downsampler@0.1.0':
+    resolution: {integrity: sha512-PQf5QLUEy5qRl+2e0gHVfdMcfinqHjG/HJKO4xk+EJrOgeucNzUesGuSHq/eyAy8s22hvf/4oQPV3fntM7WKSw==}
+    peerDependencies:
+      three: '>=0.170.0'
+    peerDependenciesMeta:
+      three:
+        optional: true
 
   '@pmndrs/upscaler@0.5.0':
     resolution: {integrity: sha512-bi3+OckPIpHYMGbvML5StLpZU7Eaqjhti4JEP/GIwonCvS35EsB+dKQhwgR18ymqP9lXTDf4md/P8RVtIuRJwg==}
@@ -999,6 +1018,15 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.6.0
 
   '@pixi/colord@2.9.6': {}
+
+  '@pmndrs/bvh@0.1.0(@babylonjs/core@9.35.0)(three@0.187.0)':
+    optionalDependencies:
+      '@babylonjs/core': 9.35.0
+      three: 0.187.0
+
+  '@pmndrs/downsampler@0.1.0(three@0.187.0)':
+    optionalDependencies:
+      three: 0.187.0
 
   '@pmndrs/upscaler@0.5.0(three@0.187.0)':
     dependencies:

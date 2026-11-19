@@ -11,10 +11,10 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
-    "downsampler": "link:../../../downsampler-reflections"
+    "@pmndrs/downsampler": "^0.1.0"
   },
   "peerDependencies": {
-    "@pmndrs/bvh": "*"
+    "@pmndrs/bvh": "^0.1.0"
   },
   "peerDependenciesMeta": {
     "@pmndrs/bvh": {
@@ -22,6 +22,6 @@
     }
   },
   "devDependencies": {
-    "@pmndrs/bvh": "link:../../../bvh"
+    "@pmndrs/bvh": "^0.1.0"
   }
 }
