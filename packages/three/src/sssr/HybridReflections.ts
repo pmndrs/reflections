@@ -127,6 +127,13 @@ export class HybridReflections {
    * own options). A denoiser without the option (Denoiser main before W78) is left alone: silently for the default,
    * with one warning when the app asked for true.
    */
+  /**
+   * W85 (T36): hand the denoiser's variance (FFX: `denoiser.variance`, Denoiser #25) back to the tracer, so
+   * `settings.temporalVarianceGuidedTracing` / `varianceThreshold` add rays where the denoiser is unsure (FFX's
+   * variance-guided tracing; the quad's other pixels trace where last frame's variance is above the threshold).
+   * Off by default; needs a denoiser with a `variance` getter, else nothing happens.
+   */
+  denoiserVariance = false;
   get denoiserKeepHistoryOnBlack(): boolean { return this.keepBlack; }
   set denoiserKeepHistoryOnBlack(v: boolean) {
     if (v === this.keepBlack) return;
@@ -382,6 +389,8 @@ export class HybridReflections {
     device.queue.submit([enc.finish()]);
     this.denoiseActive.value = 1;
     this.ran = true;
+    // W85 (T36): this frame's variance guides the next frame's extra rays (the tracer runs before the denoiser)
+    this.ssr.variance = this.denoiserVariance ? ((this.seam.denoiser as { variance?: GPUTexture }).variance ?? null) : null;
   }
 
   /** W78 (D5145): `denoiserKeepHistoryOnBlack` onto the attached denoiser, when it has the option. */

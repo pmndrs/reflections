@@ -373,6 +373,10 @@ export const SETTINGS: Setting[] = [
     appliesTo: OURS_DN, api: 'HybridReflections.denoiserKeepHistoryOnBlack (default true) -> FfxReflectionDenoiser({ keepHistoryOnBlack })',
     tradeoff: 'W78 (D5145): FFX\'s resolve writes 0 to the output and the history wherever a frame\'s prefiltered radiance is black, so a sparse glossy reflection over a dark environment never builds up (the line-spread gate\'s r 0.15 / 0.3 losses). On, black samples accumulate like any other.',
   }),
+  sel('variance', 'denoiser', 'Variance-guided tracing input', [['0', 'off'], ['1', 'on (denoiser variance -> tracer)']], '0', {
+    appliesTo: OURS_DN, api: 'HybridReflections.denoiserVariance = true; settings.temporalVarianceGuidedTracing / varianceThreshold',
+    tradeoff: 'W85 (T36, Denoiser #25): last frame\'s denoiser variance goes back to the tracer, which traces the quad\'s other pixels where it is above Variance threshold (s.varianceThreshold; FFX samples use 0, documented range 0 to 0.01). Extra rays after disocclusion and in noisy glossy areas.',
+  }),
   num('brdfMin', 'denoiser', 'BRDF weights from roughness', 0, 0.447, 0.01, 0.1, {
     appliesTo: OURS_DN, api: 'FfxReflectionDenoiser({ brdfMinAlpha: r * r })',
     tradeoff: 'W78: the BRDF / pdf weights only from this perceptual roughness up; smoother px keep FFX\'s weights (near-mirrors: the ratio is so peaked the taps barely average, orbit flicker +40-70 % on carConcept\'s r 0.03 floor).',

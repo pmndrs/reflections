@@ -174,6 +174,12 @@ export class ScreenSpaceReflectionsPass {
    * the frame after a change of `hitColor` or of this texture use this frame's scene colour instead.
    */
   historySource: THREE.Texture | null = null;
+  /**
+   * W85 (T36): last frame's reflection variance (r32float, the denoiser's `variance`), for variance-guided tracing
+   * (`settings.temporalVarianceGuidedTracing` / `varianceThreshold`). `HybridReflections.denoiserVariance` sets it
+   * after each denoise; an app with its own denoiser can set it directly. Null: no variance, no extra rays.
+   */
+  variance: GPUTexture | null = null;
   private history: GPUTexture | null = null;
   private historyValid = false;
   /** What last frame's history came from (null: hitColor 'current'); a change invalidates it. */
@@ -320,7 +326,7 @@ export class ScreenSpaceReflectionsPass {
     // W52 (D3641): last frame's hit source for the lobe filter where hits mix; the traced pass's own
     // texture still holds it (its dispatch below clears it first)
     const hitSource = this.coreHitSource && this.rt && this.rayTracing ? this.rt.source : undefined;
-    const inputs = screenSpaceInputsFromFrame(frame, core, { history: useHistory ? history : undefined, hitShadingBindGroup, hitSource });
+    const inputs = screenSpaceInputsFromFrame(frame, core, { history: useHistory ? history : undefined, hitShadingBindGroup, hitSource, variance: this.variance ?? undefined });
     const hitShading = this.settings.hitShading ?? 'reshade';
     // W74 (X4, D5060): tracedMissRate 'half' needs the traced pass's fill this frame. traceSettings wins, then
     // settings (review fix 3: either place works); both passes get the same value.
