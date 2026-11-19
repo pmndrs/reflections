@@ -57,11 +57,11 @@ export interface ReflectionsOptions {
  * A `WebGPURenderer` with the device limits the reflection passes need (`reflectionsRequiredLimits`),
  * initialised. `parameters` are `WebGPURenderer`'s (a `canvas`, ...); R3F's `renderer` prop can call this.
  */
-export async function createReflectionsRenderer(parameters: ConstructorParameters<typeof THREE.WebGPURenderer>[0] = {}): Promise<THREE.WebGPURenderer> {
+export async function createReflectionsRenderer(parameters: { canvas?: HTMLCanvasElement | OffscreenCanvas; antialias?: boolean; [option: string]: unknown } = {}): Promise<THREE.WebGPURenderer> {
   const adapter = await navigator.gpu?.requestAdapter();
   if (!adapter) throw new Error('createReflectionsRenderer: WebGPU is not available in this browser');
   const requiredLimits = { ...reflectionsRequiredLimits(adapter), ...((parameters as { requiredLimits?: object }).requiredLimits ?? {}) };
-  const renderer = new THREE.WebGPURenderer({ ...parameters, requiredLimits } as ConstructorParameters<typeof THREE.WebGPURenderer>[0]);
+  const renderer = new THREE.WebGPURenderer({ ...parameters, requiredLimits } as never);
   await renderer.init();
   return renderer;
 }
