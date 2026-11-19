@@ -1,0 +1,58 @@
+---
+title: Flicker and stability
+description: Why reflections shimmer, and which settings trade colour accuracy for stability.
+nav: 24
+---
+
+Reflections that flicker look worse than reflections that are a little off. A still image with a small error is
+easier to live with than one that boils. The library's defaults lean toward stable, and this page says where the
+dials are.
+
+## Why it shimmers
+
+Rough glossy surfaces send a random ray each frame. Each frame's answer is slightly different, so the raw signal is
+noise. Three things calm it:
+
+1. **The denoiser** blends the signal over several frames.
+2. **Anti-aliasing and the upscaler** accumulate jittered frames of the final image.
+3. **Fewer random choices**, which means fewer rays that change from frame to frame.
+
+If something flickers, first check that the denoiser is actually attached. Without it the reflections shimmer a lot
+(see [Troubleshooting](/guides/troubleshooting#reflections-flicker-or-look-grainy)).
+
+## Settings, from the safest
+
+| Setting | What you get | What it costs |
+| --- | --- | --- |
+| Anti-aliasing at ratio 1 (the upscaler as TAA) | Settles edges, normal-mapped highlights and the last shimmer of the denoised reflection. | The upscaler's own pass time. |
+| `maxAccumulation` (upscaler) | A longer history is calmer at rest. | Ghosting lasts longer in motion. |
+| `sharpness` (upscaler RCAS) | Keep it at 0 for reflections. Sharpening each jitter phase differently made mirror-edge flicker worse in the measurements. | A softer image. |
+| The denoiser's `temporalStabilityFactor` | A higher value keeps the history longer. | Slower to follow change. |
+| `mirrorBias` (default 0.5, with compensation) | Narrows the sampled lobe toward the mirror direction: less noise. | A sharper reflection that is a little biased. Compensation reduces the bias. |
+| `samplesPerQuad: 4` | More rays, less noise. | More rays to trace. |
+| `quadCopy: 'sameSurface'` | A quad stops sharing one ray across a silhouette, which removes bright dashes at edges. | A bit more work at edges. |
+| Reactive mask (upscaler) | Less reflection ghosting where reflections move with the pixel. | More of their noise shows. |
+
+## Settings that trade colour for stability
+
+These are the ones to know about, because they make the picture steadier by making it less exact:
+
+- **`mirrorBias`** truncates the reflection lobe. Higher is quieter and less correct.
+- **A longer denoiser history** blurs fast change in exchange for calm.
+- **The denoiser's hit-source options** (`denoiserHitSource`, `separateHitSources`, `missesMatchAnySource`) keep screen
+  hits, traced hits and misses from blending. They improved a car's sill band, but the band's orbit flicker rose by
+  about 2.5 times in the measurements, so the `performance` preset leaves them off. Flicker ranks first.
+- **`reflectionResolution: 'half'`** is steady but loses fine detail.
+- **A higher `roughnessThreshold`** traces more pixels. They are noisier, so the denoiser has more to do.
+
+## A working recipe
+
+1. Run the denoiser. Match its roughness gate to the tracer's threshold.
+2. Use the upscaler at ratio 1 for anti-aliasing, with `sharpness` at 0 and a long `maxAccumulation`.
+3. Keep `mirrorBias` and its compensation at the defaults.
+4. If a thin feature still twinkles, try `samplesPerQuad: 2` or `quadCopy: 'sameSurface'`.
+5. Judge it on a still camera and on a slow orbit. The two behave differently.
+
+The tuning bench in the repository (`examples/showcase/bench.html`, run locally) puts every setting on one panel with a
+flicker measurement. See the [settings reference](/reference/settings) for each knob, its default and its
+trade-off.

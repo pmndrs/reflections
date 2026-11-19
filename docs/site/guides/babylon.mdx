@@ -1,0 +1,52 @@
+---
+title: Babylon.js
+description: Screen-space reflections and probes on a Babylon.js WebGPUEngine. Experimental.
+nav: 21
+sourcecode: packages/babylon/src
+---
+
+> [!WARNING]
+> The Babylon adapter is experimental. It runs the core screen-space tracer and the probe set on Babylon's device, and
+> the API can change.
+
+{/* snippet: babylon-imports */}
+```ts
+import { FrameGraphReflectionsCompositeTask, FrameGraphReflectionsTask, BabylonProbeSet, ScreenSpaceReflections, stripSpecularIBL } from '@pmndrs/reflections/babylon';
+```
+
+## What you need
+
+- `@babylonjs/core` 9.35 or newer, on a `WebGPUEngine`.
+- The engine created with `enableAllFeatures: true` (for subgroups) and `setMaximumLimits: true` (for four colour targets).
+- Babylon's frame graph, where the reflection passes run as tasks.
+
+## The parts
+
+| Piece | What it does |
+| --- | --- |
+| `BabylonProbeSet` | Probes captured with Babylon cube renders, backed by the core probe set. Add the environment as a slot. |
+| `ScreenSpaceReflections` | The core tracer on Babylon's device. With probes, misses and rough pixels take the probe radiance. |
+| `FrameGraphReflectionsTask` | Runs the tracer inside a frame graph. |
+| `FrameGraphReflectionsCompositeTask` | Adds the reflections to the lit image, with debug views. |
+| `stripSpecularIBL(material)` | Takes the specular IBL term out of a PBR material, because the composite adds it back from the sources. |
+
+## Outline
+
+```text
+engine = new WebGPUEngine(canvas, { antialias: false, enableAllFeatures: true, setMaximumLimits: true })
+await engine.initAsync()
+materials.forEach(stripSpecularIBL)
+probes = new BabylonProbeSet(scene, { capacity: 1, sourceSize: 128, environment: [skybox] })
+ssr = new ScreenSpaceReflections({ engine, probes })
+frame graph: geometry pass -> FrameGraphReflectionsTask(ssr) -> FrameGraphReflectionsCompositeTask
+```
+
+The complete, working code is [`examples/babylon`](https://github.com/pmndrs/reflections/tree/main/examples/babylon) in
+the repository, and the [live page](/examples/babylon/) runs it. The adapter handles Babylon's conventions (handedness,
+Y-flipped targets, velocity, gloss and F0) when it builds the [frame contract](/concepts/frame-contract).
+
+## Status
+
+The Babylon adapter covers the screen-space tracer, probes and the composite. The three.js adapter is the one with
+the hybrid resolve, the ray-traced fallback and the denoiser wired in. The
+[repository notes](https://github.com/pmndrs/reflections/blob/main/docs/HANDOFF.md) list what each adapter has.

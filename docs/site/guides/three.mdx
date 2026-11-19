@@ -1,0 +1,67 @@
+---
+title: three.js
+description: The three.js adapter in depth. The passes, the nodes, and how they fit a render loop.
+nav: 20
+sourcecode: packages/three/src
+---
+
+The three.js adapter is the main one. It needs `WebGPURenderer` from `three/webgpu` (r187 or newer) and works with
+standard and physical materials. For a short version, see the [quick start](/getting-started/quick-start). The
+[first frame page](/getting-started/first-frame) goes through each call.
+
+## The pieces
+
+| Piece | What it is |
+| --- | --- |
+| `ScreenSpaceReflectionsPass` | Renders the G-buffer and runs the screen-space tracer (and the ray-traced pass, with `trace`). |
+| `HybridReflections` | Resolves the sources, runs the denoiser, and builds the composite. |
+| `ReflectionProbes`, `ReflectionProbe`, `reflectionProbes()` | Baked probes and the TSL lookup node for `scene.environmentNode`. |
+| `sampleReflectionProbes()` | The same lookup as a function you can call in your own TSL. |
+| `FrameGBuffer` | The multi-render-target pass inside the SSR pass. Use it alone to read depth, normals and roughness. |
+| `MeshBVHTraceProvider` | The ray-traced provider on three-mesh-bvh. |
+| `applyReflectionsPreset()` | Applies a named bundle of settings at run time. |
+| `reflectionsRequiredLimits()` | The device limits to request. |
+
+## The render loop
+
+Each frame, in this order:
+
+```text
+ssr.render(scene, camera)   // 1. G-buffer + trace
+hybrid.update()             // 2. resolve + denoise
+pipeline.render()           // 3. composite into your output
+```
+
+`ssr.render` replaces `renderer.render(scene, camera)` for the scene, because it renders the scene into the G-buffer.
+The composite node (`hybrid.composite().final`) is the lit image with the reflections in place. Put it in a
+`RenderPipeline`, or into your own post-processing chain.
+
+## Resizing
+
+The pass sizes its G-buffer from `gbufferOptions: { width, height }` (default: the renderer's size). When the canvas
+changes size, resize the G-buffer and reset the history so the denoiser does not blend frames of different sizes:
+
+```text
+ssr.gbuffer.setSize(width, height);
+ssr.resetHistory();
+hybrid.resetHistory();
+```
+
+## Several composites
+
+`hybrid.composite()` can be called again for another place the reflections show, such as a debug view or a second
+camera's uv. Build the composites again after you change `reflectionResolution` (`hybrid.rebuild()`, then
+`composite()`), because they read different textures at half resolution.
+
+## Camera cuts and jitter
+
+Call `resetHistory()` on a camera cut or a teleport. For an upscaler or TAA, pass the jitter to
+`ssr.render(scene, camera, { jitter })`. The showcase's `DisplayAA` helper (`examples/shared/antialias.ts`) shows the
+whole wiring with `@pmndrs/upscaler`.
+
+## Next
+
+- [Performance and quality](/guides/performance-and-quality)
+- [Flicker and stability](/guides/flicker-and-stability)
+- [Troubleshooting](/guides/troubleshooting)
+- [React Three Fiber](/guides/react-three-fiber)

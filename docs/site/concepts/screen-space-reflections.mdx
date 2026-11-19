@@ -1,0 +1,57 @@
+---
+title: Screen-space reflections
+description: A hierarchical-depth stochastic tracer that finds reflections in what is already on screen.
+nav: 11
+sourcecode: packages/three/src/sssr/ScreenSpaceReflectionsPass.ts
+---
+
+Screen-space reflections (SSR) find reflections in the image you already rendered. For each glossy pixel, the
+tracer shoots a ray along the mirrored view direction and marches it through the depth buffer until it hits
+something. The colour at the hit is the reflection.
+
+This library's tracer is a port of a hierarchical stochastic screen-space tracer from AMD's open-source samples
+(attribution in [NOTICE](https://github.com/pmndrs/reflections/blob/main/NOTICE)). In plain words:
+
+- **Hierarchical.** It builds a pyramid of the depth buffer and takes big steps over empty space, small steps near
+  surfaces. That is what makes a long ray cheap.
+- **Stochastic.** Rough surfaces send a random ray inside the specular lobe. One ray per pixel is noisy, and a
+  denoiser cleans it up over a few frames. That is why SSR and the [denoiser](/concepts/denoising-and-upscaling) go together.
+- **Classified first.** Pixels rougher than `roughnessThreshold` (0.447 perceptual by default) skip the trace and
+  take the probe or the environment. A rough surface has a soft reflection that a probe gives well and for free.
+
+## What you get
+
+For every pixel the pass gives you three textures: the reflected radiance, the world distance to the hit, and a
+confidence in the range 0 to 1. Confidence is 0 for a miss and fades toward the screen edge, so the
+[hybrid resolve](/concepts/hybrid-resolve) knows how much to trust the hit.
+
+## What it cannot see
+
+SSR only knows what is on screen. It misses:
+
+- anything off screen, which is why the [probes](/concepts/reflection-probes) are the fallback;
+- anything hidden behind a nearer object, such as the back of a thing or the floor under a table;
+- very thin objects, which the march can step over. `settings.maxCandidates` (1 to 8, default 1) makes the march look
+  past a rejected hit and keep going, which helps for a thin post in front of a wall. It costs about 0.25 ms at 8.
+
+For the misses that matter, add the [ray-traced fallback](/concepts/ray-traced-fallback).
+
+## Using it
+
+{/* snippet: settings */}
+```ts
+ssr.settings.roughnessThreshold = 0.5; // trace rougher surfaces (more rays, more noise)
+ssr.settings.samplesPerQuad = 2; // two rays per 2x2 quad on glossy pixels
+ssr.settings.maxCandidates = 4; // look past thin objects in front of a wall
+```
+
+The settings are read every frame, so you can change them live. The main ones:
+
+| Setting | What it trades |
+| --- | --- |
+| `roughnessThreshold` | Higher traces rougher surfaces: more rays and more noise for the denoiser. |
+| `samplesPerQuad` (1, 2, 4) | More rays per 2x2 quad, less noise, more cost. |
+| `maxCandidates` (1 to 8) | Looks past thin occluders. 1 is the original behaviour. |
+| `reflectionResolution` (`'full'`, `'half'`) | Half resolution traces and denoises a quarter of the pixels and upsamples. |
+
+See [Performance and quality](/guides/performance-and-quality) and the [settings reference](/reference/settings).

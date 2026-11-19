@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["@webgpu/types", "vite/client"]
+  },
+  "include": ["docs/site/snippets"],
+  "exclude": ["node_modules", "dist"]
+}
