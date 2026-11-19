@@ -45,7 +45,7 @@ nav: 90
 
 > [!NOTE]
 > This page is generated from \`docs/SETTINGS.md\`, which is generated from the settings schema of the
-> [tuning bench](/examples/showcase/bench.html) (\`examples/showcase/bench.html\`). The notes name the work items
+> tuning bench (\`examples/showcase/bench.html\`, run locally: it needs the denoiser and path tracer checkouts, so it is not on this site). The notes name the work items
 > they came from (W-numbers and D-numbers); they are the repository's internal ids, kept so each claim can be traced.
 
 ${body}`;
