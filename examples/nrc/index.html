@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>NRC hit shading (experiment)</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; padding: 16px; background: #111; color: #ddd; font: 14px/1.45 system-ui, sans-serif; }
+      .page { max-width: 1200px; }
+      code { background: #0006; padding: 0 .3em; border-radius: 4px; }
+      pre { white-space: pre-wrap; font-size: .8rem; color: #9a9; }
+      #images { display: flex; flex-wrap: wrap; gap: 8px; }
+      #images figure { margin: 0; font-size: .75rem; }
+      #images canvas { width: 256px; image-rendering: pixelated; border: 1px solid #333; display: block; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>NRC as the hit shading of ray-traced reflections (W86, experiment)</h1>
+      <p>
+        Mirror hits shaded by probes (the default), <code>rtShade</code> (<code>raytracerHitShading</code>) and the pathtracer sibling's hash radiance
+        cache (full direct at the hit + cached strict indirect), against a path-traced reference. Needs the pmndrs/pathtracer checkout next to this
+        repo (or <code>$RAYTRACER_REPO</code>). <code>window.__p.errors()</code>, <code>.flicker()</code>, <code>.recovery()</code>, <code>.smoke()</code>;
+        see <code>docs/research/w86/README.md</code>.
+      </p>
+      <pre id="status">starting...</pre>
+      <div id="images"></div>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

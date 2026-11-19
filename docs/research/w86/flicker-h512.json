@@ -1,0 +1,80 @@
+{
+ "mirror/offscreen": {
+  "exposure": 1.371,
+  "probes": {
+   "rest": {
+    "stdOverTime": 0.112,
+    "d1": 0.125,
+    "driftMean": 0.023,
+    "driftP99": 1,
+    "driftPctOver2": 0.21
+   },
+   "orbit": {
+    "startPoseStd": 0.106,
+    "d2": 0.219,
+    "pctD2Over4": 1.61,
+    "d1": 0.131
+   }
+  },
+  "rtshade": {
+   "rest": {
+    "stdOverTime": 6.183,
+    "d1": 7.002,
+    "driftMean": 1.241,
+    "driftP99": 4,
+    "driftPctOver2": 19.27
+   },
+   "orbit": {
+    "startPoseStd": 5.995,
+    "d2": 12.123,
+    "pctD2Over4": 78.78,
+    "d1": 6.995
+   }
+  },
+  "nrc": {
+   "rest": {
+    "stdOverTime": 5.115,
+    "d1": 5.68,
+    "driftMean": 1.489,
+    "driftP99": 5,
+    "driftPctOver2": 27.4
+   },
+   "orbit": {
+    "startPoseStd": 4.934,
+    "d2": 9.806,
+    "pctD2Over4": 73.51,
+    "d1": 5.666
+   }
+  },
+  "nrc-frozen": {
+   "rest": {
+    "stdOverTime": 4.997,
+    "d1": 5.656,
+    "driftMean": 0.994,
+    "driftP99": 4,
+    "driftPctOver2": 11
+   },
+   "orbit": {
+    "startPoseStd": 4.837,
+    "d2": 9.79,
+    "pctD2Over4": 73.44,
+    "d1": 5.657
+   }
+  },
+  "traced": {
+   "rest": {
+    "stdOverTime": 14.807,
+    "d1": 16.818,
+    "driftMean": 2.932,
+    "driftP99": 10,
+    "driftPctOver2": 58.37
+   },
+   "orbit": {
+    "startPoseStd": 14.376,
+    "d2": 29.072,
+    "pctD2Over4": 91.34,
+    "d1": 16.77
+   }
+  }
+ }
+}

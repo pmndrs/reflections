@@ -1,0 +1,158 @@
+{
+ "mirror/offscreen": {
+  "exposure": 1.371,
+  "probes": {
+   "rest": {
+    "stdOverTime": 0.112,
+    "d1": 0.125,
+    "driftMean": 0.023,
+    "driftP99": 1,
+    "driftPctOver2": 0.21
+   },
+   "orbit": {
+    "startPoseStd": 0.106,
+    "d2": 0.219,
+    "pctD2Over4": 1.61,
+    "d1": 0.131
+   }
+  },
+  "rtshade": {
+   "rest": {
+    "stdOverTime": 6.183,
+    "d1": 7.002,
+    "driftMean": 1.241,
+    "driftP99": 4,
+    "driftPctOver2": 19.27
+   },
+   "orbit": {
+    "startPoseStd": 5.995,
+    "d2": 12.123,
+    "pctD2Over4": 78.78,
+    "d1": 6.995
+   }
+  },
+  "nrc": {
+   "rest": {
+    "stdOverTime": 6.135,
+    "d1": 5.805,
+    "driftMean": 3.615,
+    "driftP99": 13,
+    "driftPctOver2": 65.89
+   },
+   "orbit": {
+    "startPoseStd": 6.365,
+    "d2": 9.983,
+    "pctD2Over4": 73.95,
+    "d1": 5.8
+   }
+  },
+  "nrc-frozen": {
+   "rest": {
+    "stdOverTime": 5.017,
+    "d1": 5.677,
+    "driftMean": 1,
+    "driftP99": 4,
+    "driftPctOver2": 11.13
+   },
+   "orbit": {
+    "startPoseStd": 4.854,
+    "d2": 9.83,
+    "pctD2Over4": 73.47,
+    "d1": 5.682
+   }
+  },
+  "traced": {
+   "rest": {
+    "stdOverTime": 14.807,
+    "d1": 16.818,
+    "driftMean": 2.932,
+    "driftP99": 10,
+    "driftPctOver2": 58.37
+   },
+   "orbit": {
+    "startPoseStd": 14.376,
+    "d2": 29.072,
+    "pctD2Over4": 91.34,
+    "d1": 16.77
+   }
+  }
+ },
+ "thin/red": {
+  "exposure": 0.697,
+  "probes": {
+   "rest": {
+    "stdOverTime": 0.037,
+    "d1": 0.042,
+    "driftMean": 0.008,
+    "driftP99": 0,
+    "driftPctOver2": 0
+   },
+   "orbit": {
+    "startPoseStd": 0.036,
+    "d2": 0.073,
+    "pctD2Over4": 0,
+    "d1": 0.053
+   }
+  },
+  "rtshade": {
+   "rest": {
+    "stdOverTime": 8.175,
+    "d1": 9.226,
+    "driftMean": 1.656,
+    "driftP99": 5,
+    "driftPctOver2": 32.76
+   },
+   "orbit": {
+    "startPoseStd": 7.923,
+    "d2": 16.02,
+    "pctD2Over4": 84.03,
+    "d1": 9.236
+   }
+  },
+  "nrc": {
+   "rest": {
+    "stdOverTime": 6.301,
+    "d1": 6.766,
+    "driftMean": 2.415,
+    "driftP99": 8,
+    "driftPctOver2": 51.03
+   },
+   "orbit": {
+    "startPoseStd": 6.262,
+    "d2": 11.576,
+    "pctD2Over4": 78.49,
+    "d1": 6.694
+   }
+  },
+  "nrc-frozen": {
+   "rest": {
+    "stdOverTime": 5.92,
+    "d1": 6.737,
+    "driftMean": 1.175,
+    "driftP99": 4,
+    "driftPctOver2": 17.93
+   },
+   "orbit": {
+    "startPoseStd": 5.679,
+    "d2": 11.563,
+    "pctD2Over4": 78.46,
+    "d1": 6.674
+   }
+  },
+  "traced": {
+   "rest": {
+    "stdOverTime": 15.302,
+    "d1": 17.363,
+    "driftMean": 3.058,
+    "driftP99": 10,
+    "driftPctOver2": 59.54
+   },
+   "orbit": {
+    "startPoseStd": 14.879,
+    "d2": 30.364,
+    "pctD2Over4": 91.81,
+    "d1": 17.505
+   }
+  }
+ }
+}
