@@ -24,6 +24,7 @@ export {
   type ProbeCaptureTransform, type ProbeCaptureFace, type ProbeAxis, type ProbeCaptureTransformOptions,
 } from './probes/capture';
 export { probeRadianceFallback, PROBE_FALLBACK_WGSL, type ProbeRadianceFallback } from './probes/fallback';
+export { PROBE_LOOKUP_NUDGE_SCALE, PROBE_LOOKUP_NUDGE_BIAS, probeLookupNudge, PROBE_LOOKUP_ORIGIN_WGSL } from './probes/lookupOrigin';
 export * from './sssr';
 // Mip chains and Hi-Z via `downsampler`: the device limits that let it run six levels per dispatch.
 export { reflectionsRequiredLimits, REFLECTIONS_COLOR_BYTES_PER_SAMPLE, REFLECTIONS_SAMPLED_TEXTURES_PER_STAGE } from './downsample';

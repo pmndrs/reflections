@@ -5,6 +5,7 @@
 // length cap (100 exp(-5 roughness)) follow that sample's hybrid intersect (sources.md section 3).
 // Copyright (C) 2024 Advanced Micro Devices, Inc., MIT, for those two formulas; see NOTICE.
 import { HIT_WGSL } from './provider';
+import { PROBE_LOOKUP_ORIGIN_WGSL } from '../probes/lookupOrigin';
 import { SCREEN_VISIBILITY_WGSL, shadeLobeWgslFor } from './hitShading';
 
 /** Byte size of the uniform block (struct RtParams). */
@@ -225,6 +226,7 @@ fn worldFromDepth(uv: vec2f, z: f32) -> vec3f {
 
 fn isBackground(z: f32) -> bool { return select(z >= 1.0 - 1e-6, z < 1e-6, P.depthInverted != 0u); }
 
+${PROBE_LOOKUP_ORIGIN_WGSL}
 fn loadNormal(c: vec2u) -> vec3f {
   return normalize(P.normalsUnpackMul * textureLoad(t_normal, c, 0).xyz + P.normalsUnpackAdd);
 }
@@ -263,7 +265,7 @@ fn storeTracedMiss(packed: u32, c0: vec2u, origin: vec3f, dir: vec3f) {
       o = s;
       roughness = sqrt(alpha);
     }
-    storePixel(c, vec4f(sampleRadianceFallback(o, d, roughness), 0.0), 0.0, 0.0, ${RT_SOURCE.tracedMiss}u);
+    storePixel(c, vec4f(sampleRadianceFallback(probeLookupOrigin(o, loadNormal(c), length(o - P.cameraPosition)), d, roughness), 0.0), 0.0, 0.0, ${RT_SOURCE.tracedMiss}u);
   }
 }
 // Capped entries keep what intersect wrote (its radiance is already mix(fallback, hit, confidence));

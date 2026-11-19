@@ -46,7 +46,7 @@ import {
 } from 'three/tsl';
 import { sampleReflectionProbes, sampleReflectionProbesLocal, sampleReflectionProbesProxyShare } from '../probes/ReflectionProbesNode';
 import type { ReflectionProbes } from '../probes/ReflectionProbes';
-import { RT_SOURCE } from '@pmndrs/reflections-core';
+import { RT_SOURCE, PROBE_LOOKUP_NUDGE_SCALE, PROBE_LOOKUP_NUDGE_BIAS } from '@pmndrs/reflections-core';
 import type { ScreenSpaceReflectionsPass } from './ScreenSpaceReflectionsPass';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -217,8 +217,9 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
     // W87 (D5420): P is rebuilt from depth, so a surface lying on a volume's face (a floor probe's box
     // starts at the floor) lands a few 1e-6 m either side of it: the lookup flips between the volume and
     // the environment per pixel (stripes, and a flicker once the jitter moves the error). Three's lit pass
-    // has the exact position, inside. Nudge P off the surface by more than the reconstruction error.
-    const Pprobe: N = P.add(Nw.mul(viewPosition.length().mul(2e-5).add(1e-5)));
+    // has the exact position, inside. Nudge P off the surface by more than the reconstruction error
+    // (constants shared with core's radiance fallback, W88 D5440).
+    const Pprobe: N = P.add(Nw.mul(viewPosition.length().mul(PROBE_LOOKUP_NUDGE_SCALE).add(PROBE_LOOKUP_NUDGE_BIAS)));
     probeSpecular = (sampleReflectionProbes as N)(options.probes, Pprobe, R, roughness);
     coverage = sampleReflectionProbesLocal(options.probes, Pprobe, R, roughness).a;
   } else {

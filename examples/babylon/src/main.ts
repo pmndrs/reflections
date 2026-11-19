@@ -319,7 +319,9 @@ for (const m of sceneMeshes) m.receiveShadows = true;
 
 // ---- reflections -------------------------------------------------------------------------------
 const probes = new BabylonProbeSet(scene, { capacity: 1, sourceSize: 128, environment: [skybox] });
-probes.setProbes([{ position: [0, 2, 0], influenceSize: [16, 4.2, 16], projectionSize: [16, 4.2, 12] }]);
+// W88: ?probeFace puts the influence box's floor face exactly on the floor (y = 0), the case the lookup nudge (D5440) is for
+const probeY = q.has('probeFace') ? 2.1 : 2;
+probes.setProbes([{ position: [0, probeY, 0], influenceSize: [16, 4.2, 16], projectionSize: [16, 4.2, 12] }]);
 const variant = (q.get('variant') as 'workgroup' | 'subgroups' | null) ?? 'auto';
 const ssr = new ScreenSpaceReflections({ engine, probes, variant, timestamps: device.features.has('timestamp-query') });
 ssr.enabled = q.get('ssr') !== '0';
@@ -758,6 +760,42 @@ Object.assign(window, {
       }
       const med = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
       return Object.fromEntries(Object.entries(per).map(([k, v]) => [k, Number(med(v).toFixed(4))]));
+    },
+    /**
+     * W88 (D5440): frame-to-frame stability of the radiance view over `n` frames (loop stopped), 8-bit, restricted to the
+     * pixels that miss (SSR confidence ~0 in every frame of a first pass) in the lower `frac` of the image: there the
+     * radiance IS the probe fallback, so this isolates the lookup origin. Needs ?probeFace (the box face on the floor).
+     */
+    async fallbackFlicker(n = 24, frac = 0.5) {
+      stopLoop();
+      const c2 = document.createElement('canvas'); c2.width = canvas.width; c2.height = canvas.height;
+      const g = c2.getContext('2d', { willReadFrequently: true })!;
+      const grab = async (view: CompositeView) => {
+        composite!.setView(view);
+        frame(); await idle();
+        const bmp = await createImageBitmap(canvas); g.drawImage(bmp, 0, 0); bmp.close();
+        return g.getImageData(0, Math.floor(c2.height * (1 - frac)), c2.width, Math.ceil(c2.height * frac)).data;
+      };
+      for (let i = 0; i < 4; i++) { frame(); await idle(); }
+      let mask: Uint8Array | null = null;
+      for (let k = 0; k < 8; k++) {
+        const c = await grab('confidence');
+        if (!mask) mask = new Uint8Array(c.length / 4).fill(1);
+        for (let i = 0; i < c.length; i += 4) if (c[i] > 5) mask[i / 4] = 0;
+      }
+      let prev = await grab('radiance'), sum = 0, count = 0, luma = 0;
+      const px = mask!.reduce((a, v) => a + v, 0);
+      for (let k = 0; k < n; k++) {
+        const cur = await grab('radiance');
+        let d = 0, l = 0;
+        for (let i = 0; i < cur.length; i += 4) if (mask![i / 4]) {
+          d += Math.abs(cur[i] - prev[i]) + Math.abs(cur[i + 1] - prev[i + 1]) + Math.abs(cur[i + 2] - prev[i + 2]);
+          l += cur[i] + cur[i + 1] + cur[i + 2];
+        }
+        sum += d / (3 * Math.max(px, 1)); luma += l / (3 * Math.max(px, 1)); count++; prev = cur;
+      }
+      composite!.setView('final');
+      return { missPixels: px, frames: count, meanFrameDiff: Number((sum / count).toFixed(4)), meanLuma: Number((luma / count).toFixed(3)) };
     },
     stats, orientation, motionCheck, iblCompare,
   },
