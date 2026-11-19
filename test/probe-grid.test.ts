@@ -65,7 +65,7 @@ describe('probe volume grid (W63)', () => {
       // the grid prunes: far fewer listed than n per point
       expect(listed / 4000).toBeLessThan(Math.max(4, hits / 4000 * 4));
     }
-  });
+  }, 30_000); // ~1-2 s idle; timed out at the 5 s default under load (W80, W82 logs)
 
   it('packs no grid without a capacity, or below two volumes', () => {
     const v: ProbeVolume = { slot: 0, center: [0, 0, 0], halfSize: [1, 1, 1] };
