@@ -63,8 +63,8 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T1 | Flicker and firefly metrics on the bench and in pnpm check: rest drift, orbit flicker, 2x2 energy, edge pan, raw speckle count `flicker` | high | S | ready | X0, D3622, W39, W40, W56 | Build X0's metrics in examples/shared/metrics/ as bench Measure columns; baseline every scene at today's defaults. |
-| T2 | Rotate the quad's traced pixel (X1 #1); also the contact rest drift under the upscaler `flicker` | high | S | experiment | X1 #1, W39 (contact drift), D3663 | Add quadBaseRotation 'fixed' \| 'frame' \| 'pattern' (default fixed); measure rest drift, 2x2 energy and orbit flicker with T1. |
+| T2 | Rotate the quad's traced pixel (X1 #1): W85 found no consistent gain (orbit +3-9 % on 3 scenes, -16 % offscreen only); option kept, default fixed | low | S | experiment | X1 #1, W39, D3663, W85 | Revisit only with T4 (ratio reuse). |
+| T73 | Composite probe subtraction under jitter: `final = lit + w (denoised - probeSpecular)` doesn't cancel the lit pass's probe term on mirror floors (torn `probeSpecular` view): contact rest 4.5/255, offscreen 1.6 — the biggest flicker number in the repo `flicker` | high | M | experiment | W85 finding 2, W87 | W87 (running): find the mismatch, reuse the lit pass's lookup; gate with `--only flicker`. |
 | T3 | Cone-footprint hit colour + mirrorBias compensation (X2): fewer raw fireflies, honest mirrorBias, the D3550 double blur `flicker` | high | M | experiment | X2 #5 #6, D49, D3550, W32, W39, W40 | Build hitColorFilter 'cone' on a downsampler pyramid; gate on line spread (±10 % of PT); count raw speckles with T1. |
 | T4 | Ratio-estimator ray reuse (X3): 1 ray + reuse ≈ 4 rays of noise; replaces FFX's quad copy `flicker` | high | L | experiment | X3, decision 13, D50, D3550, D3663 | Phase A in core: rayReuse 'copy' \| 'ratio'; target denoised std at spq 1 ≈ copy at spq 4 on glossy floors. |
 | T5 | History hit colour: confidence at screen edges (X1 #4), pops in pans `flicker` | med | S | experiment | X1 #4, D1002 | Add historyEdgeConfidence (default off); measure edge pan and the traced-ray count with ?rt=1. |
@@ -77,7 +77,7 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T10 | 2x2 quad copy at edges: quadCopy 'sameSurface' default after a scene check, then edge-aware upsample of the per-quad result | high | M | accepted | decision 21, D3740, D3663, D3661, D3610, W58, W53 | Run W58's Measure on chess, toyCar, Sponza and T53's scenes; flip the default if flat or better. Upsample after. |
+| T10 | 2x2 quad copy at edges: quadCopy 'sameSurface' (W85: display flicker flat on 8 scenes, raw speckle +32 % contact / +47 % carConcept, so not flipped); edge-aware upsample of the per-quad result | med | M | decide | decision 21, D3740, D3663, D3661, D3610, W58, W53, W85 | Maintainer: is raw (pre-denoiser) speckle worth trading for flat display flicker? Upsample after. |
 | T11 | Back-face depth layer (RT off): sphere fringe, dark band under the sill, white gap under the car, contact crescent | med | M | experiment | D2402, D4303, W41, W44, W21, W22 | One back-face depth target + thickness test; measure fringe px (W44's metric) and the sill band with RT off. |
 | T12 | Depth-scaled SSR thickness (X1 #2): one k for every scene scale; stripes and streaks behind objects | med | S | experiment | X1 #2, D1001, D1000, W9, W12, W17 | Add thicknessDepthFactor (default 0); sweep k on toyCar, rooms, carConcept, Sponza; streak % and stripe ratio. |
 | T13 | hitLobeFilterMixed reads last frame's hit source without reprojection (one frame late in motion) | low | S | ready | D3641, W52 | Reproject the hit-source signal through motion before the lobe filter reads it. |
@@ -123,9 +123,7 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
 | T35 | Near-mirror rest shimmer: GGX lobe noise the denoiser leaves; try a longer history for near-mirrors `flicker` | med | L | experiment | W40, W32, W39 | Measure with T1 at rest and in W39's pendulum; then a denoiser branch (W53-style) with a longer near-mirror history. |
-| T36 | Denoiser PRs #24-26 (motion scale, variance, tile list): variance-guided tracing, drop the guides pass `flicker` | med | L | waiting | D46, D1400, D307, D68, W21 | Waiting on the denoiser repo (#24-26). When #25 lands, turn on variance-guided tracing (W21: spq 4 std 0.14 -> 0.10). |
 | T37 | The FFX denoiser loses 26-46 % of heavy-tailed glossy energy (luminance weight clips bright samples) `flicker` | med | L | experiment | D3550, W45, X3 phase B | Report to the denoiser repo now; try BRDF / pdf weights in the prefilter (X3 phase B) after T4's phase A. |
-| T38 | Denoiser hit-source option (denoiser#29): review, land, pick a default; its +0.35-0.5 ms affinity cost | med | L | waiting | D3660, D3661, D3662, W53, decision 13 | Waiting on the denoiser agent's review of #29; then pick 'hits' or off on the bench. |
 | T39 | FFX spatial filter spreads rough neighbours into small near-mirror parts (carConcept's chrome star) | low | L | experiment | D3721, W56 | On a denoiser branch: harder roughness / normal weights for near-mirror centres, or no spatial pass below an alpha. |
 
 ### Performance
@@ -155,12 +153,13 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T53 | Simple test scenes: a cube / slab on the mirror, sharp edges above it, a thin plate over the floor (+ X0's strip and grazing floor) | high | S | ready | maintainer 2026-11-13, X0, decisions 20 / 21 | Add them as bench scenes with the PT reference and named regions; baseline them before any more car tuning. |
 | T54 | Path-traced ground truth for the ssr kits (moving, mirrors), then retune the hybrid thresholds against it | med | M | ready | HANDOFF tracked fixes (Q2), D52, D4301, D4402, D4802, D4701, D3513, D901, W37, W38 | Reuse the compare page's WebGPU tracer (W21 / W23) on the ssr kits; then sweep D52's cut-offs. |
 | T55 | Check runner: a full run passes the 10-min limit, leaves Chromes behind; flakes; parity on full lit images | low | S | ready | W47, W48, W49, W63, W38, W7, F3 | Split the default run or raise the limit; close Chromes on timeout; compare atlas texels for probe parity. |
 | T56 | Tooling odds: the cone filter's async compile (first frames run 'off', then pop to 'cone', D5301), grey out #29 controls, cube2d compile error, probe weight export, bench three-side upscale | low | S | ready | D3590, W48, W53, W35, D4801, D4803, D3620, D3621, D1502, W51 | One small tooling worktree; each item is under an hour. Also the shared Sponza view and the dts heap. |
 | T57 | Re-run the W21 compare readouts against the WebGPU + OIDN reference (clear coat in) | low | S | ready | W23, W21, D2305, D2303 | Re-run docs/research/showcase-compare.md when its numbers next matter; raise samples for sub-8-bit calls. |
 | T72 | Drop-in follow-ups (W84): an `antialias: 'upscaler'` option on `Reflections` (optional peer, dynamic import; cuts the remaining shimmer), a `/react` entry for `useReflections` once R3F v10 leaves alpha, auto / time-sliced re-bake, moving-mesh refit wiring, `hitColor: 'final'` | med | M | ready | W84 | The upscaler AA option first (flicker); the `/react` entry waits on R3F v10 stable and the maintainer's call. |
+| T74 | NRC hit shading (W86): opt-in once pmndrs/pathtracer publishes its hash cache + strict-indirect transport as a package and a `HitShading` injection exists; historyFrames >= 128 and a freeze option for the flicker rule; measure drift at training stride 8-64 first | med | L | waiting | W86, docs/research/w86 | Waiting on pathtracer packaging; probes stay the default. |
+| T75 | Site + CI follow-ups (W83): custom domain reflections.docs.pmnd.rs (CNAME) or a tested BASE_PATH=/reflections build; scrub FFX marks from the generated settings reference?; showcase panel links to compare / bench in the source html; bump the pinned denoiser commit in pages.yml when its r187 branch lands | low | S | decide | W83 | Maintainer: domain and publishing call. |
 
 ### Platform / waiting
 
