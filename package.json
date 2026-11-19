@@ -64,6 +64,7 @@
   "peerDependencies": {
     "@babylonjs/core": ">=9.35.0 <10",
     "@pmndrs/bvh": "^0.1.0",
+    "@pmndrs/raytracer": "*",
     "pixi.js": ">=8.22.0 <9",
     "three": ">=0.187.0",
     "three-mesh-bvh": ">=0.9.18"
@@ -73,6 +74,9 @@
       "optional": true
     },
     "@pmndrs/bvh": {
+      "optional": true
+    },
+    "@pmndrs/raytracer": {
       "optional": true
     },
     "pixi.js": {
@@ -105,6 +109,7 @@
     "typedoc": "^0.28.20",
     "typescript": "^5.9.3",
     "vite": "^6.1.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "xatlas-web": "^0.1.0"
   }
 }

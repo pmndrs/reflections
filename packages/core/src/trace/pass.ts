@@ -257,6 +257,7 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
   const { width: W, height: H, provider } = options;
   const fallback = options.radianceFallback ?? constantRadianceFallback();
   const shading = options.hitShading ?? fallbackHitShading();
+  if (shading.requiresHitShade && !provider.capabilities.hitShade) throw new Error(`rt: this hit shading needs a provider with traceHitShade (capabilities.hitShade, e.g. createRaytracerTraceProvider); ${provider.name} has none`);
   const tilesX = Math.ceil(W / 8), tilesY = Math.ceil(H / 8);
   const timer = options.timestamps && PassTimer.supported(device) ? new PassTimer(device, 8) : undefined; // begin, trace, + the fill's three (W74)
 

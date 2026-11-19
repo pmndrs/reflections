@@ -40,6 +40,10 @@ export interface HitMaterial {
   roughness?: number;
   clearcoat?: number;
   clearcoatRoughness?: number;
+  /** Linear base colour before metalness / transmission (`color x mean(map)`), for physical providers (@pmndrs/raytracer, P1.5). */
+  baseColor?: readonly [number, number, number];
+  metalness?: number;
+  transmission?: number;
 }
 
 /**
@@ -151,6 +155,9 @@ export function defaultHitMaterial(mesh: THREE.Mesh, source: HitMaterialSource =
     const k = (1 - metalness) * (1 - (m.transmission ?? 0));
     albedo[0] = base[0] * k; albedo[1] = base[1] * k; albedo[2] = base[2] * k;
     if (pbr) {
+      out.baseColor = base as [number, number, number];
+      out.metalness = metalness;
+      if (m.transmission) out.transmission = m.transmission;
       out.specular = base.map((b) => 0.04 + (b - 0.04) * metalness) as [number, number, number];
       out.roughness = m.roughness * (m.roughnessMap ? textureMeanColor(m.roughnessMap)?.[1] ?? 1 : 1);
       out.clearcoat = (m.clearcoat ?? 0) * (m.clearcoatMap ? textureMeanColor(m.clearcoatMap)?.[0] ?? 1 : 1);
