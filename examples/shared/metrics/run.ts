@@ -112,6 +112,8 @@ export interface Metrics {
   edgePan(o?: EdgePanOptions): Promise<EdgePanResult>;
   speckle(o?: SpeckleOptions): Promise<SpeckleResult>;
   energy(o?: EnergyOptions): Promise<EnergyResult | null>;
+  /** W85: per-stage (display / raw signal / denoised) consecutive-frame change at rest: where the flicker enters. */
+  stageRest(o?: StageRestOptions): Promise<StageRestResult>;
   /** Every metric above with its defaults (or the options per metric), one result object. */
   all(o?: AllOptions): Promise<Record<string, unknown>>;
 }
@@ -135,6 +137,9 @@ export interface SpeckleOptions extends RegionOptions { warm?: number; frames?: 
 export interface SpeckleResult { source: 'signal' | 'display'; sigma: number; frames: number; regions: PerRegion<{ px: number; pct: number }> }
 export interface EnergyOptions extends RegionOptions { warm?: number; frames?: number }
 export interface EnergyResult { frames: number; size: [number, number]; regions: PerRegion<{ px: number; raw: number; denoised: number; loss: number }> }
+export interface StageRestOptions extends RegionOptions { warm?: number; frames?: number }
+/** `stages.<display|signal|denoised>.<region>.mean`: the mean |frame - previous| (display 8-bit luma; signal / denoised linear luminance). */
+export interface StageRestResult { frames: number; stages: Record<string, PerRegion<{ px: number; mean: number }>> }
 export interface AllOptions { regions?: Record<string, Mask>; restDrift?: RestDriftOptions | false; orbitFlicker?: OrbitOptions | false; quadEnergy?: QuadOptions | false; edgePan?: EdgePanOptions | false; speckle?: SpeckleOptions | false; energy?: EnergyOptions | false }
 
 export function createMetrics(host: MetricsHost): Metrics {
@@ -346,5 +351,41 @@ export function createMetrics(host: MetricsHost): Metrics {
     return out;
   }
 
-  return { regions, restDrift, orbitFlicker, quadEnergy: quad, edgePan, speckle: speck, energy, all };
+  /**
+   * W85: where the rest flicker enters. Over `frames` consecutive frames of a still camera, the mean per-px
+   * |frame - previous| per region of the display (8-bit luma), the raw signal and the denoised output (both linear
+   * luminance, so compare each stage with itself, or read `rel` = the change over the stage's own mean). A stage
+   * that is steady while the next one flickers is where the flicker comes from.
+   */
+  async function stageRest(o: StageRestOptions = {}): Promise<StageRestResult> {
+    const frames = o.frames ?? 8;
+    const R = await start(o, o.warm ?? 60);
+    const stages: Record<string, { prev: Luma | null; sum: Float64Array | null; w: number; h: number; mean: Accumulator | null }> = {};
+    const feed = (name: string, L: Luma, w: number, h: number) => {
+      const s = (stages[name] ??= { prev: null, sum: null, w, h, mean: null });
+      s.sum ??= new Float64Array(w * h);
+      if (s.prev) for (let i = 0; i < w * h; i++) s.sum[i] += Math.abs(L[i] - s.prev[i]);
+      s.prev = L;
+    };
+    for (let f = 0; f <= frames; f++) {
+      const x = await luma();
+      feed('display', x, W, H);
+      if (host.readSignal) { const s = await host.readSignal(); feed('signal', luminanceOfRGBA(s.data, s.width * s.height), s.width, s.height); }
+      if (host.readDenoised) { const d = await host.readDenoised(); if (d) feed('denoised', luminanceOfRGBA(d.data, d.width * d.height), d.width, d.height); }
+    }
+    const out: StageRestResult['stages'] = {};
+    for (const [name, s] of Object.entries(stages)) {
+      const per: Record<string, { px: number; mean: number }> = {};
+      for (const [k, m0] of Object.entries(R)) {
+        const m = resampleMask(m0, W, H, s.w, s.h);
+        let px = 0, t = 0;
+        for (let i = 0; i < s.w * s.h; i++) if (m[i]) { px++; t += s.sum![i] / frames; }
+        per[k] = { px, mean: px ? t / px : 0 };
+      }
+      out[name] = per;
+    }
+    return round({ frames, stages: out });
+  }
+
+  return { regions, restDrift, orbitFlicker, quadEnergy: quad, edgePan, speckle: speck, energy, stageRest, all };
 }

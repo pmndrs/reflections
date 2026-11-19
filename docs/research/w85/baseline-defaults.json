@@ -1,0 +1,270 @@
+{
+ "date": "2026-11-19T16:41:56.867Z",
+ "label": "base",
+ "results": [
+  {
+   "config": "defaults",
+   "scene": "ssr:contact",
+   "regions": {
+    "reflection": {
+     "px": 279484,
+     "drift": 0.7787,
+     "pct8": 0.4294,
+     "rest": 4.505,
+     "orbitStd": 9.8249,
+     "d2": 12.1483,
+     "quad": 0.0221,
+     "quadRaw": 0.6805,
+     "speckle": 0.0182,
+     "drift2": 0.715,
+     "orbitStd2": 9.7104
+    },
+    "_pan": 19.265
+   }
+  },
+  {
+   "config": "defaults",
+   "scene": "ssr:mirrorWall",
+   "regions": {
+    "reflection": {
+     "px": 201664,
+     "drift": 0.3128,
+     "pct8": 0.0585,
+     "rest": 0.0094,
+     "orbitStd": 0.4603,
+     "d2": 0.7495,
+     "quad": 0.0198,
+     "quadRaw": 0.1645,
+     "speckle": 0.0131,
+     "drift2": 0.3071,
+     "orbitStd2": 0.4606
+    },
+    "_pan": 7.6822
+   }
+  },
+  {
+   "config": "defaults",
+   "scene": "ssr:offscreen",
+   "regions": {
+    "reflection": {
+     "px": 330160,
+     "drift": 0.2824,
+     "pct8": 0.2817,
+     "rest": 1.5967,
+     "orbitStd": 2.6427,
+     "d2": 5.2211,
+     "quad": -0.0312,
+     "quadRaw": 0.4126,
+     "speckle": 0.0043,
+     "drift2": 0.2664,
+     "orbitStd2": 2.8744
+    },
+    "_pan": 11.1225
+   }
+  },
+  {
+   "config": "defaults",
+   "scene": "bench:cubeFloor",
+   "regions": {
+    "reflection": {
+     "px": 405650,
+     "drift": 0.0359,
+     "pct8": 0,
+     "rest": 0.0011,
+     "orbitStd": 0.0719,
+     "d2": 0.1524,
+     "quad": 0.2897,
+     "quadRaw": 0.5279,
+     "speckle": 0,
+     "drift2": 0.0354,
+     "orbitStd2": 0.0717
+    },
+    "cubeRefl": {
+     "px": 24650,
+     "drift": 0.18,
+     "pct8": 0,
+     "rest": 0.0061,
+     "orbitStd": 0.243,
+     "d2": 0.2187,
+     "quad": 0.2175,
+     "quadRaw": 0.2242,
+     "speckle": 0,
+     "drift2": 0.1786,
+     "orbitStd2": 0.2408
+    },
+    "slabRefl": {
+     "px": 11700,
+     "drift": 0.2517,
+     "pct8": 0,
+     "rest": 0.0053,
+     "orbitStd": 0.291,
+     "d2": 0.1925,
+     "quad": 0.3706,
+     "quadRaw": 0.9132,
+     "speckle": 0,
+     "drift2": 0.2474,
+     "orbitStd2": 0.2921
+    },
+    "contact": {
+     "px": 14400,
+     "drift": 0.3265,
+     "pct8": 0,
+     "rest": 0.0072,
+     "orbitStd": 0.3184,
+     "d2": 0.1523,
+     "quad": 0.1872,
+     "quadRaw": 0.0987,
+     "speckle": 0,
+     "drift2": 0.3247,
+     "orbitStd2": 0.3161
+    },
+    "_pan": 0.4017
+   }
+  },
+  {
+   "config": "defaults",
+   "scene": "bench:edgesFloor",
+   "regions": {
+    "reflection": {
+     "px": 411632,
+     "drift": 0.1994,
+     "pct8": 0.0408,
+     "rest": 0.0031,
+     "orbitStd": 0.2077,
+     "d2": 0.3658,
+     "quad": 0.0736,
+     "quadRaw": 0.8905,
+     "speckle": 0,
+     "drift2": 0.1989,
+     "orbitStd2": 0.208
+    },
+    "panelRefl": {
+     "px": 29280,
+     "drift": 1.2393,
+     "pct8": 0.099,
+     "rest": 0.0175,
+     "orbitStd": 1.1623,
+     "d2": 1.0432,
+     "quad": 0.0843,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 1.2415,
+     "orbitStd2": 1.1668
+    },
+    "_pan": 0.4894
+   }
+  },
+  {
+   "config": "defaults",
+   "scene": "bench:plateFloor",
+   "regions": {
+    "reflection": {
+     "px": 427045,
+     "drift": 0.0109,
+     "pct8": 0,
+     "rest": 0.0004,
+     "orbitStd": 0.0563,
+     "d2": 0.1323,
+     "quad": 0.1011,
+     "quadRaw": 0.82,
+     "speckle": 0.0001,
+     "drift2": 0.0104,
+     "orbitStd2": 0.0562
+    },
+    "plateRefl": {
+     "px": 16430,
+     "drift": 0.1092,
+     "pct8": 0,
+     "rest": 0.0012,
+     "orbitStd": 0.1531,
+     "d2": 0.1282,
+     "quad": 0.4654,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 0.1036,
+     "orbitStd2": 0.1491
+    },
+    "underPlate": {
+     "px": 22940,
+     "drift": 0.0125,
+     "pct8": 0,
+     "rest": 0.0004,
+     "orbitStd": 0.141,
+     "d2": 0.0592,
+     "quad": 0.1059,
+     "quadRaw": 0.2596,
+     "speckle": 0,
+     "drift2": 0.0121,
+     "orbitStd2": 0.1362
+    },
+    "_pan": 0.3752
+   }
+  },
+  {
+   "config": "defaults",
+   "scene": "bench:carConcept@w50",
+   "regions": {
+    "reflection": {
+     "px": 458630,
+     "drift": 0.2684,
+     "pct8": 0.0035,
+     "rest": 0.0073,
+     "orbitStd": 0.3912,
+     "d2": 0.3274,
+     "quad": 0.0488,
+     "quadRaw": 0.896,
+     "speckle": 0.0577,
+     "drift2": 0.2667,
+     "orbitStd2": 0.3913
+    },
+    "wheel": {
+     "px": 9900,
+     "drift": 1.2213,
+     "pct8": 0.0202,
+     "rest": 0.0268,
+     "orbitStd": 2.1094,
+     "d2": 1.6054,
+     "quad": 0.2002,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 1.2589,
+     "orbitStd2": 2.1272
+    },
+    "car": {
+     "px": 85400,
+     "drift": 0.5797,
+     "pct8": 0.0023,
+     "rest": 0.0119,
+     "orbitStd": 0.7709,
+     "d2": 0.6407,
+     "quad": 0.1136,
+     "quadRaw": 0.9846,
+     "speckle": 0.0124,
+     "drift2": 0.5718,
+     "orbitStd2": 0.7766
+    },
+    "_pan": 0.6812
+   }
+  },
+  {
+   "config": "defaults",
+   "scene": "bench:sponza@hero",
+   "regions": {
+    "reflection": {
+     "px": 119966,
+     "drift": 0.3071,
+     "pct8": 0.0008,
+     "rest": 0.0114,
+     "orbitStd": 0.5545,
+     "d2": 5.3183,
+     "quad": -0.0047,
+     "quadRaw": 0.2736,
+     "speckle": 0.3539,
+     "drift2": 0.3158,
+     "orbitStd2": 0.5552
+    },
+    "_pan": 7.0842
+   }
+  }
+ ]
+}

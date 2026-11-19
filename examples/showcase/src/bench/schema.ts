@@ -122,7 +122,7 @@ export const SETTINGS: Setting[] = [
   bool('aa.detectShadingChanges', 'aa', 'Detect shading changes', true, { appliesTo: RASTER, api: '@pmndrs/upscaler settings.detectShadingChanges', tradeoff: 'Ages the history where shading really changed (a light, a bake) so it re-converges instead of ghosting.' }),
 
   // ---- scene -----------------------------------------------------------------------------------------------
-  sel('scene', 'scene', 'Scene', [['carConcept', 'Car concept'], ['toyCar', 'Toy car'], ['chess', 'Chess set'], ['sponza', 'Sponza'], ['lineSpread', 'Line spread (X0: emissive strip over a glossy floor)'], ['lineSpreadThin', 'Line spread, thin strip (X0: SSR thickness case)'], ['grazing', 'Grazing sweep (X0: checker wall over a glossy floor)']], null, {
+  sel('scene', 'scene', 'Scene', [['carConcept', 'Car concept'], ['toyCar', 'Toy car'], ['chess', 'Chess set'], ['sponza', 'Sponza'], ['lineSpread', 'Line spread (X0: emissive strip over a glossy floor)'], ['lineSpreadThin', 'Line spread, thin strip (X0: SSR thickness case)'], ['grazing', 'Grazing sweep (X0: checker wall over a glossy floor)'], ['cubeFloor', 'Cube and slab on a glossy floor (T53)'], ['edgesFloor', 'Sharp-edged panel above a glossy floor (T53)'], ['plateFloor', 'Thin plate over a glossy floor (T53)']], null, {
     pageDefault: 'carConcept', apply: 'rebuild', appliesTo: 'page', tradeoff: 'Reloads every method on the new scene (downloaded assets; X0\'s lineSpread / grazing are procedural, W70).',
   }),
   sel('pose', 'scene', 'Camera', [['hero', 'hero'], ['low', 'low'], ['front', 'front'], ['close', 'close'], ['top', 'top'], ['w50', 'w50 (carConcept: W50\'s view, the Measure regions)'], ['e5', 'e5 (X0 scenes: 5 deg elevation)'], ['e15', 'e15 (X0: 15 deg, the line-spread gate)'], ['e30', 'e30 (X0: 30 deg)'], ['e60', 'e60 (X0: 60 deg)']], null, {
@@ -377,6 +377,10 @@ export const SETTINGS: Setting[] = [
   sel('keepBlack', 'denoiser', 'Black samples keep the history', [['0', 'off (FFX: output 0, history dropped)'], ['1', 'on (HybridReflections default)']], '1', {
     appliesTo: OURS_DN, api: 'HybridReflections.denoiserKeepHistoryOnBlack (default true) -> FfxReflectionDenoiser({ keepHistoryOnBlack })',
     tradeoff: 'W78 (D5145): FFX\'s resolve writes 0 to the output and the history wherever a frame\'s prefiltered radiance is black, so a sparse glossy reflection over a dark environment never builds up (the line-spread gate\'s r 0.15 / 0.3 losses). On, black samples accumulate like any other.',
+  }),
+  sel('variance', 'denoiser', 'Variance-guided tracing input', [['0', 'off'], ['1', 'on (denoiser variance -> tracer)']], '0', {
+    appliesTo: OURS_DN, api: 'HybridReflections.denoiserVariance = true; settings.temporalVarianceGuidedTracing / varianceThreshold',
+    tradeoff: 'W85 (T36, Denoiser #25): last frame\'s denoiser variance goes back to the tracer, which traces the quad\'s other pixels where it is above Variance threshold (s.varianceThreshold; FFX samples use 0, documented range 0 to 0.01). Extra rays after disocclusion and in noisy glossy areas.',
   }),
   num('brdfMin', 'denoiser', 'BRDF weights from roughness', 0, 0.447, 0.01, 0.1, {
     appliesTo: OURS_DN, api: 'FfxReflectionDenoiser({ brdfMinAlpha: r * r })',

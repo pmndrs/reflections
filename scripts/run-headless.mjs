@@ -5,6 +5,7 @@
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | nrc | showcase | showcase-compare | quickstart | r3f | bench | probe-layouts)
+//   pnpm check -- --only flicker                 # W85 (T1): the X0 flicker metrics per scene x config (FLICKER_SCENES / FLICKER_CONFIGS / FLICKER_LABEL, scripts/flicker.mjs)
 //   pnpm check -- --only ssr-exp-metrics         # X0 (W70): the experiment metrics smoke (examples/shared/metrics); ssr-exp-baseline = the full baseline (scripts/ssr-exp.mjs)
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
 //   pnpm check -- --only ssr-exp-x1              # W71 (X1): each X1 setting at its default = absent on examples/ssr; (W76: historyEdgeConfidence and hitLobeFilterGrazing removed)
@@ -34,6 +35,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ssrExpBaseline, ssrExpMetricsSmoke, ssrExpRun } from './ssr-exp.mjs'; // X0 (W70)
+import { flicker } from './flicker.mjs'; // W85 (T1): the flicker section
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -3745,6 +3747,7 @@ async function main() {
     if (runs('bench')) await benchChecks(pages); // W51: the tuning bench
     if (only === 'ssr-exp-metrics') await ssrExpMetricsSmoke({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)
     if (only === 'ssr-exp-baseline') await ssrExpBaseline({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)
+    if (only === 'flicker') await flicker({ openPage, check, PORT, OUT, results, savePng }, pages); // W85 (T1): flicker metrics over scenes x configs (scripts/flicker.mjs)
     if (only === 'ssr-exp-run') await ssrExpRun({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70): one metric call on one page (SSR_EXP_URL, SSR_EXP_EVAL)
 
     if (only === 'nrc') {
