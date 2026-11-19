@@ -14,11 +14,11 @@
  *   BASE_PATH      where the site is served from: '' (default, a custom domain such as
  *                  https://reflections.docs.pmnd.rs) or '/reflections' (pmndrs.github.io/reflections).
  *   KHRONOS_REF    the glTF-Sample-Assets commit the models are loaded from at runtime (pinned below).
- *   ASSETS_CDN     where Khronos models load from (default jsDelivr). Set to 'local' to bundle examples/assets
+ *   ASSETS_CDN     where Khronos models load from (default: raw.githubusercontent.com at the pinned commit). Set to 'local' to bundle examples/assets
  *                  instead (`pnpm assets` first; about 160 MB).
  *
  * Why the models load from a CDN: they are ~160 MB (Sponza alone is 44 MB), all public Khronos files that
- * jsDelivr serves with CORS from the GitHub repo, and a Pages artifact should stay small and fast to
+  * raw.githubusercontent.com serves with CORS (jsDelivr was tried first: it answers 403 for Sponza and ABeautifulGame), and a Pages artifact should stay small and fast to
  * deploy. Only the two Poly Haven HDRIs (CC0, 3 MB) and the asset manifest ship with the site.
  */
 
@@ -56,7 +56,7 @@ run('node', ['tools/docs-site.ts', out], { BASE_PATH: basePath || undefined });
 // 2. examples (EXAMPLES_SITE=1: fails without the denoiser, leaves out the pages that need the beta or the OIDN package)
 const dist = join(out, 'examples');
 const remote: Record<string, string> = {};
-if (!local) for (const a of ASSETS) if (a.khronos && !a.devOnly) remote[a.dir] = `https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@${KHRONOS_REF}/Models/${a.khronos}/${a.variant}/`;
+if (!local) for (const a of ASSETS) if (a.khronos && !a.devOnly) remote[a.dir] = `https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/${KHRONOS_REF}/Models/${a.khronos}/${a.variant}/`;
 run('pnpm', ['exec', 'vite', 'build', '--config', 'examples/vite.config.ts'], {
     EXAMPLES_SITE: '1',
     EXAMPLES_BASE: examplesBase,

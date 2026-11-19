@@ -9,7 +9,7 @@
  *   --prefix   the base path the site was built for (BASE_PATH), served under it
  *   --only     links | docs | examples
  *
- * Needs Chrome ($CHROME overrides the macOS path) and network access (the models load from jsDelivr).
+ * Needs Chrome ($CHROME overrides the macOS path) and network access (the models load from raw.githubusercontent.com).
  * The port is $REFLECTIONS_PORT (default 5370; worktrees set their own).
  */
 

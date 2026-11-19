@@ -10,7 +10,7 @@ name: Build the site and deploy to GitHub Pages
 #
 # The denoiser is not on npm, so its source is checked out next to the repo (pinned) and bundled into the
 # examples. Without it the examples run undenoised and flicker, so the build fails if it is missing.
-# The example models load from jsDelivr at runtime (Khronos glTF Sample Assets, pinned in tools/site-build.ts).
+# The example models load from raw.githubusercontent.com at runtime (Khronos glTF Sample Assets, pinned in tools/site-build.ts).
 
 on:
   push:
