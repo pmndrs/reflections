@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>@pmndrs/reflections examples</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #fafafa; --fg: #1a1a1a; --muted: #666; --line: #ddd; --link: #0b5fff; --card: #fff; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; --muted: #999; --line: #333; --link: #7aa7ff; --card: #181818; } }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+    main { max-width: 820px; margin: 0 auto; padding: 32px 16px 64px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    p.lead { color: var(--muted); margin: 0 0 20px; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 32px 0 8px; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { padding: 10px 0; border-top: 1px solid var(--line); }
+    a { color: var(--link); font-weight: 600; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { font-size: 13px; }
+    .d { color: var(--muted); }
+    .hero { display: block; padding: 18px 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); margin: 0 0 8px; }
+    .hero b { font-size: 18px; }
+    .hero span { display: block; color: var(--muted); font-weight: 400; margin-top: 4px; }
+    .note { border-left: 3px solid var(--line); padding: 4px 12px; color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>@pmndrs/reflections examples</h1>
+  <p class="lead">Reflections for WebGPU: probes, screen-space reflections and a ray-traced fallback, composed per pixel. <a href="__DOCS__">Docs</a> · <a href="https://github.com/pmndrs/reflections">GitHub</a></p>
+
+  <a class="hero" href="showcase/"><b>Showcase</b>
+    <span>Start here. A car concept, a toy car and a chess set on a mirror floor, and Sponza with a polished floor. Switch probes, screen-space reflections, the ray-traced fallback and the denoiser on and off, and look at the debug views.
+    <code>?scene=carConcept|toyCar|chess|sponza</code>, <code>?rt=1</code>, <code>?denoise=0</code>.</span></a>
+
+  <p class="note">These pages need a browser with WebGPU (current Chrome, Edge or Safari Technology Preview). The models (Khronos glTF Sample Assets) load from a CDN and the first load is a few tens of MB.</p>
+
+  <h2>More demos</h2>
+  <ul>
+    <li><a href="ssr/">ssr</a> — screen-space reflections on small test scenes. <span class="d"><code>?scene=mirrorWall|offscreen|contact|roughnessRamp|boxRoom|moving|explainer|rooms|facingMirrors</code>, <code>?rt=1</code> ray-traced misses, <code>?probes=0</code>.</span></li>
+    <li><a href="probes/">probes</a> — live reflection probes in a room: a spinning torus and a colour-cycling light, captured every frame. <span class="d"><code>?static</code>, <code>?grid</code>, <code>?refit</code>.</span></li>
+    <li><a href="babylon/">babylon</a> — the same screen-space reflections on Babylon.js (WebGPUEngine). Experimental.</li>
+    <li><a href="scenes/">scenes</a> — the test scenes and every G-buffer target (depth, normal, roughness, motion, scene colour).</li>
+  </ul>
+
+  <h2>Developer pages</h2>
+  <p class="d">Checks and benches that the repository runs on a real GPU. They are here to read and poke at, not as demos.</p>
+  <ul>
+    <li><a href="sssr-core/">sssr-core</a> — the screen-space tracer on exact analytic inputs (raw WebGPU, no three).</li>
+    <li><a href="probe-core/">probe-core</a> — the core probe set and its radiance fallback (raw WebGPU).</li>
+    <li><a href="bc6h/">bc6h</a> — the BC6H GPU encoder against the hardware decoder.</li>
+    <li><a href="probe-bench/">probe-bench</a> — probe layout and format bench.</li>
+    <li><a href="ssr-bench/">ssr-bench</a> — ours against three's SSRNode: error, flicker, GPU ms.</li>
+    <li><a href="regressions/">regressions</a> — GPU repros of review bugs.</li>
+  </ul>
+  <p class="note">The repository also has a tuning bench and a path-traced comparison page. They need the denoiser's OIDN package and a local checkout, so they are not on this site; see <a href="__DOCS__reference/settings">the settings reference</a>.</p>
+  <p class="note">Credits: models from the <a href="https://github.com/KhronosGroup/glTF-Sample-Assets">Khronos glTF Sample Assets</a>: Sponza (Crytek, CC-BY 3.0), CarConcept and ABeautifulGame (CC-BY 4.0), ToyCar, FlightHelmet and MetalRoughSpheres (CC0). HDRIs from <a href="https://polyhaven.com">Poly Haven</a> (CC0).</p>
+</main>
+</body>
+</html>

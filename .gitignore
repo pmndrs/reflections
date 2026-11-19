@@ -9,3 +9,7 @@ examples/assets/
 .claude/worktrees/
 # pixi-3d closed beta: unpack its release tarball here (examples/pixi3d/README.md). Never commit it.
 examples/pixi3d/vendor/
+# docs site outputs (tools/docs-site.ts, tools/site-build.ts, typedoc)
+api-docs/
+docs-site/
+_site/

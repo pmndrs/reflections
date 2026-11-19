@@ -1,0 +1,27 @@
+{
+    "$schema": "https://typedoc.org/schema.json",
+    "name": "@pmndrs/reflections",
+    "entryPoints": ["src/three.ts", "src/core.ts", "src/babylon.ts", "src/pixi.ts"],
+    "tsconfig": "tsconfig.json",
+    "out": "api-docs",
+    "readme": "none",
+    "includeVersion": false,
+    "excludePrivate": true,
+    "excludeProtected": true,
+    "excludeInternal": true,
+    "excludeExternals": true,
+    "exclude": ["**/*.test.ts"],
+    "sort": ["kind", "alphabetical"],
+    "navigationLinks": {
+        "Docs": "https://reflections.docs.pmnd.rs",
+        "Examples": "https://reflections.docs.pmnd.rs/examples/",
+        "GitHub": "https://github.com/pmndrs/reflections"
+    },
+    "validation": {
+        "notExported": false,
+        "invalidLink": false,
+        "rewrittenLink": false,
+        "unusedMergeModuleWith": false
+    },
+    "treatWarningsAsErrors": false
+}
