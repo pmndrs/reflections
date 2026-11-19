@@ -2,8 +2,8 @@
 // SPD-style: up to six levels per dispatch from a 64x64 tile in workgroup memory). One instance per
 // device, so pipelines are shared by every pass that builds a chain (depth pyramid, probe prefilter).
 
-import { planBatches } from 'downsampler';
-import { Downsampler, createKernel, kernelLayoutEntries } from 'downsampler/webgpu';
+import { planBatches } from '@pmndrs/downsampler';
+import { Downsampler, createKernel, kernelLayoutEntries } from '@pmndrs/downsampler/webgpu';
 
 const perDevice = new WeakMap<GPUDevice, Downsampler>();
 

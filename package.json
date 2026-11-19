@@ -57,7 +57,7 @@
   },
   "peerDependencies": {
     "@babylonjs/core": ">=9.35.0 <10",
-    "@pmndrs/bvh": "*",
+    "@pmndrs/bvh": "^0.1.0",
     "pixi.js": ">=8.22.0 <9",
     "three": ">=0.187.0",
     "three-mesh-bvh": ">=0.9.18"
@@ -82,7 +82,7 @@
   "devDependencies": {
     "@babylonjs/core": "9.35.0",
     "@pmndrs/reflections-babylon": "workspace:*",
-    "@pmndrs/bvh": "link:../bvh",
+    "@pmndrs/bvh": "^0.1.0",
     "@pmndrs/reflections-core": "workspace:*",
     "@pmndrs/reflections-pixi": "workspace:*",
     "@pmndrs/reflections-three": "workspace:*",
