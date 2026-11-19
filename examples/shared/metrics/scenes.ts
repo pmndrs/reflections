@@ -121,9 +121,81 @@ async function grazing(aspect: number): Promise<ShowcaseScene> {
   };
 }
 
+// ---- T53 (W85): simple flicker scenes ---------------------------------------------------------------------
+// A glossy floor (roughness 0.08, bright metal) in the studio HDRI with a key light, and one object each, so the
+// flicker metrics have a reflection whose truth is obvious (named regions in bench/regions.ts, pose `hero`):
+// - cubeFloor: a 0.6 m orange cube turned 25 degrees (diagonal, stair-stepping edges) and a low slab on the floor:
+//   the contact line, the silhouette and the reflected faces (the contact-rest-drift family).
+// - edgesFloor: a high-contrast checker panel (sharp black / white edges) standing 0.25 m above the floor: the
+//   reflected edges (quad copy, edge pan, orbit shimmer).
+// - plateFloor: a 2 cm plate floating 0.25 m above the floor, bright top: SSR thickness (rays behind it), the
+//   plate's reflected edge and the dark gap under it.
+function simpleScene(id: string, title: string, fill: (scene: THREE.Scene) => void, aspect: number): ShowcaseScene {
+  const scene = new THREE.Scene();
+  scene.environmentIntensity = 1;
+  scene.backgroundIntensity = 0.35;
+  const { mesh, floor } = floorOf(0.08, 0xe8e8e8);
+  scene.add(mesh);
+  const key = new THREE.DirectionalLight(0xffffff, 2.2);
+  key.position.set(2.5, 4, 2);
+  scene.add(key);
+  fill(scene);
+  const views: Record<string, CameraView> = { hero: { pos: [0, 1.15, 3.3], target: [0, 0.2, 0], fov: 40 }, low: { pos: [0, 0.45, 3.3], target: [0, 0.2, 0], fov: 40 } };
+  return {
+    id, title, credit: 'procedural (W85, T53); studio: Poly Haven (CC0)', scene, views, floor,
+    camera: cameraFor(views.hero, aspect), exposure: 1,
+    probes: [{ position: [0, 1.5, 1], influenceSize: [30, 6, 30] as Vec3, originOffset: [0, -0.9, 0] as Vec3, blendDistance: 0.5 }],
+    bake: { near: 0.02, far: 100 },
+    thickness: { depthBufferThickness: 0.05, thicknessRoughnessFactor: 0.1 },
+  };
+}
+
+const diffuse = (color: number) => new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
+
+async function cubeFloor(aspect: number): Promise<ShowcaseScene> {
+  return simpleScene('cubeFloor', 'Cube and slab on a glossy floor (T53)', (scene) => {
+    const cube = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), diffuse(0xe0701c));
+    cube.position.set(-0.35, 0.3, 0);
+    cube.rotation.y = rad(25);
+    cube.name = 'cube';
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.12, 0.4), diffuse(0x2c8fe0));
+    slab.position.set(0.55, 0.06, 0.25);
+    slab.rotation.y = rad(-12);
+    slab.name = 'slab';
+    scene.add(cube, slab);
+  }, aspect);
+}
+
+async function edgesFloor(aspect: number): Promise<ShowcaseScene> {
+  return simpleScene('edgesFloor', 'Sharp-edged panel above a glossy floor (T53)', (scene) => {
+    const map = checkerTexture();
+    map.repeat.set(6, 3);
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.6, 0.02), new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 1, emissive: 0xffffff, emissiveMap: map, emissiveIntensity: 1.0 }));
+    panel.position.set(0, 0.55, -0.2);
+    panel.name = 'panel';
+    scene.add(panel);
+  }, aspect);
+}
+
+async function plateFloor(aspect: number): Promise<ShowcaseScene> {
+  return simpleScene('plateFloor', 'Thin plate over a glossy floor (T53)', (scene) => {
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.02, 0.8), diffuse(0xd8d020));
+    plate.position.set(0, 0.25, 0);
+    plate.rotation.y = rad(15);
+    plate.name = 'plate';
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 0.08), diffuse(0x30a050));
+    post.position.set(0.9, 0.25, -0.4);
+    post.name = 'post';
+    scene.add(plate, post);
+  }, aspect);
+}
+
 /** The bench's procedural scenes (no asset download; they need the studio HDRI file only). */
 export const METRIC_SCENES: ShowcaseEntry[] = [
   { id: 'lineSpread', title: 'Line spread (X0)', asset: '', hdri: STUDIO_HDRI, build: (a) => lineSpread(a) },
   { id: 'lineSpreadThin', title: 'Line spread, thin strip (X0)', asset: '', hdri: STUDIO_HDRI, build: (a) => lineSpread(a, true) },
   { id: 'grazing', title: 'Grazing sweep (X0)', asset: '', hdri: STUDIO_HDRI, build: grazing },
+  { id: 'cubeFloor', title: 'Cube and slab on a glossy floor (T53)', asset: '', hdri: STUDIO_HDRI, build: cubeFloor },
+  { id: 'edgesFloor', title: 'Sharp-edged panel above a glossy floor (T53)', asset: '', hdri: STUDIO_HDRI, build: edgesFloor },
+  { id: 'plateFloor', title: 'Thin plate over a glossy floor (T53)', asset: '', hdri: STUDIO_HDRI, build: plateFloor },
 ];

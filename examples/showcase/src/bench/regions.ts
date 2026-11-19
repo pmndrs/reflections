@@ -42,6 +42,19 @@ export const NAMED_REGIONS: Record<string, Region[]> = {
     { name: 'floorWheel', rect: px(200, 990, 500, 1230, 1280, 1280), pose: 'w50', aspect: 1, builtin: true, note: 'the front wheel reflected in the floor at 1:1 (W54)' },
     { name: 'door (hero)', rect: px(560, 345, 721, 389, 1280, 720), pose: 'hero', builtin: true, note: 'W46\'s door paint probe (G-buffer roughness 0.25 -> 0.35)' },
   ],
+  // T53 (W85): the simple flicker scenes (examples/shared/metrics/scenes.ts), rects at 960 x 540, pose `hero`
+  cubeFloor: [
+    { name: 'cubeRefl', rect: px(325, 330, 495, 475), pose: 'hero', builtin: true, note: 'the orange cube\'s reflection (faces and the stair-stepping diagonal edges)' },
+    { name: 'slabRefl', rect: px(495, 338, 720, 390), pose: 'hero', builtin: true, note: 'the low slab\'s reflection' },
+    { name: 'contact', rect: px(320, 322, 720, 358), pose: 'hero', builtin: true, note: 'the contact lines of both objects with the floor' },
+  ],
+  edgesFloor: [
+    { name: 'panelRefl', rect: px(360, 340, 600, 462), pose: 'hero', builtin: true, note: 'the checker panel\'s reflection: sharp edges' },
+  ],
+  plateFloor: [
+    { name: 'plateRefl', rect: px(340, 372, 650, 425), pose: 'hero', builtin: true, note: 'the plate\'s reflected underside and edge' },
+    { name: 'underPlate', rect: px(340, 296, 650, 370), pose: 'hero', builtin: true, note: 'floor under the plate: thickness leaks (rays behind the thin plate)' },
+  ],
 };
 
 const luma = (d: Uint8ClampedArray, o: number) => 0.2126 * d[o] + 0.7152 * d[o + 1] + 0.0722 * d[o + 2];
