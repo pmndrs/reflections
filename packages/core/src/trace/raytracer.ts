@@ -170,9 +170,10 @@ interface RaytracerModule {
   sceneFormatOf(buffers: object): Record<string, string>;
   rtModuleWgsl(caps: unknown, options: Record<string, unknown>): string;
   rtWalkEntries(format: object): readonly ModuleBindingEntry[];
-  rtSceneEntries(): readonly ModuleBindingEntry[];
+  /** `packing` exists since pathtracer P3.11 (default 'packed' there: one buffer); we ask for 'split' (table, data), what this provider binds. Older versions ignore it. */
+  rtSceneEntries(packing?: 'split' | 'packed'): readonly ModuleBindingEntry[];
   buildSceneCopy(input: Record<string, unknown>): SceneCopy;
-  uploadSceneCopy(device: GPUDevice, copy: SceneCopy, options?: { label?: string }): SceneCopyBuffers;
+  uploadSceneCopy(device: GPUDevice, copy: SceneCopy, options?: { label?: string; packing?: 'split' | 'packed' }): SceneCopyBuffers;
 }
 
 /** Load @pmndrs/raytracer and @pmndrs/bvh and check that they read the same GPU layout this wrapper was written for. */
@@ -317,8 +318,8 @@ export class RaytracerTraceProvider implements TraceProvider {
     // inline walk needs none.
     this.caps = rt.buildCaps({ features: new Set(), limits: device.limits as unknown as Record<string, unknown> }, new Set());
     this.copy = this.buildCopy();
-    this.copyBuffers = rt.uploadSceneCopy(device, this.copy, { label: 'reflections rt scene' });
-    this.entries = [...rt.rtWalkEntries(this.format), ...rt.rtSceneEntries()];
+    this.copyBuffers = rt.uploadSceneCopy(device, this.copy, { label: 'reflections rt scene', packing: 'split' });
+    this.entries = [...rt.rtWalkEntries(this.format), ...rt.rtSceneEntries('split')];
     this.storageBufferCount = this.entries.length;
     info.lights = this.copy.lights.length;
     info.sceneCopyBytes = this.copy.byteLength;
@@ -347,7 +348,7 @@ export class RaytracerTraceProvider implements TraceProvider {
       ...this.format,
       traceSlot: slot,
       rayMasks: this.options.rayMasks ?? false,
-      scene: { slot: { group: slot.group, firstBinding: slot.firstBinding + walk }, layout: this.copy.layout },
+      scene: { slot: { group: slot.group, firstBinding: slot.firstBinding + walk }, layout: this.copy.layout, packing: 'split' },
       shade: this.options.shade ?? {},
       minify: this.options.minify ?? true,
     });
@@ -402,7 +403,7 @@ export class RaytracerTraceProvider implements TraceProvider {
       return;
     }
     this.copyBuffers.destroy();
-    this.copyBuffers = this.rt.uploadSceneCopy(this.device, copy, { label: 'reflections rt scene' });
+    this.copyBuffers = this.rt.uploadSceneCopy(this.device, copy, { label: 'reflections rt scene', packing: 'split' });
     this._version++;
   }
 

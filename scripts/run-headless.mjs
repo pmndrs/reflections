@@ -2699,6 +2699,24 @@ async function ssrRtBvhChecks(pages) {
   // hit contact lines and coincident faces, where either answer is right (D1704).
   const oracleOk = (o) => o.agree / o.rays > 0.995 && o.gpuOnly + o.cpuOnly <= o.rays * 0.003
     && [o.triangle, o.normalSigned, o.frontFace, o.instance, o.material].every((k) => k >= o.compared * 0.995);
+  // W82 (T70): the opt-in raytracer hit shading (rtShade) on the offscreen mirror, only where @pmndrs/raytracer resolves
+  // (a sibling pathtracer checkout; otherwise the example ignores &bvhCore / &rtShade and the provider stays @pmndrs/bvh)
+  {
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&bvh=pmndrs&bvhCore=raytracer&rtShade=1&probeRes=128`);
+    pages.push(p);
+    const before = results.logs.length;
+    await p.T("window.__p.load('offscreen')");
+    const bvh = await p.T('window.__p.bvh');
+    if (bvh.provider && /raytracer/i.test(bvh.provider)) {
+      await p.T("window.__p.setPose('mirror')");
+      await p.T('window.__p.step(3)');
+      const on = await p.T('window.__p.stats()');
+      const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+      check('rt raytracerHitShading (rtShade, opt-in): renders, no validation errors, finite outputs, traced hits', errs.length === 0 && on.nonFinite === 0 && on.rt && on.rt.traced > 0 && on.rt.hits > 0,
+        errs.length ? errs.slice(0, 2).join(' | ') : `${on.misses} misses -> ${JSON.stringify(on.rt)}`);
+    } else console.log('  (info) rtShade check skipped: @pmndrs/raytracer does not resolve here (no sibling pathtracer checkout)');
+    p.close();
+  }
   for (const builder of ['auto', 'tinybvh']) {
     // probes at 128 px, as the three-mesh-bvh section above (D901 hit-shading checks)
     const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&bvh=pmndrs&bvhBuilder=${builder}&probeRes=128`);
