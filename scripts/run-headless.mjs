@@ -3225,6 +3225,24 @@ async function babylonChecks(pages) {
       if (t) console.log(`  babylon tracer GPU ms (960x540, loop stopped): ${Object.entries(t).map(([k, v]) => `${k} ${v}`).join(', ')}`);
     }
   }
+  // W88 (D5440): the radiance fallback's probe lookup at a surface lying on a volume face (?probeFace: the
+  // influence box starts at the floor, y = 0). The rebuilt origin sat either side of the face per pixel and per
+  // jitter phase; the lookup is nudged off the surface now. Frame-to-frame |diff| of the radiance view over the miss pixels of the lower half.
+  {
+    const before = results.logs.length;
+    const p = await openPage(`http://127.0.0.1:${PORT}/babylon/?manual&probeFace`);
+    pages.push(p);
+    await p.T('window.__p.step(2)');
+    const out = await p.T('window.__p.fallbackFlicker(24)');
+    if (process.env.W88_CONTROL) { // the same measurement with the box off the floor, for the notes
+      const pc = await openPage(`http://127.0.0.1:${PORT}/babylon/?manual`);
+      pages.push(pc); await pc.T('window.__p.step(2)');
+      console.log(`  control (box off the floor): ${JSON.stringify(await pc.T('window.__p.fallbackFlicker(24)'))}`);
+    }
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    console.log(`  babylon probeFace (floor on the volume face): ${JSON.stringify(out)}`);
+    check('babylon: probe lookup stable at a volume face (no GPU errors; frame diff small)', errs.length === 0 && out.missPixels > 500 && out.meanFrameDiff < 6, JSON.stringify(out));
+  }
   // D1804 (W29): the composite with SSR and probes off (environment slot only) against Babylon's own
   // specular IBL, on AO / normal-mapped metal, rough, clear-coat, sheen and bent-normal materials.
   for (const sky of ['flat', 'gradient']) {

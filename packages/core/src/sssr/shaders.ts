@@ -53,6 +53,7 @@
 //   direction is `fallbackRoughness: 'mirror'` (D1806).
 
 import { SCREEN_VISIBILITY_WGSL } from '../trace/hitShading';
+import { PROBE_LOOKUP_ORIGIN_WGSL } from '../probes/lookupOrigin';
 
 /** Byte size of the uniform block (struct Params below): 160 words, 141-159 shared out by stream (W72: 145-149). */
 export const PARAMS_SIZE = 640;
@@ -134,6 +135,8 @@ struct Params {
 
 /** Shared helpers (ffx_sssr_common.h). `inverted` = FFX_SSSR_OPTION_INVERTED_DEPTH. */
 const commonWgsl = (inverted: boolean) => /* wgsl */ `
+${PROBE_LOOKUP_ORIGIN_WGSL}
+fn viewDistanceOf(P_world: vec3f) -> f32 { return length((P.viewMatrix * vec4f(P_world, 1.0)).xyz); }
 const INVERTED_DEPTH: bool = ${inverted};
 const FAR_PLANE: f32 = ${inverted ? '0.0' : '1.0'};
 
@@ -363,7 +366,7 @@ ${sg ? `
     let view_space_reflected_direction = reflect(view_space_ray_direction, view_space_surface_normal);
     let world_space_reflected_direction = (P.invView * vec4f(view_space_reflected_direction, 0.0)).xyz;
     let world_space_origin = (P.invView * vec4f(view_space_ray, 1.0)).xyz;
-    intersection_output = vec4f(sampleRadianceFallback(world_space_origin, world_space_reflected_direction, sqrt(roughness)), 0.0);
+    intersection_output = vec4f(sampleRadianceFallback(probeLookupOrigin(world_space_origin, world_space_normal, length(view_space_ray)), world_space_reflected_direction, sqrt(roughness)), 0.0);
   }
   if (on_screen) {
     textureStore(o_radiance, dispatch_thread_id, intersection_output);
@@ -866,7 +869,8 @@ fn storeRadianceSurface(packed: u32, coords: vec2u, ray_origin: vec3f, ray_direc
         origin = (P.invView * vec4f(view_space_ray, 1.0)).xyz;
         roughness = sqrt(alpha);
       }
-      fallback = sampleRadianceFallback(origin, dir, roughness);
+      // W88 (D5440): the probe lookup sits off the surface (the ray origin stays)
+      fallback = sampleRadianceFallback(probeLookupOrigin(origin, loadWorldSpaceNormal(vec2i(c)), viewDistanceOf(origin)), dir, roughness);
     }
     storePixel(c, vec4f(mix(fallback, hit_radiance, confidence), ray_length), hit_distance, confidence);
   }
@@ -991,7 +995,7 @@ fn finishRay(r: ptr<function, Ray>) -> bool {
   if (P.fallbackRoughnessSurface != 0u) {
     storeRadianceSurface((*r).packed, (*r).coords, world_space_origin, world_space_reflected_direction, world_ray_length, hit_radiance, hit_distance, confidence);
   } else {
-    let environment_lookup = sampleRadianceFallback(world_space_origin, world_space_reflected_direction, 0.0);${reuseMirror}
+    let environment_lookup = sampleRadianceFallback(probeLookupOrigin(world_space_origin, loadWorldSpaceNormal(vec2i((*r).coords)), length((*r).view_space_ray)), world_space_reflected_direction, 0.0);${reuseMirror}
     storeRadiance((*r).packed, (*r).coords, vec4f(mix(environment_lookup, hit_radiance, confidence), world_ray_length), hit_distance, confidence);
   }
   // Hybrid sample: low confidence, not marched into the background, and not too rough to trace.
@@ -1366,7 +1370,7 @@ fn main(@builtin(local_invocation_id) lid: vec3u, @builtin(workgroup_id) wg: vec
   var radiance = sum_value / sum_w;
   if (P.fallbackRoughnessSurface != 0u && confidence < 1.0) {
     // this pixel's own rough-pixel lookup for the rest (as intersect's storeRadianceSurface)
-    radiance += (1.0 - confidence) * sampleRadianceFallback(X, reflect(-V, N), sqrt(alpha));
+    radiance += (1.0 - confidence) * sampleRadianceFallback(probeLookupOrigin(X, N, viewDistanceOf(X)), reflect(-V, N), sqrt(alpha));
   }
   let hit_distance = select(0.0, sum_t / sum_hit_w, sum_hit_w > 0.0);
   // w = world ray length (FFX's layout): re-derived to the hits, the rays' own length for misses (D5045)
