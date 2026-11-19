@@ -3332,6 +3332,7 @@ async function dropInChecks(pages, name, url, { frames = 30, maxFlicker = 0.5 } 
   const before = results.logs.length;
   const p = await openPage(`http://127.0.0.1:${PORT}${url}`);
   pages.push(p);
+  for (let i = 0; i < 120 && (await p.T('window.__p.info().ready')) === false; i++) await sleep(500); // R3F builds Reflections after mount
   await p.T('window.__p.stop()');
   const info = await p.T('window.__p.info()');
   const toggle = await p.T("typeof window.__p.setOn === 'function' ? 'setOn' : typeof window.__p.setProbes === 'function' ? 'setProbes' : null");
@@ -3705,6 +3706,10 @@ async function main() {
       await dropInChecks(pages, 'examples/quickstart', '/quickstart/?manual');
       await dropInChecks(pages, 'examples/quickstart probes only', '/quickstart/probes.html?manual');
       await dropInChecks(pages, 'examples/quickstart rt + preset performance', '/quickstart/?manual&rt=1&preset=performance', { maxFlicker: 1.5 }); // half-res: noisier, no anti-aliasing in the quick start (backlog)
+    }
+    if (runs('r3f')) {
+      await dropInChecks(pages, 'examples/r3f', '/r3f/?manual');
+      await dropInChecks(pages, 'examples/r3f rt + preset performance', '/r3f/?manual&rt=1&preset=performance', { maxFlicker: 1.5 });
     }
     if (runs('showcase')) await showcaseChecks(pages);
     if (runs('showcase-compare')) await showcaseCompareChecks(pages);

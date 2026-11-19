@@ -10,6 +10,7 @@
     "skipLibCheck": true,
     "declaration": true,
     "isolatedModules": true,
+    "jsx": "react-jsx",
     "resolveJsonModule": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
