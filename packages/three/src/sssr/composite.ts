@@ -214,8 +214,13 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
     // environment slot, not pmremTexture(environment). The two environments differ (capture vs PMREM,
     // and the slot is what the bake saw), and a mismatch shows wherever coverage < 1 (W12, D1501).
     // Coverage alone is a second lookup, compiled only where a debug view reads it.
-    probeSpecular = (sampleReflectionProbes as N)(options.probes, P, R, roughness);
-    coverage = sampleReflectionProbesLocal(options.probes, P, R, roughness).a;
+    // W87 (D5420): P is rebuilt from depth, so a surface lying on a volume's face (a floor probe's box
+    // starts at the floor) lands a few 1e-6 m either side of it: the lookup flips between the volume and
+    // the environment per pixel (stripes, and a flicker once the jitter moves the error). Three's lit pass
+    // has the exact position, inside. Nudge P off the surface by more than the reconstruction error.
+    const Pprobe: N = P.add(Nw.mul(viewPosition.length().mul(2e-5).add(1e-5)));
+    probeSpecular = (sampleReflectionProbes as N)(options.probes, Pprobe, R, roughness);
+    coverage = sampleReflectionProbesLocal(options.probes, Pprobe, R, roughness).a;
   } else {
     probeSpecular = options.environment ? (pmremTexture as N)(options.environment, R, roughness).rgb : vec3(0);
   }
