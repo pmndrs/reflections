@@ -492,7 +492,10 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     };
     const inputs: ScreenSpaceReflectionsInputs = screenSpaceInputsFromFrame(frame, { depthInverted: false });
     // occupancy 0: deterministic between tracer instances (the occupancy exit depends on atomic order)
-    const settings = { fallbackColor: C, frameIndex: 3, minTraversalOccupancy: 0 };
+    // W82 (T71): hitColorFilter 'off' = the pre-W76 rays this check was calibrated on. W76's default cone filter compiles
+    // async and its variants are cached per device, so the fallback-only and the fallback + hit-shading passes (two
+    // WGSL variants) would otherwise run one cone and one 'off' frame and differ by the filter, not by the seam.
+    const settings = { fallbackColor: C, frameIndex: 3, minTraversalOccupancy: 0, hitColorFilter: 'off' as const };
     // The trace seam (W8's pass) with an analytic provider: the back wall z = -6 (|x| < 4, 0 < y < 4),
     // no bindings, no materials (grey). Traced misses and hit shading both go through the fallback.
     const wall: TraceProvider = {
