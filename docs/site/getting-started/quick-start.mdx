@@ -1,0 +1,92 @@
+---
+title: Quick start
+description: Reflections on an existing three.js WebGPURenderer scene, from probes only to the full hybrid.
+nav: 2
+---
+
+You need three.js r187 or newer with `WebGPURenderer`, and a browser with WebGPU.
+
+```bash
+npm install @pmndrs/reflections three
+```
+
+## The whole hybrid, in one object
+
+`Reflections` wires the G-buffer, screen-space reflections, a baked probe for what the screen cannot see, an optional
+ray-traced fallback and an optional denoiser into a `RenderPipeline`. You call `reflections.render(camera)` where you
+called `renderer.render(scene, camera)`.
+
+```ts
+import * as THREE from 'three/webgpu';
+import { Reflections, createReflectionsRenderer } from '@pmndrs/reflections/three';
+import { FfxReflectionDenoiser } from 'denoiser/ffx'; // optional, see below
+
+// A WebGPURenderer with the device limits the passes need (it is initialised for you).
+const renderer = await createReflectionsRenderer({ canvas });
+
+// Your scene: standard or physical materials, an environment, a glossy floor.
+const scene = new THREE.Scene();
+scene.environment = environmentTexture;
+// ...
+
+const reflections = await Reflections.create(renderer, scene, {
+  denoiser: (device, { roughnessThreshold }) =>
+    new FfxReflectionDenoiser(device, { roughnessThreshold: roughnessThreshold ** 2 }),
+});
+
+renderer.setAnimationLoop(() => reflections.render(camera)); // instead of renderer.render(scene, camera)
+```
+
+Tone mapping and the output colour space are the renderer's: set `renderer.toneMapping` as usual.
+
+A complete page with a scene is [`examples/quickstart`](https://github.com/pmndrs/reflections/tree/main/examples/quickstart).
+
+### What `Reflections.create` takes
+
+| option | default | what |
+|---|---|---|
+| `preset` | `'default'` | `'default'` is the package defaults. `'performance'` traces and denoises at half resolution. |
+| `probes` | `true` | `true` bakes one probe over the scene's bounds. Pass a `ReflectionProbes` set you baked yourself, or `false` for the scene's environment alone. |
+| `rayTracing` | `false` | `true` traces every visible mesh for the rays neither the screen nor the probe can answer (needs `@pmndrs/bvh`). An array limits it to those objects. |
+| `denoiser` | none | A `TemporalDenoiser`, or a function `(device, { roughnessThreshold }) => denoiser`. FFX compares alpha, so square the threshold. |
+| `settings` | none | Overrides over the preset (see the settings guide). |
+
+Without a denoiser, glossy reflections are one noisy sample per 2x2 pixel quad. Use one.
+
+Every piece is public on the object (`reflections.ssr`, `.hybrid`, `.probes`, `.pipeline`) for anything the options do
+not cover. After the scene or its environment changes, call `reflections.bake()` to re-capture the probe.
+
+## Probes only
+
+The cheapest path for an existing project: no extra passes. One baked probe, and every physical material reflects it
+(box-projected, prefiltered by roughness). It shows the scene as it was when baked and does not follow moving objects.
+
+```ts
+import { ReflectionProbe, ReflectionProbes, installCubeArraySupport, reflectionProbes } from '@pmndrs/reflections/three';
+
+await installCubeArraySupport(renderer); // r187 cannot bind cube arrays yet; this adds it
+const probes = new ReflectionProbes();
+const room = new ReflectionProbe(12, 6, 12); // influence box: width, height, depth
+room.position.set(0, 2.5, 0);                // the capture point
+probes.add(room);
+scene.add(probes);
+probes.bake(renderer, scene);
+scene.environmentNode = reflectionProbes(probes);
+```
+
+`renderer.render(scene, camera)` stays as it is. See [`examples/quickstart/probes.html`](https://github.com/pmndrs/reflections/blob/main/examples/quickstart/src/probes.ts).
+
+## Which materials get reflections
+
+`MeshStandardMaterial` and `MeshPhysicalMaterial`, and their node versions. Basic, Lambert and Phong materials have no
+physically based specular term to replace, so they are left as three draws them.
+
+## The denoiser
+
+`denoiser/ffx` is a separate library ([`denoiser`](https://github.com/pmndrs/denoiser)): AMD's reflection denoiser
+ported to WGSL, running on the renderer's device. It is what makes glossy reflections steady at rest and in motion.
+
+## Next
+
+- Using React Three Fiber? See the [React Three Fiber guide](/guides/react-three-fiber).
+- To tune: every setting, its default and its cost is in the settings guide.

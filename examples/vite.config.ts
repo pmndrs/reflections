@@ -136,5 +136,5 @@ export default defineConfig({
   // Behind an alias, vite would pre-bundle the tracer with its own copy of
   // three (two three instances: broken TSL). Served as source instead, `sharedDeps` resolves its three.
   optimizeDeps: { exclude: ['three-gpu-pathtracer-webgpu'] },
-  build: { outDir: resolve(root, 'dist'), emptyOutDir: true, rollupOptions: { input: { ...pages, 'showcase-compare': resolve(root, 'showcase/compare.html'), 'showcase-bench': resolve(root, 'showcase/bench.html') } } },
+  build: { outDir: resolve(root, 'dist'), emptyOutDir: true, rollupOptions: { input: { ...pages, 'showcase-compare': resolve(root, 'showcase/compare.html'), 'showcase-bench': resolve(root, 'showcase/bench.html'), 'quickstart-probes': resolve(root, 'quickstart/probes.html') } } },
 });
