@@ -403,3 +403,61 @@ export function probeHitShading(device: GPUDevice, source: ProbeHitShadingSource
     destroy() { uniform.destroy(); },
   };
 }
+
+// ---- @pmndrs/raytracer's one-bounce shading at the hit (P1.5, D5201) ----------------------------------
+
+/**
+ * Hit shading by the provider's `traceHitShade` (`capabilities.hitShade`: `createRaytracerTraceProvider`):
+ * @pmndrs/raytracer's `rtShade` in its FULL mode, i.e. emission + `samples` light samples (light picked by power
+ * among the scene copy's emissive triangles, sun and environment; one shadow ray each), each through the builtin
+ * diffuse + GGX BSDF. That is a path tracer's first bounce at maxDepth 1: no indirect light, no probes (the
+ * probes hold the emitters and the sky too, so adding their irradiance would count those twice; D5201).
+ * Stochastic: the pixel and `setFrame(frame)` seed it; the denoiser averages it.
+ *
+ *   const shading = raytracerHitShading(device);
+ *   const rt = createTracedReflections(device, { ..., provider, hitShading: shading });
+ *   shading.setFrame(frameIndex);   // every frame
+ *   rt.dispatch(cmd, { ..., hitShadingBindGroup: shading.bindGroup });
+ */
+export interface RaytracerHitShading extends HitShading {
+  readonly bindGroup: GPUBindGroup;
+  /** Seeds this frame's light samples (any integer; change it every frame). */
+  setFrame(frame: number): void;
+  destroy(): void;
+}
+
+export function raytracerHitShading(device: GPUDevice, options: { samples?: number } = {}): RaytracerHitShading {
+  const samples = Math.max(1, Math.floor(options.samples ?? 1));
+  const layout = device.createBindGroupLayout({ label: 'rt hit shading (raytracer)', entries: [{ binding: 0, visibility: 0x4, buffer: { type: 'uniform' } }] });
+  const uniform = device.createBuffer({ label: 'rt hit shading (raytracer)', size: 16, usage: 0x40 | 0x8 /* UNIFORM | COPY_DST */ });
+  const words = new Uint32Array(4);
+  const setFrame = (frame: number) => { words[0] = frame >>> 0; device.queue.writeBuffer(uniform, 0, words); };
+  setFrame(0);
+  return {
+    wgsl: /* wgsl */ `
+@group(3) @binding(0) var<uniform> rtpShadeFrame: vec4u;
+const RTP_SHADE_SAMPLES: u32 = ${samples}u;
+fn rtpShadeHash(v: u32) -> u32 {
+  let state = v * 747796405u + 2891336453u;
+  let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+  return (word >> 22u) ^ word;
+}
+fn rtpShadeRand(seed: u32, k: u32) -> f32 { return f32(rtpShadeHash(seed ^ rtpShadeHash(k + 0x9e3779b9u)) >> 8u) * 5.9604644775390625e-8; }
+fn shadeTracedHit(hit: Hit, P: vec3f, N: vec3f, dir: vec3f) -> vec3f {
+  let origin = P - dir * hit.t;
+  let seed = rtpShadeHash((hsoPixel.x * 0x8da6b343u) ^ (hsoPixel.y * 0xd8163841u) ^ rtpShadeHash(rtpShadeFrame.x));
+  var L = vec3f(0.0);
+  for (var i = 0u; i < RTP_SHADE_SAMPLES; i++) {
+    let u = vec3f(rtpShadeRand(seed, 3u * i), rtpShadeRand(seed, 3u * i + 1u), rtpShadeRand(seed, 3u * i + 2u));
+    L += traceHitShade(hit, origin, dir, u);
+  }
+  return L / f32(RTP_SHADE_SAMPLES);
+}
+`,
+    layout,
+    requiresHitShade: true,
+    bindGroup: device.createBindGroup({ label: 'rt hit shading (raytracer)', layout, entries: [{ binding: 0, resource: { buffer: uniform } }] }),
+    setFrame,
+    destroy() { uniform.destroy(); },
+  };
+}

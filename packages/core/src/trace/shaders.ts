@@ -407,6 +407,7 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
       rtLobeVisibility = RT_VIS_BVH;
     }
   } else {
+    hsoPixel = coords; // also the per-pixel seed of a stochastic hit shading (raytracerHitShading)
     L = shadeTracedHit(hit, hitP, hitN, dir);
   }
   store(packed, coords, vec4f(L, hit.t), hit.t, 1.0, source);

@@ -297,6 +297,11 @@ export const SETTINGS: Setting[] = [
   sel('bvhBuilder', 'rt', 'Builder (@pmndrs/bvh)', [['auto', 'auto (H-PLOC with subgroups, else tinybvh)'], ['gpu-hploc', 'gpu-hploc'], ['gpu-lbvh', 'gpu-lbvh'], ['tinybvh', 'tinybvh (CPU)']], 'auto', {
     apply: 'rebuild', appliesTo: RT, api: 'createPmndrsBvhTraceProviderFromObjects({ builder })', tradeoff: 'Tree builder: build time and tree quality (trace cost); same hits.',
   }),
+  bool('rtShade', 'rt', 'Raytracer hit shading (opt-in)', false, {
+    apply: 'rebuild', appliesTo: RT, api: 'trace.raytracerHitShading (needs createRaytracerTraceProviderFromObjects, `@pmndrs/raytracer`; the examples show it only where that resolves)',
+    tradeoff: 'W82 (T70, D5201): traced hits are shaded by @pmndrs/raytracer\'s one bounce (emission + one light sample with a shadow ray, diffuse + GGX) instead of the probe lookup; stochastic, so meant for the denoised frame. Off (default): the probes shade traced hits, as before. `@pmndrs/raytracer` is not on npm yet (an optional peer), and the provider binds 5 storage buffers: the device must allow 10 per shader stage (`reflectionsRequiredLimits`, D5200; WebGPU\'s default is 8, so an app that builds its own device raises `maxStorageBuffersPerShaderStage` to min(adapter, 10)). The traced hit shading then needs 9 (RT + probe hit shading) or 10.',
+    cost: 'one light sample and its shadow ray per traced hit; not measured separately (the walk itself is the same as @pmndrs/bvh within noise, P1.5)',
+  }),
   bool('rtShadingNormals', 'rt', 'Interpolated hit normals', true, { apply: 'rebuild', appliesTo: RT, api: 'provider option shadingNormals', tradeoff: 'D1700: traced hits shade with the vertex normals (smooth, as three shades on screen) instead of the face normal (faceted).', cost: 'three-mesh-bvh up to +0.07 ms at 1080p (D1700)' }),
   num('s.missRoughnessThreshold', 'rt', 'Glossy threshold (traced)', 0, 1, 0.01, 1, {
     appliesTo: RT, api: 'settings.missRoughnessThreshold',

@@ -66,6 +66,12 @@ export interface TraceProviderCapabilities {
    * pass uses `Hit.normal` (flat shading, D1700). Default false.
    */
   readonly shadingNormal?: boolean;
+  /**
+   * The provider defines `fn traceHitShade(hit: Hit, origin: vec3f, dir: vec3f, u: vec3f) -> vec3f`: the radiance
+   * leaving the hit toward `origin`, emission plus one light sample of the provider's own lights with its shadow
+   * ray (@pmndrs/raytracer's `rtShade`; `u` = three uniform numbers). `raytracerHitShading` needs it. Default false.
+   */
+  readonly hitShade?: boolean;
 }
 
 /** A BVH ray walk behind the trace seam. */
@@ -221,6 +227,8 @@ export interface HitShading {
   storageTextureCount?: number;
   /** Sampled textures in `layout` (probes: one atlas per size), likewise (D4900). Default 0. */
   sampledTextureCount?: number;
+  /** The snippet calls the provider's `traceHitShade` (`capabilities.hitShade`); the pass refuses a provider without it. */
+  requiresHitShade?: boolean;
 }
 
 /**

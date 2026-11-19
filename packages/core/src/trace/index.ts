@@ -4,8 +4,8 @@ export {
   type BindingSlot, type ModuleBindingEntry, type TraceProvider, type TraceProviderCapabilities, type HitShading,
 } from './provider';
 export {
-  environmentHitShading, probeHitShading, HIT_MAX_DIRECTIONAL, HIT_MAX_HEMISPHERE, FALLBACK_SHADE_LOBE_WGSL, SCREEN_VISIBILITY_WGSL, shadeLobeWgslFor,
-  type EnvironmentHitShading, type EnvironmentMapping, type HitLights, type ProbeHitShading, type ProbeHitShadingSource, type ProbeHitShadingResources,
+  environmentHitShading, probeHitShading, raytracerHitShading, HIT_MAX_DIRECTIONAL, HIT_MAX_HEMISPHERE, FALLBACK_SHADE_LOBE_WGSL, SCREEN_VISIBILITY_WGSL, shadeLobeWgslFor,
+  type EnvironmentHitShading, type EnvironmentMapping, type HitLights, type ProbeHitShading, type ProbeHitShadingSource, type ProbeHitShadingResources, type RaytracerHitShading,
 } from './hitShading';
 export {
   createTracedReflections,
@@ -18,3 +18,8 @@ export {
   type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceScene, type BvhBuilderPreference,
   type PmndrsBvhTraceProviderOptions, type PmndrsBvhBuildInfo,
 } from './pmndrsBvh';
+// The core provider since P1.5: @pmndrs/raytracer's trace core (optional peer, imported on demand).
+export {
+  createRaytracerTraceProvider, loadRaytracer, raytracerMaterialOf, RaytracerTraceProvider, RAYTRACER_BVH_LAYOUT_VERSION, BVH_MAX_MATERIAL, BVH_TRIANGLE_MATERIAL_NONE,
+  type RaytracerTraceProviderOptions, type RaytracerBuildInfo, type RaytracerSun, type RaytracerEnvironment, type BvhTraceScene as RaytracerTraceScene,
+} from './raytracer';

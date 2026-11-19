@@ -18,9 +18,9 @@
 import * as THREE from 'three/webgpu';
 import { uniform } from 'three/tsl';
 import {
-  createHalfResolutionFrame, createScreenSpaceReflections, createTracedReflections, halfResolutionSize, isReflectionsPresetName, PassTimer, REFLECTION_PRESET_NAMES, reflectionsPreset, screenSpaceInputsFromFrame,
+  createHalfResolutionFrame, createScreenSpaceReflections, createTracedReflections, raytracerHitShading, halfResolutionSize, isReflectionsPresetName, PassTimer, REFLECTION_PRESET_NAMES, reflectionsPreset, screenSpaceInputsFromFrame,
   type FrameInputs, type ReflectionResolution, type ReflectionsPresetName, type HalfResolutionFrame, type HitLights, type ScreenSpaceReflections as CoreTracer,
-  type ScreenSpaceReflectionsSettings, type ScreenSpaceVariant, type TraceProvider, type TracedReflections,
+  type ScreenSpaceReflectionsSettings, type RaytracerHitShading, type ScreenSpaceVariant, type TraceProvider, type TracedReflections,
   type TracedReflectionsSettings, type TracedReflectionsStats,
 } from '@pmndrs/reflections-core';
 import { FrameGBuffer, getDevice, getGPUTexture, type FrameGBufferOptions } from '../frame/FrameGBuffer';
@@ -110,6 +110,15 @@ export interface ScreenSpaceTraceOptions {
   lights?: boolean;
   /** Ray budget, length cap, origin offset, on-screen reuse, hit shadows. */
   settings?: TracedReflectionsSettings;
+  /**
+   * W82 (T70, D5201): shade traced hits with `@pmndrs/raytracer`'s one bounce (`rtShade`: emission + light samples with
+   * a shadow ray each, through its diffuse + GGX BSDF) instead of the probe / environment lookup. Opt-in: the default
+   * stays the probes. Needs the provider from `createRaytracerTraceProviderFromObjects` (`capabilities.hitShade`) and
+   * a device with 10 storage buffers per stage (D5200: `reflectionsRequiredLimits`); with another provider it warns once
+   * and the probes shade. Stochastic (one light sample per hit per frame): meant for a denoised frame. `true` = 1 sample;
+   * `{ samples }` = more. The on-screen re-shade (`settings.hitShading`) keeps the probes either way.
+   */
+  raytracerHitShading?: boolean | { samples?: number };
 }
 
 const make = (name: string, w: number, h: number, type: THREE.TextureDataType, format: THREE.AnyPixelFormat) => {
@@ -189,6 +198,10 @@ export class ScreenSpaceReflectionsPass {
   private core: CoreTracer | null = null;
   private rt: TracedReflections | null = null;
   private hitShading: ThreeHitShading | null = null;
+  /** W82: the raytracer's hit shading for the traced pass, while `trace.raytracerHitShading` is on (and the provider can). */
+  private rtShade: RaytracerHitShading | null = null;
+  private rtShadeKey = '';
+  private rtShadeWarned = false;
   private sceneEnvironment: THREE.Texture | null = null;
   private sceneProbes: ReflectionProbes | null = null;
   private sceneEnvironmentIntensity = 1;
@@ -256,6 +269,11 @@ export class ScreenSpaceReflectionsPass {
 
   /** Debug counts of the last traced frame (rays traced, capped, hits, misses). Null without `trace`. */
   readTraceStats(): Promise<TracedReflectionsStats | null> { return this.rt ? this.rt.readStats() : Promise.resolve(null); }
+
+  /** W82 (T70): turn `trace.raytracerHitShading` on / off (or change its sample count) after attaching a provider; recompiles the traced pass on the next frame. No-op without a provider. */
+  setRaytracerHitShading(on: boolean | { samples?: number }): void {
+    if (this.traceOptions) this.traceOptions = { ...this.traceOptions, raytracerHitShading: on };
+  }
 
   /**
    * Attach, swap (new scene) or detach (null) the trace provider; keeps the other `trace` options.
@@ -345,7 +363,8 @@ export class ScreenSpaceReflectionsPass {
     if (this.rt && tracing) {
       // traced misses take black like the tracer's fallback: the composite adds probes /
       // environment for 1 - confidence, exactly the term three's lit image already has
-      this.rt.dispatch(cmd, { tracer: core, inputs, hitShadingBindGroup }, { ...this.traceSettings, hitColor: useHistory ? 'history' : 'current', hitShading, hitLobeFilter: this.traceSettings.hitLobeFilter ?? this.settings.hitLobeFilter, hitShadeOcclusion: this.traceSettings.hitShadeOcclusion ?? this.settings.hitShadeOcclusion,
+      if (this.rtShade) this.rtShade.setFrame(frame.frameIndex);
+      this.rt.dispatch(cmd, { tracer: core, inputs, hitShadingBindGroup: this.rtShade?.bindGroup ?? hitShadingBindGroup }, { ...this.traceSettings, hitColor: useHistory ? 'history' : 'current', hitShading, hitLobeFilter: this.traceSettings.hitLobeFilter ?? this.settings.hitLobeFilter, hitShadeOcclusion: this.traceSettings.hitShadeOcclusion ?? this.settings.hitShadeOcclusion,
         hitLobeFilterMixed: this.traceSettings.hitLobeFilterMixed ?? this.settings.hitLobeFilterMixed,
         roughnessThreshold: this.settings.roughnessThreshold, fallbackColor: [0, 0, 0],
         tracedMissRate: halfRate ? 'half' : 'full', tracedHalfRateMinRoughness: halfRateMin });
@@ -443,10 +462,22 @@ export class ScreenSpaceReflectionsPass {
     return this.hitShading!.bindGroup(this.traceOptions?.environmentIntensity ?? this.sceneEnvironmentIntensity, this.traceOptions && this.traceOptions.lights !== false ? this.sceneLights : {});
   }
 
+  private rtShadeWanted(): string {
+    const w = this.traceOptions?.raytracerHitShading;
+    return w ? String(typeof w === 'object' ? w.samples ?? 1 : 1) : '';
+  }
+
   private createTraced(w: number, h: number) {
     const trace = this.traceOptions!;
+    this.rtShade?.destroy(); this.rtShade = null;
+    const want = trace.raytracerHitShading;
+    if (want) {
+      if (trace.provider.capabilities.hitShade) this.rtShade = raytracerHitShading(this.device, { samples: typeof want === 'object' ? want.samples : 1 });
+      else if (!this.rtShadeWarned) { this.rtShadeWarned = true; console.warn(`raytracerHitShading needs a provider with traceHitShade (createRaytracerTraceProviderFromObjects); ${trace.provider.name} has none: the probes shade traced hits`); }
+    }
+    this.rtShadeKey = this.rtShadeWanted();
     this.rt = createTracedReflections(this.device, {
-      width: w, height: h, provider: trace.provider, hitShading: this.hitShading!.shading, timestamps: this.options.timestamps ?? false,
+      width: w, height: h, provider: trace.provider, hitShading: this.rtShade ?? this.hitShading!.shading, timestamps: this.options.timestamps ?? false,
     });
   }
 
@@ -466,6 +497,8 @@ export class ScreenSpaceReflectionsPass {
     // W78 (D5140): the sample-direction output is one more storage texture in intersect: rebuild on a flip
     const wantSample = !!this.settings.sampleDirection;
     if (this.core && wantSample !== this.coreSample) { this.rt?.destroy(); this.rt = null; this.core.destroy(); this.core = null; }
+    // W82: toggling raytracerHitShading (or its sample count) recompiles the traced pass only
+    if (this.rt && this.rtShadeKey !== this.rtShadeWanted()) { this.rt.destroy(); this.rt = null; }
     const c = this.core;
     if (c && c.width === w && c.height === h && c.depthInverted === inverted) {
       if (trace && !this.rt) this.createTraced(w, h);
@@ -494,6 +527,7 @@ export class ScreenSpaceReflectionsPass {
     this.rt?.destroy();
     this.rt = null;
     this.hitShading?.destroy();
+    this.rtShade?.destroy();
     this.half?.destroy();
     this.halfTimer?.destroy();
     this.blackEnvironment?.dispose();

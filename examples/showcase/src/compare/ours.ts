@@ -16,7 +16,7 @@ import * as THREE from 'three/webgpu';
 import { renderOutput, uniform, vec3, vec4 } from 'three/tsl';
 import {
   HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, bvhTraceSceneFromObjects,
-  createPmndrsBvhTraceProviderFromObjects, installCubeArraySupport, reflectionProbes,
+  createPmndrsBvhTraceProviderFromObjects, createRaytracerTraceProviderFromObjects, installCubeArraySupport, reflectionProbes,
 } from '@pmndrs/reflections/three';
 import { resolveScreenSpaceSettings } from '@pmndrs/reflections/core';
 import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
@@ -80,6 +80,8 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: {
     maxColorAttachmentBytesPerSample: maxBytes,
     // W61 (D4804): a probe layout of three sizes is three atlas bindings in every Sponza material (18 > the default 16)
+    // W82 (D5200, opt-in): the @pmndrs/raytracer provider binds 5 storage buffers; with probe hit shading the traced pass needs 9
+    ...(__RAYTRACER_AVAILABLE__ && params.get('rtShade') === '1' && adapter ? { maxStorageBuffersPerShaderStage: Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 10) } : {}),
     ...(params.has('probeLayout') && adapter ? { maxSampledTexturesPerShaderStage: Math.min(adapter.limits.maxSampledTexturesPerShaderStage, 48) } : {}),
   } } as N);
   renderer.setPixelRatio(1);
@@ -235,7 +237,15 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     // W46: ?specAAHits=0 keeps the traced hits' authored roughness with ?specAA on
     const material = params.get('specAAHits') === '0' ? undefined : specAAHitMaterial;
     const shadingNormals = params.get('rtShadingNormals') !== '0';
-    if (bvhKind === 'pmndrs') {
+    if (bvhKind === 'pmndrs' && __RAYTRACER_AVAILABLE__ && params.get('rtShade') === '1') {
+      // W82 (T70): the opt-in @pmndrs/raytracer provider and its hit shading (rtShade) instead of the probes
+      const built = await createRaytracerTraceProviderFromObjects(device, traceMeshes, { ...(material ? { material } : {}), shadingNormals });
+      provider = built.provider;
+      providerInfo = { kind: '@pmndrs/raytracer', triangles: built.provider.info.triangles, builder: built.provider.info.builder };
+      ssr.setTraceProvider(built.provider);
+      ssr.setRaytracerHitShading(true);
+      updateHitMaterials = () => { const s = bvhTraceSceneFromObjects(traceMeshes, { ...(material ? { material } : {}), shadingNormals }); if (s.scene.materials) built.provider.setMaterials(s.scene.materials); };
+    } else if (bvhKind === 'pmndrs') {
       const builder = (params.get('bvhBuilder') ?? 'auto') as N;
       const built = await createPmndrsBvhTraceProviderFromObjects(device, traceMeshes, { ...(material ? { material } : {}), shadingNormals, ...(builder !== 'auto' ? { builder } : {}) });
       provider = built.provider;
@@ -436,7 +446,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     live[`aa.${f}`] = () => { if (aa) Object.assign(aa.upscaler.settings, upscalerSettings()); };
   }
   /** Keys read only at creation (a Rebuild applies them). */
-  const REBUILD = new Set(['bvh', 'bvhBuilder', 'rtShadingNormals', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
+  const REBUILD = new Set(['bvh', 'bvhBuilder', 'rtShade', 'rtShadingNormals', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
     'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity', 'envLight', 'background', 'timestamps', 'shim',
     's.reflectionResolution', 'preset']);
 

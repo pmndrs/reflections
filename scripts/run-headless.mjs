@@ -4,9 +4,9 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | bench | probe-layouts)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | showcase | showcase-compare | quickstart | r3f | bench | probe-layouts)
 //   pnpm check -- --only flicker                 # W85 (T1): the X0 flicker metrics per scene x config (FLICKER_SCENES / FLICKER_CONFIGS / FLICKER_LABEL, scripts/flicker.mjs)
-//   pnpm check -- --only ssr-exp-metrics        # X0 (W70): the experiment metrics smoke (examples/shared/metrics); ssr-exp-baseline = the full baseline (scripts/ssr-exp.mjs)
+//   pnpm check -- --only ssr-exp-metrics         # X0 (W70): the experiment metrics smoke (examples/shared/metrics); ssr-exp-baseline = the full baseline (scripts/ssr-exp.mjs)
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
 //   pnpm check -- --only ssr-exp-x1              # W71 (X1): each X1 setting at its default = absent on examples/ssr; (W76: historyEdgeConfidence and hitLobeFilterGrazing removed)
 //   pnpm check -- --only ssr-exp-grazing         # W71 (X1 #3) / W76: grazing sweep 5/15/30/60 deg vs the path tracer, hitColorConeGrazing 0 / 0.5 / 1 (minutes)
@@ -117,8 +117,15 @@ function killChrome(chrome) {
 const killAllChromes = () => { for (const c of [...liveChromes.keys()]) killChrome(c); };
 process.on('exit', killAllChromes);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { killAllChromes(); process.exit(130); });
+/**
+ * P1.5: `--rt-core raytracer` runs every `bvh=pmndrs` page on core's @pmndrs/raytracer provider (`&bvhCore=raytracer`),
+ * so the @pmndrs/bvh checks and timings A/B the two providers on the same scenes.
+ */
+const RT_CORE = args.includes('--rt-core') ? args[args.indexOf('--rt-core') + 1] : null;
+const withRtCore = (url) => (RT_CORE && /[?&]bvh=pmndrs\b/.test(url) && !/bvhCore=/.test(url) ? url.replace(/([?&]bvh=pmndrs)\b/, `$1&bvhCore=${RT_CORE}`) : url);
 /** Open `url` in a fresh headless Chrome; resolves once `window.__p` exists. */
-async function openPage(url, extraArgs = []) {
+async function openPage(url0, extraArgs = []) {
+  const url = withRtCore(url0);
   // Port 0: Chrome picks a free port and writes it to DevToolsActivePort. A random fixed port could
   // collide with another worktree's Chrome, and then this run drove that run's page (F2).
   const userDataDir = path.join(os.tmpdir(), `reflections-${Date.now()}-${process.pid}-${Math.floor(Math.random() * 1e9)}`);
@@ -160,7 +167,8 @@ async function openPage(url, extraArgs = []) {
   const T = (expr) => cdp.evalJs(`(async () => JSON.stringify(await (${expr})))()`).then((s) => (s === undefined ? undefined : JSON.parse(s)));
   const close = () => { try { ws.close(); } catch { /* noop */ } killChrome(chrome); };
   /** Load another URL in the same browser (same profile, so IndexedDB carries over); resolves once its `__p` exists. */
-  const navigate = async (next) => {
+  const navigate = async (next0) => {
+    const next = withRtCore(next0);
     await cdp.send('Page.navigate', { url: next });
     const until = Date.now() + 180_000;
     while (Date.now() < until) {
@@ -2693,6 +2701,24 @@ async function ssrRtBvhChecks(pages) {
   // hit contact lines and coincident faces, where either answer is right (D1704).
   const oracleOk = (o) => o.agree / o.rays > 0.995 && o.gpuOnly + o.cpuOnly <= o.rays * 0.003
     && [o.triangle, o.normalSigned, o.frontFace, o.instance, o.material].every((k) => k >= o.compared * 0.995);
+  // W82 (T70): the opt-in raytracer hit shading (rtShade) on the offscreen mirror, only where @pmndrs/raytracer resolves
+  // (a sibling pathtracer checkout; otherwise the example ignores &bvhCore / &rtShade and the provider stays @pmndrs/bvh)
+  {
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&bvh=pmndrs&bvhCore=raytracer&rtShade=1&probeRes=128`);
+    pages.push(p);
+    const before = results.logs.length;
+    await p.T("window.__p.load('offscreen')");
+    const bvh = await p.T('window.__p.bvh');
+    if (bvh.provider && /raytracer/i.test(bvh.provider)) {
+      await p.T("window.__p.setPose('mirror')");
+      await p.T('window.__p.step(3)');
+      const on = await p.T('window.__p.stats()');
+      const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+      check('rt raytracerHitShading (rtShade, opt-in): renders, no validation errors, finite outputs, traced hits', errs.length === 0 && on.nonFinite === 0 && on.rt && on.rt.traced > 0 && on.rt.hits > 0,
+        errs.length ? errs.slice(0, 2).join(' | ') : `${on.misses} misses -> ${JSON.stringify(on.rt)}`);
+    } else console.log('  (info) rtShade check skipped: @pmndrs/raytracer does not resolve here (no sibling pathtracer checkout)');
+    p.close();
+  }
   for (const builder of ['auto', 'tinybvh']) {
     // probes at 128 px, as the three-mesh-bvh section above (D901 hit-shading checks)
     const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&bvh=pmndrs&bvhBuilder=${builder}&probeRes=128`);
@@ -2700,6 +2726,7 @@ async function ssrRtBvhChecks(pages) {
     const before = results.logs.length;
     await p.T("window.__p.load('offscreen')");
     const bvh = await p.T('window.__p.bvh');
+    console.log(`  (info) provider: ${bvh.provider}`);
     for (const kind of ['camera', 'scene']) {
       const o = await p.T(`window.__p.rtOracle(4096, '${kind}')`);
       check(`rt @pmndrs/bvh (${bvh.builder}) agrees with THREE.Raycaster, ${kind} rays`, oracleOk(o),
@@ -2784,9 +2811,11 @@ async function ssrRtBvhChecks(pages) {
  */
 async function rtBvhTiming(pages) {
   const rounds = args.includes('--rt-bvh-rounds') ? Number(args[args.indexOf('--rt-bvh-rounds') + 1]) : 3;
-  const variants = [['three-mesh-bvh', '&bvh=three-mesh-bvh'], ['@pmndrs/bvh', '&bvh=pmndrs'], ['@pmndrs/bvh rayMasks on', '&bvh=pmndrs&bvhRayMasks=1']];
+  const variants = [['three-mesh-bvh', '&bvh=three-mesh-bvh'], ['@pmndrs/bvh', '&bvh=pmndrs&bvhCore=bvh'], ['@pmndrs/bvh rayMasks on', '&bvh=pmndrs&bvhCore=bvh&bvhRayMasks=1'],
+    ['@pmndrs/raytracer', '&bvh=pmndrs&bvhCore=raytracer']]; // P1.5: core's provider over @pmndrs/raytracer
   const scenes = [['offscreen', 'mirror'], ['mirrorWall', ''], ['contact', ''], ['moving', ''], ['boxRoom', ''],
-    ...(fs.existsSync(path.join(ROOT, 'examples/assets/Sponza')) ? [['sponza', '']] : [])];
+    ...(fs.existsSync(path.join(ROOT, 'examples/assets/Sponza')) ? [['sponza', '']] : [])]
+    .filter(([scene]) => !args.includes('--rt-bvh-scenes') || args[args.indexOf('--rt-bvh-scenes') + 1].split(',').includes(scene));
   const url = (param, scene, pose) => `http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1${param}&scene=${scene}${pose ? `&pose=${pose}` : ''}`;
   const page = await openPage(url(variants[0][1], ...scenes[0]));
   pages.push(page);
@@ -3310,6 +3339,70 @@ async function pixi3dChecks(pages) {
   }
 }
 
+/**
+ * Drop-in pages (examples/quickstart, quickstart/probes.html, r3f): the page renders with no GPU
+ * errors, the frame is not black, and the reflections are really there: the lower part of the frame
+ * (the glossy floor and what stands on it) differs between reflections off and on. `window.__p`:
+ * `shot(n)` (n frames, then a PNG data URL), `setOn(bool)` or `setProbes(bool)` (the baseline), `info()`.
+ */
+const DROP_IN_DIFF = `async (a, b) => {
+  const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return [i.width, i.height, g.getImageData(0, 0, i.width, i.height).data]; };
+  const [w, h, A] = await px(a); const [, , B] = await px(b);
+  let lum = 0, lo = 255, hi = 0, n = 0, sum = 0, over = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const k = 4 * (y * w + x), l = (A[k] + A[k + 1] + A[k + 2]) / 3; lum += l; if (l < lo) lo = l; if (l > hi) hi = l;
+    if (y < h * 0.4) continue; // the floor and the objects' reflections
+    const d = (Math.abs(A[k] - B[k]) + Math.abs(A[k + 1] - B[k + 1]) + Math.abs(A[k + 2] - B[k + 2])) / 3; n++; sum += d; if (d > 12) over++;
+  }
+  return { lum: lum / (w * h), lo, hi, regionMean: sum / n, regionOver: over / n };
+}`;
+async function dropInChecks(pages, name, url, { frames = 30, maxFlicker = 0.5 } = {}) {
+  console.log(`${name}:`);
+  const slug = name.replace(/[^a-z0-9]+/gi, '-');
+  const before = results.logs.length;
+  const p = await openPage(`http://127.0.0.1:${PORT}${url}`);
+  pages.push(p);
+  for (let i = 0; i < 120 && (await p.T('window.__p.info().ready')) === false; i++) await sleep(500); // R3F builds Reflections after mount
+  await p.T('window.__p.stop()');
+  const info = await p.T('window.__p.info()');
+  const toggle = await p.T("typeof window.__p.setOn === 'function' ? 'setOn' : typeof window.__p.setProbes === 'function' ? 'setProbes' : null");
+  if (toggle) await p.T(`window.__p.${toggle}(true)`);
+  const on = await p.T(`window.__p.shot(${frames})`);
+  savePng(`${slug}-on.png`, on);
+  let off = null;
+  if (toggle) {
+    await p.T(`window.__p.${toggle}(false)`);
+    off = await p.T('window.__p.shot(3)');
+    savePng(`${slug}-off.png`, off);
+    await p.T(`window.__p.${toggle}(true)`);
+  }
+  const st = await p.T(`(${DROP_IN_DIFF})(${JSON.stringify(on)}, ${JSON.stringify(off ?? on)})`);
+  const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+  check(`${name}: renders a non-black frame, no GPU errors`, st.lum > 8 && st.hi - st.lo > 60 && errs.length === 0,
+    `mean ${st.lum.toFixed(0)}/255, range ${st.lo.toFixed(0)}-${st.hi.toFixed(0)}; ${JSON.stringify(info)}${errs.length ? '; ' + errs[0] : ''}`);
+  if (off) {
+    check(`${name}: reflections are present (floor region differs, on vs off)`, st.regionMean > 1.5 && st.regionOver > 0.01,
+      `mean |on - off| ${st.regionMean.toFixed(2)} / 255, ${(st.regionOver * 100).toFixed(1)} % of px over 12`);
+  }
+  // stable by default: a still camera, consecutive frames differ by under 1/255 (mean) on < 0.5 % of px
+  const flicker = await p.T(`(async () => {
+    const P = window.__p; const c = document.createElement('canvas'); const g = c.getContext('2d', { willReadFrequently: true });
+    let prev = null, acc = null, n = 0;
+    for (let k = 0; k < 7; k++) {
+      const img = new Image(); img.src = await P.shot(1); await img.decode(); c.width = img.width; c.height = img.height; g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, img.width, img.height).data;
+      const l = new Float32Array(d.length / 4); for (let i = 0; i < l.length; i++) l[i] = 0.2126 * d[4 * i] + 0.7152 * d[4 * i + 1] + 0.0722 * d[4 * i + 2];
+      if (prev) { acc ??= new Float32Array(l.length); for (let i = 0; i < l.length; i++) acc[i] += Math.abs(l[i] - prev[i]); n++; }
+      prev = l;
+    }
+    let over = 0; for (let i = 0; i < acc.length; i++) if (acc[i] / n > 1) over++;
+    return over / acc.length * 100;
+  })()`);
+  check(`${name}: still camera does not flicker (< ${maxFlicker} % of px move more than 1/255 between frames)`, flicker < maxFlicker, `${flicker.toFixed(3)} % of px`);
+  return { p, st, info };
+}
+
 async function main() {
   setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' || only === 'ssr-exp-baseline' || only === 'ssr-exp-grazing' ? 3_600_000 : 600_000).unref();
   let server = null;
@@ -3640,6 +3733,15 @@ async function main() {
     if (runs('pixi3d')) await pixi3dChecks(pages);
     if (ssrBenchFull) await ssrBench();
     else if (runs('ssr-bench')) await ssrBenchSmoke(pages);
+    if (runs('quickstart')) {
+      await dropInChecks(pages, 'examples/quickstart', '/quickstart/?manual');
+      await dropInChecks(pages, 'examples/quickstart probes only', '/quickstart/probes.html?manual');
+      await dropInChecks(pages, 'examples/quickstart rt + preset performance', '/quickstart/?manual&rt=1&preset=performance', { maxFlicker: 1.5 }); // half-res: noisier, no anti-aliasing in the quick start (backlog)
+    }
+    if (runs('r3f')) {
+      await dropInChecks(pages, 'examples/r3f', '/r3f/?manual');
+      await dropInChecks(pages, 'examples/r3f rt + preset performance', '/r3f/?manual&rt=1&preset=performance', { maxFlicker: 1.5 });
+    }
     if (runs('showcase')) await showcaseChecks(pages);
     if (runs('showcase-compare')) await showcaseCompareChecks(pages);
     if (runs('bench')) await benchChecks(pages); // W51: the tuning bench
