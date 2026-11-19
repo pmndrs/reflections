@@ -18,16 +18,18 @@ import {
   HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, bvhTraceSceneFromObjects,
   createPmndrsBvhTraceProviderFromObjects, installCubeArraySupport, reflectionProbes,
 } from '@pmndrs/reflections/three';
+import { resolveScreenSpaceSettings } from '@pmndrs/reflections/core';
 import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
 import { ScreenSpaceAO } from '../../../shared/ao';
 import { LINEAR_VIEWS, VIEW_IDS, buildDebugViews, type View } from '../debugViews';
 import { DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../../shared/antialias';
-import { hitSourceDenoiserOptions, hitSourceFromQuery } from '../../../shared/denoiser';
+import { brdfFromQuery, hitSourceDenoiserOptions, hitSourceFromQuery, syncDenoiserBrdf } from '../../../shared/denoiser';
 import { probeLayout, type ProbeLayoutName } from '../../../shared/probeLayouts';
 import { setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } from '../specAA';
 import type { FloorKind } from '../scenes';
 import { carInteriorProbes, carWheels, type CarProbesMode } from '../carProbes';
 import { hybridReaders } from '../../../shared/metrics/three';
+import { presetUrlKeys } from '../bench/schema';
 import {
   type CompareMethod, type MethodContext, type MethodId, type SetResult, destroyWebGPU, applySceneParams, applySpecAA, applyGeometryRoughness, freshEnvironment, mergedParams, newCanvas, sceneInfo, syncCamera,
 } from './method';
@@ -47,10 +49,13 @@ const SSSR_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   hitLobeFilterMixed: 'n', hitShadeOcclusion: 's', // W52 (D3641, D3642)
   quadCopy: 's', // W58 (D3740)
   rayReuse: 's', rayReuseTaps: 'n', rayReuseRadius: 'n', rayReuseMixSources: 'b', rayReusePattern: 's', // W73 (D5040, D5047)
-  quadBaseRotation: 's', thicknessDepthFactor: 'n', thicknessDepthMode: 's', hitLobeFilterGrazing: 'n', historyEdgeConfidence: 'b', // W71 (X1, D5000-D5003)
+  quadBaseRotation: 's', thicknessDepthFactor: 'n', thicknessDepthMode: 's', // W71 (X1, D5000-D5001; W76 removed hitLobeFilterGrazing and historyEdgeConfidence, D5002-D5003)
+  hitColorConeGrazing: 'n', // W76 (D5100)
   hitColorFilter: 's', hitColorConeScale: 'n', mirrorBiasCompensate: 'b', // W72 (D5020-D5022)
   maxCandidates: 'n', // W80 (D5180)
 };
+/** W76: the fields `resolveScreenSpaceSettings` fills (the bench shows their effective value). */
+const RESOLVED_KEYS = new Set(['hitColorFilter', 'mirrorBias', 'mirrorBiasCompensate', 'thicknessDepthMode', 'thicknessDepthFactor']);
 /** `ScreenSpaceReflectionsPass.traceSettings` fields the bench sets as `t.<field>`. */
 const TRACE_FIELDS: Record<string, 'n' | 'b' | 's'> = {
   maxTracedRaysPerFrame: 'n', maxRaysPerTile: 'n', maxRayLength: 'n', rayLengthRoughnessFalloff: 'n', normalOffset: 'n', reuseOnScreenHits: 'b',
@@ -66,6 +71,9 @@ const parse = (t: 'n' | 'b' | 's', v: string) => (t === 'n' ? Number(v) : t === 
 export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denoised' | 'ours-rt' | 'probes'>, ctx: MethodContext): Promise<CompareMethod> {
   const { width: W, height: H } = ctx;
   const params = mergedParams(ctx);
+  // W77: ?preset=<name> sets the URL keys it names wherever the URL doesn't (explicit keys win; clearing one returns it to the preset's)
+  const presetKeys = presetUrlKeys(params.get('preset'));
+  for (const [k, v] of Object.entries(presetKeys)) if (!params.has(k)) params.set(k, v);
   const canvas = newCanvas(W, H);
   const adapter = await navigator.gpu.requestAdapter();
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
@@ -145,7 +153,6 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   for (const [f, t] of Object.entries(TRACE_FIELDS)) if (params.has(`t.${f}`)) (ssr.traceSettings as N)[f] = parse(t, params.get(`t.${f}`)!);
   // W75 (X5, D5080): half-res reflections; composites are built for one mode, so it is read at creation (Rebuild)
   if (params.has('s.reflectionResolution')) ssr.settings.reflectionResolution = params.get('s.reflectionResolution') as 'full' | 'half';
-  if (params.has('s.halfResMinRoughness')) ssr.settings.halfResMinRoughness = Number(params.get('s.halfResMinRoughness')); // step 2
   // the traced misses take their fallback at the tracer's roughness setting (the adapter doesn't pass it on)
   if (ssr.settings.fallbackRoughness) ssr.traceSettings.fallbackRoughness = ssr.settings.fallbackRoughness;
   let ssrOn = params.get('ssr') !== '0';
@@ -312,8 +319,14 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   if (aaMode !== 'off' || aaQ.ratio > 1) await makeAA();
 
   const nextNodeFrame = () => (renderer as N)._nodes.nodeFrame.update();
+  // W78 (D5140): ?brdf=replace|combine, BRDF / pdf weights in FFX's prefilter (live key `brdf`)
+  let brdfMode = brdfFromQuery(params);
+  let keepBlack = params.get('keepBlack') !== '0';
+  let brdfMin = params.has('brdfMin') ? Number(params.get('brdfMin')) : undefined;
   const draw = (cam: THREE.PerspectiveCamera, useAA: boolean) => {
     nextNodeFrame();
+    syncDenoiserBrdf(ssr, hybrid, brdfMode, keepBlack, brdfMin);
+    if (params.get('keepSample') === '1') ssr.settings.sampleDirection = true; // A/B runs: no tracer rebuild between modes
     syncCamera(camera, cam);
     const a = useAA ? aa : null;
     const j = a ? a.begin(camera) : {};
@@ -344,7 +357,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     old?.dispose?.();
     resetAll();
   };
-  const setParam = (k: string, v: string | null) => { if (v === null) params.delete(k); else params.set(k, v); };
+  const setParam = (k: string, v: string | null) => { if (v !== null) params.set(k, v); else if (presetKeys[k] !== undefined) params.set(k, presetKeys[k]); else params.delete(k); };
   const setW53 = () => {
     const hs = hitSourceFromQuery(params);
     hybrid.denoiserHitSource = hs.hitSource;
@@ -377,6 +390,10 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     hitSource: () => setW53(),
     hitMissAny: () => setW53(),
     hitDistW: () => setW53(),
+    // W78 (D5140): the tracer rebuilds on an on / off flip (sampleDirection), the denoiser takes setOptions
+    brdf: (v) => { brdfMode = brdfFromQuery(new URLSearchParams(v === null ? {} : { brdf: v })); resetAll(); },
+    keepBlack: (v) => { keepBlack = v !== '0'; resetAll(); },
+    brdfMin: (v) => { brdfMin = v === null ? undefined : Number(v); resetAll(); },
     'h.depthAware': (v) => { hybrid.depthAware.value = v === null ? 1 : Number(v); },
     'h.amount': (v) => { if (id === 'probes') return; amount = v === null ? 1 : Number(v); c.amount.value = h.amount.value = amount; },
     aa: (v) => {
@@ -419,7 +436,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   /** Keys read only at creation (a Rebuild applies them). */
   const REBUILD = new Set(['bvh', 'bvhBuilder', 'rtShadingNormals', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
     'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity', 'envLight', 'background', 'timestamps', 'shim',
-    's.reflectionResolution', 's.halfResMinRoughness']);
+    's.reflectionResolution', 'preset']);
 
   return {
     id, canvas, scene: sceneInfo(kit),
@@ -470,7 +487,13 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
       return 'ignored';
     },
     get(key) {
-      if (key.startsWith('s.')) { const v = (ssr.settings as N)[key.slice(2)]; return v === undefined ? undefined : String(typeof v === 'boolean' ? +v : v); }
+      if (key.startsWith('s.')) {
+        // W76: unset fields show what the tracer resolves them to (the cone / compensation defaults, and with RT
+        // on the 'relative' thickness), so the bench shows the effective value
+        const eff = resolveScreenSpaceSettings({ ...ssr.settings, missesTraced: ssr.rayTracing && !!ssr.traced });
+        const v = (ssr.settings as N)[key.slice(2)] ?? (RESOLVED_KEYS.has(key.slice(2)) ? (eff as N)[key.slice(2)] : undefined);
+        return v === undefined ? undefined : String(typeof v === 'boolean' ? +v : v);
+      }
       if (key.startsWith('t.')) { const v = (ssr.traceSettings as N)[key.slice(2)]; return v === undefined ? undefined : String(typeof v === 'boolean' ? +v : v); }
       if (key === 'floorRoughness') return String(kit.floor.roughness);
       return undefined;

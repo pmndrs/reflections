@@ -18,8 +18,16 @@
 // hands the specular signal to denoiser/ffx's FfxReflectionDenoiser through the denoise seam. The
 // denoiser comes from the sibling Denoiser repo's source (examples/vite.config.ts) when present.
 //
-// `?mirrorBias=0..1` (default 0, FFX): the tracer's bias of glossy rays toward the mirror direction
-// (core `settings.mirrorBias`, SSSR 2015 / PICA, D49); also a slider. `__p.mirrorBiasStats()` measures it.
+// `?brdf=replace|combine` (W78, X3 phase B, default off): BRDF / pdf weights in the FFX denoiser's prefilter
+// (the tracer hands each pixel's sample direction and pdf through the seam). Also the example-only key
+// `settings.denoiserBrdf` ('off' | 'replace' | 'combine'), read every frame, so `__p.configStats` configs can set it.
+// `?keepBlack=0` (or `settings.denoiserKeepBlack: false`): FFX's own black handling; on by default (HybridReflections.denoiserKeepHistoryOnBlack, D5145).
+// `?keepSample=1` keeps the tracer's sample output on in every mode (A/B runs without a tracer rebuild).
+// `?mirrorBias=0..1`: the tracer's bias of glossy rays toward the mirror direction (core `settings.mirrorBias`,
+// SSSR 2015 / PICA, D49); also a slider. `__p.mirrorBiasStats()` measures it. Default (W76): 0.5 with the cone
+// and compensation (the bias narrows the sampled lobe and the cone puts the width back); a bias set without
+// `mirrorBiasCompensate` is D49's truncation (`?s.mirrorBiasCompensate=1` keeps compensation). The slider keeps
+// whatever compensation the tracer was running.
 //
 // `?specOcc=1` (default 0): Lagarde's specular occlusion (D66) on the probe / environment part of the
 // composite, from a screen-space AO (three's GTAO on the G-buffer, ../../shared/ao.ts); also a checkbox,
@@ -31,7 +39,7 @@ import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { PROBE_LOOKUP_EXPERIMENT } from '@pmndrs/reflections-core/probes/lookup';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, defaultHitMaterial, ReflectionProbes, type BakeOptions, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
+  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, applyReflectionsPreset, defaultHitMaterial, type DenoiserHitSourceMode, type ReflectionsPresetName, ReflectionProbes, type BakeOptions, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
   createPmndrsBvhTraceProviderFromObjects, type ThreePmndrsBvhTraceProvider,
 } from '@pmndrs/reflections/three';
 import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
@@ -40,11 +48,12 @@ import {
 } from '../../shared';
 import { HEAT_LEGEND, ProbeVolumesOverlay, gbufferWorldPosition, heatColor, probeColor, probeWeights } from '../../shared/probeDebug';
 import { SHOWCASE } from '../../showcase/src/scenes';
-import { createReflectionDenoiser, denoiserAvailable, denoiserSource } from '../../shared/denoiser';
+import { brdfFromQuery, createReflectionDenoiser, denoiserAvailable, denoiserSource, hitSourceDenoiserOptions, hitSourceFromQuery, syncDenoiserBrdf, type DenoiserBrdf } from '../../shared/denoiser';
 import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../shared/antialias';
 import { ScreenSpaceAO } from '../../shared/ao';
 import { canvasReader, createMetrics } from '../../shared/metrics/run';
 import { gbufferGlossyMask, hybridReaders } from '../../shared/metrics/three';
+import { ssrSettingsFromQuery } from '../../shared/ssrQuery';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
@@ -73,6 +82,9 @@ type HitColorMode = 'current' | 'lit' | 'final';
 type RayKind = 'camera' | 'scene';
 const HIT_MODES: HitColorMode[] = ['current', 'lit', 'final'];
 const useRT = q.get('rt') === '1';
+/** W77: ?preset=performance|default (core REFLECTION_PRESETS, through the three adapter's `preset` options). */
+// an unknown name is passed on: the pass and the hybrid warn once and ignore it
+const presetName = (q.get('preset') as ReflectionsPresetName | null) ?? null;
 /** Which BVH the ray-traced fallback uses: core's @pmndrs/bvh (default since W51, the maintainer's call on D1705) or three-mesh-bvh (`?bvh=three-mesh-bvh`, the stopgap). */
 type BvhKind = 'three-mesh-bvh' | 'pmndrs';
 const bvhKind: BvhKind = q.get('bvh') === 'three-mesh-bvh' ? 'three-mesh-bvh' : 'pmndrs';
@@ -210,13 +222,20 @@ async function main() {
     gbufferOptions: { width: W, height: H }, missList: true, timestamps: q.has('timing') || layoutMode,
     subgroups: q.get('variant') !== 'workgroup',
     // W75 (X5, D5080): ?res=half traces, denoises at half res and upsamples
-    // (?res=mixed: mirrors below ?halfResMin= (default 0.05) on a full-res path, step 2)
-    ...(q.get('res') === 'half' || q.get('res') === 'mixed' ? { settings: { reflectionResolution: 'half' as const, halfResMinRoughness: q.get('res') === 'mixed' ? Number(q.get('halfResMin') ?? 0.05) : 0 } } : {}),
+    ...(q.get('res') === 'half' || q.get('res') === 'mixed' ? { settings: { reflectionResolution: 'half' as const } } : {}),
+    ...(q.get('res') === 'full' ? { settings: { reflectionResolution: 'full' as const } } : {}),
+    // W77: ?preset=performance|default (core REFLECTION_PRESETS); ?res= and ?hitSource= given explicitly win
+    ...(presetName ? { preset: presetName } : {}),
   });
   const device = ssr.device;
   // hybrid resolve + denoise seam (phase 5)
-  let denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, q.has('timing')) : null;
-  const hybrid = new HybridReflections(ssr, { denoiser });
+  // W77: ?hitSource=0|hits|all|1 (W53: what the denoiser keeps apart), read as the bench and the showcase read it
+  // (hitSourceFromQuery: 0 / off = off, 1 = all) and set at construction like an app would: the page's own
+  // setting, which wins over ?preset= and which a preset change returns to
+  const hitSourceQ = q.has('hitSource') ? hitSourceFromQuery(q) : null;
+  const denoiserExtra = hitSourceQ ? hitSourceDenoiserOptions(hitSourceQ) : {};
+  let denoiser = denoiserAvailable ? createReflectionDenoiser(device, 0.447, q.has('timing'), denoiserExtra) : null;
+  const hybrid = new HybridReflections(ssr, { denoiser, ...(hitSourceQ ? { denoiserHitSource: hitSourceQ.hitSource } : {}), ...(presetName ? { preset: presetName } : {}) });
   // FFX's options are constructor-only, so the denoiser follows the tracer's roughness threshold by
   // being rebuilt when it changes (D1402); checked once per frame, so a slider drag rebuilds at most per frame.
   let denoiserGate = 0.447;
@@ -224,13 +243,26 @@ async function main() {
     const t = ssr.settings.roughnessThreshold ?? 0.447;
     if (!denoiser || t === denoiserGate) return;
     const old = denoiser;
-    denoiser = createReflectionDenoiser(device, t, q.has('timing'))!;
+    denoiser = createReflectionDenoiser(device, t, q.has('timing'), denoiserExtra)!;
     hybrid.setDenoiser(denoiser); // new seam: history starts over
     old.dispose();
     denoiserGate = t;
   };
   hybrid.denoise = wantDenoise && !!denoiser;
+  // W78 (D5140): the page's BRDF mode; `settings.denoiserBrdf` (example-only) overrides it per frame
+  const brdfMode = brdfFromQuery(q);
+  let brdfApplied = 'off' + false;
+  const syncBrdf = () => {
+    const mode = ((ssr.settings as N).denoiserBrdf as DenoiserBrdf | undefined) ?? brdfMode;
+    const keepBlack = ((ssr.settings as N).denoiserKeepBlack as boolean | undefined) ?? q.get('keepBlack') !== '0';
+    const brdfMin = ((ssr.settings as N).denoiserBrdfMin as number | undefined) ?? (q.has('brdfMin') ? Number(q.get('brdfMin')) : undefined);
+    syncDenoiserBrdf(ssr, hybrid, mode, keepBlack, brdfMin);
+    if (q.get('keepSample') === '1') ssr.settings.sampleDirection = true; // A/B runs: no tracer rebuild between modes
+    if (mode + keepBlack !== brdfApplied) { hybrid.resetHistory(); brdfApplied = mode + keepBlack; }
+  };
   if (q.has('mirrorBias')) ssr.settings.mirrorBias = Number(q.get('mirrorBias'));
+  Object.assign(ssr.settings, ssrSettingsFromQuery(q)); // W76: ?s.<field>=<value> from the first frame
+  if (q.get('res') === 'mixed' || q.has('halfResMin')) console.warn("?res=mixed / ?halfResMin= were removed (W76, D5084: halfResMinRoughness and the full-res mirror path); running ?res=half");
   const gpuErrors: string[] = [];
   device.addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('[webgpu uncapturederror]', m); });
   // With the loop stopped, three renders each shadow map once per camera per frame: advance it ourselves.
@@ -600,6 +632,7 @@ async function main() {
     if (manual || !looping) nextNodeFrame();
     kit.camera.aspect = W / H; kit.camera.updateProjectionMatrix(); kit.camera.updateMatrixWorld();
     if (provider && kit.update) { kit.scene.updateMatrixWorld(); refitProvider(); }
+    syncBrdf();
     ssr.render(kit.scene, kit.camera, aa.begin(kit.camera));
     aa.end(kit.camera);
     syncDenoiserGate();
@@ -651,8 +684,12 @@ async function main() {
   const thr = document.createElement('input'); thr.type = 'range'; thr.min = '0'; thr.max = '1'; thr.step = '0.01'; thr.value = '0.447';
   thr.oninput = () => { ssr.settings.roughnessThreshold = Number(thr.value); refreshUI(); if (!looping) frame(); };
   row('Roughness threshold (perceptual)', thr);
-  const biasIn = document.createElement('input'); biasIn.type = 'range'; biasIn.min = '0'; biasIn.max = '1'; biasIn.step = '0.05'; biasIn.value = String(ssr.settings.mirrorBias ?? 0);
-  biasIn.oninput = () => { ssr.settings.mirrorBias = Number(biasIn.value); hybrid.resetHistory(); refreshUI(); if (!looping) frame(); };
+  const biasIn = document.createElement('input'); biasIn.type = 'range'; biasIn.min = '0'; biasIn.max = '1'; biasIn.step = '0.05'; biasIn.value = String(ssr.settings.mirrorBias ?? 0.5); // W76: the resolved default (cone + compensation)
+  biasIn.oninput = () => {
+    // W76: a set mirrorBias alone means D49's truncation; keep the compensation the tracer ran (on by default)
+    ssr.settings.mirrorBiasCompensate ??= ssr.tracer?.outputs.settings?.mirrorBiasCompensate ?? true;
+    ssr.settings.mirrorBias = Number(biasIn.value); hybrid.resetHistory(); refreshUI(); if (!looping) frame();
+  };
   row('Mirror bias (D49)', biasIn);
   const ssrBox = document.createElement('input'); ssrBox.type = 'checkbox'; ssrBox.checked = true;
   ssrBox.onchange = () => { composite!.amount.value = ssrBox.checked ? 1 : 0; if (!looping) frame(); };
@@ -730,7 +767,7 @@ async function main() {
     if (kit!.views[pose]) poseSel.value = pose;
     status.textContent = [
       `three r${THREE.REVISION} | ${kit!.title} | ${W}x${H}${manual ? ' | manual (loop stopped)' : ''}`,
-      `variant ${ssr.variant ?? '(first frame pending)'} | hit colour ${hitMode} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | mirrorBias ${ssr.settings.mirrorBias ?? 0} | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
+      `variant ${ssr.variant ?? '(first frame pending)'} | hit colour ${hitMode} | roughnessThreshold ${ssr.settings.roughnessThreshold ?? 0.447} perceptual | mirrorBias ${ssr.tracer?.outputs.settings?.mirrorBias ?? ssr.settings.mirrorBias ?? 0.5}${ssr.tracer?.outputs.settings?.mirrorBiasCompensate && ssr.tracer?.outputs.settings?.hitColorFilter === 'cone' ? ' (compensated)' : ''} | lit target ${ssr.gbuffer.lit ? 'on' : 'OFF (composite unavailable)'}`,
       `specular IBL term: ${probes ? `${probes.bakedProbes.length} probe(s) by coverage, then scene.environment` : 'scene.environment'} | specular occlusion ${specOcc ? 'on (GTAO, probe part)' : 'off'} (?specOcc=1)`,
       `denoise: ${denoiser ? `${hybrid.denoise ? 'on' : 'off'} (${denoiser.name}, from ${denoiserSource})` : 'unavailable (no sibling Denoiser repo; raw signal)'}`,
       ...(probes ? [`probes: ${(() => { const L = currentLayout(); return L ? `layout '${L.name}' (${L.description}${L.blend !== undefined ? `, blend ${L.blend} x ${L.spacing!.toFixed(2)} m cell` : ''})` : (layoutName && kit && !hasProbeLayouts(kit.id) ? `(no layouts for ${kit.id}: rooms, offscreen, showcaseSponza)` : 'the scene\'s own'); })()} | ${sizeSummary()} px + environment ${probes.bakedResolutions[0]} px | atlases ${(probeAtlasBytes(probes as N) / 1e6).toFixed(1)} MB (layout budget ${(PROBE_LAYOUT_BUDGET / 1e6).toFixed(1)}) | bake ${lastBake ? lastBake.ms.toFixed(0) : '-'} ms (wall, 2 bounces unless ?bounces=)`] : []),
@@ -771,7 +808,9 @@ async function main() {
     ...hybridReaders(renderer, ssr, hybrid),
     setDenoise(on) { const was = hybrid.denoise; hybrid.denoise = on && !!denoiser; denoiseBox.checked = hybrid.denoise; return was; },
     jitterPhases: () => (aa.mode === 'upscaler' ? aa.upscaler.jitterPhaseCount : null),
-    describe: () => ({ page: 'ssr', scene: kit?.id, aa: aa.mode, ratio: aa.ratio, render: [W, H], display: [DW, DH], denoiser: hybrid.denoise ? denoiser?.name ?? null : null, rt: ssr.rayTracing, hit: hitMode }),
+    describe: () => ({ page: 'ssr', scene: kit?.id, aa: aa.mode, ratio: aa.ratio, render: [W, H], display: [DW, DH], denoiser: hybrid.denoise ? denoiser?.name ?? null : null, rt: ssr.rayTracing, hit: hitMode,
+      // W76: the defaults the tracer resolved last frame (cone / compensation; 'relative' thickness with RT)
+      effective: (({ hitColorFilter, mirrorBias, mirrorBiasCompensate, hitColorConeGrazing, thicknessDepthMode, thicknessDepthFactor }) => ({ hitColorFilter, mirrorBias, mirrorBiasCompensate, hitColorConeGrazing, thicknessDepthMode, thicknessDepthFactor }))(ssr.tracer?.outputs.settings ?? {}) }),
   });
   Object.assign(window, {
     __p: {
@@ -801,16 +840,23 @@ async function main() {
       setFlipped(pos: [number, number, number], target: [number, number, number], flip: boolean) {
         const c = kit!.camera; c.position.set(...pos); c.up.set(0, flip ? -1 : 1, 0); c.lookAt(...target); c.updateMatrixWorld(); aa.reset();
       },
-      /**
-       * W75 (X5): reflection resolution, rebuilding the composites ('mixed' = half with the full-res mirror
-       * path below `minRoughness`, step 2).
-       */
-      async setResolution(r: 'full' | 'half' | 'mixed', minRoughness = 0.05) {
-        ssr.settings.reflectionResolution = r === 'full' ? 'full' : 'half';
-        ssr.settings.halfResMinRoughness = r === 'mixed' ? minRoughness : 0;
+      /** W75 (X5): reflection resolution, rebuilding the composites (W76 removed step 2's 'mixed', D5084). */
+      async setResolution(r: 'full' | 'half') {
+        ssr.settings.reflectionResolution = r;
         hybrid.rebuild(); buildDisplay();
         ssr.resetHistory(); hybrid.resetHistory();
       },
+      /**
+       * W77: apply a named preset at runtime (three `applyReflectionsPreset`; `overrides` win), rebuilding
+       * the composites. Returns the applied preset.
+       */
+      setPreset(name: ReflectionsPresetName, overrides: Parameters<typeof applyReflectionsPreset>[2] = {}) {
+        const r = applyReflectionsPreset({ ssr, hybrid }, name, overrides);
+        buildDisplay(); aa.reset();
+        return r;
+      },
+      /** W77 (W53): what the denoiser keeps apart: 'off' | 'hits' | 'all'. */
+      setHitSource(mode: DenoiserHitSourceMode) { hybrid.setDenoiserHitSource(mode); aa.reset(); },
       setSSR(on: boolean) { composite!.amount.value = on ? 1 : 0; },
       /** W22: the composite's depth-aware blend (D2400) on / off (FFX's confidence blend). */
       setDepthAware(on: boolean) { hybrid.depthAware.value = on ? 1 : 0; depthBox.checked = on; },
