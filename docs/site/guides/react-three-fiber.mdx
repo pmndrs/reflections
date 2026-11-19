@@ -1,0 +1,104 @@
+---
+title: React Three Fiber
+description: Reflections in a React Three Fiber v10 canvas, with a useReflections hook.
+nav: 3
+---
+
+React Three Fiber v10 renders with `WebGPURenderer` by default, so `@pmndrs/reflections` works under a plain `<Canvas>`.
+You need `@react-three/fiber` 10 (the `alpha` tag at the time of writing; the last tested version is
+`10.0.0-alpha.6`), React 19 and three r187 or newer.
+
+```bash
+npm install @react-three/fiber@alpha react react-dom three @pmndrs/reflections
+```
+
+## Setup
+
+Two things differ from a plain canvas:
+
+1. The renderer needs the device limits the reflection passes ask for. R3F's `renderer` prop takes a factory, so pass
+   `createReflectionsRenderer` through it.
+2. The frame is drawn by `Reflections`, not by R3F's default render. A `useFrame` job in the `render` phase takes over.
+
+## A `useReflections` hook
+
+There is no hook in the package yet. This one is about thirty lines on top of `Reflections.create`
+([`examples/r3f/src/useReflections.ts`](https://github.com/pmndrs/reflections/blob/main/examples/r3f/src/useReflections.ts)):
+
+```tsx
+import { useEffect, useRef, useState } from 'react';
+import { useFrame, useThree } from '@react-three/fiber';
+import { Reflections, type ReflectionsOptions } from '@pmndrs/reflections/three';
+
+export function useReflections(options: ReflectionsOptions & { enabled?: boolean } = {}) {
+  const { renderer, scene } = useThree();
+  const [reflections, setReflections] = useState<Reflections | null>(null);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+  const enabled = options.enabled ?? true;
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    let made: Reflections | null = null;
+    Reflections.create(renderer, scene, optionsRef.current).then((r) => {
+      if (cancelled) r.dispose(); else { made = r; setReflections(r); }
+    });
+    return () => { cancelled = true; made?.dispose(); setReflections(null); };
+  }, [renderer, scene, enabled]);
+
+  // A job in the 'render' phase takes over R3F's own render call.
+  useFrame(({ renderer, scene, camera }) => {
+    if (reflections) reflections.render(camera);
+    else renderer.render(scene, camera); // a plain frame while it builds
+  }, { phase: 'render' });
+
+  return reflections;
+}
+```
+
+`Reflections.create` is async (the cube-array check, the probe bake, the BVH), so the hook returns `null` until it is
+ready and draws the scene the plain way meanwhile. It builds once per renderer and scene; to rebuild with other
+options, remount the component with a `key`.
+
+## The canvas
+
+```tsx
+import { Canvas, useThree } from '@react-three/fiber';
+import { createReflectionsRenderer } from '@pmndrs/reflections/three';
+import { FfxReflectionDenoiser } from 'denoiser/ffx';
+
+function Scene() {
+  const { scene } = useThree();
+  const [envReady, setEnvReady] = useState(false);
+
+  // The probe captures what the scene shows, so the environment has to be there first.
+  useEffect(() => {
+    scene.environment = environmentTexture;
+    scene.background = scene.environment;
+    setEnvReady(true);
+  }, [scene]);
+
+  useReflections({
+    enabled: envReady,
+    denoiser: (device, { roughnessThreshold }) =>
+      new FfxReflectionDenoiser(device, { roughnessThreshold: roughnessThreshold ** 2 }),
+  });
+
+  return <>{/* meshes with meshStandardMaterial */}</>;
+}
+
+<Canvas renderer={(defaults) => createReflectionsRenderer({ ...defaults, antialias: false })}>
+  <Scene />
+</Canvas>
+```
+
+The complete page is [`examples/r3f`](https://github.com/pmndrs/reflections/tree/main/examples/r3f).
+
+## Notes
+
+- `enabled` is for anything the probe bakes that arrives late: an `<Environment>` that is still loading, a model. Call
+  `reflections.bake()` after the scene changes.
+- Moving objects: screen-space reflections follow them. The probe is a snapshot, and with `rayTracing` the BVH holds the
+  meshes as they were at build time (`reflections.trace.refit()` each frame updates the transforms of the same meshes).
+- One `Reflections` per canvas.

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Quick start: reflections</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; padding: 16px; background: #111; color: #ddd; font: 14px/1.45 system-ui, sans-serif; }
+      a { color: #8cf; }
+      .page { max-width: 1020px; }
+      code { background: #0006; padding: 0 .3em; border-radius: 4px; }
+      canvas { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; border: 1px solid #333; border-radius: 8px; display: block; touch-action: none; }
+      label { display: inline-flex; align-items: center; gap: .4rem; margin: .6rem 0; }
+      #status { font-size: .8rem; white-space: pre-wrap; color: #9a9; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Quick start</h1>
+      <p>
+        An ordinary three.js scene plus <code>Reflections</code>: screen-space reflections, a baked probe for what the screen cannot see,
+        and the denoiser. The code is <a href="https://github.com/pmndrs/reflections/blob/main/examples/quickstart/src/main.ts">src/main.ts</a>.
+        Probes only (the cheapest path): <a href="probes.html">probes.html</a>.
+      </p>
+      <canvas id="view" width="960" height="540"></canvas>
+      <label><input type="checkbox" id="on" checked /> reflections (off: three's own pass, the probe as its environment)</label>
+      <pre id="status">starting...</pre>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

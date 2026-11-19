@@ -25,6 +25,12 @@
   <h1>@pmndrs/reflections examples</h1>
   <p class="lead">Each page also accepts <code>?manual</code> (render loop stopped). See <code>docs/HANDOFF.md</code> for status.</p>
 
+  <h2>Start here</h2>
+  <ul>
+    <li><a href="quickstart/">quickstart</a> — the smallest complete page: a three.js scene (glossy floor, PBR objects, room environment) with reflections from one <code>Reflections.create()</code>; screen space, a baked probe, the denoiser. <span class="d"><code>?rt=1</code> ray-traced fallback, <code>?preset=performance</code>, <code>?denoise=0</code>. Probes only (the cheapest path): <a href="quickstart/probes.html">quickstart/probes.html</a>.</span></li>
+    <li><a href="r3f/">r3f</a> — the same scene in React Three Fiber v10 (WebGPURenderer): a <code>useReflections()</code> hook over <code>Reflections</code>. <span class="d">Same query keys.</span></li>
+  </ul>
+
   <h2>Demos</h2>
   <ul>
     <li><a href="showcase/">showcase</a> — start here: the whole pipeline on real assets (car concept, toy car, chess set on a mirror floor; Sponza with a polished floor). Probes, SSR, ray-traced fallback and denoising as toggles, an off baseline, debug views, GPU ms. <span class="d">Needs <code>pnpm assets</code>. <code>?scene=carConcept|toyCar|chess|sponza</code>, <code>?rt=1</code>, <code>?denoise=0</code>, <code>?off</code>.</span></li>
