@@ -3094,7 +3094,7 @@ const DROP_IN_DIFF = `async (a, b) => {
   }
   return { lum: lum / (w * h), lo, hi, regionMean: sum / n, regionOver: over / n };
 }`;
-async function dropInChecks(pages, name, url, { frames = 30 } = {}) {
+async function dropInChecks(pages, name, url, { frames = 30, maxFlicker = 0.5 } = {}) {
   console.log(`${name}:`);
   const slug = name.replace(/[^a-z0-9]+/gi, '-');
   const before = results.logs.length;
@@ -3121,6 +3121,21 @@ async function dropInChecks(pages, name, url, { frames = 30 } = {}) {
     check(`${name}: reflections are present (floor region differs, on vs off)`, st.regionMean > 1.5 && st.regionOver > 0.01,
       `mean |on - off| ${st.regionMean.toFixed(2)} / 255, ${(st.regionOver * 100).toFixed(1)} % of px over 12`);
   }
+  // stable by default: a still camera, consecutive frames differ by under 1/255 (mean) on < 0.5 % of px
+  const flicker = await p.T(`(async () => {
+    const P = window.__p; const c = document.createElement('canvas'); const g = c.getContext('2d', { willReadFrequently: true });
+    let prev = null, acc = null, n = 0;
+    for (let k = 0; k < 7; k++) {
+      const img = new Image(); img.src = await P.shot(1); await img.decode(); c.width = img.width; c.height = img.height; g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, img.width, img.height).data;
+      const l = new Float32Array(d.length / 4); for (let i = 0; i < l.length; i++) l[i] = 0.2126 * d[4 * i] + 0.7152 * d[4 * i + 1] + 0.0722 * d[4 * i + 2];
+      if (prev) { acc ??= new Float32Array(l.length); for (let i = 0; i < l.length; i++) acc[i] += Math.abs(l[i] - prev[i]); n++; }
+      prev = l;
+    }
+    let over = 0; for (let i = 0; i < acc.length; i++) if (acc[i] / n > 1) over++;
+    return over / acc.length * 100;
+  })()`);
+  check(`${name}: still camera does not flicker (< ${maxFlicker} % of px move more than 1/255 between frames)`, flicker < maxFlicker, `${flicker.toFixed(3)} % of px`);
   return { p, st, info };
 }
 
@@ -3454,6 +3469,7 @@ async function main() {
     if (runs('quickstart')) {
       await dropInChecks(pages, 'examples/quickstart', '/quickstart/?manual');
       await dropInChecks(pages, 'examples/quickstart probes only', '/quickstart/probes.html?manual');
+      await dropInChecks(pages, 'examples/quickstart rt + quality low', '/quickstart/?manual&rt=1&quality=low', { maxFlicker: 1.5 }); // half-res: noisier, no anti-aliasing in the quick start (backlog)
     }
     if (runs('showcase')) await showcaseChecks(pages);
     if (runs('showcase-compare')) await showcaseCompareChecks(pages);
