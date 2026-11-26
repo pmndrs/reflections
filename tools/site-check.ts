@@ -92,7 +92,7 @@ async function httpJson(url: string) {
 async function openPage(url: string) {
   const userDataDir = mkdtempSync(join(tmpdir(), 'reflections-site-'));
   const chrome = spawn(CHROME, ['--headless=new', '--no-sandbox', '--use-angle=metal', '--enable-unsafe-webgpu', '--enable-features=Vulkan', '--window-size=1100,900', '--remote-debugging-port=0', `--user-data-dir=${userDataDir}`, url], { stdio: 'ignore', detached: true });
-  const kill = () => { try { process.kill(-chrome.pid!, 'SIGKILL'); } catch { /* gone */ } try { spawnSync('pkill', ['-9', '-f', userDataDir]); } catch { /* none */ } rmSync(userDataDir, { recursive: true, force: true }); };
+  const kill = () => { try { process.kill(-chrome.pid!, 'SIGKILL'); } catch { /* gone */ } try { spawnSync('pkill', ['-9', '-f', userDataDir]); } catch { /* none */ } try { rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }); } catch { /* Chrome still writing its profile: best effort */ } };
   let port: number | null = null;
   for (const end = Date.now() + 30000; port === null && Date.now() < end; await sleep(100)) { try { port = Number(readFileSync(join(userDataDir, 'DevToolsActivePort'), 'utf8').split('\n')[0]) || null; } catch { /* not yet */ } }
   if (port === null) { kill(); throw new Error('Chrome did not report a DevTools port'); }

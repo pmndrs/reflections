@@ -115,3 +115,11 @@ The default scenes, examples/ssr's RT pages (`rt=1`; before: the old default pro
 | bench:carConcept@w50/ours-rt | wheel | 0.6632 -> 0.6622 | 0.0157 -> 0.0155 | 1.0571 -> 1.0557 | 0.7630 -> 0.7641 | 0.0000 -> 0.0000 | 0.605 -> 0.605 |
 | bench:carConcept@w50/ours-rt | car | 0.5104 -> 0.5108 | 0.0101 -> 0.0101 | 0.5660 -> 0.5665 | 0.4731 -> 0.4730 | 0.0094 -> 0.0098 | 0.605 -> 0.605 |
 | bench:sponza@hero/ours-rt | reflection | 0.3001 -> 0.3003 | 0.0112 -> 0.0112 | 0.5543 -> 0.5543 | 5.2864 -> 5.2865 | 0.2187 -> 0.2192 | 7.125 -> 7.126 |
+
+## Gates (5411, after 5abd5e6)
+
+- Fresh clone of the branch: `pnpm install --frozen-lockfile` OK, typecheck OK, test 84, build OK, `npm pack --dry-run` 22 files, 324.0 kB packed, 1.0 MB unpacked. Bare imports in dist/*.js and dist/*.d.ts: `three/webgpu`, `three/tsl`, `three/addons/tsl/utils/SpecularHelpers.js`, `@babylonjs/core/...` (20 subpaths), `pixi.js`, `@pmndrs/bvh`, `@pmndrs/raytracer`: all published peers (`@pmndrs/downsampler` is bundled).
+- `pnpm docs:check`: the code blocks match their samples; `tsc -p tsconfig.snippets.json` fails on `docs/site/snippets/three.ts(8,3)`: `MeshBVHTraceProvider` is gone (docs/site is another lane: listed for the lead).
+- `pnpm check` per section: sssr-core 45, ssr 33, hybrid 20, ssr-rt 29, ssr-rt-builders 39, probe-core 29, probes 45, babylon 10, showcase 8, showcase-compare 4, regressions 54, preset 7, quickstart 18 (incl. the 2 default-limits pages), r3f 6/7: `r3f rt + preset performance` rest flicker 1.529 % vs the 1.5 % bound; reruns 1.433 / 1.426 % (pass); on 051a49c (the old provider) the same check reads 1.533 / 1.520 % (fail): a borderline bound, not this change.
+- flicker: above (FLICKER_REPEAT=2, before at 051a49c).
+- `pnpm site:build` + `pnpm site:check` (5411): 1126 links / 39 pages, 7 docs pages, showcase x4 (denoiser active, `@pmndrs/raytracer`), the compare page (path tracer converges 8/8 spp, OIDN wgsl), 8 example pages: all pass. site-check's Chrome profile cleanup threw ENOTEMPTY once (Chrome still writing): now best effort.
