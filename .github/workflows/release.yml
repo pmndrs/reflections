@@ -1,0 +1,106 @@
+name: Release
+
+# Publishes @pmndrs/reflections to npm with provenance. Two triggers:
+# - Actions -> Release -> Run workflow (workflow_dispatch): `version` must equal package.json's;
+#   `dry-run` (default true) runs everything but `npm publish --dry-run`.
+# - Pushing a `v*` tag (e.g. v0.1.0-alpha.0): publishes for real; the tag must equal `v` + package.json's version.
+# The dist-tag follows the version: x.y.z -> latest, x.y.z-alpha.N -> alpha, -beta.N -> beta, -rc.N -> rc.
+# Any other prerelease is refused (so nothing lands on `latest` by accident).
+#
+# Before a release, the GPU checks (`pnpm check`) must have passed on a real GPU (CLAUDE.md): CI runners
+# have none, so this job runs the typecheck, the unit tests and the build only. docs/RELEASING.md has the steps.
+#
+# Auth: npm trusted publishing (OIDC), no NPM_TOKEN. Once, on npmjs.com: package @pmndrs/reflections ->
+# Settings -> Trusted publisher -> GitHub Actions: organization pmndrs, repository reflections, workflow
+# release.yml, environment npm. npm refuses provenance from a private repository: the repo must be public.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish. Must equal package.json's (guards against publishing the wrong commit).
+        required: true
+        type: string
+      dry-run:
+        description: Run everything, but `npm publish --dry-run`
+        required: true
+        default: true
+        type: boolean
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  # npm trusted publishing and provenance: the OIDC token npm exchanges and signs the build attestation with.
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish ${{ inputs.version || github.ref_name }}${{ (github.event_name == 'workflow_dispatch' && inputs.dry-run) && ' (dry run)' || '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Optional required reviewers live on this environment (GitHub -> Settings -> Environments -> npm).
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: pnpm/action-setup@v4.1.0
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or later; pin it so a runner's bundled npm can't drift below.
+      - run: npm install -g npm@11.6.2 && npm --version
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the version and pick the dist-tag
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          actual=$(node -p "require('./package.json').version")
+          if [ "$EVENT" = push ]; then wanted="${REF_NAME#v}"; what="tag $REF_NAME"; else wanted="$INPUT_VERSION"; what="input $INPUT_VERSION"; fi
+          if [ "$actual" != "$wanted" ]; then echo "::error::package.json has version $actual, $what wants $wanted"; exit 1; fi
+          if [ "$(node -p "require('./package.json').private === true")" = true ]; then echo "::error::package.json is private"; exit 1; fi
+          case "$actual" in
+            *-alpha.*|*-alpha) tag=alpha ;;
+            *-beta.*|*-beta) tag=beta ;;
+            *-rc.*|*-rc) tag=rc ;;
+            *-*) echo "::error::prerelease $actual is not alpha / beta / rc: no dist-tag for it"; exit 1 ;;
+            *) tag=latest ;;
+          esac
+          echo "dist-tag $tag for $actual"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+      # The private workspace packages are bundled into dist; neither dist nor the packed manifest may name them.
+      # The root's `workspace:*` devDependencies are stripped here (scripts/pack-manifest.mjs; locally prepack / postpack).
+      - name: Check the packed package
+        run: |
+          node scripts/pack-manifest.mjs strip
+          node scripts/pack-manifest.mjs check
+          if grep -rlE "workspace:|@pmndrs/reflections-(core|three|babylon|pixi)" dist; then echo "::error::dist names a private workspace package"; exit 1; fi
+          npm pack --dry-run --ignore-scripts --json > pack.json
+          node -e "const files=JSON.parse(require('fs').readFileSync('pack.json','utf8'))[0].files.map((x)=>x.path);for(const f of ['LICENSE','NOTICE','README.md','CHANGELOG.md','dist/index.js','dist/index.d.ts']){if(!files.includes(f)){console.error('::error::the tarball misses '+f);process.exit(1)}}console.log(files.length+' files')"
+          rm pack.json
+
+      # npm (not pnpm) publishes: the OIDC exchange is the npm CLI's. The checks above already ran, so the
+      # lifecycle scripts are skipped (--ignore-scripts: prepublishOnly would rebuild, postpack would restore the
+      # manifest stripped above).
+      - name: Publish
+        env:
+          DIST_TAG: ${{ steps.version.outputs.tag }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
+        run: |
+          flags=(--provenance --access public --tag "$DIST_TAG" --ignore-scripts)
+          if [ "$DRY_RUN" = true ]; then flags+=(--dry-run); fi
+          npm publish "${flags[@]}"

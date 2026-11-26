@@ -7,10 +7,10 @@
 //
 // Needs: three >= 0.187 and a browser with WebGPU. `?rt=1` adds the ray-traced fallback (`@pmndrs/raytracer`),
 // `?denoise=0` turns the denoiser off, `?preset=performance`.
-// Checks only (W89, D5451): `?limits=default` builds a plain `new WebGPURenderer()` instead of `createReflectionsRenderer`, with
-// WebGPU's default limits (8 storage buffers per stage) except the colour attachment bytes the composite's lit target needs
-// (a renderer without them can't run `Reflections` at all: HANDOFF backlog); `&rtPacking=split` attaches a provider that binds one
-// storage buffer more than 8 with probe hit shading, so ray tracing turns itself off with one warning.
+// Checks only (W89, D5451; W91, D5480): `?limits=default` builds a plain `new WebGPURenderer()` instead of `createReflectionsRenderer`,
+// with WebGPU's default limits (8 storage buffers per stage, 32 colour attachment bytes per sample: the G-buffer renders three's lit
+// image in a second pass, with one warning); `&rtPacking=split` attaches a provider that binds one storage buffer more than 8 with
+// probe hit shading, so ray tracing turns itself off with one warning.
 import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Reflections, createRaytracerTraceProviderFromObjects, createReflectionsRenderer } from '@pmndrs/reflections/three';
@@ -27,9 +27,8 @@ const status = document.querySelector<HTMLElement>('#status')!;
 async function main() {
   // 1. A WebGPURenderer with the device limits the passes need (plain three would not ask for them).
   const defaultLimits = q.get('limits') === 'default';
-  const adapter = defaultLimits ? await navigator.gpu.requestAdapter() : null;
   const renderer = defaultLimits
-    ? new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { maxColorAttachmentBytesPerSample: Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64) } } as never)
+    ? new THREE.WebGPURenderer({ canvas, antialias: false })
     : await createReflectionsRenderer({ canvas, antialias: false });
   if (defaultLimits) await renderer.init();
   renderer.toneMapping = THREE.ACESFilmicToneMapping; // the usual renderer settings still apply
@@ -83,6 +82,7 @@ async function main() {
     info: () => ({
       denoiser: !!reflections.hybrid.denoiser, probes: !!reflections.probes, rt: !!reflections.trace, baked: reflections.probes?.bakedProbes.length ?? 0,
       storageBuffersPerStage: reflections.ssr.device.limits.maxStorageBuffersPerShaderStage, traced: !!reflections.ssr.traced, traceError: reflections.ssr.traceError,
+      colorBytesPerSample: reflections.ssr.device.limits.maxColorAttachmentBytesPerSample, litPass: reflections.ssr.gbuffer.litPass, exactSpecular: reflections.ssr.gbuffer.specular,
     }),
   };
 }

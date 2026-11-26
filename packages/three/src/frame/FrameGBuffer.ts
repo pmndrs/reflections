@@ -15,9 +15,11 @@
 //                                  `textures.motion`. The MRT slot must be named 'velocity': three only
 //                                  moves `positionPrevious` by last frame's instance / bone / batch
 //                                  matrices when `builder.needsPreviousData()`, i.e. `mrt.has('velocity')`.
-//   lit (optional)   rgba16float   three's full lit output (+8 bytes: needs a raised limit, see `lit`);
+//   lit (optional)   rgba16float   three's full lit output (+8 bytes: 36 in all, see `lit`);
 //                                  attachment 0 when written, since three's transmission refracts
-//                                  attachment 0 (D3520). The rest follow in the order listed.
+//                                  attachment 0 (D3520). The rest follow in the order listed. On a
+//                                  device with WebGPU's default 32 bytes it is rendered in a second
+//                                  pass of the scene into its own target instead (W91, D5480).
 //   specular (opt.)  rgba16float   three's environment-specular weights (with `lit`, +8 bytes, D603):
 //                                  rgb = single scattering (specularColorBlended x DFG.x + specularF90 x DFG.y)
 //                                        x the clear coat's base scale (1 - cc Fcc, D3512),
@@ -60,11 +62,14 @@ export interface FrameGBufferOptions {
   width?: number;
   height?: number;
   /**
-   * Also write three's full lit image (8 more bytes per sample, 36 in all). `'auto'` (default)
-   * enables it when the device allows it (`maxColorAttachmentBytesPerSample >= 36`; request it with
-   * `new WebGPURenderer({ requiredLimits: { maxColorAttachmentBytesPerSample: 64 } })`).
+   * Three's full lit image, which the hybrid composite starts from. `true`: one more target in the
+   * G-buffer's render (8 more bytes per sample, 36 in all: needs `maxColorAttachmentBytesPerSample >= 36`,
+   * which `createReflectionsRenderer` / `reflectionsRequiredLimits(adapter)` request; throws without it).
+   * `'pass'`: a second render of the scene into its own target (any device; one more scene draw per
+   * frame). `'auto'` (default): `true` when the device allows 36 bytes, else `'pass'` with one console
+   * warning (W91, D5480: WebGPU's default is 32, what a plain `new WebGPURenderer()` gets). `false`: none.
    */
-  lit?: boolean | 'auto';
+  lit?: boolean | 'auto' | 'pass';
   /**
    * Also write three's own environment-specular weights (`specular`, rgba16float) and shading
    * roughness (`shadingRoughness`, r16float): 10 more bytes per sample on top of `lit` (46 in all).
@@ -85,6 +90,16 @@ export interface FrameGBufferOptions {
 }
 
 const BYTES = { base: 8 + 8 + 8 + 4, lit: 8, specular: 8 + 2, clearcoat: 4 };
+
+let litPassWarned = false;
+/** One console warning per page when `lit: 'auto'` falls back to the second pass (D5480). */
+function warnLitPassOnce(limit: number, needed: number) {
+  if (litPassWarned) return;
+  litPassWarned = true;
+  console.warn(`Reflections: maxColorAttachmentBytesPerSample is ${limit} (WebGPU's default is 32, all a plain new WebGPURenderer() asks for); the G-buffer with three's lit image needs ${needed}. `
+    + `Build the renderer with createReflectionsRenderer() (or new WebGPURenderer({ requiredLimits: reflectionsRequiredLimits(adapter) })) to render once. `
+    + `Until then the lit image is rendered in a second pass of the scene (one more scene draw per frame) and three's exact specular weights are estimated.`);
+}
 
 /**
  * three's VelocityNode with the camera half of its history taken from our FrameCamera instead of
@@ -127,7 +142,12 @@ export class FrameGBuffer {
   readonly renderer: THREE.WebGPURenderer;
   readonly renderTarget: THREE.RenderTarget;
   readonly mrt: N;
+  /** The `lit` target is written (in the G-buffer's render, or in a second pass: `litPass`). */
   readonly lit: boolean;
+  /** The `lit` target is a second render of the scene, not one of the G-buffer's attachments (option `lit`, D5480). */
+  readonly litPass: boolean;
+  /** The second pass's target (`litPass`), null when `lit` is in the G-buffer or off. */
+  readonly litTarget: THREE.RenderTarget | null;
   /** The `specular` and `shadingRoughness` targets are written (see the option). */
   readonly specular: boolean;
   /** The `clearcoat` target is written (see the option). */
@@ -151,14 +171,19 @@ export class FrameGBuffer {
     }
     const limit = device.limits.maxColorAttachmentBytesPerSample;
     const wantLit = options.lit ?? 'auto';
-    this.lit = wantLit === 'auto' ? limit >= BYTES.base + BYTES.lit : wantLit;
-    if (this.lit && limit < BYTES.base + BYTES.lit) {
-      throw new Error(`FrameGBuffer: lit needs maxColorAttachmentBytesPerSample >= ${BYTES.base + BYTES.lit}, device has ${limit}`);
+    const litFits = limit >= BYTES.base + BYTES.lit;
+    this.lit = wantLit !== false;
+    this.litPass = wantLit === 'pass' || (wantLit === 'auto' && !litFits);
+    if (wantLit === true && !litFits) {
+      throw new Error(`FrameGBuffer: lit needs maxColorAttachmentBytesPerSample >= ${BYTES.base + BYTES.lit}, device has ${limit} `
+        + `(createReflectionsRenderer() or requiredLimits: reflectionsRequiredLimits(adapter) request it; lit: 'pass' renders it in a second pass instead)`);
     }
+    if (wantLit === 'auto' && this.litPass) warnLitPassOnce(limit, BYTES.base + BYTES.lit);
+    const inMRT = this.lit && !this.litPass;
     const withSpecular = BYTES.base + BYTES.lit + BYTES.specular;
     const wantSpecular = options.specular ?? 'auto';
-    this.specular = wantSpecular === 'auto' ? this.lit && limit >= withSpecular : wantSpecular;
-    if (this.specular && !this.lit) throw new Error('FrameGBuffer: specular needs the lit target');
+    this.specular = wantSpecular === 'auto' ? inMRT && limit >= withSpecular : wantSpecular;
+    if (this.specular && !inMRT) throw new Error('FrameGBuffer: specular needs the lit target in the G-buffer (lit: true)');
     if (this.specular && limit < withSpecular) {
       throw new Error(`FrameGBuffer: specular needs maxColorAttachmentBytesPerSample >= ${withSpecular}, device has ${limit}`);
     }
@@ -180,7 +205,7 @@ export class FrameGBuffer {
     // (WebGPUBackend.copyFramebufferToTexture: `renderContext.textures[0]`). With `output` (scene
     // colour without specular) there, glass refracted every metal (gold trim, a mirror floor) as
     // black (W42, D3520). Without `lit` the backdrop stays specular-free.
-    const names: FrameTargetName[] = this.lit ? ['lit', 'output'] : ['output'];
+    const names: FrameTargetName[] = inMRT ? ['lit', 'output'] : ['output'];
     names.push('normalRoughness', 'albedoMetalness', 'motion');
     if (this.specular) names.push('specular', 'shadingRoughness');
     if (this.clearcoat) names.push('clearcoat');
@@ -199,7 +224,18 @@ export class FrameGBuffer {
     if (this.specular) rt.textures[names.indexOf('shadingRoughness')].format = THREE.RedFormat; // r16float
     if (this.clearcoat) rt.textures[names.indexOf('clearcoat')].format = THREE.RGFormat; // rg16float
     this.renderTarget = rt;
-    this.textures = Object.fromEntries([...names.map((n, i) => [n, rt.textures[i]]), ['depth', depth]]) as never;
+    this.litTarget = null;
+    const entries: [string, THREE.Texture][] = [...names.map((n, i): [string, THREE.Texture] => [n, rt.textures[i]]), ['depth', depth]];
+    if (this.litPass) {
+      // D5480: three's plain render of the scene into its own target, the same image as the MRT's `lit`
+      const lt = new THREE.RenderTarget(w, h, { type: THREE.HalfFloatType, depthBuffer: true });
+      lt.texture.name = 'lit';
+      lt.texture.minFilter = lt.texture.magFilter = THREE.NearestFilter;
+      lt.texture.generateMipmaps = false;
+      this.litTarget = lt;
+      entries.push(['lit', lt.texture]);
+    }
+    this.textures = Object.fromEntries(entries) as never;
 
     this.velocityNode = new HistoryVelocityNode();
     const velocity = (nodeObject(this.velocityNode as N) as N).mul(this.historyValid);
@@ -210,7 +246,7 @@ export class FrameGBuffer {
       albedoMetalness: vec4((diffuseColor as N).rgb, gbufferMetalness),
       velocity: motionNode, // must be 'velocity', see the header
     };
-    if (this.lit) outputs.lit = output;
+    if (inMRT) outputs.lit = output;
     if (this.specular) { outputs.specular = gbufferSpecular; outputs.shadingRoughness = gbufferShadingRoughness; }
     if (this.clearcoat) outputs.clearcoat = gbufferClearcoat;
     this.mrt = mrt(outputs);
@@ -237,6 +273,7 @@ export class FrameGBuffer {
   setSize(width: number, height: number) {
     if (width === this.renderTarget.width && height === this.renderTarget.height) return;
     this.renderTarget.setSize(width, height);
+    this.litTarget?.setSize(width, height);
   }
 
   /** Drop the previous frame (camera cut, scene switch): the next render has prev = current and zero motion. */
@@ -288,6 +325,16 @@ export class FrameGBuffer {
     r.setRenderTarget(this.renderTarget);
     r.setMRT(this.mrt);
     r.render(scene, camera);
+    if (this.litTarget) {
+      // the second pass (D5480): no MRT, so no velocity node (objects' motion history stays the G-buffer's);
+      // cleared to zero like the MRT's `lit` attachment
+      const clear = r.getClearColor(new THREE.Color()), alpha = r.getClearAlpha();
+      r.setMRT(null);
+      r.setRenderTarget(this.litTarget);
+      r.setClearColor(0x000000, 0);
+      r.render(scene, camera);
+      r.setClearColor(clear, alpha);
+    }
     r.setRenderTarget(prevTarget);
     r.setMRT(prevMRT);
 
@@ -318,6 +365,7 @@ export class FrameGBuffer {
 
   dispose() {
     this.renderTarget.dispose();
+    this.litTarget?.dispose();
     this.textures.depth.dispose();
   }
 }

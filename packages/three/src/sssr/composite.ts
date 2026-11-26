@@ -70,7 +70,7 @@ export interface ScreenSpaceCompositeOptions {
    * no `specular` target: with it, three's own per-material intensity is in the target.
    */
   environmentIntensity?: number | N;
-  /** The lit image (HDR, linear). Default: the G-buffer's `lit` target (throws if it has none). */
+  /** The lit image (HDR, linear). Default: the G-buffer's `lit` target (throws if it has none: `lit: false`). */
   lit?: N;
   /** Screen uv to composite at. Default `uv()` (a full-screen pass). */
   uv?: N;
@@ -173,7 +173,7 @@ export interface ScreenSpaceComposite {
 export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: ScreenSpaceCompositeOptions = {}): ScreenSpaceComposite {
   const g = ssr.gbuffer.textures;
   const at = options.uv ?? uv();
-  if (!options.lit && !g.lit) throw new Error('screenSpaceComposite: the G-buffer has no lit target (raise maxColorAttachmentBytesPerSample to 36+) and no `lit` was given');
+  if (!options.lit && !g.lit) throw new Error('screenSpaceComposite: the G-buffer has no lit target (FrameGBuffer option `lit: false`) and no `lit` was given');
   const lit: N = options.lit ?? texture(g.lit!, at).rgb;
   const nr: N = texture(g.normalRoughness!, at);
   const am: N = texture(g.albedoMetalness!, at);

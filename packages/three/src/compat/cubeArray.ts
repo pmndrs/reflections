@@ -59,7 +59,8 @@ export interface InstallCubeArrayOptions {
 
 /** three's own CubeArrayTexture class, when the installed three has one (#35053 landed). */
 export function nativeCubeArrayTexture(): typeof VendoredCubeArrayTexture | null {
-  const native = (THREE as Record<string, unknown>)['CubeArrayTexture'];
+  // Reflect.get, not THREE['CubeArrayTexture']: bundlers fold the literal and warn "not exported" in every app's build (W91)
+  const native: unknown = Reflect.get(THREE, 'CubeArrayTexture');
   return typeof native === 'function' ? (native as typeof VendoredCubeArrayTexture) : null;
 }
 
