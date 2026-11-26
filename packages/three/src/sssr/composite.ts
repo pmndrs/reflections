@@ -140,6 +140,8 @@ export interface ScreenSpaceComposite {
   specularOcclusion: N;
   /** Local probe coverage in [0, 1] (0 without probes): the probe vs environment split of `probeSpecular`. */
   coverage: N;
+  /** The world position the probe lookups use: P moved off the surface along its normal (D5420). P itself without probes. */
+  probePosition: N;
   /** Perceptual roughness from the G-buffer. */
   roughness: N;
   confidence: N;
@@ -209,6 +211,7 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
   }
   let probeSpecular: N;
   let coverage: N = float(0);
+  let probePosition: N = P;
   if (options.probes) {
     // the same lookup three lit with (reflectionProbes()): the volumes by coverage, then the atlas's
     // environment slot, not pmremTexture(environment). The two environments differ (capture vs PMREM,
@@ -222,6 +225,7 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
     const Pprobe: N = P.add(Nw.mul(viewPosition.length().mul(PROBE_LOOKUP_NUDGE_SCALE).add(PROBE_LOOKUP_NUDGE_BIAS)));
     probeSpecular = (sampleReflectionProbes as N)(options.probes, Pprobe, R, roughness);
     coverage = sampleReflectionProbesLocal(options.probes, Pprobe, R, roughness).a;
+    probePosition = Pprobe;
   } else {
     probeSpecular = options.environment ? (pmremTexture as N)(options.environment, R, roughness).rgb : vec3(0);
   }
@@ -291,7 +295,7 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
     const upSpecular: N = residual.rgb.add(upWeight.oneMinus().mul(specularOcclusion).mul(probeSpecular)).toVar();
     const final: N = vec4(geometry.select(lit.add(weight.mul(upSpecular.sub(probeSpecular)).mul(amount)).max(0), lit), 1);
     return {
-      final, lit, weight, scale, exact: float(exact ? 1 : 0), probeSpecular, specular: upSpecular, signal: upSpecular, denoised: upSpecular, denoise, specularOcclusion, coverage, roughness: float(nr.w),
+      final, lit, weight, scale, exact: float(exact ? 1 : 0), probeSpecular, specular: upSpecular, signal: upSpecular, denoised: upSpecular, denoise, specularOcclusion, coverage, probePosition, roughness: float(nr.w),
       confidence, ssrWeight: upWeight, hitFade, probeConsistency, depthAware, ssr: ssrRadiance, geometry, amount,
       hitDistance,
       source: sourceAt(),
@@ -302,7 +306,7 @@ export function screenSpaceComposite(ssr: ScreenSpaceReflectionsPass, options: S
   const delta: N = weight.mul(specular.sub(probeSpecular)).mul(amount);
   const final: N = vec4(geometry.select(lit.add(delta).max(0), lit), 1);
   return {
-    final, lit, weight, scale, exact: float(exact ? 1 : 0), probeSpecular, specular, signal, denoised, denoise, specularOcclusion, coverage, roughness: float(nr.w),
+    final, lit, weight, scale, exact: float(exact ? 1 : 0), probeSpecular, specular, signal, denoised, denoise, specularOcclusion, coverage, probePosition, roughness: float(nr.w),
     confidence, ssrWeight, hitFade, probeConsistency, depthAware, ssr: ssrRadiance, geometry, amount,
     hitDistance,
     source: texture(ssr.source, at).x,

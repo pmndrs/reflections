@@ -370,7 +370,7 @@ async function main() {
     const dim = tone(c.lit).mul(0.35);
     // W61: the baked set's volume weights at this px's world position (../../shared/probeDebug.ts)
     probeViewsBuilt = PROBE_VIEWS.includes(shownView);
-    const pw = probeWeights(probeViewsBuilt && useProbes && probesEnabled ? probes : null, gbufferWorldPosition(ssr as N, at).P);
+    const pw = probeWeights(probeViewsBuilt && useProbes && probesEnabled ? probes : null, c.probePosition); // the composite's nudged lookup position (D5420), so the views weigh what the lookup weighed
     const litLuma: N = tone(c.lit).dot(vec3(0.2126, 0.7152, 0.0722));
     const bg = vec3(0.02, 0.03, 0.08);
     // tone-mapped views (LINEAR_VIEWS): linear while the upscaler runs, which tone-maps after it
