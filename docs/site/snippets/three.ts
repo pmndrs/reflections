@@ -3,13 +3,16 @@
 // Edit the region here, then run `pnpm docs:snippets` to copy it into the pages.
 import * as THREE from 'three/webgpu';
 import { renderOutput } from 'three/tsl';
+import { FfxReflectionDenoiser } from 'denoiser/ffx';
 import {
   HybridReflections,
-  MeshBVHTraceProvider,
+  Reflections,
   ReflectionProbe,
   ReflectionProbes,
   ScreenSpaceReflectionsPass,
   applyReflectionsPreset,
+  createRaytracerTraceProviderFromObjects,
+  createReflectionsRenderer,
   installCubeArraySupport,
   getDevice,
   reflectionProbes,
@@ -31,6 +34,23 @@ export async function createRenderer(canvas: HTMLCanvasElement): Promise<THREE.W
   return renderer;
 }
 // #endregion
+
+export async function oneCall(canvas: HTMLCanvasElement, scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
+  // #region reflections-create
+  // A WebGPURenderer with the device limits the passes need, already initialised.
+  const renderer = await createReflectionsRenderer({ canvas, antialias: false });
+
+  const reflections = await Reflections.create(renderer, scene, {
+    preset: 'default', // or 'performance'
+    rayTracing: false, // true needs @pmndrs/raytracer and @pmndrs/bvh
+    denoiser: (device, { roughnessThreshold }) => new FfxReflectionDenoiser(device, { roughnessThreshold: roughnessThreshold ** 2 }),
+  });
+
+  // Where you called renderer.render(scene, camera):
+  renderer.setAnimationLoop(() => reflections.render(camera));
+  // #endregion
+  return reflections;
+}
 
 export async function firstFrame(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, denoiser: TemporalDenoiser<SpecularInputs> | null) {
   // #region first-frame
@@ -74,7 +94,8 @@ export async function bakeProbes(renderer: THREE.WebGPURenderer, scene: THREE.Sc
 
 export async function rayTracedFallback(renderer: THREE.WebGPURenderer, scene: THREE.Scene, meshes: THREE.Mesh[]) {
   // #region ray-traced
-  const provider = await MeshBVHTraceProvider.fromObjects(getDevice(renderer), meshes);
+  // needs `npm install @pmndrs/raytracer @pmndrs/bvh`
+  const { provider } = await createRaytracerTraceProviderFromObjects(getDevice(renderer), meshes);
   const ssr = new ScreenSpaceReflectionsPass(renderer, { trace: { provider } });
   // #endregion
   return ssr;

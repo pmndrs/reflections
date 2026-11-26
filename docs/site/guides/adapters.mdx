@@ -1,0 +1,62 @@
+---
+title: Adapters
+description: Which engine adapter has which feature. three.js, React Three Fiber, Babylon.js and pixi.js side by side.
+nav: 19
+---
+
+The core of `@pmndrs/reflections` runs on a bare `GPUDevice` and knows no engine. Each adapter turns an engine's frame
+into the [frame contract](/concepts/frame-contract) and puts the result back. The adapters do not all have the same
+parts wired in. This page lists what each has.
+
+## Feature matrix
+
+| Feature | three.js | React Three Fiber | Babylon.js | pixi.js |
+| --- | --- | --- | --- | --- |
+| Reflection probes | Yes | Yes | Yes | Yes |
+| Screen-space reflections | Yes | Yes | Yes | Yes |
+| Ray-traced fallback | Yes | Yes | No | No |
+| Denoiser seam | Yes | Yes | No | Yes |
+| Presets (`default`, `performance`) | Yes | Yes | No | No |
+| Hybrid resolve (`HybridReflections`) | Yes | Yes | No | No |
+| One-call setup (`Reflections.create`) | Yes | Yes, in a hook | No | No |
+| Status | Main adapter | Uses the three.js adapter | Experimental | Experimental |
+
+React Three Fiber is not a separate adapter. It is the three.js adapter under a `<Canvas>`, with a hook from the
+example that calls `Reflections.create`.
+
+What the rows mean:
+
+- **Probes.** Baked, prefiltered captures of the scene, blended by influence volume. [Reflection probes](/concepts/reflection-probes).
+- **Screen-space reflections.** The tracer that marches the depth buffer. [Screen-space reflections](/concepts/screen-space-reflections).
+- **Ray-traced fallback.** Rays through a BVH for what the screen misses, through `@pmndrs/raytracer`.
+  [Ray-traced fallback](/concepts/ray-traced-fallback).
+- **Denoiser seam.** You pass a temporal denoiser (`denoiser/ffx`) and the adapter runs it on the traced signal.
+  [Denoising and upscaling](/concepts/denoising-and-upscaling).
+- **Presets.** Named bundles of settings, applied with `preset` or `applyReflectionsPreset`.
+  [Performance and quality](/guides/performance-and-quality).
+- **Hybrid resolve.** One object that picks the screen hit, the traced hit, the probe or the environment per pixel, and
+  denoises the result. [Hybrid resolve](/concepts/hybrid-resolve).
+- **One-call setup.** One `await Reflections.create(renderer, scene, options)` and one `reflections.render(camera)` per
+  frame.
+
+On Babylon and pixi the tracer takes the probes (and an environment slot) as its fallback, and a composite adds the
+result to the lit image. That is screen space with probes behind it. It is not the hybrid resolve.
+
+## Which adapter do I need
+
+- **three.js, with or without React.** The [three.js page](/guides/three) or the
+  [React Three Fiber page](/guides/react-three-fiber). Start with `Reflections.create`.
+- **Babylon.js.** The [Babylon.js page](/guides/babylon). You build a frame graph with the two reflection tasks.
+- **pixi.js.** The [pixi.js page](/guides/pixi). It needs the pixi-3d closed beta.
+- **Another engine.** Use `@pmndrs/reflections/core` on a `GPUDevice`. An adapter maps the engine's G-buffer, camera
+  and conventions onto the frame contract, then reuses the core passes.
+
+## Peer packages by adapter
+
+| Adapter | Required | Optional |
+| --- | --- | --- |
+| three.js, React Three Fiber | `three` `>=0.187.0` | `@pmndrs/raytracer` `^0.1.0` and `@pmndrs/bvh` `^0.1.0` for ray tracing, `denoiser` `^2.0.0` |
+| Babylon.js | `@babylonjs/core` `>=9.35.0 <10` | none |
+| pixi.js | `pixi.js` `>=8.22.0 <9`, and pixi-3d (closed beta) | `denoiser` `^2.0.0` |
+
+All of them need a browser with WebGPU. There is no WebGL path.

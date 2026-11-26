@@ -74,15 +74,19 @@ Pass the same `probes` to `HybridReflections({ probes })`, so the composite remo
 
 ## Add the ray-traced fallback
 
-The ray tracer needs a BVH of your meshes. The three.js adapter builds one with `three-mesh-bvh`:
+The ray tracer needs a BVH of your meshes. The three.js adapter builds one with
+[`@pmndrs/raytracer`](/concepts/ray-traced-fallback) (`npm install @pmndrs/raytracer @pmndrs/bvh`). The helper
+returns the provider and a `refit()` function for moving meshes:
 
 {/* snippet: ray-traced */}
 ```ts
-const provider = await MeshBVHTraceProvider.fromObjects(getDevice(renderer), meshes);
+// needs `npm install @pmndrs/raytracer @pmndrs/bvh`
+const { provider } = await createRaytracerTraceProviderFromObjects(getDevice(renderer), meshes);
 const ssr = new ScreenSpaceReflectionsPass(renderer, { trace: { provider } });
 ```
 
-Only the rays SSR missed are traced. See [Ray-traced fallback](/concepts/ray-traced-fallback).
+Only the rays SSR missed are traced. If the device cannot fit the traced pass, it warns once and the frame goes on
+with screen space and probes. See [Ray-traced fallback](/concepts/ray-traced-fallback).
 
 ## Next
 

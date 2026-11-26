@@ -8,6 +8,7 @@ You need three.js r187 or newer with `WebGPURenderer`, and a browser with WebGPU
 
 ```bash
 npm install @pmndrs/reflections three
+npm install denoiser   # optional: steady glossy reflections
 ```
 
 ## The whole hybrid, in one object
@@ -47,7 +48,7 @@ A complete page with a scene is [`examples/quickstart`](https://github.com/pmndr
 |---|---|---|
 | `preset` | `'default'` | `'default'` is the package defaults. `'performance'` traces and denoises at half resolution. |
 | `probes` | `true` | `true` bakes one probe over the scene's bounds. Pass a `ReflectionProbes` set you baked yourself, or `false` for the scene's environment alone. |
-| `rayTracing` | `false` | `true` traces every visible mesh for the rays neither the screen nor the probe can answer (needs `@pmndrs/bvh`). An array limits it to those objects. |
+| `rayTracing` | `false` | `true` traces every visible mesh for the rays neither the screen nor the probe can answer (needs `@pmndrs/raytracer` and `@pmndrs/bvh`, see [Ray-traced fallback](/concepts/ray-traced-fallback)). An array limits it to those objects. |
 | `denoiser` | none | A `TemporalDenoiser`, or a function `(device, { roughnessThreshold }) => denoiser`. FFX compares alpha, so square the threshold. |
 | `settings` | none | Overrides over the preset (see the settings guide). |
 
@@ -83,14 +84,12 @@ physically based specular term to replace, so they are left as three draws them.
 
 ## The denoiser
 
-`denoiser/ffx` is a separate library ([`denoiser`](https://github.com/pmndrs/denoiser)): AMD's reflection denoiser
-ported to WGSL, running on the renderer's device. It is what makes glossy reflections steady at rest and in motion.
-
-It isn't on npm yet: `denoiser` 2.x (the version with `denoiser/ffx`) is unpublished, and the `denoiser` on npm today
-is the old 0.0.x. Until 2.0 is published, build it from the repo, or leave the option out: reflections still work,
-glossy surfaces are just noisier.
+`denoiser/ffx` is a separate package ([`denoiser`](https://github.com/pmndrs/denoiser), version 2 or newer): a
+reflection denoiser written in WGSL, running on the renderer's device. It is what makes glossy reflections steady at
+rest and in motion. If you leave the option out, reflections still work and glossy surfaces are just noisier.
 
 ## Next
 
-- Using React Three Fiber? See the [React Three Fiber guide](/guides/react-three-fiber).
+- Using React Three Fiber? See the [React Three Fiber guide](/guides/react-three-fiber). Babylon.js or pixi.js? See
+  the [adapter comparison](/guides/adapters).
 - To tune: every setting, its default and its cost is in the settings guide.

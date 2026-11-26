@@ -8,10 +8,6 @@ nav: 1
 npm install @pmndrs/reflections three
 ```
 
-> [!NOTE]
-> `@pmndrs/reflections` is not published yet. Until it is, build it from
-> [the repository](https://github.com/pmndrs/reflections) (`pnpm install && pnpm build`) and link it.
-
 ## Peer dependencies
 
 Every peer is optional, so you install only what you use.
@@ -19,13 +15,24 @@ Every peer is optional, so you install only what you use.
 | Peer | Version | You need it for |
 | --- | --- | --- |
 | `three` | `>=0.187.0` | The three.js adapter. r187 is the floor. |
-| `three-mesh-bvh` | `>=0.9.18` | The ray-traced fallback on three, as the BVH provider. |
-| `@pmndrs/bvh` | any | The ray-traced fallback, as the library's own BVH provider (not on npm yet). |
 | `@babylonjs/core` | `>=9.35.0 <10` | The Babylon adapter. |
 | `pixi.js` | `>=8.22.0 <9` | The pixi adapter. |
+| `@pmndrs/raytracer` | `^0.1.0` | The ray-traced fallback (`rayTracing: true`). The only ray-tracing provider. |
+| `@pmndrs/bvh` | `^0.1.0` | The BVH that `@pmndrs/raytracer` walks. Install it with the raytracer. |
 
-The denoiser is not a peer on purpose. It plugs in through a small interface, so you pass an object in. See
+For ray tracing, install both:
+
+```bash
+npm install @pmndrs/raytracer @pmndrs/bvh
+```
+
+The denoiser is not a peer on purpose. It plugs in through a small interface, so you pass an object in. Install it
+as its own package, [`denoiser`](https://github.com/pmndrs/denoiser) `^2.0.0` (`npm install denoiser`). See
 [Denoising and upscaling](/concepts/denoising-and-upscaling).
+
+Each adapter has a page with its own install line and a minimal setup: [three.js](/guides/three),
+[React Three Fiber](/guides/react-three-fiber), [Babylon.js](/guides/babylon), [pixi.js](/guides/pixi). The
+[adapter comparison](/guides/adapters) lists what each one supports.
 
 ## Entry points
 
@@ -44,7 +51,9 @@ The package is ES modules only, with `sideEffects: false`.
 - **WebGPU.** Current Chrome and Edge, and Safari Technology Preview, have it. There is no WebGL path.
 - **Compute shaders and storage textures.** Everything WebGPU gives you by default.
 - **More device limits than the defaults.** The G-buffer and the composite use more colour-attachment bytes and
-  sampled textures than WebGPU's default limits allow. The next section shows how to ask for them.
+  sampled textures than WebGPU's default limits allow. The next section shows how to ask for them. The ray-traced
+  pass fits WebGPU's default of 8 storage buffers per stage in three's default setup (see
+  [Troubleshooting](/guides/troubleshooting#a-texture-or-storage-limit-error)).
 - **Optional features** the library uses when the adapter has them: `subgroups` (a faster tracer variant) and
   `timestamp-query` (per-pass GPU times).
 

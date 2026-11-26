@@ -1,18 +1,36 @@
 ---
 title: React Three Fiber
 description: Reflections in a React Three Fiber v10 canvas, with a useReflections hook.
-nav: 3
+nav: 21
 ---
 
-React Three Fiber v10 renders with `WebGPURenderer` by default, so `@pmndrs/reflections` works under a plain `<Canvas>`.
-You need `@react-three/fiber` 10 (the `alpha` tag at the time of writing; the last tested version is
-`10.0.0-alpha.6`), React 19 and three r187 or newer.
+React Three Fiber (R3F) v10 renders with `WebGPURenderer`, so the [three.js adapter](/guides/three) works under a plain
+`<Canvas>`. Everything `Reflections.create` does is available: probes, screen-space reflections, the ray-traced
+fallback, the denoiser, presets and the hybrid resolve. The package has no React code. A small hook of about thirty
+lines, copied from the example, wraps `Reflections.create`. See the [adapter comparison](/guides/adapters).
+
+## Install
+
+R3F v10 is on the `alpha` tag at the time of writing. The last tested version is `10.0.0-alpha.6`. You also need
+React 19.
 
 ```bash
 npm install @react-three/fiber@alpha react react-dom three @pmndrs/reflections
 ```
 
-## Setup
+| Package | Range | When |
+| --- | --- | --- |
+| `three` | `>=0.187.0` | Always. |
+| `@react-three/fiber` | `10.0.0-alpha.6` tested | Always. |
+| `@pmndrs/raytracer` | `^0.1.0` (optional) | `rayTracing: true`. |
+| `@pmndrs/bvh` | `^0.1.0` (optional) | Install with `@pmndrs/raytracer`. |
+| `denoiser` | `^2.0.0` (optional, not a peer) | `denoiser/ffx`, for steady glossy reflections. |
+
+```bash
+npm install @pmndrs/raytracer @pmndrs/bvh denoiser
+```
+
+## Minimal setup
 
 Two things differ from a plain canvas:
 
@@ -20,18 +38,18 @@ Two things differ from a plain canvas:
    `createReflectionsRenderer` through it.
 2. The frame is drawn by `Reflections`, not by R3F's default render. A `useFrame` job in the `render` phase takes over.
 
-## A `useReflections` hook
+### The `useReflections` hook
 
-There is no hook in the package yet. This one is about thirty lines on top of `Reflections.create`
-([`examples/r3f/src/useReflections.ts`](https://github.com/pmndrs/reflections/blob/main/examples/r3f/src/useReflections.ts)):
+This is [`examples/r3f/src/useReflections.ts`](https://github.com/pmndrs/reflections/blob/main/examples/r3f/src/useReflections.ts):
 
 ```tsx
 import { useEffect, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
+import type * as THREE from 'three/webgpu';
 import { Reflections, type ReflectionsOptions } from '@pmndrs/reflections/three';
 
 export function useReflections(options: ReflectionsOptions & { enabled?: boolean } = {}) {
-  const { renderer, scene } = useThree();
+  const { renderer, scene } = useThree() as unknown as { renderer: THREE.WebGPURenderer; scene: THREE.Scene };
   const [reflections, setReflections] = useState<Reflections | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -43,14 +61,14 @@ export function useReflections(options: ReflectionsOptions & { enabled?: boolean
     let made: Reflections | null = null;
     Reflections.create(renderer, scene, optionsRef.current).then((r) => {
       if (cancelled) r.dispose(); else { made = r; setReflections(r); }
-    });
+    }, (e) => console.error('useReflections:', e));
     return () => { cancelled = true; made?.dispose(); setReflections(null); };
   }, [renderer, scene, enabled]);
 
-  // A job in the 'render' phase takes over R3F's own render call.
+  // A job in the 'render' phase takes over R3F's own render call; this draws the frame instead.
   useFrame(({ renderer, scene, camera }) => {
     if (reflections) reflections.render(camera);
-    else renderer.render(scene, camera); // a plain frame while it builds
+    else (renderer as THREE.WebGPURenderer).render(scene, camera);
   }, { phase: 'render' });
 
   return reflections;
@@ -58,26 +76,31 @@ export function useReflections(options: ReflectionsOptions & { enabled?: boolean
 ```
 
 `Reflections.create` is async (the cube-array check, the probe bake, the BVH), so the hook returns `null` until it is
-ready and draws the scene the plain way meanwhile. It builds once per renderer and scene; to rebuild with other
-options, remount the component with a `key`.
+ready and draws the scene the plain way meanwhile. It builds once per renderer and scene. To rebuild with other
+options, remount the component with a `key`. If creation fails, the error goes to the console and the plain frame
+stays.
 
-## The canvas
+### The canvas
 
 ```tsx
+import { useEffect, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
+import * as THREE from 'three/webgpu';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createReflectionsRenderer } from '@pmndrs/reflections/three';
 import { FfxReflectionDenoiser } from 'denoiser/ffx';
+import { useReflections } from './useReflections';
 
 function Scene() {
-  const { scene } = useThree();
+  const { renderer, scene } = useThree() as unknown as { renderer: THREE.WebGPURenderer; scene: THREE.Scene };
   const [envReady, setEnvReady] = useState(false);
 
   // The probe captures what the scene shows, so the environment has to be there first.
   useEffect(() => {
-    scene.environment = environmentTexture;
+    scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
     scene.background = scene.environment;
     setEnvReady(true);
-  }, [scene]);
+  }, [renderer, scene]);
 
   useReflections({
     enabled: envReady,
@@ -85,20 +108,53 @@ function Scene() {
       new FfxReflectionDenoiser(device, { roughnessThreshold: roughnessThreshold ** 2 }),
   });
 
-  return <>{/* meshes with meshStandardMaterial */}</>;
+  return (
+    <>
+      <directionalLight position={[3, 6, 2]} intensity={1.6} />
+      <mesh rotation-x={-Math.PI / 2}>
+        <circleGeometry args={[6, 64]} />
+        <meshStandardMaterial color={0x20242b} roughness={0.08} />
+      </mesh>
+      <mesh position={[-1.3, 0.7, 0]}>
+        <sphereGeometry args={[0.7, 64, 32]} />
+        <meshStandardMaterial color={0xffc766} roughness={0.18} metalness={1} />
+      </mesh>
+    </>
+  );
 }
 
-<Canvas renderer={(defaults) => createReflectionsRenderer({ ...defaults, antialias: false })}>
-  <Scene />
-</Canvas>
+export default function App() {
+  return (
+    <Canvas
+      renderer={(defaults) => createReflectionsRenderer({ ...(defaults as object), antialias: false })}
+      camera={{ position: [3.4, 2.2, 4.6], fov: 45 }}
+    >
+      <Scene />
+    </Canvas>
+  );
+}
 ```
 
-The complete page is [`examples/r3f`](https://github.com/pmndrs/reflections/tree/main/examples/r3f).
+## Device limits
 
-## Notes
+`createReflectionsRenderer` asks the adapter for the limits the passes need. Keep it in the `renderer` prop. A
+renderer built without it can throw in `Reflections.create` for lack of colour-attachment bytes. The ray-traced pass
+fits WebGPU's default 8 storage buffers per stage in this setup. If a configuration does not fit, it warns once, sets
+`pass.traceError`, and screen space and probes continue
+([Troubleshooting](/guides/troubleshooting#ray-tracing-is-off-on-this-device)).
 
+## Known gaps
+
+- R3F v10 is an alpha. The hook lives in the example, not in the package, and there is no `@pmndrs/reflections/react` entry.
 - `enabled` is for anything the probe bakes that arrives late: an `<Environment>` that is still loading, a model. Call
   `reflections.bake()` after the scene changes.
-- Moving objects: screen-space reflections follow them. The probe is a snapshot, and with `rayTracing` the BVH holds the
-  meshes as they were at build time (`reflections.trace.refit()` each frame updates the transforms of the same meshes).
+- Moving objects: screen-space reflections follow them. The probe is a snapshot, and with `rayTracing` the BVH holds
+  the meshes as they were at build time (`reflections.trace.refit()` each frame updates the transforms of the same
+  meshes).
 - One `Reflections` per canvas.
+
+## Live example
+
+[`examples/r3f`](https://github.com/pmndrs/reflections/tree/main/examples/r3f) is the full page, and the
+[live version](/examples/r3f/) runs it. It takes `?rt=1` for the ray-traced fallback, `?preset=performance` and
+`?denoise=0`.

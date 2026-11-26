@@ -1,24 +1,104 @@
 ---
 title: three.js
-description: The three.js adapter in depth. The passes, the nodes, and how they fit a render loop.
+description: The three.js adapter. What it supports, how to install it, a minimal setup, and the passes in depth.
 nav: 20
 sourcecode: packages/three/src
 ---
 
-The three.js adapter is the main one. It needs `WebGPURenderer` from `three/webgpu` (r187 or newer) and works with
-standard and physical materials. For a short version, see the [quick start](/getting-started/quick-start). The
-[first frame page](/getting-started/first-frame) goes through each call.
+The three.js adapter is the main one. It has every feature in the library: probes, screen-space reflections, the
+ray-traced fallback, the denoiser seam, presets and the hybrid resolve. `Reflections.create` sets them all up in one
+call. See the [adapter comparison](/guides/adapters) for the other engines.
+
+It needs `WebGPURenderer` from `three/webgpu` (r187 or newer) and works with `MeshStandardMaterial` and
+`MeshPhysicalMaterial`, and their node versions.
+
+## Install
+
+```bash
+npm install @pmndrs/reflections three
+```
+
+| Package | Range | When |
+| --- | --- | --- |
+| `three` | `>=0.187.0` | Always. |
+| `@pmndrs/raytracer` | `^0.1.0` (optional) | `rayTracing: true`, the ray-traced fallback. |
+| `@pmndrs/bvh` | `^0.1.0` (optional) | Install with `@pmndrs/raytracer`. |
+| `denoiser` | `^2.0.0` (optional, not a peer) | A denoiser for glossy reflections: `denoiser/ffx`. |
+
+```bash
+npm install @pmndrs/raytracer @pmndrs/bvh denoiser
+```
+
+## Minimal setup
+
+This is [`examples/quickstart`](https://github.com/pmndrs/reflections/tree/main/examples/quickstart) without its
+scene and controls. `Reflections.create` builds the G-buffer, the screen-space pass, a baked probe, the denoiser and
+the composite in a `RenderPipeline`.
+
+{/* snippet: reflections-create */}
+```ts
+// A WebGPURenderer with the device limits the passes need, already initialised.
+const renderer = await createReflectionsRenderer({ canvas, antialias: false });
+
+const reflections = await Reflections.create(renderer, scene, {
+  preset: 'default', // or 'performance'
+  rayTracing: false, // true needs @pmndrs/raytracer and @pmndrs/bvh
+  denoiser: (device, { roughnessThreshold }) => new FfxReflectionDenoiser(device, { roughnessThreshold: roughnessThreshold ** 2 }),
+});
+
+// Where you called renderer.render(scene, camera):
+renderer.setAnimationLoop(() => reflections.render(camera));
+```
+
+The options are in the [quick start](/getting-started/quick-start#what-reflectionscreate-takes). After the scene or its
+environment changes, call `reflections.bake()`. Every piece stays public on the object: `reflections.ssr`,
+`.hybrid`, `.probes`, `.trace` and `.pipeline`.
+
+For a cheaper start with no extra passes, bake probes only. See the [quick start](/getting-started/quick-start#probes-only).
+To build the frame yourself, see [first frame](/getting-started/first-frame) and the sections below.
+
+## Device limits
+
+The passes ask for more than WebGPU's default limits: up to 64 colour-attachment bytes per sample (the default is 32)
+and up to 32 sampled textures per stage (the default is 16). `createReflectionsRenderer` asks for them for you. To
+build the renderer yourself, pass `requiredLimits: reflectionsRequiredLimits(adapter)` to `WebGPURenderer`
+([Installation](/getting-started/installation#ask-for-the-right-device-limits)).
+
+The ray-traced pass binds 8 storage buffers per stage in three's default setup, which is WebGPU's default limit. It runs
+on a plain device. If a configuration needs more, the pass warns once, sets `pass.traceError`, and screen space and
+probes continue. See [Troubleshooting](/guides/troubleshooting#ray-tracing-is-off-on-this-device).
+
+A plain `WebGPURenderer` with the default colour-attachment limit throws in `Reflections.create`. Use
+`createReflectionsRenderer`, or raise `maxColorAttachmentBytesPerSample` to 36 or more.
+
+## Known gaps
+
+- Basic, Lambert and Phong materials get no reflections, by design. Use a standard material.
+- On three r187, probes need `installCubeArraySupport(renderer)` to use a real cube array. `Reflections.create` does
+  it for you. Without it, probes use a 2D array.
+- The ray-traced BVH is built once. Moving meshes need `reflections.trace.refit()` each frame. Changed geometry needs a
+  new build.
+- One `Reflections` per canvas.
+- Without a denoiser, glossy reflections are noisy.
+
+## Live example
+
+The [quickstart](/examples/quickstart/) runs this page's setup. The [showcase](/examples/showcase/) runs the whole
+pipeline on real scenes, with each source switchable.
 
 ## The pieces
 
+`Reflections` is built from these. Use them directly to wire the frame yourself.
+
 | Piece | What it is |
 | --- | --- |
+| `Reflections` | The one-call setup: all the pieces below, in a `RenderPipeline`. |
 | `ScreenSpaceReflectionsPass` | Renders the G-buffer and runs the screen-space tracer (and the ray-traced pass, with `trace`). |
 | `HybridReflections` | Resolves the sources, runs the denoiser, and builds the composite. |
 | `ReflectionProbes`, `ReflectionProbe`, `reflectionProbes()` | Baked probes and the TSL lookup node for `scene.environmentNode`. |
 | `sampleReflectionProbes()` | The same lookup as a function you can call in your own TSL. |
 | `FrameGBuffer` | The multi-render-target pass inside the SSR pass. Use it alone to read depth, normals and roughness. |
-| `MeshBVHTraceProvider` | The ray-traced provider on three-mesh-bvh. |
+| `createRaytracerTraceProviderFromObjects()` | Builds the ray-traced provider (`@pmndrs/raytracer`) from three meshes. |
 | `applyReflectionsPreset()` | Applies a named bundle of settings at run time. |
 | `reflectionsRequiredLimits()` | The device limits to request. |
 
@@ -65,3 +145,4 @@ whole wiring with `@pmndrs/upscaler`.
 - [Flicker and stability](/guides/flicker-and-stability)
 - [Troubleshooting](/guides/troubleshooting)
 - [React Three Fiber](/guides/react-three-fiber)
+- [Adapter comparison](/guides/adapters)

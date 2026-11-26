@@ -11,7 +11,7 @@ nav: 0
 </Intro>
 
 > [!IMPORTANT]
-> The package is at version 0.0.0 and is not on npm yet. The API can still change before 0.1.
+> This is an early release. The API can still change.
 
 ## The three sources
 
@@ -44,8 +44,10 @@ covers one source.
 | --- | --- |
 | `@pmndrs/reflections` and `@pmndrs/reflections/three` | The three.js adapter: probes, the SSR pass, the hybrid resolve, TSL nodes. Both paths give the same exports. |
 | `@pmndrs/reflections/core` | Engine-agnostic WebGPU passes that run on a bare `GPUDevice`. |
-| `@pmndrs/reflections/babylon` | Babylon.js `WebGPUEngine` adapter. Experimental. |
-| `@pmndrs/reflections/pixi` | pixi.js v8 adapter for pixi-3d scenes. Experimental. |
+| `@pmndrs/reflections/babylon` | Babylon.js `WebGPUEngine` adapter: probes and screen-space reflections. Experimental. |
+| `@pmndrs/reflections/pixi` | pixi.js v8 adapter for pixi-3d scenes: probes, screen-space reflections and the denoiser. Experimental. |
+
+The [adapter comparison](/guides/adapters) shows which feature each one has.
 
 ## Where to go next
 
@@ -55,5 +57,5 @@ covers one source.
 4. [Live examples](/examples/showcase/): the showcase runs the whole pipeline on real models. Switch each source on and off.
 
 The library sits next to a few others from the same group, each with one job: a
-[denoiser](/concepts/denoising-and-upscaling), an upscaler, a BVH, a depth downsampler and motion vectors. You
-do not need them all. The [denoising and upscaling page](/concepts/denoising-and-upscaling) says how they fit.
+[denoiser](/concepts/denoising-and-upscaling), an upscaler, a ray tracer and BVH, a path tracer used as a reference,
+a depth downsampler and motion vectors. You do not need them all. The [denoising and upscaling page](/concepts/denoising-and-upscaling) says how they fit.
