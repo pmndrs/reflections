@@ -19,7 +19,7 @@ import * as THREE from 'three/webgpu';
 import { mrt, diffuseColor, normalView } from 'three/tsl';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { WebGPUPathTracer, RenderToScreenNodeMaterial } from 'three-gpu-pathtracer-webgpu';
-import { Denoiser, type OidnDenoiser } from '@pmndrs/denoiser-oidn';
+import { Denoiser } from 'denoiser';
 import { type CompareMethod, type MethodContext, applySceneParams, destroyWebGPU, freshEnvironment, mergedParams, newCanvas, sceneInfo, syncCamera } from './method';
 import { toneOf } from './ours';
 
@@ -27,7 +27,8 @@ import { toneOf } from './ours';
 type N = any;
 
 export const pathTracerAvailable = WebGPUPathTracer !== null && RenderToScreenNodeMaterial !== null;
-export const oidnAvailable = Denoiser !== null;
+type OidnDenoiser = Awaited<ReturnType<typeof Denoiser.create>>;
+export const oidnAvailable = true; // `denoiser` 2.x from npm (W89)
 export const DEFAULT_MAX_SAMPLES = 8;
 
 /** A device with the adapter's max limits and every feature: the tracer's kernels need more than the defaults. */
@@ -60,8 +61,8 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
 
   // OIDN on the renderer's device (zero copy: tracer texture -> denoiser -> three StorageTexture)
   let oidn: OidnDenoiser | null = null, oidnError = '';
-  if (Denoiser && params.get('ptDenoise') !== '0') {
-    try { oidn = await Denoiser.create({ device, tzaUrl: import.meta.env.DEV ? '/tzas' : undefined }); }
+  if (params.get('ptDenoise') !== '0') {
+    try { oidn = await Denoiser.create({ device }); } // weights: the denoiser's DEFAULT_TZA_URL
     catch (e) { oidnError = String((e as Error)?.message ?? e); console.error('[pathtraced] OIDN', e); }
   }
 
@@ -238,7 +239,7 @@ export async function createPathTracer(ctx: MethodContext): Promise<CompareMetho
     },
     info: () => ({
       tracer: 'three-gpu-pathtracer WebGPUPathTracer', bounces: pt.maxBounces, filterGlossyFactor: 0, mis: true, clampIndirect: pt.clampIndirect,
-      maxSamples, samples: reached, dispatches, denoised, denoiser: oidn ? `OIDN (${oidn.runtime.lastChoice ?? oidn.runtime.name}), albedo + normal aux` : null,
+      maxSamples, samples: reached, dispatches, denoised, denoiser: oidn ? `OIDN (${(oidn.runtime as { lastChoice?: string }).lastChoice ?? oidn.runtime.name}), albedo + normal aux` : null,
       traceMs: Math.round(traceMs), denoiseMs: Math.round(denoiseMs), readyMs: Math.round(readyMs), clearcoatDropped, sceneBuildMs: Math.round(buildMs),
     }),
     gpuErrors: () => errors,

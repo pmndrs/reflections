@@ -1807,7 +1807,7 @@ async function hitSourceChecks(pages) {
     p.setHitSource({ hitSource: false }); await p.step(2);
     return { offSource: !!offSource, counts, changed: changed / (A.length / 4), opts: p.hybrid.denoiser.options, offAgain: !!p.hybrid.denoiseSeam.hitSource, errors: p.gpuErrors.length };
   })()`);
-  if (r.skip) { console.log('  note: hit-source skipped (the denoiser has no setOptions: point DENOISER_REPO at the W53 branch)'); return; }
+  if (r.skip) { console.log('  note: hit-source skipped (the denoiser has no setOptions: denoiser >= 2.0 has it)'); return; }
   const n = r.counts.reduce((a, b) => a + b, 0);
   check('hit source (W53): off, the seam hands the denoiser none; on, screen-space and traced codes and the frame changes; off again clears the FFX option and the input',
     !r.offSource && r.counts[1] > 0.01 * n && r.counts[2] > 0.01 * n && r.counts[3] === 0 && r.opts.separateHitSources === false && !r.offAgain && r.changed > 0.001 && r.errors === 0,
@@ -1867,7 +1867,7 @@ async function brdfPrefilterChecks(pages) {
     console.warn = warn0;
     return { offSample, hasSample: !!S, glossy, withPdf, unit, changed, offDiff, nonFinite, halfWarned, errors: p.gpuErrors.length };
   })()`);
-  if (r.skip) { console.log('  note: brdf-prefilter skipped (the denoiser has no brdfWeights: point DENOISER_REPO at the W78 branch)'); return; }
+  if (r.skip) { console.log('  note: brdf-prefilter skipped (the denoiser has no brdfWeights: only the unmerged w78 branch of pmndrs/denoiser has them, not denoiser 2.0 on npm)'); return; }
   check('BRDF prefilter (W78): off, no sample direction; on, most glossy px carry a unit direction and pdf > 0, and the denoised output changes; no NaN, no validation errors',
     !r.offSample && r.hasSample && r.withPdf > 0.8 * r.glossy && r.unit === r.withPdf && r.offDiff < 0.001 * r.glossy && r.changed > 0.05 * r.glossy && r.nonFinite === 0 && r.errors === 0,
     `glossy px ${r.glossy}: with pdf ${(r.withPdf / r.glossy * 100).toFixed(1)}%, unit ${r.unit === r.withPdf}; denoised changed > 1%: ${(r.changed / r.glossy * 100).toFixed(1)}% (off vs off: ${(r.offDiff / r.glossy * 100).toFixed(2)}%); non-finite ${r.nonFinite}; errors ${r.errors}`);

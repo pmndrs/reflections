@@ -8,8 +8,8 @@ name: Build the site and deploy to GitHub Pages
 # (Actions > this workflow > Run workflow) until Dennis decides to publish.
 # tools/site-build.ts is the build both here and locally (`pnpm docs:api && pnpm site:build`).
 #
-# The denoiser is not on npm, so its source is checked out next to the repo (pinned) and bundled into the
-# examples. Without it the examples run undenoised and flicker, so the build fails if it is missing.
+# The denoiser is the `denoiser` package from npm (a devDependency), installed with the rest; site-check
+# fails a showcase that runs without it.
 # The example models load from raw.githubusercontent.com at runtime (Khronos glTF Sample Assets, pinned in tools/site-build.ts).
 
 on:
@@ -53,12 +53,6 @@ jobs:
         with:
           fetch-depth: 0
           filter: blob:none
-      # pmndrs/denoiser at a pinned commit (the one the examples were checked against), source only.
-      - uses: actions/checkout@v4.2.2
-        with:
-          repository: pmndrs/denoiser
-          ref: 7014384c8117df48622d27a4cb52a4d4a5bf9a54
-          path: denoiser
       - uses: pnpm/action-setup@v4.1.0
       - uses: actions/setup-node@v4.4.0
         with:
@@ -70,7 +64,6 @@ jobs:
       - run: pnpm docs:api
       - run: pnpm site:build _site
         env:
-          DENOISER_REPO: ${{ github.workspace }}/denoiser
           # '' on the custom domain; '/reflections' for pmndrs.github.io/reflections.
           BASE_PATH: ''
           NEXT_PUBLIC_URL: https://reflections.docs.pmnd.rs

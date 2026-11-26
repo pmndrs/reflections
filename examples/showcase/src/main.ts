@@ -71,7 +71,7 @@ async function main() {
   const adapter = await navigator.gpu.requestAdapter();
   // the composite reads the G-buffer's lit target: 36 bytes per sample
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, trackTimestamp: q.has('gpuTime'), requiredLimits: { maxColorAttachmentBytesPerSample: maxBytes, ...(__RAYTRACER_AVAILABLE__ && q.get('rtShade') === '1' && adapter ? { maxStorageBuffersPerShaderStage: Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 10) } : {}) /* W82, D5200: the raytracer provider binds 5 */ } } as N);
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, trackTimestamp: q.has('gpuTime'), requiredLimits: { maxColorAttachmentBytesPerSample: maxBytes, ...(q.get('rtShade') === '1' && adapter ? { maxStorageBuffersPerShaderStage: Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 10) } : {}) /* W82, D5200: the raytracer provider binds 5 */ } } as N);
   renderer.setPixelRatio(1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -127,8 +127,8 @@ async function main() {
   // ---- state ---------------------------------------------------------------------------------------
   const state = {
     probes: q.get('probes') !== '0',
-    /** W82 (T70): `?rtShade=1` shades traced hits with @pmndrs/raytracer's one bounce instead of the probes (opt-in; needs the raytracer, __RAYTRACER_AVAILABLE__). */
-    rtShade: __RAYTRACER_AVAILABLE__ && q.get('rtShade') === '1',
+    /** W82 (T70): `?rtShade=1` shades traced hits with @pmndrs/raytracer's one bounce instead of the probes (opt-in). */
+    rtShade: q.get('rtShade') === '1',
     ssr: q.get('ssr') !== '0',
     rt: q.get('rt') === '1',
     view: (q.has('off') ? 'off' : (q.get('view') as View) ?? 'final') as View,
@@ -272,7 +272,7 @@ async function main() {
   }
   /** W82: switch the traced hit shading; a provider with `traceHitShade` is needed, so the provider is rebuilt. */
   async function setRtShade(on: boolean) {
-    state.rtShade = on && __RAYTRACER_AVAILABLE__;
+    state.rtShade = on;
     if (provider) { provider.destroy(); provider = null; ssr.setTraceProvider(null); if (state.rt) await ensureBVH(); }
     ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
   }
@@ -492,7 +492,7 @@ async function main() {
   const reshadeSel = select(HIT_SHADING_MODES, state.reshade, (v) => setReshade(v as HitShadingMode));
   row('Hit specular', reshadeSel);
   // W82 (T70): the raytracer's hit shading, only where @pmndrs/raytracer resolves (not on npm yet)
-  if (__RAYTRACER_AVAILABLE__ && bvhKind === 'pmndrs') {
+  if (bvhKind === 'pmndrs') {
     const rs = check('Ray-traced hits: raytracer shading (1 light sample)', state.rtShade, (v) => { setRtShade(v); });
     rs.parentElement!.title = 'raytracerHitShading (D5201): traced hits shaded by @pmndrs/raytracer\'s rtShade (emission + a light sample with a shadow ray, diffuse + GGX) instead of the probe lookup. Opt-in; stochastic, meant for the denoised frame. Needs 10 storage buffers per stage (D5200).';
   }

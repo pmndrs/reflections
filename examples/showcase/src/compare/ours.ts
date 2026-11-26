@@ -19,7 +19,7 @@ import {
   createPmndrsBvhTraceProviderFromObjects, createRaytracerTraceProviderFromObjects, installCubeArraySupport, reflectionProbes,
 } from '@pmndrs/reflections/three';
 import { resolveScreenSpaceSettings } from '@pmndrs/reflections/core';
-import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
+import { FfxReflectionDenoiser } from 'denoiser/ffx';
 import { ScreenSpaceAO } from '../../../shared/ao';
 import { LINEAR_VIEWS, VIEW_IDS, buildDebugViews, type View } from '../debugViews';
 import { DisplayAA, aaFromQuery, reflectionReactive, renderSize, type AAMode } from '../../../shared/antialias';
@@ -81,7 +81,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     maxColorAttachmentBytesPerSample: maxBytes,
     // W61 (D4804): a probe layout of three sizes is three atlas bindings in every Sponza material (18 > the default 16)
     // W82 (D5200, opt-in): the @pmndrs/raytracer provider binds 5 storage buffers; with probe hit shading the traced pass needs 9
-    ...(__RAYTRACER_AVAILABLE__ && params.get('rtShade') === '1' && adapter ? { maxStorageBuffersPerShaderStage: Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 10) } : {}),
+    ...(params.get('rtShade') === '1' && adapter ? { maxStorageBuffersPerShaderStage: Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 10) } : {}),
     ...(params.has('probeLayout') && adapter ? { maxSampledTexturesPerShaderStage: Math.min(adapter.limits.maxSampledTexturesPerShaderStage, 48) } : {}),
   } } as N);
   renderer.setPixelRatio(1);
@@ -237,7 +237,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     // W46: ?specAAHits=0 keeps the traced hits' authored roughness with ?specAA on
     const material = params.get('specAAHits') === '0' ? undefined : specAAHitMaterial;
     const shadingNormals = params.get('rtShadingNormals') !== '0';
-    if (bvhKind === 'pmndrs' && __RAYTRACER_AVAILABLE__ && params.get('rtShade') === '1') {
+    if (bvhKind === 'pmndrs' && params.get('rtShade') === '1') {
       // W82 (T70): the opt-in @pmndrs/raytracer provider and its hit shading (rtShade) instead of the probes
       const built = await createRaytracerTraceProviderFromObjects(device, traceMeshes, { ...(material ? { material } : {}), shadingNormals });
       provider = built.provider;

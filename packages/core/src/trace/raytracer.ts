@@ -6,14 +6,16 @@
 // shading buffer, the normal-matrix packing and the vertex-normal walk the old @pmndrs/bvh wrapper carried are gone
 // (they live, tested, in @pmndrs/raytracer's scene copy).
 //
-// @pmndrs/raytracer and @pmndrs/bvh are optional peers, imported on demand (or passed in: `options.module`,
+// @pmndrs/raytracer (^0.1.0 on npm) and @pmndrs/bvh are optional peers, imported on demand (or passed in: `options.module`,
 // `options.bvhModule`); their types are not imported, so core type-checks without them.
 //
 // Bindings (group = the pass's provider slot), all read-only storage:
 //   0..2   bvh nodes, triangles, top level                 (@pmndrs/bvh, `rtWalkEntries`; 3 for record leaves)
-//   3..4   scene copy table, data                          (@pmndrs/raytracer, `rtSceneEntries`)
-// Five storage buffers, one more than the old wrapper (D5200): a probe fallback + probe hit shading pass needs
-// `maxStorageBuffersPerShaderStage` >= 10 (`reflectionsRequiredLimits` asks for it).
+//   3      the scene copy, packed: header + table + data   (@pmndrs/raytracer, `rtSceneEntries('packed')`, P3.11)
+//          ('split', or a packed copy over `maxStorageBufferBindingSize`: 3..4 table, data)
+// Four storage buffers packed (W89, D5450), five split (D5200). Three's traced pass (pass 3 + no radiance fallback +
+// provider + probe hit shading 1) fits WebGPU's default 8 packed; a probe fallback + probe hit shading (core, 3 + 1 + 4 + 1)
+// needs 9 (`reflectionsRequiredLimits` asks for up to 10).
 //
 // What the seam gets:
 //   traceFirstHit            rtClosest; Hit.instance = the input instance's position, Hit.material = the triangle's
@@ -134,6 +136,12 @@ export interface RaytracerTraceProviderOptions {
   shade?: Readonly<Record<string, unknown>>;
   /** Minify the provider's WGSL (line breaks kept). Default true: the module with `rtShade` is ~50 KB unminified. */
   minify?: boolean;
+  /**
+   * How the scene copy is bound (@pmndrs/raytracer's `SceneCopyPacking`, W89 / D5450). 'auto' (default): 'packed' (one storage
+   * buffer: header + table + data) unless that buffer would pass the device's `maxStorageBufferBindingSize`, then 'split'
+   * (table and data, two buffers). The packed copy is what fits the trace pass under WebGPU's default 8 storage buffers.
+   */
+  packing?: 'auto' | 'packed' | 'split';
 }
 
 // ---- the parts of @pmndrs/bvh and @pmndrs/raytracer this file uses ------------------------------------------------
@@ -162,24 +170,27 @@ interface BvhModule {
     instanceIndex: number; nodeOffset: number; triangleOffset: number; meshBounds: ArrayLike<number>; objectToWorld: ArrayLike<number>; material?: number;
   }[]): BvhTopLevel;
 }
+type SceneCopyPacking = 'split' | 'packed';
 interface SceneCopy { readonly layout: unknown; readonly byteLength: number; readonly lights: readonly unknown[]; readonly triangleLightCount: number; readonly table: Uint32Array<ArrayBuffer>; readonly data: Uint32Array<ArrayBuffer> }
-interface SceneCopyBuffers { readonly table: GPUBuffer; readonly data: GPUBuffer; destroy(): void }
+interface SceneCopyBuffers { readonly packing: SceneCopyPacking; readonly table?: GPUBuffer; readonly data?: GPUBuffer; readonly packed?: GPUBuffer; destroy(): void }
 interface RaytracerModule {
   readonly BVH_LAYOUT_VERSION: number;
   buildCaps(source: { features: ReadonlySet<string>; limits: Record<string, unknown> }, wgslLanguageFeatures?: ReadonlySet<string>): unknown;
   sceneFormatOf(buffers: object): Record<string, string>;
   rtModuleWgsl(caps: unknown, options: Record<string, unknown>): string;
   rtWalkEntries(format: object): readonly ModuleBindingEntry[];
-  /** `packing` exists since pathtracer P3.11 (default 'packed' there: one buffer); we ask for 'split' (table, data), what this provider binds. Older versions ignore it. */
-  rtSceneEntries(packing?: 'split' | 'packed'): readonly ModuleBindingEntry[];
+  rtSceneEntries(packing: SceneCopyPacking): readonly ModuleBindingEntry[];
   buildSceneCopy(input: Record<string, unknown>): SceneCopy;
-  uploadSceneCopy(device: GPUDevice, copy: SceneCopy, options?: { label?: string; packing?: 'split' | 'packed' }): SceneCopyBuffers;
+  uploadSceneCopy(device: GPUDevice, copy: SceneCopy, options: { label?: string; packing: SceneCopyPacking }): SceneCopyBuffers;
+  /** Rewrites a rebuilt copy into earlier buffers when it fits (false: upload again). */
+  writeSceneCopy(device: GPUDevice, buffers: SceneCopyBuffers, copy: SceneCopy): boolean;
+  packedSceneCopyBytes(copy: Pick<SceneCopy, 'table' | 'data'>): number;
 }
 
 /** Load @pmndrs/raytracer and @pmndrs/bvh and check that they read the same GPU layout this wrapper was written for. */
 export async function loadRaytracer(module?: unknown, bvhModule?: unknown): Promise<{ rt: RaytracerModule; bvh: BvhModule }> {
-  const rt = (module ?? (await import('@pmndrs/raytracer'))) as RaytracerModule;
-  const bvh = (bvhModule ?? (await import('@pmndrs/bvh'))) as BvhModule;
+  const rt = (module ?? (await import('@pmndrs/raytracer'))) as unknown as RaytracerModule;
+  const bvh = (bvhModule ?? (await import('@pmndrs/bvh'))) as unknown as BvhModule;
   if (rt.BVH_LAYOUT_VERSION !== RAYTRACER_BVH_LAYOUT_VERSION || bvh.GPU_LAYOUT_VERSION !== RAYTRACER_BVH_LAYOUT_VERSION) {
     throw new Error(`RaytracerTraceProvider: @pmndrs/raytracer reads bvh layout ${rt.BVH_LAYOUT_VERSION}, @pmndrs/bvh writes ${bvh.GPU_LAYOUT_VERSION}; this provider was written for ${RAYTRACER_BVH_LAYOUT_VERSION}`);
   }
@@ -275,6 +286,8 @@ export interface RaytracerBuildInfo {
   skippedSingular: number;
   /** Lights in the scene copy (emissive triangles, sun, environment). */
   lights: number;
+  /** How the scene copy is bound: 'packed' (one storage buffer) or 'split' (two). */
+  packing: 'packed' | 'split';
   /** Bytes of the scene copy. */
   sceneCopyBytes: number;
   /** Wall time of the mesh trees + scene assembly + scene copy + upload. */
@@ -299,6 +312,8 @@ export class RaytracerTraceProvider implements TraceProvider {
   private copyBuffers: SceneCopyBuffers;
   private readonly format: Record<string, string>;
   private readonly caps: unknown;
+  /** How the scene copy is bound (fixed at creation: the WGSL and the layout depend on it). */
+  readonly packing: SceneCopyPacking;
 
   /** @internal use {@link createRaytracerTraceProvider} */
   constructor(
@@ -318,9 +333,13 @@ export class RaytracerTraceProvider implements TraceProvider {
     // inline walk needs none.
     this.caps = rt.buildCaps({ features: new Set(), limits: device.limits as unknown as Record<string, unknown> }, new Set());
     this.copy = this.buildCopy();
-    this.copyBuffers = rt.uploadSceneCopy(device, this.copy, { label: 'reflections rt scene', packing: 'split' });
-    this.entries = [...rt.rtWalkEntries(this.format), ...rt.rtSceneEntries('split')];
+    // W89 (D5450): packed (one buffer) unless it would pass the device's binding size
+    const want = options.packing ?? 'auto';
+    this.packing = want === 'auto' ? (rt.packedSceneCopyBytes(this.copy) <= device.limits.maxStorageBufferBindingSize ? 'packed' : 'split') : want;
+    this.copyBuffers = rt.uploadSceneCopy(device, this.copy, { label: 'reflections rt scene', packing: this.packing });
+    this.entries = [...rt.rtWalkEntries(this.format), ...rt.rtSceneEntries(this.packing)];
     this.storageBufferCount = this.entries.length;
+    info.packing = this.packing;
     info.lights = this.copy.lights.length;
     info.sceneCopyBytes = this.copy.byteLength;
   }
@@ -348,7 +367,7 @@ export class RaytracerTraceProvider implements TraceProvider {
       ...this.format,
       traceSlot: slot,
       rayMasks: this.options.rayMasks ?? false,
-      scene: { slot: { group: slot.group, firstBinding: slot.firstBinding + walk }, layout: this.copy.layout, packing: 'split' },
+      scene: { slot: { group: slot.group, firstBinding: slot.firstBinding + walk }, layout: this.copy.layout, packing: this.packing },
       shade: this.options.shade ?? {},
       minify: this.options.minify ?? true,
     });
@@ -356,8 +375,9 @@ export class RaytracerTraceProvider implements TraceProvider {
   }
 
   resources(): readonly GPUBindingResource[] {
-    const t = this.traceBuffers;
-    return [t.nodes, t.triangles, t.topLevel, ...(t.positions ? [t.positions] : []), this.copyBuffers.table, this.copyBuffers.data].map((buffer) => ({ buffer }));
+    const t = this.traceBuffers, c = this.copyBuffers;
+    const scene = c.packing === 'packed' ? [c.packed!] : [c.table!, c.data!];
+    return [t.nodes, t.triangles, t.topLevel, ...(t.positions ? [t.positions] : []), ...scene].map((buffer) => ({ buffer }));
   }
 
   /**
@@ -397,13 +417,9 @@ export class RaytracerTraceProvider implements TraceProvider {
   private replaceCopy() {
     const copy = this.buildCopy();
     this.copy = copy;
-    if (this.copyBuffers.table.size >= copy.table.byteLength && this.copyBuffers.data.size >= Math.max(16, copy.data.byteLength)) {
-      this.device.queue.writeBuffer(this.copyBuffers.table, 0, copy.table);
-      if (copy.data.byteLength) this.device.queue.writeBuffer(this.copyBuffers.data, 0, copy.data);
-      return;
-    }
+    if (this.rt.writeSceneCopy(this.device, this.copyBuffers, copy)) return;
     this.copyBuffers.destroy();
-    this.copyBuffers = this.rt.uploadSceneCopy(this.device, copy, { label: 'reflections rt scene', packing: 'split' });
+    this.copyBuffers = this.rt.uploadSceneCopy(this.device, copy, { label: 'reflections rt scene', packing: this.packing });
     this._version++;
   }
 
@@ -457,6 +473,7 @@ export async function createRaytracerTraceProvider(
     triangles: scene.instances.reduce((n, instance) => n + layouts[instance.mesh].triangleCount, 0),
     skippedSingular: data.topLevel.skippedSingular,
     lights: 0,
+    packing: 'packed',
     sceneCopyBytes: 0,
     buildMs: 0,
   };

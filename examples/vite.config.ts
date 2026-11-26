@@ -25,35 +25,17 @@ if (existsSync(pixi3dDir)) {
   }
 }
 
-// The denoiser (an optional peer, never a dependency) is resolved from the sibling `Denoiser` repo's
-// source when one sits next to this repo or next to any parent folder (worktrees sit deeper), or at
-// $DENOISER_REPO. Otherwise `@pmndrs/denoiser-ffx` resolves to a stub and the pages run undenoised.
-function findDenoiser(): string | null {
-  const entry = (repo: string) => resolve(repo, 'packages/denoiser-ffx/src/index.ts');
-  const env = process.env.DENOISER_REPO;
-  if (env) return existsSync(entry(env)) ? resolve(env) : null;
-  for (let dir = resolve(root, '..'); dirname(dir) !== dir; dir = dirname(dir)) {
-    const repo = resolve(dirname(dir), 'Denoiser');
-    if (existsSync(entry(repo))) return repo;
-  }
-  return null;
-}
-const denoiserRepo = findDenoiser();
-// The public site build (tools/site-build.ts, EXAMPLES_SITE=1) must not silently run undenoised (it flickers): fail here.
-// It also leaves out the pages that need the Denoiser repo's OIDN package or the closed pixi-3d beta (compare, bench, pixi3d).
+// The denoiser (`denoiser` 2.x on npm: `denoiser/ffx`, `denoiser/three`, OIDN at its root) and `@pmndrs/raytracer`
+// are devDependencies (W89): no sibling checkout. The OIDN weights (.tza) load from the denoiser's default
+// `DEFAULT_TZA_URL` (a pinned CDN copy of the upstream weights).
+// The public site build (tools/site-build.ts, EXAMPLES_SITE=1) leaves out pixi (a redirect), nrc (the private pathtracer
+// bench, below) and the closed pixi-3d beta.
 const siteBuild = process.env.EXAMPLES_SITE === '1';
-if (siteBuild && !denoiserRepo) throw new Error('EXAMPLES_SITE=1 needs the denoiser source: set DENOISER_REPO to a pmndrs/denoiser checkout (packages/denoiser-ffx/src/index.ts must exist).');
-if (siteBuild) for (const k of Object.keys(pages)) if (k === 'pixi' || k === 'nrc' || k.startsWith('pixi3d-')) delete pages[k]; // (pixi/ only redirects to pixi3d/arcade; nrc needs the private pathtracer checkout)
-// denoiser/three's `ffxReflections()` TSL helper (examples/showcase compare page, method "three SSR +
-// FFX"), from the same Denoiser checkout. Only its temporal/ffx.ts module graph is used.
-const denoiserThreeFfx = denoiserRepo && existsSync(resolve(denoiserRepo, 'packages/denoiser-three/src/temporal/ffx.ts'))
-  ? resolve(denoiserRepo, 'packages/denoiser-three/src/temporal/ffx.ts') : null;
+if (siteBuild) for (const k of Object.keys(pages)) if (k === 'pixi' || k === 'nrc' || k.startsWith('pixi3d-')) delete pages[k];
 
 // The compare page's path-traced reference: three-gpu-pathtracer's WebGPU tracer (`three-gpu-pathtracer/webgpu`,
-// 0.0.28, a devDependency: the first release built for three r187) and the OIDN denoiser (the Denoiser repo's
-// `denoiser` package). $PATHTRACER_REPO points the alias at another checkout or package. The Denoiser repo's
-// own copy (0.0.27, pinned for its r186) does not run on r187: r187 dropped the single-struct storage buffers
-// its wavefront queues use ("an array element type cannot contain a runtime-sized array").
+// 0.0.28, a devDependency: the first release built for three r187). $PATHTRACER_REPO points the alias at another
+// checkout or package.
 function findPathTracer(): string | null {
   const entry = (repo: string) => resolve(repo, 'src/webgpu/index.js');
   const env = process.env.PATHTRACER_REPO;
@@ -62,54 +44,44 @@ function findPathTracer(): string | null {
   return existsSync(entry(installed)) ? realpathSync(installed) : null;
 }
 const pathTracerRepo = findPathTracer();
-// OIDN: the `denoiser` package's source (its workspace deps aliased to source below) and its .tza weights.
-const oidnEntry = denoiserRepo && existsSync(resolve(denoiserRepo, 'packages/denoiser/src/index.ts')) ? resolve(denoiserRepo, 'packages/denoiser/src/index.ts') : null;
-const tzasDir = denoiserRepo ? resolve(denoiserRepo, 'packages/denoiser/tzas') : null;
-type Middleware = (req: { url?: string }, res: { setHeader(k: string, v: string): void; end(b: Buffer): void }, next: () => void) => void;
-const serveTzas = {
-  // dev: GET /tzas/<name>.tza from the Denoiser checkout (the denoiser's tzaUrl), as its examples do
-  name: 'reflections-serve-tzas',
-  configureServer(server: { middlewares: { use(path: string, fn: Middleware): void } }) {
-    server.middlewares.use('/tzas', (req, res, next) => {
-      const file = tzasDir && resolve(tzasDir, '.' + decodeURIComponent((req.url ?? '').split('?')[0]));
-      if (!tzasDir || !file || !file.startsWith(tzasDir + '/') || !existsSync(file) || !statSync(file).isFile()) return next();
-      res.setHeader('Content-Type', 'application/octet-stream');
-      res.end(readFileSync(file));
-    });
-  },
-};
 
-// `@pmndrs/raytracer` (pmndrs/pathtracer's trace core; opt-in provider, W82 / T69) is not on npm yet. Like the
-// denoiser it is resolved from a sibling checkout (`pathtracer/packages/raytracer` next to this repo or any parent
-// folder, or $RAYTRACER_REPO = the package dir). Without one it aliases to a stub and the pages hide the option
-// (`__RAYTRACER_AVAILABLE__`). Its `@pmndrs/bvh` / `@pmndrs/downsampler` imports resolve from this repo (sharedDeps).
-function findRaytracer(): string | null {
-  const entry = (dir: string) => resolve(dir, 'src/index.ts');
-  const env = process.env.RAYTRACER_REPO;
-  if (env) return existsSync(entry(env)) ? realpathSync(env) : null;
+// W86 (examples/nrc, experimental, never on the site): pmndrs/pathtracer's bench-only neural/hash radiance cache
+// (`bench/nrc/*`) and its bench scene fixtures are not published, so this page alone resolves a sibling `pathtracer`
+// checkout (next to this repo or any parent folder, or $NRC_PATHTRACER_REPO = the repo root). Read-only: nothing is
+// copied or built. Inside that checkout and examples/nrc, `@pmndrs/raytracer` / `@pmndrs/pathtracer` resolve to the
+// checkout's sources (the bench is written against them); everywhere else they are the npm packages. Without a checkout
+// `@nrc-bench` aliases to a stub and examples/nrc shows a notice (`__NRC_AVAILABLE__` false).
+function findNrcCheckout(): string | null {
+  const ok = (repo: string) => existsSync(resolve(repo, 'bench/nrc/hash-grid.ts')) && existsSync(resolve(repo, 'packages/pathtracer/src/index.ts'));
+  const env = process.env.NRC_PATHTRACER_REPO;
+  if (env) return ok(env) ? realpathSync(env) : null;
   for (let dir = resolve(root, '..'); dirname(dir) !== dir; dir = dirname(dir)) {
-    const pkg = resolve(dirname(dir), 'pathtracer/packages/raytracer');
-    if (existsSync(entry(pkg))) return realpathSync(pkg);
+    const repo = resolve(dirname(dir), 'pathtracer');
+    if (ok(repo)) return realpathSync(repo);
   }
   return null;
 }
-const raytracerRepo = findRaytracer();
+const nrcRoot = siteBuild ? null : findNrcCheckout();
+const nrcPage = resolve(root, 'nrc') + '/';
+const nrcSources = {
+  name: 'reflections-nrc-sources',
+  enforce: 'pre' as const,
+  resolveId(source: string, importer?: string) {
+    if (!nrcRoot || !importer || !(importer.startsWith(nrcRoot + '/') || importer.startsWith(nrcPage))) return null;
+    if (source === '@pmndrs/raytracer') return resolve(nrcRoot, 'packages/raytracer/src/index.ts');
+    if (source === '@pmndrs/pathtracer') return resolve(nrcRoot, 'packages/pathtracer/src/index.ts');
+    return null;
+  },
+};
 
-// W86 (examples/nrc, experimental): pmndrs/pathtracer's bench-only neural/hash radiance cache (`bench/nrc/*`), its
-// `@pmndrs/pathtracer` package (the reference path tracer) and its bench scene fixtures, from the same sibling checkout
-// as the raytracer (`<pathtracer>/packages/raytracer` -> `<pathtracer>`). Read-only: nothing is copied or built. Without it
-// `@nrc-bench` / `@pmndrs/pathtracer` alias to a stub and examples/nrc shows a notice (`__NRC_AVAILABLE__` false).
-const nrcRoot = raytracerRepo && existsSync(resolve(raytracerRepo, '../../bench/nrc/hash-grid.ts')) && existsSync(resolve(raytracerRepo, '../pathtracer/src/index.ts'))
-  ? resolve(raytracerRepo, '../..') : null;
-
-// Sources served as-is from outside the dep optimizer (the Denoiser checkout, the aliased tracer) resolve `three`
-// and `three-mesh-bvh` from here, never from their own node_modules: one three instance per page.
-const outside = [denoiserRepo, pathTracerRepo, raytracerRepo, nrcRoot].filter((x): x is string => !!x);
+// Sources served as-is from outside the dep optimizer (the aliased tracer, the nrc checkout) resolve `three`,
+// `three-mesh-bvh`, `@pmndrs/bvh` and `@pmndrs/downsampler` from here, never from their own node_modules: one copy per page.
+const outside = [pathTracerRepo, nrcRoot].filter((x): x is string => !!x);
 const sharedDeps = {
   name: 'reflections-shared-deps',
   enforce: 'pre' as const,
   async resolveId(this: { resolve: (s: string, i?: string, o?: object) => Promise<unknown> }, source: string, importer?: string) {
-    if (!importer || !/^(three|three-mesh-bvh|@pmndrs\/bvh)(\/|$)/.test(source)) return null;
+    if (!importer || !/^(three|three-mesh-bvh|@pmndrs\/bvh|@pmndrs\/downsampler)(\/|$)/.test(source)) return null;
     if (!outside.some((r) => importer.startsWith(r + '/'))) return null;
     return this.resolve(source, resolve(root, 'index.html'), { skipSelf: true });
   },
@@ -131,12 +103,12 @@ export default defineConfig({
       const path = id.split('?')[0].replaceAll('\\', '/');
       if (/\/pixi3d\/[^/]+\/main\.ts$/.test(path)) return readFileSync(resolve(root, 'pixi3d/unavailable.ts'), 'utf8');
     },
-  }, sharedDeps, serveTzas],
+  }, nrcSources, sharedDeps],
   server: {
     port: Number(process.env.REFLECTIONS_PORT ?? 5370), strictPort: true, host: '127.0.0.1',
-    fs: { allow: [resolve(root, '..'), ...(denoiserRepo ? [denoiserRepo] : []), ...(pathTracerRepo ? [pathTracerRepo] : []), ...(raytracerRepo ? [raytracerRepo] : []), ...(nrcRoot ? [nrcRoot] : [])] },
+    fs: { allow: [resolve(root, '..'), ...(pathTracerRepo ? [pathTracerRepo] : []), ...(nrcRoot ? [nrcRoot] : [])] },
   },
-  define: { __RAYTRACER_AVAILABLE__: JSON.stringify(!!raytracerRepo), __NRC_AVAILABLE__: JSON.stringify(!!nrcRoot), __DENOISER_SOURCE__: JSON.stringify(denoiserRepo ?? ''), __PATHTRACER_SOURCE__: JSON.stringify(pathTracerRepo ?? '') },
+  define: { __NRC_AVAILABLE__: JSON.stringify(!!nrcRoot), __PATHTRACER_SOURCE__: JSON.stringify(pathTracerRepo ?? '') },
   resolve: {
     alias: [
       ...(hasPixi3d
@@ -150,22 +122,8 @@ export default defineConfig({
       { find: /^@pmndrs\/reflections\/babylon$/, replacement: resolve(root, '../src/babylon.ts') },
       { find: /^@pmndrs\/reflections\/pixi$/, replacement: resolve(root, '../src/pixi.ts') },
       { find: /^@pmndrs\/reflections$/, replacement: resolve(root, '../src/index.ts') },
-      // denoiser-ffx imports denoiser-core: from source too, so the checkout needs no install (CI)
-      ...(denoiserRepo ? [{ find: /^@pmndrs\/denoiser-core$/, replacement: resolve(denoiserRepo, 'packages/denoiser-core/src/index.ts') }] : []),
-      {
-        find: /^@pmndrs\/denoiser-ffx$/,
-        replacement: denoiserRepo ? resolve(denoiserRepo, 'packages/denoiser-ffx/src/index.ts') : resolve(root, 'shared/denoiser-missing.ts'),
-      },
-      { find: /^@pmndrs\/raytracer$/, replacement: raytracerRepo ? resolve(raytracerRepo, 'src/index.ts') : resolve(root, 'shared/raytracer-missing.ts') },
-      { find: /^@pmndrs\/pathtracer$/, replacement: nrcRoot ? resolve(nrcRoot, 'packages/pathtracer/src/index.ts') : resolve(root, 'shared/raytracer-missing.ts') },
       nrcRoot ? { find: /^@nrc-bench\//, replacement: resolve(nrcRoot, 'bench') + '/' } : { find: /^@nrc-bench\/.*$/, replacement: resolve(root, 'shared/nrc-missing.ts') },
-      { find: /^@pmndrs\/denoiser-three-ffx$/, replacement: denoiserThreeFfx ?? resolve(root, 'shared/denoiser-three-missing.ts') },
       { find: /^three-gpu-pathtracer-webgpu$/, replacement: pathTracerRepo ? resolve(pathTracerRepo, 'src/webgpu/index.js') : resolve(root, 'shared/pathtracer-missing.ts') },
-      { find: /^@pmndrs\/denoiser-oidn$/, replacement: oidnEntry ?? resolve(root, 'shared/denoiser-oidn-missing.ts') },
-      // the `denoiser` package's workspace deps, from source (reached only through @pmndrs/denoiser-oidn)
-      ...(oidnEntry
-        ? ['core', 'wgsl', 'webnn'].map((p) => ({ find: new RegExp(`^@pmndrs/denoiser-${p}$`), replacement: resolve(denoiserRepo!, `packages/denoiser-${p}/src/index.ts`) }))
-        : []),
     ],
   },
   // Behind an alias, vite would pre-bundle the tracer with its own copy of

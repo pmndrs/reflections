@@ -14,7 +14,7 @@ import { Reflections, createReflectionsRenderer } from '@pmndrs/reflections/thre
 // optional, but glossy reflections are noisy and shimmer without it. In your project:
 //   import { FfxReflectionDenoiser } from 'denoiser/ffx';
 // (this repo's examples resolve the name to a sibling checkout, or to null when there is none)
-import { FfxReflectionDenoiser } from '@pmndrs/denoiser-ffx';
+import { FfxReflectionDenoiser } from 'denoiser/ffx';
 import { createScene } from './scene';
 
 const q = new URLSearchParams(location.search);

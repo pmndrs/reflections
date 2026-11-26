@@ -5,7 +5,3 @@ packages:
 # pnpm 10 blocks dependency lifecycle scripts unless listed here.
 onlyBuiltDependencies:
   - esbuild
-
-# Optional peers (@pmndrs/raytracer is not on npm yet, W82) must not be installed as dependencies: peers are
-# listed as devDependencies where the repo needs them.
-autoInstallPeers: false

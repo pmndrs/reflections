@@ -92,7 +92,7 @@ const bvhBuilder = (q.get('bvhBuilder') ?? 'auto') as BvhBuilderPreference;
 /** `&bvhRayMasks=1`: @pmndrs/bvh's walk with its instance-mask test compiled in (W48; default off, D3591). */
 const bvhRayMasks = q.get('bvhRayMasks') === '1';
 /** P1.5: `&bvhCore=raytracer` builds core's provider over @pmndrs/raytracer's trace core instead of the @pmndrs/bvh wrapper (A/B). */
-const bvhCore = __RAYTRACER_AVAILABLE__ && q.get('bvhCore') === 'raytracer' ? 'raytracer' : 'bvh';
+const bvhCore = q.get('bvhCore') === 'raytracer' ? 'raytracer' : 'bvh';
 /** W82 (T70): `&rtShade=1` (with `&bvhCore=raytracer`) shades traced hits with @pmndrs/raytracer's rtShade instead of the probes. */
 const rtShade = bvhCore === 'raytracer' && q.get('rtShade') === '1';
 /** `&shadingNormals=0`: traced hits shaded with the flat geometric normal (D1700 A/B). */
