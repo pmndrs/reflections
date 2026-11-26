@@ -7,7 +7,7 @@
 //
 // Methods: ours raw / denoised / with the RT fallback, probes only, three r187's SSRNode raw / with
 // its own denoiser / with the FFX reflection denoiser (the denoiser repo's wiring), and the path
-// tracer (three-gpu-pathtracer WebGPU, stopped at a sample cap and OIDN-denoised) as the reference. Every method displays AgX + sRGB at the
+// tracer (@pmndrs/pathtracer, stopped at a sample cap and OIDN-denoised) as the reference. Every method displays AgX + sRGB at the
 // scene's exposure.
 //
 // "Measure" (a tool readout, not a check): with the camera frozen, path-trace the reference to N
@@ -453,7 +453,7 @@ async function main() {
     const errs = errors.length + [...live.values()].reduce((a, m) => a + m.gpuErrors().length, 0);
     statusEl.textContent = [
       `${entry.title} | ${W}x${H} | three r${THREE.REVISION}`,
-      `path tracer: ${pathTracerAvailable ? __PATHTRACER_SOURCE__ + ' (WebGPU)' : 'not found'}; OIDN: ${oidnAvailable ? 'denoiser package' : 'not found'}`,
+      `path tracer: @pmndrs/pathtracer (npm); OIDN: denoiser (npm)`,
       `FFX: ${ffxAvailable ? 'denoiser/three ffxReflections + denoiser/ffx' : denoiserAvailable ? 'denoiser/ffx only' : 'not found'}`,
       errs ? `GPU errors: ${errs}` : '',
     ].filter(Boolean).join('\n');

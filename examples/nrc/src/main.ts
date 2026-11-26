@@ -529,7 +529,7 @@ async function smoke(L: Lib) {
 
 async function main() {
   if (!__NRC_AVAILABLE__) {
-    status.textContent = 'The pmndrs/pathtracer checkout (bench/nrc, @pmndrs/pathtracer) was not found next to this repo; set RAYTRACER_REPO=<pathtracer>/packages/raytracer. Nothing to run.';
+    status.textContent = 'The pmndrs/pathtracer checkout (bench/nrc, @pmndrs/pathtracer) was not found next to this repo; set NRC_PATHTRACER_REPO=<pathtracer checkout>. Nothing to run.';
     win.__p = { available: false };
     return;
   }

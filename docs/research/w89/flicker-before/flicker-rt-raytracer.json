@@ -1,0 +1,46 @@
+{
+ "date": "2026-11-26T02:30:03.435Z",
+ "label": "rt-raytracer",
+ "results": [
+  {
+   "config": "rt raytracer",
+   "scene": "ssr:contact",
+   "regions": {
+    "reflection": {
+     "px": 279484,
+     "drift": 0.3801,
+     "pct8": 0.0004,
+     "rest": 0.0066,
+     "orbitStd": 0.4862,
+     "d2": 0.5519,
+     "quad": 0.3982,
+     "quadRaw": 0.7553,
+     "speckle": 0.0188,
+     "drift2": 0.371,
+     "orbitStd2": 0.473
+    },
+    "_pan": 3.7938
+   }
+  },
+  {
+   "config": "rt raytracer",
+   "scene": "ssr:mirrorWall",
+   "regions": {
+    "reflection": {
+     "px": 200974,
+     "drift": 0.303,
+     "pct8": 0.0517,
+     "rest": 0.0091,
+     "orbitStd": 0.4043,
+     "d2": 0.7257,
+     "quad": 0.0322,
+     "quadRaw": 0.1851,
+     "speckle": 0.0144,
+     "drift2": 0.3038,
+     "orbitStd2": 0.4043
+    },
+    "_pan": 7.7109
+   }
+  }
+ ]
+}

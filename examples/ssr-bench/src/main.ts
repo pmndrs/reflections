@@ -34,7 +34,7 @@ import { ssr as threeSSR } from 'three/addons/tsl/display/SSRNode.js';
 import { temporalReproject } from 'three/addons/tsl/display/TemporalReprojectNode.js';
 import { recurrentDenoise } from 'three/addons/tsl/display/RecurrentDenoiseNode.js';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes, reflectionsRequiredLimits, screenSpaceComposite,
+  HybridReflections, createRaytracerTraceProviderFromObjects, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, getGPUTexture, reflectionProbes, reflectionsRequiredLimits, screenSpaceComposite,
 } from '@pmndrs/reflections/three';
 import { HIT_WGSL } from '@pmndrs/reflections/core';
 import { SCENES, type KitScene } from '../../shared';
@@ -336,7 +336,7 @@ async function main() {
       const meshes: THREE.Mesh[] = [];
       scene.updateMatrixWorld(true);
       scene.traverseVisible((o) => { if ((o as THREE.Mesh).isMesh && !(o as N).isHelper && !o.userData.noTrace) meshes.push(o as THREE.Mesh); });
-      const provider = await MeshBVHTraceProvider.fromObjects(device, meshes);
+      const { provider } = await createRaytracerTraceProviderFromObjects(device, meshes);
       const mk = (name: string, type: THREE.TextureDataType, format: THREE.AnyPixelFormat) => {
         const t = new THREE.StorageTexture(W, H); t.name = name; t.type = type; t.format = format;
         t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; return t;
@@ -396,7 +396,7 @@ async function main() {
       const proxy = Object.create(pass0, { radiance: { value: refRad }, confidence: { value: refConf } }) as ScreenSpaceReflectionsPass;
       const c = screenSpaceComposite(proxy, { probes, environment: env, environmentIntensity: envI });
       pipeline.outputNode = c.final;
-      info = { provider: { meshes: meshes.length, triangles: provider.triangles } };
+      info = { provider: { meshes: meshes.length, triangles: provider.info.triangles } };
       render = () => { pass0.render(scene, camera); };
     } else if (base) {
       pipeline.outputNode = vec4(texture(pass0.gbuffer.textures.lit!).rgb, 1);

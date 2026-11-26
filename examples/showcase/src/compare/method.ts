@@ -19,7 +19,7 @@ export const METHOD_LABELS: Record<MethodId, string> = {
   'three-raw': 'three SSRNode, raw (stochastic)',
   'three-denoise': 'three SSRNode + its denoiser',
   'three-ffx': 'three SSRNode + FFX (denoiser repo wiring)',
-  pathtraced: 'path traced + OIDN (three-gpu-pathtracer WebGPU)',
+  pathtraced: 'path traced + OIDN (@pmndrs/pathtracer)',
 };
 export const METHOD_SHORT: Record<MethodId, string> = {
   'ours-raw': 'ours raw', 'ours-denoised': 'ours denoised', 'ours-rt': 'ours + RT', probes: 'probes only',

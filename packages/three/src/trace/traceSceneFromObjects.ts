@@ -1,6 +1,6 @@
-// three → core's @pmndrs/bvh trace provider (docs/SPEC.md "Trace seam"). The provider and its math
-// live in core (`createPmndrsBvhTraceProvider`); this file only turns three objects into the
-// engine-free inputs it takes: positions, indices, vertex normals, world matrices and material ids.
+// three objects → the engine-free inputs of core's trace provider (docs/SPEC.md "Trace seam"; `createRaytracerTraceProvider`,
+// wrapped for three by ./RaytracerTraceProvider.ts): positions, indices, vertex normals, world matrices and material ids.
+// (W89: the @pmndrs/bvh wrapper provider this file also built is deleted; the raytracer is the one provider.)
 //
 // - One mesh tree per BufferGeometry, shared by every Mesh that uses it (per BufferGeometry and
 //   material table of its groups, for multi-material meshes).
@@ -15,14 +15,11 @@
 // - Vertex normals (the `normal` attribute, read the same way) shade traced hits (D1700); a
 //   geometry without them is shaded flat.
 import * as THREE from 'three/webgpu';
-import {
-  createPmndrsBvhTraceProvider, PMNDRS_BVH_TRIANGLE_MATERIAL_NONE, type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceScene,
-  type PmndrsBvhTraceProvider, type PmndrsBvhTraceProviderOptions,
-} from '@pmndrs/reflections-core';
-import { defaultHitMaterial, hitMaterialSource, type HitMaterial, type HitMaterialSource } from './MeshBVHTraceProvider';
+import { BVH_TRIANGLE_MATERIAL_NONE, type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceScene } from '@pmndrs/reflections-core';
+import { defaultHitMaterial, hitMaterialSource, type HitMaterial, type HitMaterialSource } from './hitMaterial';
 import { isMultiMaterial, triangleMaterialIndices } from './materialGroups';
 
-export interface PmndrsBvhFromObjectsOptions extends PmndrsBvhTraceProviderOptions {
+export interface TraceSceneFromObjectsOptions {
   /**
    * The material a mesh contributes to traced-hit shading. Default {@link defaultHitMaterial}. A
    * multi-material mesh is asked once per material its groups draw with (`source`, W49).
@@ -73,10 +70,10 @@ function geometryInput(geometry: THREE.BufferGeometry, shadingNormals: boolean):
 }
 
 /**
- * Engine-free inputs for {@link createPmndrsBvhTraceProvider} from three objects (meshes, groups or
+ * Engine-free inputs for core's `createRaytracerTraceProvider` from three objects (meshes, groups or
  * whole scenes; their world matrices must be current).
  */
-export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3D[], options: Pick<PmndrsBvhFromObjectsOptions, 'material' | 'filter' | 'shadingNormals'> = {}): ThreeBvhTraceScene {
+export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3D[], options: TraceSceneFromObjectsOptions = {}): ThreeBvhTraceScene {
   const filter = options.filter ?? defaultFilter;
   const materialOf = options.material ?? defaultHitMaterial;
   const meshes: BvhMeshGeometry[] = [];
@@ -123,7 +120,7 @@ export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3
       const input = geometryInput(mesh.geometry, options.shadingNormals !== false);
       let triangleMaterials: Uint16Array | null = null;
       if (signature && tri && groups) {
-        triangleMaterials = new Uint16Array(tri.length).fill(PMNDRS_BVH_TRIANGLE_MATERIAL_NONE);
+        triangleMaterials = new Uint16Array(tri.length).fill(BVH_TRIANGLE_MATERIAL_NONE);
         for (let t = 0; t < tri.length; t++) { const id = groups.get(tri[t]); if (id !== undefined) triangleMaterials[t] = id; }
       }
       meshes.push(triangleMaterials ? { ...input, triangleMaterials } : input);
@@ -147,42 +144,4 @@ export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3
     return e && (e.groups?.get(materialIndex) ?? e.instance);
   };
   return { scene: { meshes, instances, materials }, sources, materialSources, materialIdOf };
-}
-
-/** A core @pmndrs/bvh provider plus the three objects behind it, so it can follow them. */
-export interface ThreePmndrsBvhTraceProvider extends ThreeBvhTraceScene {
-  provider: PmndrsBvhTraceProvider;
-  /** The engine-free inputs it was built from (instance i = sources[i]). */
-  scene: BvhTraceScene;
-  /** Objects moved (same meshes, current world matrices): new top level, mesh trees untouched. */
-  refit(): void;
-}
-
-/**
- * Build core's @pmndrs/bvh trace provider over three objects:
- *
- *   const { provider, refit } = await createPmndrsBvhTraceProviderFromObjects(device, scene);
- *   ssr.setTraceProvider(provider);
- *   // per frame for moving objects: scene.updateMatrixWorld(); refit();
- */
-export async function createPmndrsBvhTraceProviderFromObjects(
-  device: GPUDevice,
-  objects: THREE.Object3D | THREE.Object3D[],
-  options: PmndrsBvhFromObjectsOptions = {},
-): Promise<ThreePmndrsBvhTraceProvider> {
-  const built = bvhTraceSceneFromObjects(objects, options);
-  const { scene, sources } = built;
-  const provider = await createPmndrsBvhTraceProvider(device, scene, options);
-  const m = new THREE.Matrix4();
-  return {
-    ...built,
-    provider,
-    refit() {
-      provider.setTransforms(sources.map(({ mesh, instanceId }) => {
-        if (instanceId < 0) return mesh.matrixWorld.elements;
-        (mesh as THREE.InstancedMesh).getMatrixAt(instanceId, m);
-        return new THREE.Matrix4().multiplyMatrices(mesh.matrixWorld, m).elements;
-      }));
-    },
-  };
 }

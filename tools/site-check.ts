@@ -92,7 +92,7 @@ async function httpJson(url: string) {
 async function openPage(url: string) {
   const userDataDir = mkdtempSync(join(tmpdir(), 'reflections-site-'));
   const chrome = spawn(CHROME, ['--headless=new', '--no-sandbox', '--use-angle=metal', '--enable-unsafe-webgpu', '--enable-features=Vulkan', '--window-size=1100,900', '--remote-debugging-port=0', `--user-data-dir=${userDataDir}`, url], { stdio: 'ignore', detached: true });
-  const kill = () => { try { process.kill(-chrome.pid!, 'SIGKILL'); } catch { /* gone */ } try { spawnSync('pkill', ['-9', '-f', userDataDir]); } catch { /* none */ } rmSync(userDataDir, { recursive: true, force: true }); };
+  const kill = () => { try { process.kill(-chrome.pid!, 'SIGKILL'); } catch { /* gone */ } try { spawnSync('pkill', ['-9', '-f', userDataDir]); } catch { /* none */ } try { rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }); } catch { /* Chrome still writing its profile: best effort */ } };
   let port: number | null = null;
   for (const end = Date.now() + 30000; port === null && Date.now() < end; await sleep(100)) { try { port = Number(readFileSync(join(userDataDir, 'DevToolsActivePort'), 'utf8').split('\n')[0]) || null; } catch { /* not yet */ } }
   if (port === null) { kill(); throw new Error('Chrome did not report a DevTools port'); }
@@ -148,6 +148,17 @@ async function examplesChecks() {
       const shot: string = await p.evalJs('window.__p.shot()');
       const lum: number = await p.evalJs(`(async () => { const i = new Image(); i.src = ${JSON.stringify(shot)}; await i.decode(); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); const d = g.getImageData(0, 0, i.width, i.height).data; let s = 0; for (let k = 0; k < d.length; k += 4) s += (d[k] + d[k + 1] + d[k + 2]) / 3; return s / (d.length / 4); })()`);
       check(`showcase ${scene}: renders, denoiser active, no GPU / console errors`, info.gpuErrors === 0 && !!info.denoiser && lum > 8 && p.logs.length === 0, `denoiser=${info.denoiser} lum=${lum.toFixed(1)} bvh=${info.bvh?.kind ?? 'none'} ${p.logs.join(' | ')}`);
+    } finally { p.close(); }
+  }
+  // W89: the compare page ships: its path tracer (@pmndrs/pathtracer) converges and OIDN denoises, from npm packages only
+  {
+    const p = await openPage(`${origin}/examples/showcase/compare.html?manual&scene=toyCar&left=ours-denoised&right=pathtraced`);
+    try {
+      const ready = await waitFor(p, '!!window.__p && window.__p.entries().length > 0', 240000);
+      const conv = ready ? JSON.parse(await p.evalJs('(async () => JSON.stringify(await window.__p.converge()))()')) : null;
+      const errs: string[] = ready ? JSON.parse(await p.evalJs('JSON.stringify(window.__p.gpuErrors())')) : [];
+      check('showcase compare: the path tracer converges and OIDN denoises, no GPU / console errors', !!conv?.done && !!conv?.denoised && errs.length === 0 && p.logs.length === 0,
+        `${conv ? `${conv.samples} / ${conv.maxSamples} spp, denoiser ${conv.denoiser}` : 'not ready'} ${[...errs, ...p.logs].join(' | ')}`);
     } finally { p.close(); }
   }
   for (const path of ['/examples/', '/examples/ssr/?manual', '/examples/probes/?manual', '/examples/scenes/?manual', '/examples/babylon/?manual', '/examples/quickstart/', '/examples/quickstart/probes.html', '/examples/r3f/']) {

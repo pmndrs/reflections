@@ -18,7 +18,7 @@ import { reflectionProbes } from './probes/ReflectionProbesNode';
 import { installCubeArraySupport } from './compat/cubeArray';
 import { ScreenSpaceReflectionsPass, type ScreenSpaceReflectionsPassSettings } from './sssr/ScreenSpaceReflectionsPass';
 import { HybridReflections } from './sssr/HybridReflections';
-import { createPmndrsBvhTraceProviderFromObjects } from './trace/PmndrsBvhTraceProvider';
+import { createRaytracerTraceProviderFromObjects } from './trace/RaytracerTraceProvider';
 
 /** The perceptual roughness above which a pixel skips the trace (the denoiser gates at the same value). */
 export interface ReflectionsDenoiserInfo { roughnessThreshold: number }
@@ -36,9 +36,11 @@ export interface ReflectionsOptions {
   /** Cube face size of the automatic probe. Default 256 (128 with the 'performance' preset). */
   probeResolution?: number;
   /**
-   * Ray-traced fallback for rays the screen cannot answer (needs `@pmndrs/bvh`, an optional peer).
+   * Ray-traced fallback for rays the screen cannot answer, through `@pmndrs/raytracer` (an optional peer: install it).
    * `true`: every visible mesh of the scene, a BVH built once at `create()` (static meshes; for moving
    * ones use `reflections.trace.refit()` each frame). An array: only these objects. Default false.
+   * Ray tracing degrades, with one console warning, to screen space + probes when it can't run: the package isn't
+   * installed, or the device has too few storage buffers per shader stage for the traced pass (W89, D5451).
    */
   rayTracing?: boolean | THREE.Object3D[];
   /**
@@ -129,9 +131,14 @@ export class Reflections {
       if (Array.isArray(options.rayTracing)) meshes.push(...options.rayTracing);
       else scene.traverseVisible((o) => { if ((o as THREE.Mesh).isMesh && o.userData.noTrace !== true) meshes.push(o); });
       scene.updateMatrixWorld(true);
-      const built = await createPmndrsBvhTraceProviderFromObjects(device, meshes);
-      ssr.setTraceProvider(built.provider);
-      trace = { provider: built.provider as { destroy(): void }, refit: built.refit };
+      try {
+        const built = await createRaytracerTraceProviderFromObjects(device, meshes);
+        ssr.setTraceProvider(built.provider);
+        trace = { provider: built.provider as { destroy(): void }, refit: built.refit };
+      } catch (e) {
+        // W89 (D5451): no ray tracing (the optional peer is missing or failed to build); SSR + probes go on
+        console.warn('Reflections: ray tracing is off (@pmndrs/raytracer could not be loaded or built; install it for rayTracing). Screen-space reflections and probes continue.', e);
+      }
     }
 
     const hybrid = new HybridReflections(ssr, { denoiser, preset });

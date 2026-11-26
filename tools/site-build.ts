@@ -5,12 +5,13 @@
  *     /api/        the TypeDoc API reference                        `pnpm docs:api` (run it first)
  *     /examples/   the built examples (landing page + the demos)    vite build, examples/vite.config.ts
  *
- *     pnpm docs:api && DENOISER_REPO=../denoiser pnpm site:build [out]     # out defaults to _site/
+ *     pnpm docs:api && pnpm site:build [out]     # out defaults to _site/
  *     npx -y serve _site
  *
+ * The denoiser is the `denoiser` package from npm (a devDependency since W89), bundled like any other dependency;
+ * tools/site-check.ts fails a showcase that runs without it.
+ *
  * Environment:
- *   DENOISER_REPO  a pmndrs/denoiser checkout (its source is bundled; nothing there is installed). Required:
- *                  without it the examples run undenoised and flicker, so the build fails instead.
  *   BASE_PATH      where the site is served from: '' (default, a custom domain such as
  *                  https://reflections.docs.pmnd.rs) or '/reflections' (pmndrs.github.io/reflections).
  *   KHRONOS_REF    the glTF-Sample-Assets commit the models are loaded from at runtime (pinned below).
@@ -45,15 +46,10 @@ const run = (cmd: string, args: string[], env: Record<string, string | undefined
     }
 };
 
-if (!process.env.DENOISER_REPO) {
-    console.error('site: DENOISER_REPO is not set. The examples need the denoiser source (a pmndrs/denoiser checkout) or they run undenoised and flicker.');
-    process.exit(1);
-}
-
 // 1. docs + api
 run('node', ['tools/docs-site.ts', out], { BASE_PATH: basePath || undefined });
 
-// 2. examples (EXAMPLES_SITE=1: fails without the denoiser, leaves out the pages that need the beta or the OIDN package)
+// 2. examples (EXAMPLES_SITE=1: leaves out the pages that need the pixi-3d beta or the private pathtracer bench)
 const dist = join(out, 'examples');
 const remote: Record<string, string> = {};
 if (!local) for (const a of ASSETS) if (a.khronos && !a.devOnly) remote[a.dir] = `https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/${KHRONOS_REF}/Models/${a.khronos}/${a.variant}/`;
@@ -93,11 +89,9 @@ for (const a of shipped) {
 const manifest = ASSETS.filter((a) => !a.devOnly).map(({ dir, file, license }) => ({ dir, file, license, devOnly: false }));
 writeFileSync(join(assetsOut, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
-// 4. the examples' landing page, and the showcase's links to pages this site leaves out
+// 4. the examples' landing page (the showcase keeps its links to compare.html and bench.html: both ship since W89)
 const docsHref = `${basePath}/`;
 writeFileSync(join(dist, 'index.html'), readFileSync(join(ROOT, 'tools/site-index.html'), 'utf8').replaceAll('__DOCS__', docsHref));
-const showcase = join(dist, 'showcase/index.html');
-writeFileSync(showcase, readFileSync(showcase, 'utf8').replace(/<a href="\.\/compare\.html">[^<]*<\/a> · <a href="\.\/bench\.html">[^<]*<\/a> · /, ''));
 
 // 5. GitHub Pages: no Jekyll
 writeFileSync(join(out, '.nojekyll'), '');

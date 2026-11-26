@@ -70,7 +70,7 @@ export async function rtLimitChecks() {
   };
   // 3 (pass) + 5 (provider) + 1 (probe table) = 9 storage buffers on a default device (8)
   out.fiveBuffersAndProbes = await attempt(device, fakeProvider(device, 5), true);
-  // 3 + 4 + 1 = 8: fits (three-mesh-bvh's provider binds 4)
+  // 3 + 4 + 1 = 8: fits (the raytracer provider binds 4 with its packed scene copy, D5450)
   out.fourBuffersAndProbes = await attempt(device, fakeProvider(device, 4), true);
   // 4 (pass) + 1 (provider) storage textures on a default device (4)
   out.oneStorageTexture = await attempt(device, fakeProvider(device, 0, 1), false);

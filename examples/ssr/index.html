@@ -25,7 +25,7 @@
           <code>screenSpaceComposite</code> takes three's lit image and replaces its specular IBL with
           <code>mix(probes or environment, SSR, confidence) &times; DFG</code>. No denoiser: glossy SSR is one sample per quad.
           URL: <code>?scene=</code>, <code>?view=</code>, <code>?pose=</code>, <code>?probes=0</code>, <code>?variant=workgroup</code>, <code>?manual</code>,
-          <code>?rt=1</code> (rays for the screen-space misses through three-mesh-bvh; view <code>source</code>: SSR hit green, traced hit blue,
+          <code>?rt=1</code> (rays for the screen-space misses through @pmndrs/raytracer; view <code>source</code>: SSR hit green, traced hit blue,
           traced hit shaded from the screen cyan, traced miss magenta, capped orange, probe grey).
         </p>
       </header>

@@ -1,18 +1,21 @@
-// The examples' denoiser: denoiser/ffx's FfxReflectionDenoiser from the sibling Denoiser repo when
-// examples/vite.config.ts found one, else null (the hybrid resolve then runs undenoised).
-import { FfxReflectionDenoiser, type FfxReflectionDenoiserOptions } from '@pmndrs/denoiser-ffx';
+// The examples' denoiser: denoiser/ffx's FfxReflectionDenoiser (`denoiser` ^2.0.0 from npm, a devDependency since W89;
+// before, a sibling Denoiser checkout).
+import { FfxReflectionDenoiser } from 'denoiser/ffx';
 import { type ScreenSpaceReflectionsSettings, type SpecularInputs, type TemporalDenoiser } from '@pmndrs/reflections/core';
 
-export const denoiserAvailable = FfxReflectionDenoiser !== null;
-export const denoiserSource = __DENOISER_SOURCE__;
+/** The FFX options the examples pass; the W78 BRDF ones exist only on the Denoiser repo's unmerged w78 branch (applied when the instance has them). */
+export type FfxReflectionDenoiserOptions = NonNullable<ConstructorParameters<typeof FfxReflectionDenoiser>[1]>;
+
+/** Always true since W89 (the denoiser is a devDependency); kept so the pages' "no denoiser" paths stay readable. */
+export const denoiserAvailable = true;
+export const denoiserSource = 'denoiser (npm)';
 
 /**
  * FFX reflection denoiser gated at the tracer's threshold: FFX compares alpha (perceptual^2), so
  * rougher pixels (probe term only, no noise) pass through untouched.
  */
 export function createReflectionDenoiser(device: GPUDevice, roughnessThreshold = 0.447, timestamps = false, extra: FfxReflectionDenoiserOptions = {}): TemporalDenoiser<SpecularInputs> | null {
-  if (!FfxReflectionDenoiser) return null;
-  return new FfxReflectionDenoiser(device, { roughnessThreshold: roughnessThreshold * roughnessThreshold, timestamps, ...extra });
+  return new FfxReflectionDenoiser(device, { roughnessThreshold: roughnessThreshold * roughnessThreshold, timestamps, ...extra }) as unknown as TemporalDenoiser<SpecularInputs>;
 }
 
 /**
@@ -82,7 +85,7 @@ export function syncDenoiserBrdf(
   if (on) ssr.settings.sampleDirection = true; else delete ssr.settings.sampleDirection;
   hybrid.denoiserSampleDirection = on;
   // only on a denoiser that has the options (FFX from the Denoiser repo after W78): main's would just store them
-  const d = hybrid.denoiser as { options?: object; setOptions?: (o: FfxReflectionDenoiserOptions) => void } | null;
+  const d = hybrid.denoiser as { options?: object; setOptions?: (o: Record<string, unknown>) => void } | null;
   if (d?.setOptions && d.options && 'brdfWeights' in d.options) d.setOptions({ brdfWeights: mode, brdfMinAlpha: minRoughness * minRoughness });
   hybrid.denoiserKeepHistoryOnBlack = keepBlack;
   return flipped;

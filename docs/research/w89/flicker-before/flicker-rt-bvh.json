@@ -1,0 +1,46 @@
+{
+ "date": "2026-11-26T02:29:39.641Z",
+ "label": "rt-bvh",
+ "results": [
+  {
+   "config": "rt bvh",
+   "scene": "ssr:contact",
+   "regions": {
+    "reflection": {
+     "px": 279484,
+     "drift": 0.3802,
+     "pct8": 0.0004,
+     "rest": 0.0066,
+     "orbitStd": 0.4892,
+     "d2": 0.5518,
+     "quad": 0.3981,
+     "quadRaw": 0.7555,
+     "speckle": 0.0188,
+     "drift2": 0.3708,
+     "orbitStd2": 0.473
+    },
+    "_pan": 3.7919
+   }
+  },
+  {
+   "config": "rt bvh",
+   "scene": "ssr:mirrorWall",
+   "regions": {
+    "reflection": {
+     "px": 200974,
+     "drift": 0.303,
+     "pct8": 0.0517,
+     "rest": 0.0091,
+     "orbitStd": 0.4047,
+     "d2": 0.7255,
+     "quad": 0.0322,
+     "quadRaw": 0.1847,
+     "speckle": 0.0145,
+     "drift2": 0.3038,
+     "orbitStd2": 0.4043
+    },
+    "_pan": 7.7109
+   }
+  }
+ ]
+}

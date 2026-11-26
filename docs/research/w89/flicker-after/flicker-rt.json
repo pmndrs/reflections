@@ -1,0 +1,46 @@
+{
+ "date": "2026-11-26T03:15:47.787Z",
+ "label": "rt",
+ "results": [
+  {
+   "config": "rt raytracer",
+   "scene": "ssr:contact",
+   "regions": {
+    "reflection": {
+     "px": 279484,
+     "drift": 0.3805,
+     "pct8": 0.0004,
+     "rest": 0.0067,
+     "orbitStd": 0.4861,
+     "d2": 0.552,
+     "quad": 0.3982,
+     "quadRaw": 0.7559,
+     "speckle": 0.0186,
+     "drift2": 0.3696,
+     "orbitStd2": 0.4729
+    },
+    "_pan": 3.7944
+   }
+  },
+  {
+   "config": "rt raytracer",
+   "scene": "ssr:mirrorWall",
+   "regions": {
+    "reflection": {
+     "px": 201664,
+     "drift": 0.3066,
+     "pct8": 0.059,
+     "rest": 0.0093,
+     "orbitStd": 0.3989,
+     "d2": 0.7267,
+     "quad": 0.0275,
+     "quadRaw": 0.1855,
+     "speckle": 0.0126,
+     "drift2": 0.3011,
+     "orbitStd2": 0.3985
+    },
+    "_pan": 7.7125
+   }
+  }
+ ]
+}

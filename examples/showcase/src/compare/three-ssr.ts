@@ -29,7 +29,7 @@ import {
 import { ssr as threeSSR } from 'three/addons/tsl/display/SSRNode.js';
 import { temporalReproject } from 'three/addons/tsl/display/TemporalReprojectNode.js';
 import { recurrentDenoise } from 'three/addons/tsl/display/RecurrentDenoiseNode.js';
-import { ffxReflections } from '@pmndrs/denoiser-three-ffx';
+import { ffxReflections } from 'denoiser/three';
 import { DisplayAA, aaFromQuery, renderSize, type AAMode } from '../../../shared/antialias';
 import { setSpecularAA, specAAFromQuery, specAAStrength } from '../specAA';
 import type { FloorKind } from '../scenes';
@@ -39,7 +39,7 @@ import { toneOf } from './ours';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 
-export const ffxAvailable = ffxReflections !== null;
+export const ffxAvailable = true; // denoiser/three from npm (W89)
 
 // three's example: "Disable env map specular ... since SSR provides the specular reflections
 // instead", scoped to the renderers that ask for it.
@@ -72,7 +72,6 @@ const UPS: Record<string, 'n' | 'b'> = { rcasDenoise: 'b', exposure: 'n', autoEx
 export async function createThreeSSR(id: Extract<MethodId, 'three-raw' | 'three-denoise' | 'three-ffx'>, ctx: MethodContext): Promise<CompareMethod> {
   const { width: W, height: H } = ctx;
   const params = mergedParams(ctx);
-  if (id === 'three-ffx' && !ffxReflections) throw new Error('three SSR + FFX needs the sibling Denoiser repo (denoiser/three)');
   const canvas = newCanvas(W, H);
   const renderer = new THREE.WebGPURenderer({ canvas, antialias: false } as N);
   (renderer as N).__noEnvSpecular = true;

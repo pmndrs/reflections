@@ -124,10 +124,10 @@ export async function ssrHistoryChecks() {
  * at p = budget / tiles: a tile is never traced with probability (1 - p)^frames, every frame p^frames.
  */
 export async function rtTileChecks() {
-  const { MeshBVHTraceProvider } = await import('@pmndrs/reflections/three');
+  const { createRaytracerTraceProviderFromObjects } = await import('@pmndrs/reflections/three');
   const rig = await ssrRig(640, 320);
   const { renderer, device, scene, camera, width, height } = rig;
-  const provider = await MeshBVHTraceProvider.fromObjects(device, rig.meshes);
+  const { provider } = await createRaytracerTraceProviderFromObjects(device, rig.meshes);
   const ssr = new ScreenSpaceReflectionsPass(renderer, {
     gbufferOptions: { width, height }, settings: { missConfidenceThreshold: 1.01 }, trace: { provider, lights: false },
   });
@@ -174,10 +174,10 @@ export async function rtTileChecks() {
 /** Core tracer + traced pass on the rig's device, over one G-buffer frame (all rays to the miss list). */
 async function coreRtRig() {
   const core = await import('@pmndrs/reflections/core');
-  const { FrameGBuffer, MeshBVHTraceProvider } = await import('@pmndrs/reflections/three');
+  const { FrameGBuffer, createRaytracerTraceProviderFromObjects } = await import('@pmndrs/reflections/three');
   const rig = await ssrRig();
   const { renderer, device, scene, camera, width, height } = rig;
-  const provider = await MeshBVHTraceProvider.fromObjects(device, rig.meshes);
+  const { provider } = await createRaytracerTraceProviderFromObjects(device, rig.meshes);
   const gb = new FrameGBuffer(renderer, { width, height, lit: true });
   const frame = gb.render(scene, camera);
   const tracer = core.createScreenSpaceReflections(device, { width, height, depthInverted: frame.conventions.depthInverted, missList: true });

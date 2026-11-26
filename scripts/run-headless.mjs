@@ -4,7 +4,7 @@
 //   pnpm check                       # starts the examples server if needed, runs every check
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
-//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-bvh | pixi3d | probe-core | probe-bench | ssr-bench | nrc | showcase | showcase-compare | quickstart | r3f | bench | probe-layouts)
+//   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-builders (alias ssr-rt-bvh) | pixi3d | probe-core | probe-bench | ssr-bench | nrc | showcase | showcase-compare | quickstart | r3f | bench | probe-layouts)
 //   pnpm check -- --only flicker                 # W85 (T1): the X0 flicker metrics per scene x config (FLICKER_SCENES / FLICKER_CONFIGS / FLICKER_LABEL, scripts/flicker.mjs)
 //   pnpm check -- --only ssr-exp-metrics         # X0 (W70): the experiment metrics smoke (examples/shared/metrics); ssr-exp-baseline = the full baseline (scripts/ssr-exp.mjs)
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
@@ -25,7 +25,7 @@
 //   pnpm check -- --only probe-bench --probe-atlas   # W62: mixed probe sizes in one 2D octahedral atlas vs cube arrays; out/w62-probe-atlas.json
 //   pnpm check -- --only ssr-bench --ssr-bench   # the phase 3 gate bench: ours vs three's SSRNode (minutes); JSON to out/ssr-bench.json
 //                                    # (--ssr-scenes rooms,mirrorWall to narrow it)
-//   pnpm check -- --only ssr-rt --rt-shadow-timing   # D903: GPU ms of hit shadow rays, kit scenes, 960x540 + 1080p (also ssr-rt-bvh)
+//   pnpm check -- --only ssr-rt --rt-shadow-timing   # D903: GPU ms of hit shadow rays, kit scenes, 960x540 + 1080p (also ssr-rt-builders)
 //   pnpm check -- --only rt-materials [--rt-material-assets]   # W49: per-triangle hit materials, both providers (+ the asset survey)
 //
 // Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
@@ -117,15 +117,9 @@ function killChrome(chrome) {
 const killAllChromes = () => { for (const c of [...liveChromes.keys()]) killChrome(c); };
 process.on('exit', killAllChromes);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { killAllChromes(); process.exit(130); });
-/**
- * P1.5: `--rt-core raytracer` runs every `bvh=pmndrs` page on core's @pmndrs/raytracer provider (`&bvhCore=raytracer`),
- * so the @pmndrs/bvh checks and timings A/B the two providers on the same scenes.
- */
-const RT_CORE = args.includes('--rt-core') ? args[args.indexOf('--rt-core') + 1] : null;
-const withRtCore = (url) => (RT_CORE && /[?&]bvh=pmndrs\b/.test(url) && !/bvhCore=/.test(url) ? url.replace(/([?&]bvh=pmndrs)\b/, `$1&bvhCore=${RT_CORE}`) : url);
 /** Open `url` in a fresh headless Chrome; resolves once `window.__p` exists. */
 async function openPage(url0, extraArgs = []) {
-  const url = withRtCore(url0);
+  const url = url0;
   // Port 0: Chrome picks a free port and writes it to DevToolsActivePort. A random fixed port could
   // collide with another worktree's Chrome, and then this run drove that run's page (F2).
   const userDataDir = path.join(os.tmpdir(), `reflections-${Date.now()}-${process.pid}-${Math.floor(Math.random() * 1e9)}`);
@@ -168,7 +162,7 @@ async function openPage(url0, extraArgs = []) {
   const close = () => { try { ws.close(); } catch { /* noop */ } killChrome(chrome); };
   /** Load another URL in the same browser (same profile, so IndexedDB carries over); resolves once its `__p` exists. */
   const navigate = async (next0) => {
-    const next = withRtCore(next0);
+    const next = next0;
     await cdp.send('Page.navigate', { url: next });
     const until = Date.now() + 180_000;
     while (Date.now() < until) {
@@ -1400,7 +1394,7 @@ async function regressionChecks(pages) {
 }
 
 /**
- * examples/ssr?rt=1: the ray-traced pass over the SSSR miss list (three-mesh-bvh provider).
+ * examples/ssr?rt=1: the ray-traced pass over the SSSR miss list (core's @pmndrs/raytracer provider, the only one since W89).
  *  - the provider agrees with three's CPU raycaster on camera rays (ray oracle);
  *  - offscreen, view 'mirror': the wall mirror shows the wall behind the camera with RT on (confidence,
  *    traced hit distance vs the analytic mirror distance, the emissive bars), and doesn't with RT off;
@@ -1553,18 +1547,18 @@ async function rtMaterialAssetSurvey(p, label) {
   }
 }
 
-/** `--only rt-materials`: {@link rtMaterialChecks} on three-mesh-bvh and @pmndrs/bvh (auto, tinybvh), each on its own page. */
+/** `--only rt-materials`: {@link rtMaterialChecks} on the provider's trees from each builder (auto, tinybvh), each on its own page. */
 async function rtMaterialsAlone(pages) {
   console.log('examples/ssr (?rt=1, multiMaterial):');
   const oracleOk = (o) => o.agree / o.rays > 0.995 && [o.triangle, o.instance, o.material].every((k) => k >= o.compared * 0.995);
-  for (const [bvhParam, builder] of [['&bvh=three-mesh-bvh', null], ['&bvh=pmndrs', 'auto'], ['&bvh=pmndrs', 'tinybvh']]) {
-    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1${bvhParam}${builder ? `&bvhBuilder=${builder}` : ''}&probeRes=128&scene=multiMaterial`);
+  for (const builder of ['auto', 'tinybvh']) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&bvhBuilder=${builder}&probeRes=128&scene=multiMaterial`);
     pages.push(p);
     const bvh = await p.T('window.__p.bvh');
-    const label = builder ? `@pmndrs/bvh (${bvh.builder})` : 'three-mesh-bvh port';
+    const label = `@pmndrs/raytracer (${bvh.builder})`;
     // the survey (materials arrays are the scene's, not the walk's) on the first provider only
     if (args.includes('--rt-material-assets')) { await rtMaterialAssetSurvey(p, label); return; }
-    await rtMaterialChecks(p, label, builder ? oracleOk : null);
+    await rtMaterialChecks(p, label, oracleOk);
   }
 }
 
@@ -1604,15 +1598,15 @@ async function ssrRtChecks(pages) {
   console.log('examples/ssr (?rt=1):');
   // probes at 128 px: the size W25 / W28 measured the hit-shading checks at (the page follows the
   // 256 px default since 443e35d; at 256 contact's D901 ratio reads 1.10 with @pmndrs/bvh, HANDOFF backlog)
-  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&bvh=three-mesh-bvh&probeRes=128`);
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&probeRes=128`);
   pages.push(p);
   const before = results.logs.length;
   await p.T("window.__p.load('offscreen')");
   const bvh = await p.T('window.__p.bvh');
   const oracle = await p.T('window.__p.rtOracle(4096)');
-  check('rt provider (three-mesh-bvh port) agrees with THREE.Raycaster', oracle.agree / oracle.rays > 0.995 && oracle.gpuOnly + oracle.cpuOnly <= oracle.rays * 0.003,
+  check('rt provider (@pmndrs/raytracer) agrees with THREE.Raycaster', oracle.agree / oracle.rays > 0.995 && oracle.gpuOnly + oracle.cpuOnly <= oracle.rays * 0.003,
     `${oracle.agree}/${oracle.rays} agree (${oracle.bothMiss} both miss), gpu-only ${oracle.gpuOnly}, cpu-only ${oracle.cpuOnly}, p99 rel ${oracle.p99Rel.toExponential(1)}, max rel ${oracle.maxRel.toExponential(1)}; BVH ${bvh.meshes} meshes, ${bvh.triangles} tris, ${bvh.buildMs.toFixed(0)} ms`);
-  await rtAnyHitChecks(p, 'three-mesh-bvh port');
+  await rtAnyHitChecks(p, '@pmndrs/raytracer');
   await p.T("window.__p.setPose('mirror')");
   await p.T('window.__p.setRT(false)');
   await p.T('window.__p.step(2)');
@@ -1655,18 +1649,18 @@ async function ssrRtChecks(pages) {
     const extra = id === 'mirrorWall' ? `; wall: ${(st.wall.confidentFraction * 100).toFixed(1)}% confident, corr ${st.wall.lumCorrelation.toFixed(3)}` : '';
     check(`rt ${id}: renders, finite, no validation errors`, e.length === 0 && st.nonFinite === 0, e.length ? e.slice(0, 2).join(' | ') : `${st.misses} misses -> ${JSON.stringify(st.rt)}${extra}`);
     await rtHitShadingLines(p, id);
-    if (id === 'contact') await rtShadingNormalChecks(p, 'three-mesh-bvh port');
+    if (id === 'contact') await rtShadingNormalChecks(p, '@pmndrs/raytracer');
   }
   await halfRateChecks(p); // W74 (X4, D5060)
-  await rtMaterialChecks(p, 'three-mesh-bvh port'); // W49 (D1701 / D1702)
-  if (args.includes('--rt-material-assets')) await rtMaterialAssetSurvey(p, 'three-mesh-bvh');
-  if (args.includes('--rt-shadow-timing')) await rtShadowTiming('three-mesh-bvh', '&bvh=three-mesh-bvh');
+  await rtMaterialChecks(p, '@pmndrs/raytracer'); // W49 (D1701 / D1702)
+  if (args.includes('--rt-material-assets')) await rtMaterialAssetSurvey(p, '@pmndrs/raytracer');
+  if (args.includes('--rt-shadow-timing')) await rtShadowTiming('@pmndrs/raytracer', '');
   await missFillChecks(pages);
   await offscreenFillChecks(pages);
   await rtHitAtlasChecks(pages); // W47 (D4702)
 
   // GPU ms vs miss count at 1080p: the same frame, misses varied with the miss-list threshold
-  const big = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1&bvh=three-mesh-bvh&scene=offscreen&pose=mirror`);
+  const big = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1&scene=offscreen&pose=mirror`);
   pages.push(big);
   const rows = [];
   for (const thr of [0, 0.3, 0.9, 1.01]) {
@@ -1717,7 +1711,7 @@ const MISS_FILL = `async (poses, variants) => {
 }`;
 
 async function missFillChecks(pages) {
-  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&bvh=three-mesh-bvh&denoise=0&scene=facingMirrors`);
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=facingMirrors`);
   pages.push(p);
   const r = await p.T(`(${MISS_FILL})(['default', 'left'], { all: { include: true }, kit: {} })`);
   const line = (k) => `${k}: ${r[k].kit.px} miss px, all captured ${r[k].all.mad.toFixed(2)} -> kit ${r[k].kit.mad.toFixed(2)}`;
@@ -1807,7 +1801,7 @@ async function hitSourceChecks(pages) {
     p.setHitSource({ hitSource: false }); await p.step(2);
     return { offSource: !!offSource, counts, changed: changed / (A.length / 4), opts: p.hybrid.denoiser.options, offAgain: !!p.hybrid.denoiseSeam.hitSource, errors: p.gpuErrors.length };
   })()`);
-  if (r.skip) { console.log('  note: hit-source skipped (the denoiser has no setOptions: point DENOISER_REPO at the W53 branch)'); return; }
+  if (r.skip) { console.log('  note: hit-source skipped (the denoiser has no setOptions: denoiser >= 2.0 has it)'); return; }
   const n = r.counts.reduce((a, b) => a + b, 0);
   check('hit source (W53): off, the seam hands the denoiser none; on, screen-space and traced codes and the frame changes; off again clears the FFX option and the input',
     !r.offSource && r.counts[1] > 0.01 * n && r.counts[2] > 0.01 * n && r.counts[3] === 0 && r.opts.separateHitSources === false && !r.offAgain && r.changed > 0.001 && r.errors === 0,
@@ -1867,7 +1861,7 @@ async function brdfPrefilterChecks(pages) {
     console.warn = warn0;
     return { offSample, hasSample: !!S, glossy, withPdf, unit, changed, offDiff, nonFinite, halfWarned, errors: p.gpuErrors.length };
   })()`);
-  if (r.skip) { console.log('  note: brdf-prefilter skipped (the denoiser has no brdfWeights: point DENOISER_REPO at the W78 branch)'); return; }
+  if (r.skip) { console.log('  note: brdf-prefilter skipped (the denoiser has no brdfWeights: only the unmerged w78 branch of pmndrs/denoiser has them, not denoiser 2.0 on npm)'); return; }
   check('BRDF prefilter (W78): off, no sample direction; on, most glossy px carry a unit direction and pdf > 0, and the denoised output changes; no NaN, no validation errors',
     !r.offSample && r.hasSample && r.withPdf > 0.8 * r.glossy && r.unit === r.withPdf && r.offDiff < 0.001 * r.glossy && r.changed > 0.05 * r.glossy && r.nonFinite === 0 && r.errors === 0,
     `glossy px ${r.glossy}: with pdf ${(r.withPdf / r.glossy * 100).toFixed(1)}%, unit ${r.unit === r.withPdf}; denoised changed > 1%: ${(r.changed / r.glossy * 100).toFixed(1)}% (off vs off: ${(r.offDiff / r.glossy * 100).toFixed(2)}%); non-finite ${r.nonFinite}; errors ${r.errors}`);
@@ -1962,7 +1956,7 @@ const OFFSCREEN_SIZE_VARIANTS = {
   floor1024: { sizes: [256, 1024, 256] },
 };
 async function offscreenSizeMeasure(pages) {
-  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&bvh=three-mesh-bvh&denoise=0&gpuTime&scene=offscreen`);
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&gpuTime&scene=offscreen`);
   pages.push(p);
   const r = await p.T(`(${OFFSCREEN_FILL})(['default', 'mirror'], ${JSON.stringify(OFFSCREEN_FILL_RECT)}, ${JSON.stringify(OFFSCREEN_SIZE_VARIANTS)}, ${JSON.stringify(OFFSCREEN_RING_RECT)})`);
   const timing = {};
@@ -2217,7 +2211,7 @@ async function probeLayoutMeasure(pages) {
     const poses = PROBE_LAYOUT_MEASURE[scene];
     all[scene] ??= {};
     if (parts.includes('error')) {
-      const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&bvh=three-mesh-bvh&denoise=0&probeLayout=shipped&scene=${scene}`);
+      const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&probeLayout=shipped&scene=${scene}`);
       pages.push(p);
       const t0 = Date.now();
       const r = await p.T(`(${LAYOUT_MEASURE})(${JSON.stringify(poses)}, ${JSON.stringify(PROBE_LAYOUT_VARIANTS)})`);
@@ -2575,7 +2569,7 @@ async function probeLookupCost(pages) {
 }
 
 async function offscreenFillChecks(pages) {
-  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&bvh=three-mesh-bvh&denoise=0&scene=offscreen`);
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=offscreen`);
   pages.push(p);
   // W60: `all256` is the kit with every probe at the set's 256 px (the kit before per-probe sizes)
   const r = await p.T(`(${OFFSCREEN_FILL})(['default', 'mirror'], ${JSON.stringify(OFFSCREEN_FILL_RECT)}, { single: { probes: [0] }, all256: { sizes: [256, 256, 256] }, kit: {} }, ${JSON.stringify(OFFSCREEN_RING_RECT)})`);
@@ -2660,9 +2654,9 @@ const RT_HIT_ATLASES = `async (poses) => {
   delete p.ssr.settings.hitColorFilter;
   return out;
 }`;
-/** examples/ssr offscreen, `bvh` '' (three-mesh-bvh) or 'pmndrs': the {@link RT_HIT_ATLASES} check. JSON to out/w47-rt-hit-atlases[-pmndrs].json. */
+/** examples/ssr offscreen: the {@link RT_HIT_ATLASES} check. JSON to out/w47-rt-hit-atlases.json. (`bvh` only names the output files.) */
 async function rtHitAtlasChecks(pages, bvh = '') {
-  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&bvh=three-mesh-bvh&denoise=0&scene=offscreen&bvh=${bvh || 'three-mesh-bvh'}`);
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&scene=offscreen`);
   pages.push(p);
   const r = await p.T(`(${RT_HIT_ATLASES})(['default', 'mirror'])`);
   fs.mkdirSync(OUT, { recursive: true });
@@ -2685,55 +2679,52 @@ async function rtHitAtlasChecks(pages, bvh = '') {
 }
 
 /**
- * examples/ssr?rt=1&bvh=pmndrs (W14): core's @pmndrs/bvh provider.
+ * examples/ssr?rt=1 per tree builder (W14; W89: the section was `ssr-rt-bvh`, comparing two older providers;
+ * both are gone and core's @pmndrs/raytracer provider walks the @pmndrs/bvh trees):
  *  - the ray oracle against THREE.Raycaster (camera rays and rays spread through the scene): first
  *    hit, triangle, normal, frontFace, instance and material, for each builder (auto, tinybvh);
- *  - the offscreen wall mirror with RT on, as for three-mesh-bvh;
- *  - SPEC phase 4 gate: the @pmndrs/bvh walk vs three-mesh-bvh's on the same rays, per scene
- *    (`--rt-compare-rays N`, default 16384 per ray set).
+ *  - the offscreen wall mirror with RT on, as in ssr-rt;
+ *  - the oracle per scene (it was the SPEC phase 4 gate between two walks; THREE.Raycaster is the yardstick now);
+ *  - the opt-in raytracer hit shading (rtShade).
  */
-async function ssrRtBvhChecks(pages) {
-  console.log('examples/ssr (?rt=1&bvh=pmndrs):');
+async function ssrRtBuilderChecks(pages) {
+  console.log('examples/ssr (?rt=1, per builder):');
   if (args.includes('--rt-bvh-timing-only')) return rtBvhTiming(pages);
-  const nCompare = args.includes('--rt-compare-rays') ? Number(args[args.indexOf('--rt-compare-rays') + 1]) : 16384;
   const fmtOracle = (o) => `${o.agree}/${o.rays} agree (${o.bothMiss} both miss), gpu-only ${o.gpuOnly}, cpu-only ${o.cpuOnly}, p99 rel ${o.p99Rel.toExponential(1)}; of ${o.compared} hits: triangle ${o.triangle}, normal ${o.normalSigned} (same line ${o.normalAbs}), frontFace ${o.frontFace}, instance ${o.instance}, material ${o.material}`;
   // Where both hit within 1e-3 the attributes must agree, but for ties: rays spread through a scene
   // hit contact lines and coincident faces, where either answer is right (D1704).
   const oracleOk = (o) => o.agree / o.rays > 0.995 && o.gpuOnly + o.cpuOnly <= o.rays * 0.003
     && [o.triangle, o.normalSigned, o.frontFace, o.instance, o.material].every((k) => k >= o.compared * 0.995);
-  // W82 (T70): the opt-in raytracer hit shading (rtShade) on the offscreen mirror, only where @pmndrs/raytracer resolves
-  // (a sibling pathtracer checkout; otherwise the example ignores &bvhCore / &rtShade and the provider stays @pmndrs/bvh)
+  // W82 (T70): the opt-in raytracer hit shading (rtShade) on the offscreen mirror
   {
-    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&bvh=pmndrs&bvhCore=raytracer&rtShade=1&probeRes=128`);
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&rtShade=1&probeRes=128`);
     pages.push(p);
     const before = results.logs.length;
     await p.T("window.__p.load('offscreen')");
-    const bvh = await p.T('window.__p.bvh');
-    if (bvh.provider && /raytracer/i.test(bvh.provider)) {
-      await p.T("window.__p.setPose('mirror')");
-      await p.T('window.__p.step(3)');
-      const on = await p.T('window.__p.stats()');
-      const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
-      check('rt raytracerHitShading (rtShade, opt-in): renders, no validation errors, finite outputs, traced hits', errs.length === 0 && on.nonFinite === 0 && on.rt && on.rt.traced > 0 && on.rt.hits > 0,
-        errs.length ? errs.slice(0, 2).join(' | ') : `${on.misses} misses -> ${JSON.stringify(on.rt)}`);
-    } else console.log('  (info) rtShade check skipped: @pmndrs/raytracer does not resolve here (no sibling pathtracer checkout)');
+    await p.T("window.__p.setPose('mirror')");
+    await p.T('window.__p.step(3)');
+    const on = await p.T('window.__p.stats()');
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
+    check('rt raytracerHitShading (rtShade, opt-in): renders, no validation errors, finite outputs, traced hits', errs.length === 0 && on.nonFinite === 0 && on.rt && on.rt.traced > 0 && on.rt.hits > 0,
+      errs.length ? errs.slice(0, 2).join(' | ') : `${on.misses} misses -> ${JSON.stringify(on.rt)}`);
     p.close();
   }
   for (const builder of ['auto', 'tinybvh']) {
-    // probes at 128 px, as the three-mesh-bvh section above (D901 hit-shading checks)
-    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&bvh=pmndrs&bvhBuilder=${builder}&probeRes=128`);
+    // probes at 128 px, as the ssr-rt section (D901 hit-shading checks)
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&bvhBuilder=${builder}&probeRes=128`);
     pages.push(p);
     const before = results.logs.length;
     await p.T("window.__p.load('offscreen')");
     const bvh = await p.T('window.__p.bvh');
-    console.log(`  (info) provider: ${bvh.provider}`);
+    console.log(`  (info) provider: ${bvh.provider}, scene copy ${bvh.packing}`);
+    const label = `@pmndrs/raytracer (${bvh.builder})`;
     for (const kind of ['camera', 'scene']) {
       const o = await p.T(`window.__p.rtOracle(4096, '${kind}')`);
-      check(`rt @pmndrs/bvh (${bvh.builder}) agrees with THREE.Raycaster, ${kind} rays`, oracleOk(o),
+      check(`rt ${label} agrees with THREE.Raycaster, ${kind} rays`, oracleOk(o),
         `${fmtOracle(o)}; BVH ${bvh.meshes} meshes, ${bvh.triangles} tris, ${bvh.buildMs.toFixed(0)} ms${bvh.fallbackReason ? ` (${bvh.fallbackReason})` : ''}`);
     }
-    if (builder !== 'auto') { await rtMaterialChecks(p, `@pmndrs/bvh (${bvh.builder})`, oracleOk); continue; } // W49
-    await rtAnyHitChecks(p, `@pmndrs/bvh (${bvh.builder})`);
+    if (builder !== 'auto') { await rtMaterialChecks(p, label, oracleOk); continue; } // W49
+    await rtAnyHitChecks(p, label);
     await p.T("window.__p.setPose('mirror')");
     await p.T('window.__p.setRT(false)');
     await p.T('window.__p.step(2)');
@@ -2742,77 +2733,50 @@ async function ssrRtBvhChecks(pages) {
     await p.T('window.__p.step(2)');
     const on = await p.T('window.__p.stats()');
     const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
-    check('rt @pmndrs/bvh offscreen: renders, no validation errors, finite outputs', errs.length === 0 && on.nonFinite === 0 && on.rt && on.rt.traced > 0,
+    check(`rt ${label} offscreen: renders, no validation errors, finite outputs`, errs.length === 0 && on.nonFinite === 0 && on.rt && on.rt.traced > 0,
       errs.length ? errs.slice(0, 2).join(' | ') : `${on.misses} misses -> ${JSON.stringify(on.rt)}`);
-    check('rt @pmndrs/bvh offscreen: the wall mirror shows the wall behind the camera',
+    check(`rt ${label} offscreen: the wall mirror shows the wall behind the camera`,
       on.facingPanelConfidence > 0.9 && off.facingPanelConfidence < 0.1 && on.panel.hitDistanceMedianRelErr < 0.02 && on.panel.within2pc > 0.8 && on.panel.brightFraction > 0.02,
       `confidence ${off.facingPanelConfidence.toFixed(3)} -> ${on.facingPanelConfidence.toFixed(3)}; hit distance median rel err ${on.panel.hitDistanceMedianRelErr.toExponential(2)}, ${(on.panel.within2pc * 100).toFixed(1)}% within 2%; bright ${(on.panel.brightFraction * 100).toFixed(2)}%`);
     await p.T("window.__p.setView('final')");
-    savePng('ssr-rt-bvh-offscreen-mirror-final.png', await p.T('window.__p.shot()'));
+    savePng('ssr-rt-builders-offscreen-mirror-final.png', await p.T('window.__p.shot()'));
     await p.T("window.__p.setView('grid')");
 
-    // the phase 4 gate: same rays through both walks, per scene
+    // per scene: the walk against THREE.Raycaster (brute force per mesh; fewer rays on the asset)
     const assets = fs.existsSync(path.join(ROOT, 'examples/assets/Sponza')) ? ['sponza'] : [];
     for (const id of ['offscreen', 'mirrorWall', 'contact', 'boxRoom', 'moving', 'facingMirrors', 'rooms', ...assets]) {
       const b = results.logs.length;
       await p.T(`window.__p.load(${JSON.stringify(id)})`);
       await p.T('window.__p.step(1)');
       const big = assets.includes(id);
-      if (big) {
-        // Which walk is right where they disagree? THREE.Raycaster (brute force per mesh) on fewer rays,
-        // ours first: building three-mesh-bvh's BVH reorders the geometry's index buffer in place,
-        // after which our triangle ids (taken before) no longer match three's faceIndex.
-        for (const which of ['pmndrs', 'three-mesh-bvh']) {
-          const o = await p.T(`window.__p.rtOracle(1024, 'camera', '${which}')`);
-          if (which === 'pmndrs') check(`rt @pmndrs/bvh vs THREE.Raycaster, ${id}, camera rays`, oracleOk(o), fmtOracle(o));
-          else console.log(`  (info) three-mesh-bvh vs THREE.Raycaster, ${id}, camera rays - ${fmtOracle(o)}`);
-        }
-      }
-      for (const kind of ['camera', 'scene']) {
-        const c = await p.T(`window.__p.rtCompare(${nCompare}, '${kind}')`);
+      for (const kind of big ? ['camera'] : ['camera', 'scene']) {
+        const o = await p.T(`window.__p.rtOracle(${big ? 1024 : 4096}, '${kind}')`);
         const e = results.logs.slice(b).filter((l) => /invalid|validation|uncaptured|exception|error/i.test(l));
-        const detail = `${c.agree}/${c.rays} agree (${c.bothMiss} both miss), pmndrs-only ${c.pmndrsOnly}, three-mesh-bvh-only ${c.tmbOnly}, p99 rel ${c.p99Rel.toExponential(1)}, max rel ${c.maxRel.toExponential(1)}; of ${c.compared} hits: normal ${c.normal}, frontFace ${c.frontFace}; ${c.triangles} tris, ${c.builder}, build ${c.buildMs.pmndrs.toFixed(0)} vs ${c.buildMs.threeMeshBvh.toFixed(0)} ms`;
-        // On the asset the stopgap misses the nearest hit on some rays (D1705); the oracle above is its check.
-        if (big && e.length === 0) { console.log(`  (info) rt @pmndrs/bvh vs three-mesh-bvh, ${id}, ${kind} rays - ${detail}`); continue; }
-        check(`rt @pmndrs/bvh vs three-mesh-bvh, ${id}, ${kind} rays`,
-          e.length === 0 && c.agree / c.rays > 0.995 && c.pmndrsOnly + c.tmbOnly <= c.rays * 0.003 && c.normal >= c.compared * 0.995,
-          e.length ? e.slice(0, 2).join(' | ') : detail);
+        // what the old per-scene gate held (hit / t and the normal's line): 'rooms' has coincident walls of different rooms,
+        // where the instance / material id of either wall is right (D1704); the ids are held on offscreen and multiMaterial
+        const sceneOk = o.agree / o.rays > 0.995 && o.gpuOnly + o.cpuOnly <= o.rays * 0.003 && o.normalAbs >= o.compared * 0.995;
+        check(`rt ${label} vs THREE.Raycaster, ${id}, ${kind} rays (hit, t, normal)`, e.length === 0 && sceneOk, e.length ? e.slice(0, 2).join(' | ') : fmtOracle(o));
       }
-      // D903: the same hit-shading measurement as the ssr-rt section, on this provider
-      if (['mirrorWall', 'contact', 'moving'].includes(id)) { await p.T('window.__p.step(2)'); await rtHitShadingLines(p, `${id} (@pmndrs/bvh)`); }
-      if (id === 'contact') await rtShadingNormalChecks(p, '@pmndrs/bvh');
+      // D903: the same hit-shading measurement as the ssr-rt section
+      if (['mirrorWall', 'contact', 'moving'].includes(id)) { await p.T('window.__p.step(2)'); await rtHitShadingLines(p, `${id} (${label})`); }
+      if (id === 'contact') await rtShadingNormalChecks(p, label);
     }
-    await rtMaterialChecks(p, `@pmndrs/bvh (${bvh.builder})`, oracleOk); // W49 (D1701 / D1702)
-    if (args.includes('--rt-material-assets')) await rtMaterialAssetSurvey(p, '@pmndrs/bvh');
+    await rtMaterialChecks(p, label, oracleOk); // W49 (D1701 / D1702)
+    if (args.includes('--rt-material-assets')) await rtMaterialAssetSurvey(p, label);
   }
-  if (args.includes('--rt-shadow-timing')) await rtShadowTiming('@pmndrs/bvh', '&bvh=pmndrs');
-  await rtHitAtlasChecks(pages, 'pmndrs'); // W47 (D4702)
-
-  // Information, not a gate: trace-pass GPU ms of both walks on the same frame (1080p, offscreen
-  // 'mirror', every confidence below 1.01 traced), loop stopped, median of 20.
-  const ms = {};
-  for (const bvh of ['three-mesh-bvh', 'pmndrs']) {
-    const t = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&timing&w=1920&h=1080&rt=1&bvh=${bvh}&scene=offscreen&pose=mirror`);
-    pages.push(t);
-    await t.T('window.__p.setSettings({ missConfidenceThreshold: 1.01 })');
-    const r = await t.T('window.__p.time(20)');
-    await t.T('window.__p.step(1)');
-    ms[bvh] = { trace: r.ms['rt trace'], misses: (await t.T('window.__p.traceStats()')).misses };
-  }
-  console.log(`  (info) rt trace GPU ms at 1920x1080, offscreen 'mirror', ${ms.pmndrs.misses} misses: @pmndrs/bvh ${ms.pmndrs.trace?.toFixed(3)} ms, three-mesh-bvh ${ms['three-mesh-bvh'].trace?.toFixed(3)} ms`);
+  if (args.includes('--rt-shadow-timing')) await rtShadowTiming('@pmndrs/raytracer', '');
   if (args.includes('--rt-bvh-timing')) await rtBvhTiming(pages);
 }
 
 /**
- * W48: 'rt trace' GPU ms at 1080p per walk (three-mesh-bvh, @pmndrs/bvh, @pmndrs/bvh with its
+ * W48: 'rt trace' GPU ms at 1080p per provider variant (W89: @pmndrs/raytracer packed, split, and with the
  * instance-mask test compiled in, `&bvhRayMasks=1`), loop stopped, median of 20 frames per run, `--rt-bvh-rounds` runs (default 3)
  * in rotating order, median of the runs. Two loads per run: the default miss list, then every pixel
  * below confidence 1.01 traced (the walk's cost on a full screen of rays). Opt-in (`--rt-bvh-timing`).
  */
 async function rtBvhTiming(pages) {
   const rounds = args.includes('--rt-bvh-rounds') ? Number(args[args.indexOf('--rt-bvh-rounds') + 1]) : 3;
-  const variants = [['three-mesh-bvh', '&bvh=three-mesh-bvh'], ['@pmndrs/bvh', '&bvh=pmndrs&bvhCore=bvh'], ['@pmndrs/bvh rayMasks on', '&bvh=pmndrs&bvhCore=bvh&bvhRayMasks=1'],
-    ['@pmndrs/raytracer', '&bvh=pmndrs&bvhCore=raytracer']]; // P1.5: core's provider over @pmndrs/raytracer
+  const variants = [['@pmndrs/raytracer', ''], ['@pmndrs/raytracer split', '&rtPacking=split'], ['@pmndrs/raytracer rayMasks on', '&bvhRayMasks=1']];
   const scenes = [['offscreen', 'mirror'], ['mirrorWall', ''], ['contact', ''], ['moving', ''], ['boxRoom', ''],
     ...(fs.existsSync(path.join(ROOT, 'examples/assets/Sponza')) ? [['sponza', '']] : [])]
     .filter(([scene]) => !args.includes('--rt-bvh-scenes') || args[args.indexOf('--rt-bvh-scenes') + 1].split(',').includes(scene));
@@ -3114,6 +3078,41 @@ async function benchChecks(pages) {
     return { code, q, ok, back }; })()`);
   check('bench: copy as code, URL state and presets', st.code.includes('ScreenSpaceReflectionsPass') && st.code.includes('hitLobeFilter: 0') && st.q.includes('lobeFilter=0') && (!st.ok || st.back === st.q),
     `query '${st.q}', preset round trip ${st.ok ? 'ok' : 'storage unavailable'}, code ${st.code.split('\n').length} lines`);
+}
+
+/**
+ * W89 (`--only pt-reference`, opt-in): the path-traced reference per bench scene, to A/B a reference change. Per scene at
+ * its hero pose: bench Measure with `PT_SPP` (default 32) reference samples (+ OIDN), ours + RT and ours denoised (16 warm-up
+ * frames, 4 measured): per region (frame, glossy) the reference's mean luma and each method's MAD against it. The reference
+ * image goes to OUT/pt-reference-<label>-<scene>.png, the numbers to OUT/pt-reference-<label>.json (`PT_LABEL`, default 'run').
+ */
+async function ptReferenceRun(pages) {
+  console.log('W89 path-traced reference per scene (bench Measure):');
+  const label = process.env.PT_LABEL ?? 'run';
+  const spp = Number(process.env.PT_SPP ?? 32);
+  const out = { label, spp, date: new Date().toISOString(), scenes: {} };
+  const p0 = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual`);
+  pages.push(p0);
+  const scenes = (process.env.PT_SCENES ? process.env.PT_SCENES.split(',') : await p0.T('window.__p.entries()'));
+  p0.close();
+  for (const scene of scenes) {
+    const before = results.logs.length;
+    const p = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual&scene=${scene}&pose=hero&left=ours-rt&right=ours-denoised`);
+    pages.push(p);
+    const m = await p.T(`window.__p.measure({ samples: ${spp}, warmup: 16, frames: 4, methods: ['ours-rt', 'ours-denoised'] })`);
+    const info = await p.T("(async () => { const P = window.__p; const pt = P.ptInfo ? await P.ptInfo() : null; return pt; })()").catch(() => null);
+    const ref = await p.T("(() => { const P = window.__p; const i = P.metrics?.lastImages; if (!i) return null; const [w, h] = P.lastMeasure.size; const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(i.ref), w, h), 0, 0); return c.toDataURL('image/png'); })()");
+    if (ref) savePng(`pt-reference-${label}-${scene}.png`, ref);
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    const rows = Object.fromEntries(m.rows.filter((r) => ['frame', 'glossy'].includes(r.region)).map((r) => [r.region, { px: r.px, ptLuma: r.refLuma, rt: r.methods['ours-rt']?.mad, denoised: r.methods['ours-denoised']?.mad, rtLuma: r.methods['ours-rt']?.luma }]));
+    out.scenes[scene] = { referenceSamples: m.referenceSamples, rows, info, seconds: m.seconds };
+    const f = (r) => r ? `PT luma ${r.ptLuma.toFixed(1)}, MAD ours+RT ${r.rt?.toFixed(2)} / ours ${r.denoised?.toFixed(2)}` : '-';
+    check(`pt-reference ${scene}: Measure ran (${m.referenceSamples} spp), no GPU errors`, errs.length === 0 && m.referenceSamples > 0,
+      `frame: ${f(rows.frame)}; glossy (${rows.glossy?.px ?? 0} px): ${f(rows.glossy)}${errs.length ? '; ' + errs[0] : ''}`);
+    p.close();
+  }
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, `pt-reference-${label}.json`), JSON.stringify(out, null, 1));
 }
 
 /**
@@ -3744,10 +3743,10 @@ async function main() {
     if (only === 'probe-lookup-parity') await probeLookupParity(pages); // W63: a lookup variant vs the shipped lookup, image for image
     if (only === 'probe-lookup-cost') await probeLookupCost(pages); // W63: the lookup's cost per variant and volume count, JSON to out/w63-probe-lookup-cost.json
     if (only === 'offscreen-sizes') await offscreenSizeMeasure(pages); // W60 (D4700): offscreen per-probe sizes, JSON to out/w60-offscreen.json
-    if (only === 'rt-hit-atlases') { await rtHitAtlasChecks(pages); await rtHitAtlasChecks(pages, 'pmndrs'); } // W47 (D4702): RT hits over a mixed-size set alone (also part of ssr-rt / ssr-rt-bvh)
-    if (only === 'rt-materials') await rtMaterialsAlone(pages); // W49 (D1701 / D1702): per-triangle hit materials on both providers alone (also part of ssr-rt / ssr-rt-bvh)
+    if (only === 'rt-hit-atlases') await rtHitAtlasChecks(pages); // W47 (D4702): RT hits over a mixed-size set alone (also part of ssr-rt)
+    if (only === 'rt-materials') await rtMaterialsAlone(pages); // W49 (D1701 / D1702): per-triangle hit materials per builder alone (also part of ssr-rt / ssr-rt-builders)
     if (runs('babylon')) await babylonChecks(pages);
-    if (runs('ssr-rt-bvh')) await ssrRtBvhChecks(pages);
+    if (runs('ssr-rt-builders') || only === 'ssr-rt-bvh') await ssrRtBuilderChecks(pages); // W89: was ssr-rt-bvh
     if (runs('pixi3d')) await pixi3dChecks(pages);
     if (ssrBenchFull) await ssrBench();
     else if (runs('ssr-bench')) await ssrBenchSmoke(pages);
@@ -3755,6 +3754,21 @@ async function main() {
       await dropInChecks(pages, 'examples/quickstart', '/quickstart/?manual');
       await dropInChecks(pages, 'examples/quickstart probes only', '/quickstart/probes.html?manual');
       await dropInChecks(pages, 'examples/quickstart rt + preset performance', '/quickstart/?manual&rt=1&preset=performance', { maxFlicker: 1.5 }); // half-res: noisier, no anti-aliasing in the quick start (backlog)
+      // W89 (D5450 / D5451): ray tracing on a renderer built without reflectionsRequiredLimits (WebGPU's default 8 storage buffers per
+      // stage). The default provider (packed scene copy) fits: RT runs. A provider that binds one more (split) does not: RT turns
+      // itself off with one console warning, SSR + probes go on (no validation error, no black frame).
+      {
+        const d = await dropInChecks(pages, 'examples/quickstart rt, default device limits', '/quickstart/?manual&rt=1&limits=default', { maxFlicker: 1.5 });
+        const i = await d.p.T('window.__p.info()');
+        check('examples/quickstart rt, default device limits: the traced pass runs (8 storage buffers per stage, packed scene copy)', i.storageBuffersPerStage === 8 && i.rt && i.traced && !i.traceError,
+          JSON.stringify(i));
+        const before = results.logs.length;
+        const s = await dropInChecks(pages, 'examples/quickstart rt (split scene copy), default device limits', '/quickstart/?manual&rt=1&limits=default&rtPacking=split', { maxFlicker: 1.5 });
+        const j = await s.p.T('window.__p.info()');
+        const warned = results.logs.slice(before).filter((l) => /ray tracing is off/.test(l));
+        check('examples/quickstart rt (split), default device limits: ray tracing degrades to SSR + probes with one console warning', j.storageBuffersPerStage === 8 && !j.traced && /storage buffers/.test(j.traceError ?? '') && warned.length === 1,
+          `${JSON.stringify(j)}; ${warned.length} warning(s): ${warned[0] ?? ''}`.slice(0, 600));
+      }
     }
     if (runs('r3f')) {
       await dropInChecks(pages, 'examples/r3f', '/r3f/?manual');
@@ -3765,6 +3779,7 @@ async function main() {
     if (runs('bench')) await benchChecks(pages); // W51: the tuning bench
     if (only === 'ssr-exp-metrics') await ssrExpMetricsSmoke({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)
     if (only === 'ssr-exp-baseline') await ssrExpBaseline({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)
+    if (only === 'pt-reference') await ptReferenceRun(pages); // W89: the PT reference per bench scene (PT_LABEL, PT_SPP, PT_SCENES)
     if (only === 'flicker') await flicker({ openPage, check, PORT, OUT, results, savePng }, pages); // W85 (T1): flicker metrics over scenes x configs (scripts/flicker.mjs)
     if (only === 'ssr-exp-run') await ssrExpRun({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70): one metric call on one page (SSR_EXP_URL, SSR_EXP_EVAL)
 

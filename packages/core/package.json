@@ -15,7 +15,7 @@
   },
   "peerDependencies": {
     "@pmndrs/bvh": "^0.1.0",
-    "@pmndrs/raytracer": "*"
+    "@pmndrs/raytracer": "^0.1.0"
   },
   "peerDependenciesMeta": {
     "@pmndrs/bvh": {
@@ -26,6 +26,7 @@
     }
   },
   "devDependencies": {
-    "@pmndrs/bvh": "^0.1.0"
+    "@pmndrs/bvh": "^0.1.0",
+    "@pmndrs/raytracer": "^0.1.0"
   }
 }

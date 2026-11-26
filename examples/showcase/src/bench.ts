@@ -547,7 +547,7 @@ async function main() {
     while (!(pt.done?.() ?? true) && performance.now() - t0 < 600_000) { pt.frame(camera); onStep?.(); await pt.idle(); await nextFrame(); }
   }
   async function measure(opts: { samples?: number; warmup?: number; frames?: number; methods?: MethodId[] } = {}): Promise<Measure> {
-    if (!pathTracerAvailable) throw new Error('Measure needs the path tracer (the sibling Denoiser repo\'s three-gpu-pathtracer)');
+    if (!pathTracerAvailable) throw new Error('Measure needs the path tracer (@pmndrs/pathtracer)');
     const samples = opts.samples ?? Number(sampIn.value), warmup = opts.warmup ?? Number(warmIn.value), K = opts.frames ?? Number(framesIn.value);
     // the ticked methods, else the shown sides (not the reference)
     const ticked = METHOD_IDS.filter((id) => id !== 'pathtraced' && measureBoxes.get(id)?.checked);
@@ -690,7 +690,6 @@ async function main() {
       else if (s.id === 'rt' && v === false) after.push('ssr.rayTracing = false;');
       else if (s.group !== 'three' && s.group !== 'pathtracer') example.push(`${s.id}=${encodeValue(s, v)}`);
     }
-    const bvh = val('bvh') ?? 'pmndrs';
     const block = (xs: string[], ind = '    ') => xs.map((x) => `${ind}${x},`).join('\n');
     return [
       `// @pmndrs/reflections options for this bench view (${entry.id}, ${METHOD_SHORT[sides[0]]} | ${METHOD_SHORT[sides[1]]})`,
@@ -699,10 +698,8 @@ async function main() {
       settings.length ? `  settings: {\n${block(settings)}\n  },` : '  // settings: package defaults',
       `});`,
       trace.length ? `Object.assign(ssr.traceSettings, {\n${block(trace, '  ')}\n});` : '',
-      `// ray-traced misses (${bvh === 'pmndrs' ? '@pmndrs/bvh' : 'three-mesh-bvh'})`,
-      bvh === 'pmndrs'
-        ? `const { provider } = await createPmndrsBvhTraceProviderFromObjects(ssr.device, meshes${val('bvhBuilder') && val('bvhBuilder') !== 'auto' ? `, { builder: '${val('bvhBuilder')}' }` : ''});`
-        : 'const provider = await MeshBVHTraceProvider.fromObjects(ssr.device, meshes);',
+      `// ray-traced misses (@pmndrs/raytracer)`,
+      `const { provider } = await createRaytracerTraceProviderFromObjects(ssr.device, meshes${val('bvhBuilder') && val('bvhBuilder') !== 'auto' ? `, { builder: '${val('bvhBuilder')}' }` : ''});`,
       'ssr.setTraceProvider(provider); ssr.rayTracing = true;',
       `const denoiser = new FfxReflectionDenoiser(ssr.device, {\n${block([...dn.some((x) => x.startsWith('roughnessThreshold')) ? [] : [`roughnessThreshold: ${(Number(val('s.roughnessThreshold') ?? 0.447) ** 2).toFixed(4)} // the tracer's threshold, squared`], ...dn], '  ')}\n});`,
       `const probes = new ReflectionProbes(); /* add ReflectionProbe volumes */`,
@@ -973,7 +970,7 @@ async function main() {
     timingsEl.textContent = lines.length ? lines.join('\n') + '\n(G-buffer and composite not timed; live loop, not a measurement)' : '(no timed method shown: ours methods time their passes when timestamp-query exists)';
     statusEl.textContent = [
       `${entry.title} | ${W}x${H} | three r${THREE.REVISION}`,
-      `path tracer: ${pathTracerAvailable ? 'three-gpu-pathtracer (WebGPU)' : 'not found'}; OIDN: ${oidnAvailable ? 'yes' : 'not found'}; FFX: ${denoiserAvailable ? 'yes' : 'not found'}`,
+      `path tracer: ${pathTracerAvailable ? '@pmndrs/pathtracer' : 'not found'}; OIDN: ${oidnAvailable ? 'yes' : 'not found'}; FFX: ${denoiserAvailable ? 'yes' : 'not found'}`,
       errs ? `GPU errors: ${errs}` : '',
     ].filter(Boolean).join('\n');
   }, 500);
