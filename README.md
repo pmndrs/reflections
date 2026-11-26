@@ -10,6 +10,9 @@ Reflections for WebGPU. Reflection probes (box-projected, GGX-prefiltered), scre
 npm install @pmndrs/reflections three
 ```
 
+Until 0.1.0 is out, the package is on the `alpha` tag: `npm install @pmndrs/reflections@alpha three`. With TypeScript,
+also install `@types/three`. The package is ESM only and needs WebGPU.
+
 Every peer is optional, so install the ones you use:
 
 | Peer | Range | For |

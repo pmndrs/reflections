@@ -68,8 +68,10 @@ The ray-traced pass binds 8 storage buffers per stage in three's default setup, 
 on a plain device. If a configuration needs more, the pass warns once, sets `pass.traceError`, and screen space and
 probes continue. See [Troubleshooting](/guides/troubleshooting#ray-tracing-is-off-on-this-device).
 
-A plain `WebGPURenderer` with the default colour-attachment limit throws in `Reflections.create`. Use
-`createReflectionsRenderer`, or raise `maxColorAttachmentBytesPerSample` to 36 or more.
+A plain `new WebGPURenderer()` works, with one console warning. Its default colour-attachment limit (32 bytes per
+sample) cannot hold the G-buffer and the lit image together (36), so the scene is drawn a second time for the lit
+image and three's specular weights are estimated. Use `createReflectionsRenderer`, or pass
+`requiredLimits: reflectionsRequiredLimits(adapter)`, to avoid the extra draw.
 
 ## Known gaps
 

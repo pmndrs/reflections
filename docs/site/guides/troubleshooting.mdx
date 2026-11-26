@@ -56,8 +56,9 @@ The G-buffer's lit target and three's exact specular weights need more than 32 b
 limit, those targets stay off and the composite falls back to an estimate of three's specular term. The result is
 close, but not exact. Request `maxColorAttachmentBytesPerSample` (up to 64) with the helper.
 
-A plain `new WebGPURenderer()` with WebGPU's default of 32 bytes can throw in `Reflections.create` ("the G-buffer has
-no lit target"). Use `createReflectionsRenderer`, or raise that one limit.
+A plain `new WebGPURenderer()` has WebGPU's default of 32 bytes, and the G-buffer with the lit image needs 36. The
+G-buffer then draws the scene a second time for the lit image and warns once. It costs one more scene draw per frame
+(shadow maps included). Use `createReflectionsRenderer`, or raise that one limit, to remove the extra draw.
 
 ## WebGPU is not available
 

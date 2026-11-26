@@ -298,7 +298,7 @@ async function main() {
     status.textContent = [
       `pixi-3d on pixi.js WebGPURenderer | ${view.pixelWidth}x${view.pixelHeight} | ${manual ? 'manual (loop stopped)' : 'running'} | probe capture ${bakeMs.toFixed(0)} ms`,
       `tracer variant ${view.ssr.variant} | SSR ${view.ssrEnabled ? 'on' : 'off (probes / environment only)'} | probes ${probes.enabled ? 'on (1 probe + sky)' : 'off (sky only)'}`,
-      `denoise ${denoiser ? (view.ssr.denoising ? `on (${denoiser.name})` : 'off') : 'unavailable (no sibling Denoiser repo)'} | view ${view.debugView} | frames ${frames} | GPU errors ${gpuErrors.length}`,
+      `denoise ${denoiser ? (view.ssr.denoising ? `on (${denoiser.name})` : 'off') : 'unavailable'} | view ${view.debugView} | frames ${frames} | GPU errors ${gpuErrors.length}`,
     ].join('\n');
   }
   setInterval(refreshUI, 500);
