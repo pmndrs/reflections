@@ -17,7 +17,7 @@ import { createBC6HEncoder } from '@pmndrs/reflections/core';
 import { FrameGBuffer, getDevice, getGPUTexture } from '@pmndrs/reflections/three';
 // @ts-ignore vite raw import
 import bc6hSrc from '../../../packages/core/src/encode/bc6h.ts?raw';
-import { gbufferFirstFrameChecks, rtHistoryChecks, rtStatsChecks, rtTileChecks, ssrHistoryChecks } from './ssr';
+import { gbufferFirstFrameChecks, gbufferLitPassChecks, rtHistoryChecks, rtStatsChecks, rtTileChecks, ssrHistoryChecks } from './ssr';
 import { hiZLimitChecks, probeEnvDominantChecks, probeIrradianceChecks, probeSourceSizeChecks, rtLimitChecks } from './core';
 import { probeRebakeChecks, probeScaleChecks } from './probes';
 import { specularSwapAssetChecks, specularSwapChecks } from './swap';
@@ -31,6 +31,7 @@ const F2: Record<string, () => Promise<unknown>> = {
   rtHistory: rtHistoryChecks,
   rtStats: rtStatsChecks,
   gbufferFirstFrame: gbufferFirstFrameChecks,
+  gbufferLitPass: gbufferLitPassChecks,
   probeEnvDominant: probeEnvDominantChecks,
   probeIrradiance: probeIrradianceChecks,
   probeScale: probeScaleChecks,

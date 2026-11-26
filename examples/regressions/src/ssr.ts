@@ -278,3 +278,49 @@ export async function gbufferFirstFrameChecks() {
   }
   return out;
 }
+
+/**
+ * gbufferLitPass (W91, D5480): on a 32-byte device the G-buffer renders three's lit image in a second
+ * pass (`lit: 'pass'`). It must be the image the MRT's `lit` attachment holds: same scene, same camera,
+ * lit by a light and the environment, with a clear-coated and a transmissive object. Both G-buffers
+ * on one 64-byte device; `specular: false` so the MRT's set matches the second pass's.
+ */
+export async function gbufferLitPassChecks() {
+  const { FrameGBuffer } = await import('@pmndrs/reflections/three');
+  const rig = await ssrRig();
+  const { renderer, device, scene, camera, width, height } = rig;
+  const light = new THREE.DirectionalLight(0xffffff, 2);
+  light.position.set(3, 4, 2);
+  scene.add(light);
+  const env = new THREE.DataTexture(new Float32Array([0.6, 0.7, 0.9, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
+  env.mapping = THREE.EquirectangularReflectionMapping;
+  env.needsUpdate = true;
+  scene.environment = env;
+  const coat = new THREE.Mesh(new THREE.SphereGeometry(0.5, 32, 16), new THREE.MeshPhysicalMaterial({ color: 0xff4020, roughness: 0.4, clearcoat: 1 }));
+  coat.position.set(-1.4, 0.5, 0.8);
+  const glass = new THREE.Mesh(new THREE.SphereGeometry(0.5, 32, 16), new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.05, transmission: 1, thickness: 0.5 }));
+  glass.position.set(1.4, 0.5, 0.8);
+  scene.add(coat, glass);
+  scene.updateMatrixWorld(true);
+  const inMRT = new FrameGBuffer(renderer, { width, height, lit: true, specular: false });
+  const pass = new FrameGBuffer(renderer, { width, height, lit: 'pass' });
+  const out: Record<string, unknown> = { inMRT: { lit: inMRT.lit, litPass: inMRT.litPass }, pass: { lit: pass.lit, litPass: pass.litPass, specular: pass.specular } };
+  const a = inMRT.render(scene, camera), b = pass.render(scene, camera);
+  const la = await readTexture(device, a.textures.lit!), lb = await readTexture(device, b.textures.lit!);
+  let maxDiff = 0, sum = 0, lit = 0;
+  for (let i = 0; i < width * height; i++) {
+    for (let c = 0; c < 3; c++) {
+      const d = Math.abs(la.data[i * 4 + c] - lb.data[i * 4 + c]);
+      maxDiff = Math.max(maxDiff, d); sum += d;
+    }
+    if (la.data[i * 4] + la.data[i * 4 + 1] + la.data[i * 4 + 2] > 0.05) lit++;
+  }
+  // the G-buffer's own targets agree too (the second pass must not disturb them)
+  const na = await readTexture(device, a.textures.normal), nb = await readTexture(device, b.textures.normal);
+  let normalDiff = 0;
+  for (let i = 0; i < na.data.length; i++) normalDiff = Math.max(normalDiff, Math.abs(na.data[i] - nb.data[i]));
+  await device.queue.onSubmittedWorkDone();
+  Object.assign(out, { maxDiff, meanDiff: sum / (width * height * 3), litPixels: lit / (width * height), normalDiff, gpuErrors: rig.gpuErrors });
+  inMRT.dispose(); pass.dispose(); env.dispose(); renderer.dispose();
+  return out;
+}

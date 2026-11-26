@@ -1254,6 +1254,13 @@ function f2Checks(r) {
         `max diff ${gf[k].maxDiff.toExponential(2)}; [10], [14]: first frame ${gf[k].firstFrame.map((v) => v.toFixed(4)).join(' ')}, rendered ${gf[k].rendered.map((v) => v.toFixed(4)).join(' ')}`);
     }
   }
+  const lp = section('gbufferLitPass');
+  if (lp) {
+    // W91 (D5480): the second pass a 32-byte device falls back to is the MRT's lit image (same scene, camera, coat, glass)
+    check("gbuffer: lit in a second pass (lit: 'pass') matches the G-buffer's lit attachment, other targets untouched",
+      lp.pass.litPass === true && lp.pass.specular === false && lp.inMRT.litPass === false && lp.litPixels > 0.2 && lp.maxDiff < 2e-3 && lp.normalDiff === 0 && lp.gpuErrors.length === 0,
+      `max |diff| ${lp.maxDiff.toExponential(2)}, mean ${lp.meanDiff.toExponential(2)} over ${(lp.litPixels * 100).toFixed(0)} % lit px; normals ${lp.normalDiff}; ${lp.gpuErrors.length} GPU errors ${lp.gpuErrors[0] ?? ''}`);
+  }
   const pd = section('probeEnvDominant');
   if (pd) {
     // all three read the same cube along the same direction; 1e-3 covers the prefilter's fp16 storage
@@ -3758,9 +3765,18 @@ async function main() {
       // stage). The default provider (packed scene copy) fits: RT runs. A provider that binds one more (split) does not: RT turns
       // itself off with one console warning, SSR + probes go on (no validation error, no black frame).
       {
+        // W91 (D5480): a plain new WebGPURenderer() raises no limit at all: 32 colour attachment bytes per sample, so the G-buffer
+        // can't hold three's lit image; it is rendered in a second pass with one console warning (it threw in the composite before).
+        const before0 = results.logs.length;
+        const z = await dropInChecks(pages, 'examples/quickstart, default device limits (plain WebGPURenderer)', '/quickstart/?manual&limits=default');
+        const k = await z.p.T('window.__p.info()');
+        const litWarned = results.logs.slice(before0).filter((l) => /maxColorAttachmentBytesPerSample/.test(l));
+        check('examples/quickstart, default device limits: 32 colour bytes per sample, lit in a second pass, one console warning naming the limit and createReflectionsRenderer',
+          k.colorBytesPerSample === 32 && k.litPass === true && k.exactSpecular === false && litWarned.length === 1 && /createReflectionsRenderer/.test(litWarned[0] ?? ''),
+          `${JSON.stringify(k)}; ${litWarned.length} warning(s): ${litWarned[0] ?? ''}`.slice(0, 600));
         const d = await dropInChecks(pages, 'examples/quickstart rt, default device limits', '/quickstart/?manual&rt=1&limits=default', { maxFlicker: 1.5 });
         const i = await d.p.T('window.__p.info()');
-        check('examples/quickstart rt, default device limits: the traced pass runs (8 storage buffers per stage, packed scene copy)', i.storageBuffersPerStage === 8 && i.rt && i.traced && !i.traceError,
+        check('examples/quickstart rt, default device limits: the traced pass runs (8 storage buffers per stage, packed scene copy; lit in a second pass)', i.storageBuffersPerStage === 8 && i.rt && i.traced && !i.traceError && i.litPass === true,
           JSON.stringify(i));
         const before = results.logs.length;
         const s = await dropInChecks(pages, 'examples/quickstart rt (split scene copy), default device limits', '/quickstart/?manual&rt=1&limits=default&rtPacking=split', { maxFlicker: 1.5 });
