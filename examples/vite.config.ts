@@ -75,13 +75,13 @@ const nrcSources = {
 };
 
 // Sources served as-is from outside the dep optimizer (the aliased tracer, the nrc checkout) resolve `three`,
-// `three-mesh-bvh`, `@pmndrs/bvh` and `@pmndrs/downsampler` from here, never from their own node_modules: one copy per page.
+// `@pmndrs/bvh` and `@pmndrs/downsampler` from here, never from their own node_modules: one copy per page.
 const outside = [pathTracerRepo, nrcRoot].filter((x): x is string => !!x);
 const sharedDeps = {
   name: 'reflections-shared-deps',
   enforce: 'pre' as const,
   async resolveId(this: { resolve: (s: string, i?: string, o?: object) => Promise<unknown> }, source: string, importer?: string) {
-    if (!importer || !/^(three|three-mesh-bvh|@pmndrs\/bvh|@pmndrs\/downsampler)(\/|$)/.test(source)) return null;
+    if (!importer || !/^(three|@pmndrs\/bvh|@pmndrs\/downsampler)(\/|$)/.test(source)) return null;
     if (!outside.some((r) => importer.startsWith(r + '/'))) return null;
     return this.resolve(source, resolve(root, 'index.html'), { skipSelf: true });
   },

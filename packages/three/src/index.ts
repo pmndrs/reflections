@@ -35,15 +35,10 @@ export { sceneColorNoSpecular, gbufferRoughness, gbufferMetalness } from './fram
 export { ScreenSpaceReflectionsPass, type ScreenSpaceReflectionsPassOptions, type ScreenSpaceReflectionsPassSettings } from './sssr/ScreenSpaceReflectionsPass';
 export { screenSpaceComposite, type ScreenSpaceComposite, type ScreenSpaceCompositeOptions } from './sssr/composite';
 
-// Ray-traced fallback: three-mesh-bvh behind core's trace seam (the stopgap until @pmndrs/bvh).
-// three-mesh-bvh is an optional peer, imported on demand by MeshBVHTraceProvider.fromObjects.
-export { MeshBVHTraceProvider, defaultHitMaterial, hitMaterialSource, textureMeanColor, type HitMaterial, type HitMaterialSource, type MeshBVHComputeDataLike, type MeshBVHTraceProviderOptions } from './trace/MeshBVHTraceProvider';
+// Ray-traced fallback: core's @pmndrs/raytracer provider (optional peer, imported on demand) built from a three scene.
+export { defaultHitMaterial, hitMaterialSource, textureMeanColor, type HitMaterial, type HitMaterialSource } from './trace/hitMaterial';
 export type { ScreenSpaceTraceOptions } from './sssr/ScreenSpaceReflectionsPass';
-// The core provider (@pmndrs/bvh, optional peer, imported on demand) built from a three scene.
-export {
-  bvhTraceSceneFromObjects, createPmndrsBvhTraceProviderFromObjects,
-  type PmndrsBvhFromObjectsOptions, type ThreeBvhTraceScene, type ThreePmndrsBvhTraceProvider,
-} from './trace/PmndrsBvhTraceProvider';
+export { bvhTraceSceneFromObjects, type TraceSceneFromObjectsOptions, type ThreeBvhTraceScene } from './trace/traceSceneFromObjects';
 export {
   createRaytracerTraceProviderFromObjects, sunFromObjects, type RaytracerFromObjectsOptions, type ThreeRaytracerTraceProvider,
 } from './trace/RaytracerTraceProvider';

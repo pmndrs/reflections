@@ -690,7 +690,6 @@ async function main() {
       else if (s.id === 'rt' && v === false) after.push('ssr.rayTracing = false;');
       else if (s.group !== 'three' && s.group !== 'pathtracer') example.push(`${s.id}=${encodeValue(s, v)}`);
     }
-    const bvh = val('bvh') ?? 'pmndrs';
     const block = (xs: string[], ind = '    ') => xs.map((x) => `${ind}${x},`).join('\n');
     return [
       `// @pmndrs/reflections options for this bench view (${entry.id}, ${METHOD_SHORT[sides[0]]} | ${METHOD_SHORT[sides[1]]})`,
@@ -699,10 +698,8 @@ async function main() {
       settings.length ? `  settings: {\n${block(settings)}\n  },` : '  // settings: package defaults',
       `});`,
       trace.length ? `Object.assign(ssr.traceSettings, {\n${block(trace, '  ')}\n});` : '',
-      `// ray-traced misses (${bvh === 'pmndrs' ? '@pmndrs/bvh' : 'three-mesh-bvh'})`,
-      bvh === 'pmndrs'
-        ? `const { provider } = await createPmndrsBvhTraceProviderFromObjects(ssr.device, meshes${val('bvhBuilder') && val('bvhBuilder') !== 'auto' ? `, { builder: '${val('bvhBuilder')}' }` : ''});`
-        : 'const provider = await MeshBVHTraceProvider.fromObjects(ssr.device, meshes);',
+      `// ray-traced misses (@pmndrs/raytracer)`,
+      `const { provider } = await createRaytracerTraceProviderFromObjects(ssr.device, meshes${val('bvhBuilder') && val('bvhBuilder') !== 'auto' ? `, { builder: '${val('bvhBuilder')}' }` : ''});`,
       'ssr.setTraceProvider(provider); ssr.rayTracing = true;',
       `const denoiser = new FfxReflectionDenoiser(ssr.device, {\n${block([...dn.some((x) => x.startsWith('roughnessThreshold')) ? [] : [`roughnessThreshold: ${(Number(val('s.roughnessThreshold') ?? 0.447) ** 2).toFixed(4)} // the tracer's threshold, squared`], ...dn], '  ')}\n});`,
       `const probes = new ReflectionProbes(); /* add ReflectionProbe volumes */`,

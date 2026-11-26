@@ -11,12 +11,12 @@
 // ../bench/schema.ts names the keys), and `set(key, value)` applies the live ones without a rebuild.
 // The bench's own defaults (`ctx.defaults`) add display AA (the showcase's @pmndrs/upscaler, `?aa=`) and
 // per-pass GPU timestamps; the compare page passes none, so it renders as before (no AA, no timing).
-// W51: @pmndrs/bvh is the examples' ray-tracing provider (`?bvh=three-mesh-bvh` for the stopgap; D1705).
+// The ray-tracing provider: core's @pmndrs/raytracer (the only one since W89).
 import * as THREE from 'three/webgpu';
 import { renderOutput, uniform, vec3, vec4 } from 'three/tsl';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, bvhTraceSceneFromObjects,
-  createPmndrsBvhTraceProviderFromObjects, createRaytracerTraceProviderFromObjects, installCubeArraySupport, reflectionProbes,
+  HybridReflections, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, bvhTraceSceneFromObjects,
+  createRaytracerTraceProviderFromObjects, installCubeArraySupport, reflectionProbes,
 } from '@pmndrs/reflections/three';
 import { resolveScreenSpaceSettings } from '@pmndrs/reflections/core';
 import { FfxReflectionDenoiser } from 'denoiser/ffx';
@@ -80,8 +80,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: {
     maxColorAttachmentBytesPerSample: maxBytes,
     // W61 (D4804): a probe layout of three sizes is three atlas bindings in every Sponza material (18 > the default 16)
-    // W82 (D5200, opt-in): the @pmndrs/raytracer provider binds 5 storage buffers; with probe hit shading the traced pass needs 9
-    ...(params.get('rtShade') === '1' && adapter ? { maxStorageBuffersPerShaderStage: Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 10) } : {}),
+    // (W89, D5450: no storage-buffer limit: the raytracer provider's packed scene copy fits WebGPU's default 8)
     ...(params.has('probeLayout') && adapter ? { maxSampledTexturesPerShaderStage: Math.min(adapter.limits.maxSampledTexturesPerShaderStage, 48) } : {}),
   } } as N);
   renderer.setPixelRatio(1);
@@ -225,8 +224,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   /** Re-bake (a floor or material change the probes should see), as the showcase's `bake()`; nodes keep the set. */
   const rebake = () => { renderer.setRenderTarget(null); bake(); resetAll(); };
 
-  // the ray-traced fallback: @pmndrs/bvh by default (W51, the maintainer's call on D1705), ?bvh=three-mesh-bvh the stopgap
-  const bvhKind = params.get('bvh') === 'three-mesh-bvh' ? 'three-mesh-bvh' : 'pmndrs';
+  // the ray-traced fallback: core's @pmndrs/raytracer provider
   let provider: { destroy(): void } | null = null;
   let providerInfo: { kind: string; triangles: number; builder?: string } | null = null;
   let updateHitMaterials: () => void = () => {};
@@ -237,28 +235,14 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     // W46: ?specAAHits=0 keeps the traced hits' authored roughness with ?specAA on
     const material = params.get('specAAHits') === '0' ? undefined : specAAHitMaterial;
     const shadingNormals = params.get('rtShadingNormals') !== '0';
-    if (bvhKind === 'pmndrs' && params.get('rtShade') === '1') {
-      // W82 (T70): the opt-in @pmndrs/raytracer provider and its hit shading (rtShade) instead of the probes
-      const built = await createRaytracerTraceProviderFromObjects(device, traceMeshes, { ...(material ? { material } : {}), shadingNormals });
-      provider = built.provider;
-      providerInfo = { kind: '@pmndrs/raytracer', triangles: built.provider.info.triangles, builder: built.provider.info.builder };
-      ssr.setTraceProvider(built.provider);
-      ssr.setRaytracerHitShading(true);
-      updateHitMaterials = () => { const s = bvhTraceSceneFromObjects(traceMeshes, { ...(material ? { material } : {}), shadingNormals }); if (s.scene.materials) built.provider.setMaterials(s.scene.materials); };
-    } else if (bvhKind === 'pmndrs') {
-      const builder = (params.get('bvhBuilder') ?? 'auto') as N;
-      const built = await createPmndrsBvhTraceProviderFromObjects(device, traceMeshes, { ...(material ? { material } : {}), shadingNormals, ...(builder !== 'auto' ? { builder } : {}) });
-      provider = built.provider;
-      providerInfo = { kind: '@pmndrs/bvh', triangles: built.provider.info.triangles, builder: built.provider.info.builder };
-      ssr.setTraceProvider(built.provider);
-      updateHitMaterials = () => { const s = bvhTraceSceneFromObjects(traceMeshes, { ...(material ? { material } : {}), shadingNormals }); if (s.scene.materials) built.provider.setMaterials(s.scene.materials); };
-    } else {
-      const p = await MeshBVHTraceProvider.fromObjects(device, traceMeshes, { ...(material ? { material } : {}), shadingNormals });
-      provider = p;
-      providerInfo = { kind: 'three-mesh-bvh', triangles: p.triangles };
-      ssr.setTraceProvider(p);
-      updateHitMaterials = () => p.updateMaterials();
-    }
+    // W82 (T70): ?rtShade=1 shades traced hits with the raytracer's rtShade instead of the probes
+    const builder = (params.get('bvhBuilder') ?? 'auto') as N;
+    const built = await createRaytracerTraceProviderFromObjects(device, traceMeshes, { ...(material ? { material } : {}), shadingNormals, ...(builder !== 'auto' ? { builder } : {}) });
+    provider = built.provider;
+    providerInfo = { kind: '@pmndrs/raytracer', triangles: built.provider.info.triangles, builder: built.provider.info.builder };
+    ssr.setTraceProvider(built.provider);
+    if (params.get('rtShade') === '1') ssr.setRaytracerHitShading(true);
+    updateHitMaterials = () => { const s = bvhTraceSceneFromObjects(traceMeshes, { ...(material ? { material } : {}), shadingNormals }); if (s.scene.materials) built.provider.setMaterials(s.scene.materials); };
     ssr.rayTracing = params.get('rt') !== '0';
   }
 
@@ -446,7 +430,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     live[`aa.${f}`] = () => { if (aa) Object.assign(aa.upscaler.settings, upscalerSettings()); };
   }
   /** Keys read only at creation (a Rebuild applies them). */
-  const REBUILD = new Set(['bvh', 'bvhBuilder', 'rtShade', 'rtShadingNormals', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
+  const REBUILD = new Set(['bvhBuilder', 'rtShade', 'rtShadingNormals', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
     'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity', 'envLight', 'background', 'timestamps', 'shim',
     's.reflectionResolution', 'preset']);
 

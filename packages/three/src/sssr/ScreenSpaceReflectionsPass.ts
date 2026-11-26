@@ -12,7 +12,7 @@
 //
 // Ray-traced fallback (SPEC section 4; off unless `trace` is given, D51): core's
 // `createTracedReflections` runs right after the tracer in the same encoder, over its miss list,
-// through a TraceProvider (../trace/MeshBVHTraceProvider.ts for three-mesh-bvh). Traced hits
+// through a TraceProvider (../trace/RaytracerTraceProvider.ts: core's @pmndrs/raytracer provider). Traced hits
 // overwrite radiance / hit distance / confidence (1) before the copies, so the composite and the
 // denoise seam see one signal; `source` says which pixels the traced pass touched.
 import * as THREE from 'three/webgpu';
@@ -85,7 +85,7 @@ export interface ScreenSpaceReflectionsPassOptions {
 }
 
 export interface ScreenSpaceTraceOptions {
-  /** The BVH walk, e.g. `await MeshBVHTraceProvider.fromObjects(pass.device, meshes)`. */
+  /** The BVH walk, e.g. `(await createRaytracerTraceProviderFromObjects(pass.device, meshes)).provider`. */
   provider: TraceProvider;
   /**
    * Environment the hit shading lights hits with (an equirect 2-D texture or a CubeTexture).
@@ -113,8 +113,8 @@ export interface ScreenSpaceTraceOptions {
   /**
    * W82 (T70, D5201): shade traced hits with `@pmndrs/raytracer`'s one bounce (`rtShade`: emission + light samples with
    * a shadow ray each, through its diffuse + GGX BSDF) instead of the probe / environment lookup. Opt-in: the default
-   * stays the probes. Needs the provider from `createRaytracerTraceProviderFromObjects` (`capabilities.hitShade`) and
-   * a device with 10 storage buffers per stage (D5200: `reflectionsRequiredLimits`); with another provider it warns once
+   * stays the probes. Needs the provider from `createRaytracerTraceProviderFromObjects` (`capabilities.hitShade`; it binds
+   * 7 storage buffers with the packed scene copy, D5450, so WebGPU's default 8 suffice); with another provider it warns once
    * and the probes shade. Stochastic (one light sample per hit per frame): meant for a denoised frame. `true` = 1 sample;
    * `{ samples }` = more. The on-screen re-shade (`settings.hitShading`) keeps the probes either way.
    */
@@ -202,6 +202,10 @@ export class ScreenSpaceReflectionsPass {
   private rtShade: RaytracerHitShading | null = null;
   private rtShadeKey = '';
   private rtShadeWarned = false;
+  /** W89 (D5451): the traced pass could not be built for this provider / hit shading (device limits): no retry each frame. */
+  private traceFailed: { provider: TraceProvider; shading: unknown; rtShade: string } | null = null;
+  private traceWarned = false;
+  private _traceError: string | null = null;
   private sceneEnvironment: THREE.Texture | null = null;
   private sceneProbes: ReflectionProbes | null = null;
   private sceneEnvironmentIntensity = 1;
@@ -244,8 +248,14 @@ export class ScreenSpaceReflectionsPass {
 
   /** The core tracer (lists, counters, pyramid, miss list); recreated on resize, null before the first frame. */
   get tracer(): CoreTracer | null { return this.core; }
-  /** The core ray-traced pass (null without `trace`, or before the first frame). */
+  /** The core ray-traced pass (null without `trace`, or before the first frame, or when it can't run here: `traceError`). */
   get traced(): TracedReflections | null { return this.rt; }
+  /**
+   * W89 (D5451): why the ray-traced pass is not running although a provider is attached (e.g. the device allows fewer
+   * storage buffers per shader stage than the provider + hit shading need), or null. Screen space + probes go on without
+   * it; one console warning says so. Cleared by `setTraceProvider` / `setRaytracerHitShading`.
+   */
+  get traceError(): string | null { return this._traceError; }
   /** What traced hits are lit with this frame: the probes at the hit (D901) or the environment mean; null before the first traced frame. */
   get hitShadingSource(): 'probes' | 'environment' | null { return this.rt && this.hitShading ? this.hitShading.kind : null; }
   get device(): GPUDevice { return getDevice(this.renderer); }
@@ -273,6 +283,7 @@ export class ScreenSpaceReflectionsPass {
   /** W82 (T70): turn `trace.raytracerHitShading` on / off (or change its sample count) after attaching a provider; recompiles the traced pass on the next frame. No-op without a provider. */
   setRaytracerHitShading(on: boolean | { samples?: number }): void {
     if (this.traceOptions) this.traceOptions = { ...this.traceOptions, raytracerHitShading: on };
+    this.traceFailed = null; this._traceError = null;
   }
 
   /**
@@ -282,6 +293,7 @@ export class ScreenSpaceReflectionsPass {
   setTraceProvider(provider: TraceProvider | null) {
     this.rt?.destroy();
     this.rt = null;
+    this.traceFailed = null; this._traceError = null;
     if (!provider) { this.traceOptions = null; this.rayTracing = false; return; }
     this.traceOptions = { ...this.traceOptions, provider };
     this.rayTracing = true;
@@ -469,6 +481,9 @@ export class ScreenSpaceReflectionsPass {
 
   private createTraced(w: number, h: number) {
     const trace = this.traceOptions!;
+    // W89 (D5451): this provider + hit shading failed to build already (limits don't change): stay on screen space + probes
+    const f = this.traceFailed;
+    if (f && f.provider === trace.provider && f.shading === this.hitShading!.shading && f.rtShade === this.rtShadeWanted()) return;
     this.rtShade?.destroy(); this.rtShade = null;
     const want = trace.raytracerHitShading;
     if (want) {
@@ -476,9 +491,23 @@ export class ScreenSpaceReflectionsPass {
       else if (!this.rtShadeWarned) { this.rtShadeWarned = true; console.warn(`raytracerHitShading needs a provider with traceHitShade (createRaytracerTraceProviderFromObjects); ${trace.provider.name} has none: the probes shade traced hits`); }
     }
     this.rtShadeKey = this.rtShadeWanted();
-    this.rt = createTracedReflections(this.device, {
-      width: w, height: h, provider: trace.provider, hitShading: this.rtShade ?? this.hitShading!.shading, timestamps: this.options.timestamps ?? false,
-    });
+    try {
+      this.rt = createTracedReflections(this.device, {
+        width: w, height: h, provider: trace.provider, hitShading: this.rtShade ?? this.hitShading!.shading, timestamps: this.options.timestamps ?? false,
+      });
+      this._traceError = null;
+    } catch (e) {
+      // W89 (D5451): e.g. a device with WebGPU's default 8 storage buffers per stage and a configuration that binds more.
+      // The tracer's misses then keep its own fallback (no `missesTraced`), the composite adds the probes: no black frame.
+      this.rtShade?.destroy(); this.rtShade = null;
+      this.rt = null;
+      this.traceFailed = { provider: trace.provider, shading: this.hitShading!.shading, rtShade: this.rtShadeKey };
+      this._traceError = String((e as Error)?.message ?? e);
+      if (!this.traceWarned) {
+        this.traceWarned = true;
+        console.warn(`ScreenSpaceReflectionsPass: ray tracing is off on this device; screen-space reflections and probes continue. ${this._traceError}`);
+      }
+    }
   }
 
   private ensure(w: number, h: number, inverted: boolean) {

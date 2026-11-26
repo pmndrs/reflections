@@ -2,7 +2,7 @@
 // suggested reflection probes, renders ScreenSpaceReflectionsPass (G-buffer + screen-space trace,
 // hit colour from last frame's image) and resolves with HybridReflections (SSR -> RT -> probes ->
 // environment, denoised through the denoise seam by denoiser/ffx when the sibling Denoiser repo is
-// there); the ray-traced fallback (three-mesh-bvh behind core's trace seam) is a toggle that builds
+// there); the ray-traced fallback (core's @pmndrs/raytracer provider behind the trace seam) is a toggle that builds
 // the BVH on first use.
 //
 // Sources: probes on/off swaps `scene.environmentNode` (and the composite's probe term) between the
@@ -25,8 +25,8 @@
 // roughness by its normal map's variance at the sampled mip (Toksvig, vMF form; ./specAA.ts), in three's lit term, the
 // G-buffer and traced hits alike; ?specAA=<k> scales the added variance. Also a checkbox under "Materials".
 //
-// W51: ?lobeFilter=<k> (`settings.hitLobeFilter`, D3550; default the package's 1; also a slider), ?bvh=three-mesh-bvh (the RT
-// stopgap; @pmndrs/bvh is the default), and every other knob on ./bench.html (the tuning bench; docs/SETTINGS.md).
+// W51: ?lobeFilter=<k> (`settings.hitLobeFilter`, D3550; default the package's 1; also a slider), and every other knob on
+// ./bench.html (the tuning bench; docs/SETTINGS.md).
 // URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=0|1|<k> ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?shadeVis=all ?lobeMix=<0..1> ?shadeOcc=screen ?lobeFilter=<k> (W52) ?hitSource=hits|all ?hitDistW=<k> (W53: the denoiser keeps hit sources apart / weights by hit distance) ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
@@ -34,8 +34,8 @@ import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';
 import * as TSL from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, bvhTraceSceneFromObjects,
-  createPmndrsBvhTraceProviderFromObjects, createRaytracerTraceProviderFromObjects, installCubeArraySupport, reflectionProbes, sampleReflectionProbes,
+  HybridReflections, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, bvhTraceSceneFromObjects,
+  createRaytracerTraceProviderFromObjects, installCubeArraySupport, reflectionProbes, sampleReflectionProbes,
   applyReflectionsPreset, denoiserHitSourceModeOf, isReflectionsPresetName, reflectionsPreset, type ReflectionsPresetName,
 } from '@pmndrs/reflections/three';
 import { availableAssets, probeAtlasBytes } from '../../shared';
@@ -71,7 +71,9 @@ async function main() {
   const adapter = await navigator.gpu.requestAdapter();
   // the composite reads the G-buffer's lit target: 36 bytes per sample
   const maxBytes = Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64);
-  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, trackTimestamp: q.has('gpuTime'), requiredLimits: { maxColorAttachmentBytesPerSample: maxBytes, ...(q.get('rtShade') === '1' && adapter ? { maxStorageBuffersPerShaderStage: Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 10) } : {}) /* W82, D5200: the raytracer provider binds 5 */ } } as N);
+  // W89 (D5450): no storage-buffer limit raised: the raytracer provider's packed scene copy fits WebGPU's default 8 (this page is
+  // also the check that ray tracing runs on a renderer built without reflectionsRequiredLimits)
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, trackTimestamp: q.has('gpuTime'), requiredLimits: { maxColorAttachmentBytesPerSample: maxBytes } } as N);
   renderer.setPixelRatio(1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -147,8 +149,6 @@ async function main() {
   let entry: ShowcaseEntry | null = null;
   let probes: ReflectionProbes | null = null;
   let helper: ReflectionProbesHelper | null = null;
-  /** W51: @pmndrs/bvh is the examples' provider (the maintainer's call on D1705); `?bvh=three-mesh-bvh` the stopgap. */
-  const bvhKind = q.get('bvh') === 'three-mesh-bvh' ? 'three-mesh-bvh' : 'pmndrs';
   let provider: { destroy(): void } | null = null;
   let updateHitMaterials: () => void = () => {};
   let bvhInfo: { kind: string; triangles: number; ms: number } | null = null;
@@ -248,32 +248,22 @@ async function main() {
     kit.scene.traverseVisible((o) => { if ((o as THREE.Mesh).isMesh && !o.userData.noTrace) meshes.push(o as THREE.Mesh); });
     const t0 = performance.now();
     const forKit = kit;
-    let p: { destroy(): void }, tp: N, triangles: number, update: () => void;
-    if (bvhKind === 'pmndrs' && state.rtShade) {
-      // the opt-in @pmndrs/raytracer provider (T69 / T70): same trees, plus rtShade at the hit
-      const built = await createRaytracerTraceProviderFromObjects(device, meshes, { material: specAAHitMaterial });
-      p = tp = built.provider; triangles = built.provider.info.triangles;
-      update = () => { const s = bvhTraceSceneFromObjects(meshes, { material: specAAHitMaterial }); if (s.scene.materials) built.provider.setMaterials(s.scene.materials); };
-    } else if (bvhKind === 'pmndrs') {
-      const built = await createPmndrsBvhTraceProviderFromObjects(device, meshes, { material: specAAHitMaterial });
-      p = tp = built.provider; triangles = built.provider.info.triangles;
-      update = () => { const s = bvhTraceSceneFromObjects(meshes, { material: specAAHitMaterial }); if (s.scene.materials) built.provider.setMaterials(s.scene.materials); };
-    } else {
-      const m = await MeshBVHTraceProvider.fromObjects(device, meshes, { material: specAAHitMaterial });
-      p = tp = m; triangles = m.triangles; update = () => m.updateMaterials();
-    }
+    // core's @pmndrs/raytracer provider (the only one since W89); rtShade (opt-in) uses the same provider
+    const built = await createRaytracerTraceProviderFromObjects(device, meshes, { material: specAAHitMaterial });
+    const p = built.provider, triangles = built.provider.info.triangles;
+    const update = () => { const s = bvhTraceSceneFromObjects(meshes, { material: specAAHitMaterial }); if (s.scene.materials) built.provider.setMaterials(s.scene.materials); };
     building = false;
     if (kit !== forKit) { p.destroy(); return; }
     provider = p;
     updateHitMaterials = update;
-    bvhInfo = { kind: bvhKind === 'pmndrs' ? '@pmndrs/bvh' : 'three-mesh-bvh', triangles, ms: performance.now() - t0 };
-    ssr.setTraceProvider(tp);
+    bvhInfo = { kind: '@pmndrs/raytracer', triangles, ms: performance.now() - t0 };
+    ssr.setTraceProvider(p);
     ssr.setRaytracerHitShading(state.rtShade);
   }
-  /** W82: switch the traced hit shading; a provider with `traceHitShade` is needed, so the provider is rebuilt. */
+  /** W82: switch the traced hit shading (the provider has `traceHitShade`: only the traced pass recompiles). */
   async function setRtShade(on: boolean) {
     state.rtShade = on;
-    if (provider) { provider.destroy(); provider = null; ssr.setTraceProvider(null); if (state.rt) await ensureBVH(); }
+    ssr.setRaytracerHitShading(on);
     ssr.resetHistory(); hybrid.resetHistory(); aa.reset();
   }
   async function setRT(on: boolean) {
@@ -491,10 +481,10 @@ async function main() {
   row('Hit colour', select(HIT_MODES, state.hit, (v) => setHit(v as HitMode)));
   const reshadeSel = select(HIT_SHADING_MODES, state.reshade, (v) => setReshade(v as HitShadingMode));
   row('Hit specular', reshadeSel);
-  // W82 (T70): the raytracer's hit shading, only where @pmndrs/raytracer resolves (not on npm yet)
-  if (bvhKind === 'pmndrs') {
+  // W82 (T70): the raytracer's hit shading (opt-in)
+  {
     const rs = check('Ray-traced hits: raytracer shading (1 light sample)', state.rtShade, (v) => { setRtShade(v); });
-    rs.parentElement!.title = 'raytracerHitShading (D5201): traced hits shaded by @pmndrs/raytracer\'s rtShade (emission + a light sample with a shadow ray, diffuse + GGX) instead of the probe lookup. Opt-in; stochastic, meant for the denoised frame. Needs 10 storage buffers per stage (D5200).';
+    rs.parentElement!.title = 'raytracerHitShading (D5201): traced hits shaded by @pmndrs/raytracer\'s rtShade (emission + a light sample with a shadow ray, diffuse + GGX) instead of the probe lookup. Opt-in; stochastic, meant for the denoised frame.';
   }
   // W51 (settings guide): filtered importance sampling at re-shaded / traced hits (D3550); 0 = the hit's own roughness
   const lobe = slider('Hit lobe filter', 0, 2, 0.05, ssr.settings.hitLobeFilter ?? 1, (v) => { ssr.settings.hitLobeFilter = v; ssr.resetHistory(); aa.reset(); });

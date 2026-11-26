@@ -12,14 +12,10 @@ export {
   type TracedReflections, type TracedReflectionsOptions, type TracedReflectionsSettings, type TracedReflectionsDispatch, type TracedReflectionsStats,
 } from './pass';
 export { RT_SOURCE, RT_STATE, RT_STATE_HEADER } from './shaders';
-// The core provider: @pmndrs/bvh (optional peer, imported on demand) over engine-free geometry.
-export {
-  createPmndrsBvhTraceProvider, loadPmndrsBvh, PmndrsBvhTraceProvider, PMNDRS_BVH_LAYOUT_VERSION, PMNDRS_BVH_MAX_MATERIAL, PMNDRS_BVH_TRIANGLE_MATERIAL_NONE,
-  type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceScene, type BvhBuilderPreference,
-  type PmndrsBvhTraceProviderOptions, type PmndrsBvhBuildInfo,
-} from './pmndrsBvh';
-// The core provider since P1.5: @pmndrs/raytracer's trace core (optional peer, imported on demand).
+// The core provider (P1.5; the only one since W89): @pmndrs/raytracer's trace core over @pmndrs/bvh trees (optional peers,
+// imported on demand) over engine-free geometry.
 export {
   createRaytracerTraceProvider, loadRaytracer, raytracerMaterialOf, RaytracerTraceProvider, RAYTRACER_BVH_LAYOUT_VERSION, BVH_MAX_MATERIAL, BVH_TRIANGLE_MATERIAL_NONE,
-  type RaytracerTraceProviderOptions, type RaytracerBuildInfo, type RaytracerSun, type RaytracerEnvironment, type BvhTraceScene as RaytracerTraceScene,
+  type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceScene, type BvhTraceScene as RaytracerTraceScene, type BvhBuilderPreference,
+  type RaytracerTraceProviderOptions, type RaytracerBuildInfo, type RaytracerSun, type RaytracerEnvironment,
 } from './raytracer';

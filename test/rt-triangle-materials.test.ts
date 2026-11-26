@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three/webgpu';
-import { MeshBVH } from 'three-mesh-bvh';
 import { GPU_LAYOUT_TRIANGLE_BYTES, GPU_LAYOUT_TRIANGLE_WORD } from '@pmndrs/bvh';
-import { createPmndrsBvhTraceProvider, PMNDRS_BVH_TRIANGLE_MATERIAL_NONE, type BvhTraceScene } from '@pmndrs/reflections-core';
+import { packedSceneCopyBytes } from '@pmndrs/raytracer';
+import { createRaytracerTraceProvider, BVH_TRIANGLE_MATERIAL_NONE, type BvhTraceScene } from '@pmndrs/reflections-core';
 import { bvhTraceSceneFromObjects, defaultHitMaterial, type HitMaterialSource } from '@pmndrs/reflections-three';
-import { rootMaterialIndices, triangleMaterialIndices } from '../packages/three/src/trace/materialGroups';
+import { triangleMaterialIndices } from '../packages/three/src/trace/materialGroups';
 
 // Per-triangle materials at traced hits (W49, D1701 / D1702): a three mesh with an array of materials
-// gives each triangle its group's material. @pmndrs/bvh: `triangleMaterials` per mesh tree, built
-// from the groups; three-mesh-bvh: a transform slot per BVH root, one root per group range. The GPU
-// walks are checked in examples/ssr's multiMaterial scene (`pnpm check -- --only rt-materials`).
+// gives each triangle its group's material: `triangleMaterials` per mesh tree (@pmndrs/bvh's records, read by
+// @pmndrs/raytracer's walk), built from the groups. The GPU walk is checked in examples/ssr's multiMaterial scene
+// (`pnpm check -- --only rt-materials`).
 
 // node has no WebGPU globals; the provider names buffer usages
 (globalThis as { GPUBufferUsage?: unknown }).GPUBufferUsage ??= { MAP_READ: 1, MAP_WRITE: 2, COPY_SRC: 4, COPY_DST: 8, INDEX: 16, VERTEX: 32, UNIFORM: 64, STORAGE: 128, INDIRECT: 256, QUERY_RESOLVE: 512 };
@@ -17,6 +17,7 @@ const fakeDevice = () => ({
   createBuffer: (d: GPUBufferDescriptor) => ({ size: d.size, label: d.label, destroy() {} }),
   queue: { writeBuffer() {} },
   features: new Set<string>(),
+  limits: { maxStorageBufferBindingSize: 1 << 30, maxBufferSize: 1 << 30, maxStorageBuffersPerShaderStage: 8, maxComputeWorkgroupStorageSize: 32768 },
 }) as unknown as GPUDevice;
 
 /** A box whose six groups (+x, -x, +y, -y, +z, -z) take materials 0 / 1 as `indices`. */
@@ -39,33 +40,6 @@ describe('three groups -> triangle materials', () => {
     g.addGroup(6, 12, 3); // triangles 2-5: 2-3 already taken
     g.setDrawRange(3, 30); // triangles 1-10
     expect(Array.from(triangleMaterialIndices(g))).toEqual([-1, 2, 2, 2, 3, 3, -1, -1, -1, -1, -1, -1]);
-  });
-  it('per three-mesh-bvh root, the group\'s materialIndex, in MeshBVH\'s root order', () => {
-    const cases: THREE.BufferGeometry[] = [box(), box([1, 0, 1, 0, 1, 0])];
-    const overlapping = box();
-    overlapping.clearGroups();
-    overlapping.addGroup(0, 18, 0);
-    overlapping.addGroup(12, 24, 1);
-    overlapping.setDrawRange(3, 27);
-    cases.push(overlapping);
-    const unsorted = box();
-    unsorted.clearGroups();
-    unsorted.addGroup(18, 18, 1);
-    unsorted.addGroup(0, 18, 0);
-    cases.push(unsorted);
-    for (const g of cases) {
-      const ours = rootMaterialIndices(g);
-      const bvh = new MeshBVH(g.clone());
-      const ranges = (bvh as unknown as { getRootRanges(range?: unknown): { offset: number; count: number }[] }).getRootRanges();
-      expect(ours.length).toBe((bvh as unknown as { _roots: unknown[] })._roots.length);
-      expect(ours.length).toBe(ranges.length);
-      // a root's material: the first group (in geometry.groups order) drawing its first triangle
-      const tri = triangleMaterialIndices(g);
-      expect(ours).toEqual(ranges.map((r) => tri[r.offset]));
-    }
-    const plain = new THREE.BoxGeometry();
-    plain.clearGroups();
-    expect(rootMaterialIndices(plain)).toEqual([]);
   });
 });
 
@@ -118,13 +92,13 @@ describe('bvhTraceSceneFromObjects: multi-material meshes (D1702)', () => {
     g.addGroup(0, 12, 1);
     g.addGroup(12, 12, 0);
     const { scene } = bvhTraceSceneFromObjects(new THREE.Mesh(g, [red, green]));
-    const N = PMNDRS_BVH_TRIANGLE_MATERIAL_NONE;
+    const N = BVH_TRIANGLE_MATERIAL_NONE;
     expect(Array.from(scene.meshes[0].triangleMaterials!)).toEqual([1, 1, 1, 1, 0, 0, 0, 0, N, N, N, N]);
     expect(scene.instances[0].material).toBe(0);
   });
 });
 
-describe('createPmndrsBvhTraceProvider: triangle materials into @pmndrs/bvh (tinybvh)', () => {
+describe('createRaytracerTraceProvider: triangle materials into @pmndrs/bvh (tinybvh)', () => {
   it('each triangle record carries its material + 1 in flags bits 16-31, 0 where the instance\'s applies', async () => {
     const geometry = box();
     geometry.clearGroups();
@@ -133,7 +107,7 @@ describe('createPmndrsBvhTraceProvider: triangle materials into @pmndrs/bvh (tin
     const mesh = new THREE.Mesh(geometry, [red, green]);
     mesh.updateMatrixWorld(true);
     const { scene } = bvhTraceSceneFromObjects(mesh);
-    const provider = await createPmndrsBvhTraceProvider(fakeDevice(), scene, { builder: 'tinybvh' });
+    const provider = await createRaytracerTraceProvider(fakeDevice(), scene, { builder: 'tinybvh' });
     const [layout] = (provider as unknown as { layouts: { triangles: ArrayBuffer; triangleCount: number }[] }).layouts;
     const words = new Uint32Array(layout.triangles);
     const byTriangle: number[] = [];
@@ -149,6 +123,29 @@ describe('createPmndrsBvhTraceProvider: triangle materials into @pmndrs/bvh (tin
     const geometry = box();
     const s = bvhTraceSceneFromObjects(new THREE.Mesh(geometry, [red, green])).scene;
     const bad: BvhTraceScene = { ...s, meshes: [{ ...s.meshes[0], triangleMaterials: new Uint16Array(12).fill(2) }] };
-    await expect(createPmndrsBvhTraceProvider(fakeDevice(), bad, { builder: 'tinybvh' })).rejects.toThrow(/triangle 0 uses material 2; there are 2/);
+    await expect(createRaytracerTraceProvider(fakeDevice(), bad, { builder: 'tinybvh' })).rejects.toThrow(/triangle 0 uses material 2; there are 2/);
+  });
+});
+
+describe('createRaytracerTraceProvider: scene copy packing (W89, D5450)', () => {
+  const scene = () => { const m = new THREE.Mesh(box(), [red, green]); m.updateMatrixWorld(true); return bvhTraceSceneFromObjects(m).scene; };
+  it('binds the walk (3) + one packed scene-copy buffer by default: 4 storage buffers', async () => {
+    const provider = await createRaytracerTraceProvider(fakeDevice(), scene(), { builder: 'tinybvh' });
+    expect(provider.packing).toBe('packed');
+    expect(provider.info.packing).toBe('packed');
+    expect(provider.storageBufferCount).toBe(4);
+    expect(provider.resources().length).toBe(4);
+  });
+  it("'split' binds table and data separately: 5", async () => {
+    const provider = await createRaytracerTraceProvider(fakeDevice(), scene(), { builder: 'tinybvh', packing: 'split' });
+    expect(provider.storageBufferCount).toBe(5);
+    expect(provider.resources().length).toBe(5);
+  });
+  it("'auto' falls back to split when the packed copy passes maxStorageBufferBindingSize", async () => {
+    const packed = await createRaytracerTraceProvider(fakeDevice(), scene(), { builder: 'tinybvh' });
+    const device = fakeDevice() as unknown as { limits: Record<string, number> };
+    device.limits.maxStorageBufferBindingSize = packedSceneCopyBytes(packed.sceneCopy) - 4; // the table and the data still fit alone
+    const provider = await createRaytracerTraceProvider(device as unknown as GPUDevice, scene(), { builder: 'tinybvh' });
+    expect(provider.packing).toBe('split');
   });
 });

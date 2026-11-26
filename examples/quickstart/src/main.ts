@@ -5,15 +5,18 @@
 // a baked probe (and, optionally, from rays against a BVH), denoises the result and composites it
 // into the final image. You call `reflections.render(camera)` where you called `renderer.render()`.
 //
-// Needs: three >= 0.187 and a browser with WebGPU. `?rt=1` adds the ray-traced fallback,
+// Needs: three >= 0.187 and a browser with WebGPU. `?rt=1` adds the ray-traced fallback (`@pmndrs/raytracer`),
 // `?denoise=0` turns the denoiser off, `?preset=performance`.
+// Checks only (W89, D5451): `?limits=default` builds a plain `new WebGPURenderer()` instead of `createReflectionsRenderer`, with
+// WebGPU's default limits (8 storage buffers per stage) except the colour attachment bytes the composite's lit target needs
+// (a renderer without them can't run `Reflections` at all: HANDOFF backlog); `&rtPacking=split` attaches a provider that binds one
+// storage buffer more than 8 with probe hit shading, so ray tracing turns itself off with one warning.
 import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Reflections, createReflectionsRenderer } from '@pmndrs/reflections/three';
+import { Reflections, createRaytracerTraceProviderFromObjects, createReflectionsRenderer } from '@pmndrs/reflections/three';
 // The denoiser is a separate library (`denoiser/ffx`: AMD's reflection denoiser in WGSL). It is
 // optional, but glossy reflections are noisy and shimmer without it. In your project:
 //   import { FfxReflectionDenoiser } from 'denoiser/ffx';
-// (this repo's examples resolve the name to a sibling checkout, or to null when there is none)
 import { FfxReflectionDenoiser } from 'denoiser/ffx';
 import { createScene } from './scene';
 
@@ -23,7 +26,12 @@ const status = document.querySelector<HTMLElement>('#status')!;
 
 async function main() {
   // 1. A WebGPURenderer with the device limits the passes need (plain three would not ask for them).
-  const renderer = await createReflectionsRenderer({ canvas, antialias: false });
+  const defaultLimits = q.get('limits') === 'default';
+  const adapter = defaultLimits ? await navigator.gpu.requestAdapter() : null;
+  const renderer = defaultLimits
+    ? new THREE.WebGPURenderer({ canvas, antialias: false, requiredLimits: { maxColorAttachmentBytesPerSample: Math.min(adapter?.limits.maxColorAttachmentBytesPerSample ?? 32, 64) } } as never)
+    : await createReflectionsRenderer({ canvas, antialias: false });
+  if (defaultLimits) await renderer.init();
   renderer.toneMapping = THREE.ACESFilmicToneMapping; // the usual renderer settings still apply
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 
@@ -37,9 +45,16 @@ async function main() {
   // 3. Reflections: one object. Everything but the renderer and the scene is optional.
   const reflections = await Reflections.create(renderer, scene, {
     preset: q.get('preset') === 'performance' ? 'performance' : 'default',
-    rayTracing: q.get('rt') === '1', // rays for what neither the screen nor the probe has (needs @pmndrs/bvh)
+    rayTracing: q.get('rt') === '1', // rays for what neither the screen nor the probe has (needs @pmndrs/raytracer)
     denoiser: Ffx && ((device, { roughnessThreshold }) => new Ffx(device, { roughnessThreshold: roughnessThreshold ** 2 })),
   });
+
+  // (checks only) a provider whose scene copy is bound split: 9 storage buffers with probe hit shading
+  if (q.get('rt') === '1' && q.get('rtPacking') === 'split') {
+    reflections.trace?.provider.destroy();
+    const built = await createRaytracerTraceProviderFromObjects(reflections.ssr.device, scene, { packing: 'split' });
+    reflections.ssr.setTraceProvider(built.provider);
+  }
 
   // 4. The loop: reflections.render(camera) instead of renderer.render(scene, camera).
   let on = true;
@@ -65,7 +80,10 @@ async function main() {
     setOn(v: boolean) { on = v; toggle.checked = v; },
     /** Render n frames (denoiser history), then the PNG data URL of the canvas. */
     async shot(n = 1) { for (let i = 0; i < n; i++) frame(); return canvas.toDataURL('image/png'); },
-    info: () => ({ denoiser: !!reflections.hybrid.denoiser, probes: !!reflections.probes, rt: !!reflections.trace, baked: reflections.probes?.bakedProbes.length ?? 0 }),
+    info: () => ({
+      denoiser: !!reflections.hybrid.denoiser, probes: !!reflections.probes, rt: !!reflections.trace, baked: reflections.probes?.bakedProbes.length ?? 0,
+      storageBuffersPerStage: reflections.ssr.device.limits.maxStorageBuffersPerShaderStage, traced: !!reflections.ssr.traced, traceError: reflections.ssr.traceError,
+    }),
   };
 }
 

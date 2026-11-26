@@ -14,6 +14,9 @@ importers:
       '@pmndrs/bvh':
         specifier: ^0.1.0
         version: 0.1.0(@babylonjs/core@9.35.0)(three@0.187.0)
+      '@pmndrs/pathtracer':
+        specifier: ^0.1.0
+        version: 0.1.0(@babylonjs/core@9.35.0)(three@0.187.0)
       '@pmndrs/raytracer':
         specifier: ^0.1.0
         version: 0.1.0(@babylonjs/core@9.35.0)(three@0.187.0)
@@ -74,9 +77,6 @@ importers:
       three-gpu-pathtracer:
         specifier: 0.0.28
         version: 0.0.28(three-mesh-bvh@0.9.18(three@0.187.0))(three@0.187.0)(xatlas-web@0.1.0)
-      three-mesh-bvh:
-        specifier: ^0.9.18
-        version: 0.9.18(three@0.187.0)
       typedoc:
         specifier: ^0.28.20
         version: 0.28.20(typescript@5.9.3)
@@ -138,9 +138,6 @@ importers:
       three:
         specifier: ^0.187.0
         version: 0.187.0
-      three-mesh-bvh:
-        specifier: ^0.9.18
-        version: 0.9.18(three@0.187.0)
 
 packages:
 
@@ -358,6 +355,9 @@ packages:
     peerDependenciesMeta:
       three:
         optional: true
+
+  '@pmndrs/pathtracer@0.1.0':
+    resolution: {integrity: sha512-O+H03+cj+cmmzASnXcPtvJeA5RIGZR/cwqtXbI+Ga3EoBztkD2HWeG0WlqF1MkW2ppAH4GGOiJCEE3pPICIcvQ==}
 
   '@pmndrs/raytracer@0.1.0':
     resolution: {integrity: sha512-MqSddR0bsbwlZ58/9+yeuLO8LQADocEXsy4jobnh1amEfImPHiB9WjERGoS+mUzL/jlJg7vyE3O3N2jaJkHYBA==}
@@ -1172,6 +1172,13 @@ snapshots:
   '@pmndrs/downsampler@0.1.0(three@0.187.0)':
     optionalDependencies:
       three: 0.187.0
+
+  '@pmndrs/pathtracer@0.1.0(@babylonjs/core@9.35.0)(three@0.187.0)':
+    dependencies:
+      '@pmndrs/raytracer': 0.1.0(@babylonjs/core@9.35.0)(three@0.187.0)
+    transitivePeerDependencies:
+      - '@babylonjs/core'
+      - three
 
   '@pmndrs/raytracer@0.1.0(@babylonjs/core@9.35.0)(three@0.187.0)':
     dependencies:

@@ -24,11 +24,6 @@ Copyright (c) 2015 Krzysztof Narkowicz, dual-licensed public domain / MIT (used 
   - packages/core/src/probes/prefilter.ts and probes/layouts/prefilter.ts: WGSL kernels vendored
     from src/sky/pmrem/kernels.ts.
 
-three-mesh-bvh 0.9.18 (https://github.com/gkjohnson/three-mesh-bvh), Copyright (c) 2018 Garrett Johnson, MIT.
-  - packages/three/src/trace/MeshBVHTraceProvider.ts: a WGSL port of the WebGPU ray walk
-    (src/webgpu/shapecastFns/getShapecastFn.js, getRaycastFirstHitFn.js, rayShapecastUtils.js and
-    intersectRayTriangle in src/webgpu/tsl/fns.js) over BVHComputeData's packed buffers.
-
 FidelityFX SDK v1.1.4 (https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK),
 Copyright (C) 2024 Advanced Micro Devices, Inc., MIT.
   - packages/core/src/sssr/*: a WGSL port of the stochastic screen-space reflection tracer

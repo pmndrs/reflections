@@ -7,16 +7,14 @@
 // with (`scene.environmentNode = reflectionProbes(probes)`) unless `?probes=0`; the composite then
 // reads them with `sampleReflectionProbesLocal` and falls back to `scene.environment` by coverage.
 //
-// `?rt=1` attaches a ray-traced fallback for the misses (W51: @pmndrs/bvh by default, D1705; before, three-mesh-bvh behind core's trace seam,
-// MeshBVHTraceProvider), rebuilt per scene and refitted per frame for animated scenes.
-// `&bvh=three-mesh-bvh` keeps that stopgap; `&bvh=pmndrs` (the default) is core's @pmndrs/bvh provider (createPmndrsBvhTraceProviderFromObjects;
-// `&bvhBuilder=tinybvh|gpu-hploc|gpu-lbvh`, default auto = H-PLOC with subgroups, tinybvh without;
-// `&bvhRayMasks=1` compiles @pmndrs/bvh's instance-mask test in).
-// `window.__p.rtCompare(n)` traces the same rays through both providers (SPEC phase 4 gate).
+// `?rt=1` attaches a ray-traced fallback for the misses: core's @pmndrs/raytracer provider (createRaytracerTraceProviderFromObjects;
+// the only provider since W89: the earlier stopgap and the @pmndrs/bvh wrapper are gone), rebuilt per scene and refitted
+// per frame for animated scenes. `&bvhBuilder=tinybvh|gpu-hploc|gpu-lbvh` (default auto = H-PLOC with subgroups, tinybvh
+// without), `&bvhRayMasks=1` compiles @pmndrs/bvh's instance-mask test in, `&rtPacking=split` binds the scene copy as two
+// buffers (D5450), `&rtShade=1` shades traced hits with the raytracer's rtShade.
 //
-// `?denoise=1|0` (default on when a denoiser is available): the hybrid resolve (HybridReflections)
-// hands the specular signal to denoiser/ffx's FfxReflectionDenoiser through the denoise seam. The
-// denoiser comes from the sibling Denoiser repo's source (examples/vite.config.ts) when present.
+// `?denoise=1|0` (default on): the hybrid resolve (HybridReflections) hands the specular signal to denoiser/ffx's
+// FfxReflectionDenoiser (the `denoiser` package) through the denoise seam.
 //
 // `?brdf=replace|combine` (W78, X3 phase B, default off): BRDF / pdf weights in the FFX denoiser's prefilter
 // (the tracer hands each pixel's sample direction and pdf through the seam). Also the example-only key
@@ -39,8 +37,8 @@ import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { PROBE_LOOKUP_EXPERIMENT } from '@pmndrs/reflections-core/probes/lookup';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  HybridReflections, MeshBVHTraceProvider, ReflectionProbe, applyReflectionsPreset, defaultHitMaterial, type DenoiserHitSourceMode, type ReflectionsPresetName, ReflectionProbes, type BakeOptions, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
-  createPmndrsBvhTraceProviderFromObjects, type ThreePmndrsBvhTraceProvider, createRaytracerTraceProviderFromObjects,
+  HybridReflections, ReflectionProbe, applyReflectionsPreset, defaultHitMaterial, type DenoiserHitSourceMode, type ReflectionsPresetName, ReflectionProbes, type BakeOptions, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
+  type ThreeRaytracerTraceProvider, createRaytracerTraceProviderFromObjects,
 } from '@pmndrs/reflections/three';
 import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
 import {
@@ -85,16 +83,13 @@ const useRT = q.get('rt') === '1';
 /** W77: ?preset=performance|default (core REFLECTION_PRESETS, through the three adapter's `preset` options). */
 // an unknown name is passed on: the pass and the hybrid warn once and ignore it
 const presetName = (q.get('preset') as ReflectionsPresetName | null) ?? null;
-/** Which BVH the ray-traced fallback uses: core's @pmndrs/bvh (default since W51, the maintainer's call on D1705) or three-mesh-bvh (`?bvh=three-mesh-bvh`, the stopgap). */
-type BvhKind = 'three-mesh-bvh' | 'pmndrs';
-const bvhKind: BvhKind = q.get('bvh') === 'three-mesh-bvh' ? 'three-mesh-bvh' : 'pmndrs';
 const bvhBuilder = (q.get('bvhBuilder') ?? 'auto') as BvhBuilderPreference;
 /** `&bvhRayMasks=1`: @pmndrs/bvh's walk with its instance-mask test compiled in (W48; default off, D3591). */
 const bvhRayMasks = q.get('bvhRayMasks') === '1';
-/** P1.5: `&bvhCore=raytracer` builds core's provider over @pmndrs/raytracer's trace core instead of the @pmndrs/bvh wrapper (A/B). */
-const bvhCore = q.get('bvhCore') === 'raytracer' ? 'raytracer' : 'bvh';
-/** W82 (T70): `&rtShade=1` (with `&bvhCore=raytracer`) shades traced hits with @pmndrs/raytracer's rtShade instead of the probes. */
-const rtShade = bvhCore === 'raytracer' && q.get('rtShade') === '1';
+/** W82 (T70): `&rtShade=1` shades traced hits with @pmndrs/raytracer's rtShade instead of the probes. */
+const rtShade = q.get('rtShade') === '1';
+/** W89 (D5450): `&rtPacking=split` binds the scene copy as table + data (5 storage buffers) instead of packed (4). */
+const rtPacking = q.get('rtPacking') === 'split' ? 'split' as const : 'auto' as const;
 /** `&shadingNormals=0`: traced hits shaded with the flat geometric normal (D1700 A/B). */
 const shadingNormals = q.get('shadingNormals') !== '0';
 const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
@@ -452,28 +447,19 @@ async function main() {
   type ExampleProvider = TraceProvider & { destroy(): void };
   let provider: ExampleProvider | null = null;
   let refitProvider: () => void = () => {};
-  /** The @pmndrs/bvh build (instance -> three object), when `bvh=pmndrs`. */
-  let pmndrsBuild: ThreePmndrsBvhTraceProvider | null = null;
-  let bvhInfo: { kind: BvhKind; meshes: number; triangles: number; buildMs: number; builder?: string; fallbackReason?: string | null } | null = null;
+  /** The provider's build (instance -> three object). */
+  let pmndrsBuild: ThreeRaytracerTraceProvider | null = null;
+  let bvhInfo: { kind: '@pmndrs/raytracer'; meshes: number; triangles: number; buildMs: number; builder?: string; fallbackReason?: string | null; packing: string } | null = null;
   const traceMeshes = (root: THREE.Object3D) => {
     const meshes: THREE.Mesh[] = [];
     root.traverseVisible((o) => { if ((o as THREE.Mesh).isMesh && !(o as N).isHelper && !o.userData.noTrace) meshes.push(o as THREE.Mesh); });
     return meshes;
   };
-  async function buildProvider(kind: BvhKind, meshes: THREE.Mesh[]) {
+  async function buildProvider(meshes: THREE.Mesh[]) {
     const t0 = performance.now();
-    if (kind === 'pmndrs' && bvhCore === 'raytracer') {
-      const built = await createRaytracerTraceProviderFromObjects(device, meshes, { builder: bvhBuilder, shadingNormals, rayMasks: bvhRayMasks });
-      const i = built.provider.info;
-      return { provider: built.provider as ExampleProvider, pmndrs: built as unknown as ThreePmndrsBvhTraceProvider, refit: built.refit, info: { kind, meshes: meshes.length, triangles: i.triangles, buildMs: performance.now() - t0, builder: i.builder, fallbackReason: i.fallbackReason } };
-    }
-    if (kind === 'pmndrs') {
-      const built = await createPmndrsBvhTraceProviderFromObjects(device, meshes, { builder: bvhBuilder, shadingNormals, rayMasks: bvhRayMasks });
-      const i = built.provider.info;
-      return { provider: built.provider as ExampleProvider, pmndrs: built, refit: built.refit, info: { kind, meshes: meshes.length, triangles: i.triangles, buildMs: performance.now() - t0, builder: i.builder, fallbackReason: i.fallbackReason } };
-    }
-    const p = await MeshBVHTraceProvider.fromObjects(device, meshes, { shadingNormals });
-    return { provider: p as ExampleProvider, pmndrs: null, refit: () => p.refit(), info: { kind, meshes: meshes.length, triangles: p.triangles, buildMs: performance.now() - t0 } };
+    const built = await createRaytracerTraceProviderFromObjects(device, meshes, { builder: bvhBuilder, shadingNormals, rayMasks: bvhRayMasks, packing: rtPacking });
+    const i = built.provider.info;
+    return { provider: built.provider as ExampleProvider, pmndrs: built, refit: built.refit, info: { kind: '@pmndrs/raytracer' as const, meshes: meshes.length, triangles: i.triangles, buildMs: performance.now() - t0, builder: i.builder, fallbackReason: i.fallbackReason, packing: i.packing } };
   }
   let time = 0, paused = false;
   /**
@@ -613,7 +599,7 @@ async function main() {
       kit.scene.updateMatrixWorld(true);
       const meshes = traceMeshes(kit.scene);
       provider?.destroy();
-      const built = await buildProvider(bvhKind, meshes);
+      const built = await buildProvider(meshes);
       provider = built.provider; pmndrsBuild = built.pmndrs; refitProvider = built.refit; bvhInfo = built.info;
       ssr.setTraceProvider(provider);
       ssr.setRaytracerHitShading(rtShade);
@@ -784,7 +770,7 @@ async function main() {
       ...(timingOn ? [`GPU ms: three's passes (G-buffer + probe lookups, composite, display) ${rolling.length ? medianOf(rolling).toFixed(2) : '-'} running${lastTiming ? ` | loop stopped at ${lastTiming.size.join('x')}: three's passes ${lastTiming.renderMs.toFixed(2)} (p10 ${lastTiming.renderSpread[0].toFixed(2)}, p90 ${lastTiming.renderSpread[1].toFixed(2)}), core passes (SSR${ssr.rayTracing ? ' + RT' : ''}) ${lastTiming.coreMs.toFixed(2)}` : ' | press Time for loop-stopped numbers'}`] : []),
       ...(viewSel.value === 'probeCount' ? [`probeCount: volumes blended per px (lookup samples): ${HEAT_LEGEND.map(([, l]) => l).join(' / ')} = dark blue / green / yellow / orange / red / magenta`] : []),
       ...(viewSel.value === 'probeIndex' ? ['probeIndex: the dominant probe per px, in the colour the volume overlay draws it (?probeVolumes=1)'] : []),
-      useRT ? `ray-traced misses: ${ssr.rayTracing ? 'on' : 'off'} (${bvhKind === 'pmndrs' ? '@pmndrs/bvh' : 'three-mesh-bvh'}${bvhInfo ? `, ${bvhInfo.meshes} meshes, ${bvhInfo.triangles} triangles, built in ${bvhInfo.buildMs.toFixed(0)} ms${bvhInfo.builder ? ` by ${bvhInfo.builder}${bvhInfo.fallbackReason ? ` (${bvhInfo.fallbackReason})` : ''}` : ''}` : ''}; &bvh=pmndrs|three-mesh-bvh)` : 'ray-traced misses: off (?rt=1)',
+      useRT ? `ray-traced misses: ${ssr.rayTracing ? (ssr.traceError ? `unavailable (${ssr.traceError})` : 'on') : 'off'} (@pmndrs/raytracer${bvhInfo ? `, ${bvhInfo.meshes} meshes, ${bvhInfo.triangles} triangles, scene copy ${bvhInfo.packing}, built in ${bvhInfo.buildMs.toFixed(0)} ms${bvhInfo.builder ? ` by ${bvhInfo.builder}${bvhInfo.fallbackReason ? ` (${bvhInfo.fallbackReason})` : ''}` : ''}` : ''})` : 'ray-traced misses: off (?rt=1)',
     ].join('\n');
   }
   function setView(v: View) {
@@ -905,8 +891,7 @@ async function main() {
       traceStats: () => ssr.readTraceStats(),
       get bvh() { return bvhInfo && { ...bvhInfo, provider: provider?.name }; },
       tileCapCheck: () => tileCapCheck(),
-      rtOracle: (n?: number, rays?: RayKind, which?: BvhKind) => rtOracle(n, rays, which),
-      rtCompare: (n?: number, rays?: RayKind) => rtCompare(n, rays),
+      rtOracle: (n?: number, rays?: RayKind) => rtOracle(n, rays),
       rtMaterialCheck: (n?: number, rays?: RayKind) => rtMaterialCheck(n, rays),
       hitShadingError: (extra?: N, variants?: N[]) => hitShadingError(extra, variants),
       rtAnyHitOracle: (n?: number, rays?: RayKind) => rtAnyHitOracle(n, rays),
@@ -2030,16 +2015,13 @@ ${provider.code({ group: 1, firstBinding: 0 })}
    * same side, `normalAbs` = same line, cos >= 0.999), frontFace = (dot(normal, dir) < 0), and for
    * @pmndrs/bvh the instance (object + instanceId) and the material id the walk reports.
    */
-  async function rtOracle(n = 4096, kind: RayKind = 'camera', which?: BvhKind) {
+  async function rtOracle(n = 4096, kind: RayKind = 'camera') {
     if (!provider || !bvhInfo) throw new Error('rtOracle needs ?rt=1');
     const meshes = traceMeshes(kit!.scene);
-    // `which` other than the page's provider: build that one for this call only
-    const temp = which && which !== bvhInfo.kind ? await buildProvider(which, meshes) : null;
-    const tested = temp?.provider ?? provider, pmndrs = temp ? temp.pmndrs : pmndrsBuild;
+    const tested = provider, pmndrs = pmndrsBuild;
     const { origins, dirs } = makeRays(n, kind);
     const { f, u, s, gpuWallMs } = await traceRays(tested, origins, dirs);
     const shadingNormal = !!tested.capabilities.shadingNormal;
-    temp?.provider.destroy();
     const sides = new Map<THREE.Material, THREE.Side>();
     for (const m of meshes) for (const mat of ([] as THREE.Material[]).concat(m.material)) { sides.set(mat, mat.side); mat.side = THREE.DoubleSide; }
     // @pmndrs/bvh: instance index -> the object it came from, and the material id it was given
@@ -2103,50 +2085,10 @@ ${provider.code({ group: 1, firstBinding: 0 })}
     }
     for (const [mat, sd] of sides) mat.side = sd;
     return {
-      provider: which ?? bvhInfo.kind, rays: n, kind, agree, bothMiss, gpuOnly, cpuOnly, maxRel, p99Rel: pct(errs, 0.99), gpuWallMs,
+      provider: bvhInfo.kind, rays: n, kind, agree, bothMiss, gpuOnly, cpuOnly, maxRel, p99Rel: pct(errs, 0.99), gpuWallMs,
       compared, triangle, normalSigned, normalAbs, frontFace, instance: pmndrs ? instance : null, material: pmndrs ? material : null, examples,
       shading: { capability: shadingNormal, compared: shadedCompared, agree: shadedAgree, meanDeg: shadedCompared ? shadedAngle / shadedCompared : 0, flatMeanDeg: shadedCompared ? flatAngle / shadedCompared : 0 },
     };
-  }
-
-  /**
-   * SPEC phase 4 gate: the @pmndrs/bvh walk vs three-mesh-bvh's on the same rays (both built fresh
-   * over the scene's traced meshes). Agreement = both miss, or both hit within 1e-3 relative t;
-   * where both hit: normals on the same line (three-mesh-bvh's faces the ray, ours is the authored
-   * side) and the same frontFace. Triangle ids are not compared: three-mesh-bvh's are positions in
-   * its reordered index buffer (rtOracle checks ours against three's faceIndex).
-   */
-  async function rtCompare(n = 65536, kind: RayKind = 'camera') {
-    const meshes = traceMeshes(kit!.scene);
-    const a = await buildProvider('pmndrs', meshes);
-    const b = await buildProvider('three-mesh-bvh', meshes);
-    try {
-      const { origins, dirs } = makeRays(n, kind);
-      const ra = await traceRays(a.provider, origins, dirs);
-      const rb = await traceRays(b.provider, origins, dirs);
-      let agree = 0, bothMiss = 0, pmndrsOnly = 0, tmbOnly = 0, compared = 0, normal = 0, frontFace = 0, maxRel = 0;
-      const errs: number[] = [];
-      for (let i = 0; i < n; i++) {
-        const ta = ra.f[i * 8], tb = rb.f[i * 8];
-        if (ta < 0 && tb < 0) { bothMiss++; agree++; continue; }
-        if (tb < 0) { pmndrsOnly++; continue; }
-        if (ta < 0) { tmbOnly++; continue; }
-        const rel = relErr(ta, tb);
-        errs.push(rel); maxRel = Math.max(maxRel, rel);
-        if (rel >= 1e-3) continue;
-        agree++; compared++;
-        const cos = ra.f[i * 8 + 4] * rb.f[i * 8 + 4] + ra.f[i * 8 + 5] * rb.f[i * 8 + 5] + ra.f[i * 8 + 6] * rb.f[i * 8 + 6];
-        if (Math.abs(cos) >= 0.999) normal++;
-        if ((ra.f[i * 8 + 2] > 0.5) === (rb.f[i * 8 + 2] > 0.5)) frontFace++;
-      }
-      return {
-        rays: n, kind, scene: kit!.id, triangles: a.info.triangles, builder: a.info.builder, fallbackReason: a.info.fallbackReason,
-        buildMs: { pmndrs: a.info.buildMs, threeMeshBvh: b.info.buildMs },
-        agree, bothMiss, pmndrsOnly, tmbOnly, maxRel, p99Rel: pct(errs, 0.99), compared, normal, frontFace,
-      };
-    } finally {
-      a.provider.destroy(); b.provider.destroy();
-    }
   }
 }
 

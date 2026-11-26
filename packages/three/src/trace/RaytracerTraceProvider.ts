@@ -1,4 +1,4 @@
-// three → core's @pmndrs/raytracer trace provider (docs/SPEC.md "Trace seam", P1.5). The provider lives in core
+// three → core's @pmndrs/raytracer trace provider (docs/SPEC.md "Trace seam", P1.5; the only provider since W89). The provider lives in core
 // (`createRaytracerTraceProvider`); this file turns three objects into its engine-free inputs (the same ones
 // `bvhTraceSceneFromObjects` builds: positions, indices, vertex normals, world matrices, material ids) and three's
 // lights into the provider's own (for `raytracerHitShading`):
@@ -13,9 +13,9 @@ import {
   createRaytracerTraceProvider, type RaytracerTraceScene as BvhTraceScene, type RaytracerEnvironment, type RaytracerSun, type RaytracerTraceProvider,
   type RaytracerTraceProviderOptions,
 } from '@pmndrs/reflections-core';
-import { bvhTraceSceneFromObjects, type PmndrsBvhFromObjectsOptions, type ThreeBvhTraceScene } from './PmndrsBvhTraceProvider';
+import { bvhTraceSceneFromObjects, type TraceSceneFromObjectsOptions, type ThreeBvhTraceScene } from './traceSceneFromObjects';
 
-export interface RaytracerFromObjectsOptions extends RaytracerTraceProviderOptions, Pick<PmndrsBvhFromObjectsOptions, 'material' | 'filter' | 'shadingNormals'> {
+export interface RaytracerFromObjectsOptions extends RaytracerTraceProviderOptions, TraceSceneFromObjectsOptions {
   /** The environment `traceHitShade` samples. Default none (black). */
   environment?: RaytracerEnvironment | null;
   /** The sun. Default: the brightest visible DirectionalLight under `objects` (null: none). */

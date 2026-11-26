@@ -288,21 +288,15 @@ export const SETTINGS: Setting[] = [
 
   // ---- ray tracing -----------------------------------------------------------------------------------------
   bool('rt', 'rt', 'Ray-traced fallback', true, { pageDefault: true, appliesTo: RT, api: 'pass.rayTracing', tradeoff: 'On the ours + RT method: traced rays for the SSR misses. Off shows the same instance without them (= ours denoised).' }),
-  sel('bvh', 'rt', 'Provider', [['pmndrs', '@pmndrs/bvh'], ['three-mesh-bvh', 'three-mesh-bvh (stopgap)']], null, {
-    pageDefault: 'pmndrs', apply: 'rebuild', appliesTo: RT, api: 'PmndrsBvhTraceProvider | MeshBVHTraceProvider',
-    defaultNote: 'the app picks one; the examples default to @pmndrs/bvh (W51, D1705)',
-    tradeoff: 'Same hits on the procedural scenes (100% hit / t agreement, W14 / W48); @pmndrs/bvh agrees with THREE.Raycaster on Sponza where three-mesh-bvh misses 2.4% (D1705), and is faster.',
-    cost: 'trace at 1080p: Sponza 0.771 vs 1.417 ms (default misses), 1.043 vs 1.867 (all traced) (D1705); offscreen mirror 0.459 vs 0.539 (W14)',
-  }),
   sel('bvhBuilder', 'rt', 'Builder (@pmndrs/bvh)', [['auto', 'auto (H-PLOC with subgroups, else tinybvh)'], ['gpu-hploc', 'gpu-hploc'], ['gpu-lbvh', 'gpu-lbvh'], ['tinybvh', 'tinybvh (CPU)']], 'auto', {
-    apply: 'rebuild', appliesTo: RT, api: 'createPmndrsBvhTraceProviderFromObjects({ builder })', tradeoff: 'Tree builder: build time and tree quality (trace cost); same hits.',
+    apply: 'rebuild', appliesTo: RT, api: 'createRaytracerTraceProviderFromObjects({ builder })', tradeoff: 'Tree builder: build time and tree quality (trace cost); same hits.',
   }),
   bool('rtShade', 'rt', 'Raytracer hit shading (opt-in)', false, {
-    apply: 'rebuild', appliesTo: RT, api: 'trace.raytracerHitShading (needs createRaytracerTraceProviderFromObjects, `@pmndrs/raytracer`; the examples show it only where that resolves)',
-    tradeoff: 'W82 (T70, D5201): traced hits are shaded by @pmndrs/raytracer\'s one bounce (emission + one light sample with a shadow ray, diffuse + GGX) instead of the probe lookup; stochastic, so meant for the denoised frame. Off (default): the probes shade traced hits, as before. `@pmndrs/raytracer` is not on npm yet (an optional peer), and the provider binds 5 storage buffers: the device must allow 10 per shader stage (`reflectionsRequiredLimits`, D5200; WebGPU\'s default is 8, so an app that builds its own device raises `maxStorageBuffersPerShaderStage` to min(adapter, 10)). The traced hit shading then needs 9 (RT + probe hit shading) or 10.',
-    cost: 'one light sample and its shadow ray per traced hit; not measured separately (the walk itself is the same as @pmndrs/bvh within noise, P1.5)',
+    apply: 'rebuild', appliesTo: RT, api: 'trace.raytracerHitShading (pass.setRaytracerHitShading)',
+    tradeoff: 'W82 (T70, D5201): traced hits are shaded by @pmndrs/raytracer\'s one bounce (emission + one light sample with a shadow ray, diffuse + GGX) instead of the probe lookup; stochastic, so meant for the denoised frame. Off (default): the probes shade traced hits, as before. The traced pass binds 7 storage buffers with it (8 with probe hit shading; W89, D5450): WebGPU\'s default 8 suffice.',
+    cost: 'one light sample and its shadow ray per traced hit; not measured separately',
   }),
-  bool('rtShadingNormals', 'rt', 'Interpolated hit normals', true, { apply: 'rebuild', appliesTo: RT, api: 'provider option shadingNormals', tradeoff: 'D1700: traced hits shade with the vertex normals (smooth, as three shades on screen) instead of the face normal (faceted).', cost: 'three-mesh-bvh up to +0.07 ms at 1080p (D1700)' }),
+  bool('rtShadingNormals', 'rt', 'Interpolated hit normals', true, { apply: 'rebuild', appliesTo: RT, api: 'provider option shadingNormals', tradeoff: 'D1700: traced hits shade with the vertex normals (smooth, as three shades on screen) instead of the face normal (faceted).', cost: 'up to +0.07 ms at 1080p (D1700, measured on a former provider)' }),
   num('s.missRoughnessThreshold', 'rt', 'Glossy threshold (traced)', 0, 1, 0.01, 1, {
     appliesTo: RT, api: 'settings.missRoughnessThreshold',
     tradeoff: 'Only misses at perceptual roughness <= this go to the ray tracer (FFX hybrid sample: 0.469). Lower = fewer traced rays (cheaper); rougher misses keep the probe.',
@@ -315,7 +309,7 @@ export const SETTINGS: Setting[] = [
   num('t.rayLengthRoughnessFalloff', 'rt', 'Ray length falloff', 0, 20, 0.5, 5, { appliesTo: RT, api: 'traceSettings.rayLengthRoughnessFalloff', tradeoff: 'cap = maxRayLength x exp(-falloff x alpha): rough rays stay short.' }),
   num('t.normalOffset', 'rt', 'Origin offset', 0, 0.02, 0.0005, 0.003, { appliesTo: RT, api: 'traceSettings.normalOffset', tradeoff: 'Origin pushed along N by this x view distance: too small self-hits (acne), too large skips contact.' }),
   bool('t.reuseOnScreenHits', 'rt', 'Reuse on-screen hits', true, { appliesTo: RT, api: 'traceSettings.reuseOnScreenHits', tradeoff: 'D55: a traced hit the camera sees takes the screen colour (re-shaded with the re-shade on, D3542) instead of the probe-lit hit shading.' }),
-  bool('t.hitShadows', 'rt', 'Hit shadow rays', true, { appliesTo: RT, api: 'traceSettings.hitShadows', tradeoff: 'D903: one shadow ray per directional light from each traced off-screen hit; off lights every hit unoccluded.', cost: '<= 0.03 ms on 3 of 4 scenes (D903); \'moving\' 1080p +0.169 ms three-mesh-bvh, +0.081 @pmndrs/bvh (D2601)' }),
+  bool('t.hitShadows', 'rt', 'Hit shadow rays', true, { appliesTo: RT, api: 'traceSettings.hitShadows', tradeoff: 'D903: one shadow ray per directional light from each traced off-screen hit; off lights every hit unoccluded.', cost: '<= 0.03 ms on 3 of 4 scenes (D903); \'moving\' 1080p +0.081 ms (D2601, the former @pmndrs/bvh wrapper)' }),
   bool('t.hitSpecular', 'rt', 'Hit specular lobe', true, { appliesTo: RT, api: 'traceSettings.hitSpecular', tradeoff: 'D3510: traced hits shade their specular lobe and coat (with D3513\'s one visibility ray); off = diffuse + emissive only.' }),
   num('rtLobeFilter', 'rt', 'Hit lobe filter (traced)', 0, 2, 0.05, null, { defaultNote: 'the tracer\'s (Hit lobe filter)', appliesTo: RT, api: 'traceSettings.hitLobeFilter', tradeoff: 'Overrides the lobe filter at traced hits only (the compare page\'s ?rtLobeFilter=): separates the W45 effect on RT hits from the screen-space ones.' }),
   num('t.onScreenDepthTolerance', 'rt', 'On-screen depth tolerance', 0, 0.1, 0.005, 0.02, { appliesTo: RT, api: 'traceSettings.onScreenDepthTolerance', tradeoff: 'Relative view-distance tolerance for "the camera sees this hit": looser reuses more screen colour (cheaper shading, can pick a neighbour).' }),
