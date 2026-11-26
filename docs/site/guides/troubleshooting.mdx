@@ -1,14 +1,34 @@
 ---
 title: Troubleshooting
-description: Device limit errors, storage buffer limits, and materials that get no reflections.
-nav: 25
+description: Device limits, the ray-tracing warning, and materials that get no reflections.
+nav: 26
 ---
+
+## Ray tracing is off on this device
+
+The ray-traced pass binds storage buffers: the scene copy, the BVH walk, the probes and the shading. WebGPU's default
+allows 8 per shader stage. The scene copy is packed into one buffer, so three's default setup uses exactly 8 and runs on
+a plain `WebGPURenderer`. A configuration that needs more does not throw in the three adapter. The pass warns once:
+
+```text
+ScreenSpaceReflectionsPass: ray tracing is off on this device; screen-space reflections and probes continue. (the count and the limit)
+```
+
+It also sets `pass.traceError` to the message. Screen space and probes keep working, so the frame is never black and
+there is no validation error. It does not retry on its own. To get ray tracing back, raise the limit (below), or give
+the pass a lighter configuration, then call `setTraceProvider` again.
+
+`Reflections.create({ rayTracing: true })` also warns once, and goes on, if `@pmndrs/raytracer` or `@pmndrs/bvh` is not
+installed. Install both: `npm install @pmndrs/raytracer @pmndrs/bvh`.
+
+The core entry (`@pmndrs/reflections/core`) still throws, with the limit to raise, because its caller decides what to do.
+With a probe fallback and probe hit shading together, core needs 9 storage buffers, which a default device does not have.
 
 ## A texture or storage limit error
 
 The passes count their bindings when they are built. If a pass plus the parts plugged into it (the probes' fallback,
-hit shading, a trace provider) pass a per-stage limit, the build throws with the numbers and what to change. It looks
-like this:
+hit shading, a trace provider) pass a per-stage limit, the build says so with the numbers and what to change. In core
+it throws. It looks like this:
 
 ```text
 rt: the trace pipeline binds 11 storage buffers in the compute stage (...); the device allows 10 (maxStorageBuffersPerShaderStage).
@@ -35,6 +55,9 @@ for up to 32. If your adapter cannot give 32, use fewer probe sizes (one or two 
 The G-buffer's lit target and three's exact specular weights need more than 32 bytes per sample. Without the extra
 limit, those targets stay off and the composite falls back to an estimate of three's specular term. The result is
 close, but not exact. Request `maxColorAttachmentBytesPerSample` (up to 64) with the helper.
+
+A plain `new WebGPURenderer()` with WebGPU's default of 32 bytes can throw in `Reflections.create` ("the G-buffer has
+no lit target"). Use `createReflectionsRenderer`, or raise that one limit.
 
 ## WebGPU is not available
 

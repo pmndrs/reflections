@@ -214,7 +214,7 @@ async function main() {
   probes.enabled = q.get('probes') !== '0';
 
   const variant = q.get('variant') === 'workgroup' ? 'workgroup' : 'auto';
-  // the FFX reflection denoiser through core's denoise seam, when the sibling Denoiser repo is there
+  // the FFX reflection denoiser (`denoiser` ^2.0.0 from npm) through core's denoise seam
   const denoiser = denoiserAvailable ? createReflectionDenoiser(device) : null;
   const view = new ReflectionsView({
     renderer, width: W, height: H, resolution: 1, probes, variant, timestamps: true, denoiser,

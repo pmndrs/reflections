@@ -1,24 +1,110 @@
 ---
 title: Babylon.js
-description: Screen-space reflections and probes on a Babylon.js WebGPUEngine. Experimental.
-nav: 21
+description: Screen-space reflections and probes on a Babylon.js WebGPUEngine, as frame-graph tasks. Experimental.
+nav: 22
 sourcecode: packages/babylon/src
 ---
 
 > [!WARNING]
-> The Babylon adapter is experimental. It runs the core screen-space tracer and the probe set on Babylon's device, and
-> the API can change.
+> The Babylon adapter is experimental. The API can change.
+
+The adapter runs the core screen-space tracer and the probe set on Babylon's own device. It supports:
+
+- **Probes.** `BabylonProbeSet` captures them with Babylon cube renders, plus an environment slot.
+- **Screen-space reflections.** `ScreenSpaceReflections`, on a G-buffer from Babylon's geometry renderer.
+- **A composite.** It adds the reflections to the lit image, with debug views.
+- **Frame-graph tasks.** `FrameGraphReflectionsTask` and `FrameGraphReflectionsCompositeTask`.
+
+It does not have the ray-traced fallback, the denoiser, presets, the hybrid resolve or a one-call setup. The
+[adapter comparison](/guides/adapters) has the full table. The adapter handles Babylon's conventions (handedness,
+Y-flipped targets, velocity, gloss and F0) when it builds the [frame contract](/concepts/frame-contract).
+
+## Install
+
+```bash
+npm install @pmndrs/reflections @babylonjs/core
+```
+
+| Package | Range | When |
+| --- | --- | --- |
+| `@babylonjs/core` | `>=9.35.0 <10` | Always. The tested version is 9.35.0. |
+
+`three`, `pixi.js`, `@pmndrs/raytracer`, `@pmndrs/bvh` and `denoiser` are not used by this adapter.
+
+## Minimal setup
+
+The complete code is [`examples/babylon`](https://github.com/pmndrs/reflections/tree/main/examples/babylon). These
+are its reflection parts. Import from the Babylon entry:
 
 {/* snippet: babylon-imports */}
 ```ts
 import { FrameGraphReflectionsCompositeTask, FrameGraphReflectionsTask, BabylonProbeSet, ScreenSpaceReflections, stripSpecularIBL } from '@pmndrs/reflections/babylon';
 ```
 
-## What you need
+### 1. The engine
 
-- `@babylonjs/core` 9.35 or newer, on a `WebGPUEngine`.
-- The engine created with `enableAllFeatures: true` (for subgroups) and `setMaximumLimits: true` (for four colour targets).
-- Babylon's frame graph, where the reflection passes run as tasks.
+{/* snippet: babylon-engine */}
+```ts
+export async function createEngine(canvas: HTMLCanvasElement): Promise<WebGPUEngine> {
+  // enableAllFeatures: subgroups for the tracer's faster variant. setMaximumLimits: four colour targets.
+  const engine = new WebGPUEngine(canvas, { antialias: false, enableAllFeatures: true, setMaximumLimits: true });
+  await engine.initAsync();
+  return engine;
+}
+```
+
+### 2. Probes and the tracer
+
+{/* snippet: babylon-reflections */}
+```ts
+// The composite adds the specular IBL term back from the sources, so take it out of the materials.
+materials.forEach((m) => stripSpecularIBL(m));
+
+// One probe over the room, plus the environment as a slot.
+const probes = new BabylonProbeSet(scene, { capacity: 1, sourceSize: 128, environment: [skybox] });
+probes.setProbes([{ position: [0, 2, 0], influenceSize: [16, 4.2, 16], projectionSize: [16, 4.2, 12] }]);
+await scene.whenReadyAsync();
+await probes.bake();
+
+const ssr = new ScreenSpaceReflections({ engine, probes });
+```
+
+`BabylonProbeSet.bake()` needs `scene.activeCamera` to be set, because the captures take its near and far planes.
+`ssr.configure(width, height)` allocates the tracer's textures. Call it again, and rebuild the frame graph, when the
+size changes.
+
+### 3. The frame graph
+
+Build a frame graph the usual Babylon way: clear, shadows, a geometry renderer task that writes world normals,
+reflectivity and linear velocity, the sky. Then add the two reflection tasks and present the composite:
+
+{/* snippet: babylon-tasks */}
+```ts
+// The geometry task writes world normals, reflectivity and linear velocity. `sky` holds the lit colour and depth.
+const trace = new FrameGraphReflectionsTask('reflections', graph, ssr);
+trace.camera = camera;
+trace.colorTexture = sky.outputTexture;
+trace.depthTexture = sky.outputDepthTexture;
+trace.worldNormalTexture = geometry.geometryWorldNormalTexture;
+trace.reflectivityTexture = geometry.geometryReflectivityTexture;
+trace.velocityTexture = geometry.geometryLinearVelocityTexture;
+graph.addTask(trace);
+
+const composite = new FrameGraphReflectionsCompositeTask('composite', graph, scene);
+composite.camera = camera;
+composite.sourceTexture = sky.outputTexture;
+composite.depthTexture = sky.outputDepthTexture;
+composite.worldNormalTexture = geometry.geometryWorldNormalTexture;
+composite.reflectivityTexture = geometry.geometryReflectivityTexture;
+composite.velocityTexture = geometry.geometryLinearVelocityTexture;
+composite.radianceTexture = trace.radianceTexture;
+composite.confidenceTexture = trace.confidenceTexture;
+composite.hitDistanceTexture = trace.hitDistanceTexture;
+graph.addTask(composite);
+```
+
+The geometry task needs `disableImageProcessing = true`, so the tracer and the composite get linear HDR. Feed the
+composite's `outputTexture` to your image-processing task. `examples/babylon/src/main.ts` has the whole graph.
 
 ## The parts
 
@@ -27,26 +113,23 @@ import { FrameGraphReflectionsCompositeTask, FrameGraphReflectionsTask, BabylonP
 | `BabylonProbeSet` | Probes captured with Babylon cube renders, backed by the core probe set. Add the environment as a slot. |
 | `ScreenSpaceReflections` | The core tracer on Babylon's device. With probes, misses and rough pixels take the probe radiance. |
 | `FrameGraphReflectionsTask` | Runs the tracer inside a frame graph. |
-| `FrameGraphReflectionsCompositeTask` | Adds the reflections to the lit image, with debug views. |
+| `FrameGraphReflectionsCompositeTask` | Adds the reflections to the lit image, with debug views (`COMPOSITE_VIEWS`). |
 | `stripSpecularIBL(material)` | Takes the specular IBL term out of a PBR material, because the composite adds it back from the sources. |
 
-## Outline
+## Device limits
 
-```text
-engine = new WebGPUEngine(canvas, { antialias: false, enableAllFeatures: true, setMaximumLimits: true })
-await engine.initAsync()
-materials.forEach(stripSpecularIBL)
-probes = new BabylonProbeSet(scene, { capacity: 1, sourceSize: 128, environment: [skybox] })
-ssr = new ScreenSpaceReflections({ engine, probes })
-frame graph: geometry pass -> FrameGraphReflectionsTask(ssr) -> FrameGraphReflectionsCompositeTask
-```
+The engine needs `setMaximumLimits: true` for four colour targets, and `enableAllFeatures: true` if you want the
+subgroup variant of the tracer. The adapter reads Babylon's `GPUDevice` and does not make its own. There is no
+ray-traced pass here, so the storage-buffer count from the three.js adapter does not apply.
 
-The complete, working code is [`examples/babylon`](https://github.com/pmndrs/reflections/tree/main/examples/babylon) in
-the repository, and the [live page](/examples/babylon/) runs it. The adapter handles Babylon's conventions (handedness,
-Y-flipped targets, velocity, gloss and F0) when it builds the [frame contract](/concepts/frame-contract).
+## Known gaps
 
-## Status
+- No ray-traced fallback, no denoiser, no presets and no hybrid resolve. Probes and screen space only.
+- No one-call setup like `Reflections.create`. You build the frame graph.
+- Materials need `stripSpecularIBL`, which works on PBR materials.
+- Experimental: names and options can change.
 
-The Babylon adapter covers the screen-space tracer, probes and the composite. The three.js adapter is the one with
-the hybrid resolve, the ray-traced fallback and the denoiser wired in. The
-[repository notes](https://github.com/pmndrs/reflections/blob/main/docs/HANDOFF.md) list what each adapter has.
+## Live example
+
+[`examples/babylon`](https://github.com/pmndrs/reflections/tree/main/examples/babylon) is the source, and the
+[live page](/examples/babylon/) runs it. It takes `?ssr=0`, `?probes=0`, `?view=` and `?variant=workgroup`.

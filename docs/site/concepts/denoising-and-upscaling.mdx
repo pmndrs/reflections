@@ -9,9 +9,10 @@ denoiser. Several sibling libraries from the same group do the other jobs, so ea
 
 | Library | Its job | How it meets this one |
 | --- | --- | --- |
-| [`@pmndrs/denoiser`](https://github.com/pmndrs/denoiser) | Denoises. Includes a real-time temporal reflection denoiser, `FfxReflectionDenoiser`. | Plugs in through the **denoise seam**. You pass it to `HybridReflections`. |
+| [`denoiser`](https://github.com/pmndrs/denoiser) (`^2.0.0` on npm) | Denoises. `denoiser/ffx` has a real-time temporal reflection denoiser, `FfxReflectionDenoiser`. The root export is OIDN, for path-traced frames. | Plugs in through the **denoise seam**. You pass it to `HybridReflections`. |
 | [`@pmndrs/upscaler`](https://github.com/pmndrs/upscaler) | Temporal upscaling and anti-aliasing of the final frame. | Runs **after** the composite, on the whole image. Reflections are not special to it. |
-| [`@pmndrs/bvh`](https://github.com/pmndrs/bvh) | BVH builders and a WGSL ray walk, with no engine. | The core ray-traced provider, behind the **trace seam**. |
+| [`@pmndrs/raytracer`](https://github.com/pmndrs/pathtracer) and [`@pmndrs/bvh`](https://github.com/pmndrs/bvh) | A WGSL ray-tracing core, and the BVH builders and ray walk under it. Neither knows an engine. | The ray-traced provider, behind the **trace seam**. `@pmndrs/raytracer` is the only one. |
+| [`@pmndrs/pathtracer`](https://github.com/pmndrs/pathtracer) | A path tracer built on the raytracer. | Only the showcase's compare page uses it, as the reference image. Not a dependency. |
 | `@pmndrs/downsampler` | A fast GPU depth downsample (SPD style). | Builds the depth pyramid the screen-space tracer marches. A dependency, not something you call. |
 | `@pmndrs/motion-vectors` | Motion vectors for engines that do not produce them. | The denoiser and the upscaler both read per-pixel motion. This is where it can come from when your engine has no velocity output. |
 
@@ -19,6 +20,10 @@ denoiser. Several sibling libraries from the same group do the other jobs, so ea
 
 `HybridReflections` takes any object shaped like a `TemporalDenoiser<SpecularInputs>` from the denoiser's core. It
 receives the radiance, the hit distance, the guides (depth, normal, roughness, motion) and the camera. `FfxReflectionDenoiser` fits as is.
+
+```bash
+npm install denoiser
+```
 
 {/* snippet: denoise-seam */}
 ```ts
@@ -30,8 +35,8 @@ The denoiser is an optional peer and never a dependency. That keeps this package
 denoiser that speaks the same interface.
 
 > [!NOTE]
-> `@pmndrs/denoiser` is not on npm yet. Without it, the resolve runs undenoised. That still works, but rough glossy
-> surfaces and traced reflections shimmer much more. The [live examples](/examples/showcase/) run with it.
+> Without a denoiser, the resolve runs undenoised. That still works, but rough glossy surfaces and traced reflections
+> shimmer much more. The [live examples](/examples/showcase/) run with it.
 
 Match the denoiser's roughness gate to the tracer's. The tracer skips pixels rougher than `roughnessThreshold`
 (perceptual). The denoiser compares alpha, which is perceptual roughness squared. If you use the default of 0.447,
@@ -54,5 +59,5 @@ the better first choice when you have to pick one.
 ## The trace seam
 
 The ray-traced fallback does not care which BVH you use. A provider is a WGSL function that returns the first hit,
-plus a bind group. `MeshBVHTraceProvider` wraps three-mesh-bvh. `@pmndrs/bvh` provides the engine-free one. See
+plus a bind group. The shipped provider is built on `@pmndrs/raytracer`. See
 [Ray-traced fallback](/concepts/ray-traced-fallback).

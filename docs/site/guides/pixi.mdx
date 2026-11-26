@@ -1,23 +1,97 @@
 ---
 title: pixi.js
 description: Reflections for pixi-3d scenes on a pixi v8 WebGPURenderer. Experimental, and it needs a closed beta.
-nav: 22
+nav: 23
 sourcecode: packages/pixi/src
 ---
 
 > [!WARNING]
 > The pixi adapter is experimental, and it works with **pixi-3d** (`@pixi/3d`), which is in a closed beta and not on
-> npm. This repository never bundles it, and the live examples site does not include the pixi example.
+> npm. This package never imports it. You need the beta to use the adapter. The live examples site does not include
+> the pixi example.
 
 pixi has no G-buffer, so the adapter builds the [frame contract](/concepts/frame-contract) from what a pixi-3d
 `View3D` provides (colour, depth, motion, camera) plus one extra pass for normals and material values. The adapter
-never imports `@pixi/3d`. It takes pixi textures and plain structural types, so it builds and type-checks without
-the beta.
+takes pixi textures and plain structural types, so it builds and type-checks without the beta.
+
+It supports:
+
+- **Probes.** `PixiProbeSet`, captured from pixi-3d renders, plus the view's hemisphere as the environment slot.
+- **Screen-space reflections.** The core tracer on pixi's device.
+- **The denoiser.** Pass any denoiser with the core `TemporalDenoiser` shape (`denoiser/ffx`) as `denoiser`.
+- **A composite.** A pixi `Filter`, and `ReflectionsView`, a sprite that ties the parts together.
+
+It does not have the ray-traced fallback, presets, the hybrid resolve or a one-call `Reflections.create`. See the
+[adapter comparison](/guides/adapters).
+
+## Install
+
+```bash
+npm install @pmndrs/reflections pixi.js
+npm install denoiser   # optional
+```
+
+| Package | Range | When |
+| --- | --- | --- |
+| `pixi.js` | `>=8.22.0 <9` | Always. The tested version is 8.22.0. |
+| `@pixi/3d` | closed beta | Always. Not on npm, and not a dependency of this package. |
+| `denoiser` | `^2.0.0` (optional, not a peer) | A denoiser for glossy reflections. |
+
+`three`, `@babylonjs/core`, `@pmndrs/raytracer` and `@pmndrs/bvh` are not used by this adapter.
+
+## Minimal setup
+
+The complete code is [`examples/pixi3d/arcade/main.ts`](https://github.com/pmndrs/reflections/blob/main/examples/pixi3d/arcade/main.ts).
+Import from the pixi entry:
 
 {/* snippet: pixi-imports */}
 ```ts
 import { PixiProbeSet, ReflectionsView, ScreenSpaceReflections as PixiScreenSpaceReflections, requestReflectionsDevice } from '@pmndrs/reflections/pixi';
 ```
+
+### 1. The app, on a device with the right limits
+
+{/* snippet: pixi-app */}
+```ts
+export async function createApp(): Promise<Application> {
+  const app = new Application();
+  await app.init({
+    preference: 'webgpu',
+    gpu: await requestReflectionsDevice(), // a device with the limits and features the library uses
+    width: 960,
+    height: 540,
+    resolution: 1,
+    antialias: false,
+  });
+  return app;
+}
+```
+
+### 2. The view
+
+pixi-3d renders colour, depth (`DepthOutputPass`) and motion (`MotionVectorPass`). A fourth pass, `ReflectionsGBufferPass`,
+writes normals and material values. It is in `examples/pixi3d/shared/reflections.ts`, because the beta does not have it.
+Then:
+
+{/* snippet: pixi-view */}
+```ts
+// Optional: probes for what the screen cannot see. The example's ProbeCapture then fills them from six pixi-3d renders.
+const probes = new PixiProbeSet(renderer, { capacity: 1, sourceSize: 128 });
+probes.setProbes([{ position: [0, 1.2, -1.6], influenceSize: [30, 10, 30], fade: 2 }]);
+
+const view = new ReflectionsView({ renderer, width: 960, height: 540, resolution: 1, probes, denoiser });
+view3d.setSize(view.pixelWidth, view.pixelHeight); // pixi-3d renders at the frame's size
+app.stage.addChild(view);
+
+// Each frame, before pixi renders the stage:
+const frame = () => {
+  renderer.render({ container: view3d as never, target: view.colorTarget });
+  view.render({ depth: depthPass.texture, motion: motionPass.texture, gbuffer: gbufferPass.texture }, view3d.camera);
+};
+```
+
+Call `frame()` from a ticker at `UPDATE_PRIORITY.HIGH`, so it runs before pixi renders the stage. `view.ssr.denoise`
+turns the denoiser on and off. `view.debugView` picks a debug view.
 
 ## The parts
 
@@ -26,13 +100,26 @@ import { PixiProbeSet, ReflectionsView, ScreenSpaceReflections as PixiScreenSpac
 | `requestReflectionsDevice` | Creates the device with the limits the library needs, for pixi's renderer to use. |
 | `Pixi3DFrame` | The frame contract from a pixi-3d `View3D`'s outputs. |
 | `PixiProbeSet` | The core probe set, captured from pixi-3d renders. |
-| `ScreenSpaceReflections` | The core tracer on pixi's device. |
+| `ScreenSpaceReflections` | The core tracer on pixi's device. Takes `denoiser`. |
 | `ReflectionsFilter` | The composite as a pixi `Filter`. |
 | `ReflectionsView` | An all-in-one sprite that ties the parts together. |
 
-## Try it
+## Device limits
 
-The example `examples/pixi3d/arcade` is a neon arcade built with pixi-3d. To run it you need the beta tarball
-unpacked into `examples/pixi3d/vendor/`. The steps are in
-[`examples/pixi3d/README.md`](https://github.com/pmndrs/reflections/blob/main/examples/pixi3d/README.md). Without the
-beta, the page shows a setup notice.
+`requestReflectionsDevice` asks the adapter for the optional features pixi can use (texture compression, subgroups,
+timestamp queries and more) and the limits from `reflectionsRequiredLimits`. Pass the result as pixi's `gpu` option.
+There is no ray-traced pass in this adapter, so the storage-buffer count from the three.js adapter does not apply.
+
+## Known gaps
+
+- Needs the pixi-3d closed beta. Without it the example shows a setup notice.
+- No ray-traced fallback, no presets, no hybrid resolve, and no one-call setup. Probes, screen space and the denoiser.
+- The G-buffer pass for normals and material values comes from the example, not the package.
+- Experimental: names and options can change.
+
+## Live example
+
+The example `examples/pixi3d/arcade` is a neon arcade built with pixi-3d. It is not on the live site, because the beta
+cannot be bundled. To run it, unpack the beta tarball into `examples/pixi3d/vendor/`. The steps are in
+[`examples/pixi3d/README.md`](https://github.com/pmndrs/reflections/blob/main/examples/pixi3d/README.md), and
+`pnpm examples` serves it at `/pixi3d/arcade/`.

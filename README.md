@@ -2,7 +2,24 @@
 
 Reflections for WebGPU. Reflection probes (box-projected, GGX-prefiltered), screen-space reflections and a ray-traced fallback, composed per pixel into one denoised hybrid. The core is engine-agnostic WGSL on a bare `GPUDevice`; three.js `WebGPURenderer` is the first adapter (with Babylon.js and pixi.js adapters experimental).
 
-> Early: the API can still change. Needs three.js r187 or newer and a browser with WebGPU. Docs: https://reflections.docs.pmnd.rs. The plan and its gates are in [docs/SPEC.md](docs/SPEC.md).
+> Early: the API can still change. Needs a browser with WebGPU. Docs: https://reflections.docs.pmnd.rs. The plan and its gates are in [docs/SPEC.md](docs/SPEC.md).
+
+## Install
+
+```bash
+npm install @pmndrs/reflections three
+```
+
+Every peer is optional, so install the ones you use:
+
+| Peer | Range | For |
+|---|---|---|
+| `three` | `>=0.187.0` | the three.js adapter and React Three Fiber |
+| `@babylonjs/core` | `>=9.35.0 <10` | the Babylon.js adapter |
+| `pixi.js` | `>=8.22.0 <9` | the pixi.js adapter |
+| `@pmndrs/raytracer`, `@pmndrs/bvh` | `^0.1.0` | the ray-traced fallback (`rayTracing: true`) |
+
+The temporal denoiser is a separate package, [`denoiser`](https://github.com/pmndrs/denoiser) `^2.0.0` (`npm install denoiser`). It is not a peer: you pass it in.
 
 ## Quick start
 
@@ -23,9 +40,9 @@ const reflections = await Reflections.create(renderer, scene, {
 renderer.setAnimationLoop(() => reflections.render(camera)); // where you called renderer.render(scene, camera)
 ```
 
-> **The denoiser isn't on npm yet.** `denoiser/ffx` is the [`denoiser`](https://github.com/pmndrs/denoiser) 2.x package; the `denoiser` on npm today is the old 0.0.x and has no `ffx` entry. Until 2.0 is published, build it from that repo (or leave the option out: reflections still work, glossy surfaces are noisier).
+`denoiser/ffx` is the [`denoiser`](https://github.com/pmndrs/denoiser) package, version 2 or newer. Leave the option out and reflections still work, but glossy surfaces are noisier.
 
-`Reflections.create` takes `preset` (`'default'`, or `'performance'` for half-resolution reflections), `probes`, `rayTracing: true` (the ray-traced fallback, needs `@pmndrs/bvh`) and `settings`. A complete page: [`examples/quickstart`](examples/quickstart/). Every piece (`reflections.ssr`, `.hybrid`, `.probes`, `.pipeline`) stays public.
+`Reflections.create` takes `preset` (`'default'`, or `'performance'` for half-resolution reflections), `probes`, `rayTracing: true` (the ray-traced fallback; needs `@pmndrs/raytracer` and `@pmndrs/bvh`) and `settings`. A complete page: [`examples/quickstart`](examples/quickstart/). Every piece (`reflections.ssr`, `.hybrid`, `.probes`, `.pipeline`) stays public.
 
 ### Probes only
 
@@ -51,6 +68,7 @@ React Three Fiber v10 (`@react-three/fiber@alpha`, tested with 10.0.0-alpha.6) r
 ```tsx
 import { Canvas } from '@react-three/fiber';
 import { createReflectionsRenderer } from '@pmndrs/reflections/three';
+import { FfxReflectionDenoiser } from 'denoiser/ffx';
 import { useReflections } from './useReflections'; // examples/r3f/src/useReflections.ts, about 30 lines
 
 function Effects() {
@@ -91,8 +109,10 @@ The probes are this library's: an engine-agnostic core (GGX prefilter, cube-arra
 |---|---|
 | `@pmndrs/reflections` / `/three` | three.js adapter: `Reflections`, probes, screen-space and hybrid passes, TSL nodes |
 | `@pmndrs/reflections/core` | engine-agnostic WebGPU: the probe prefilter, the screen-space tracer, the trace seam, the denoise seam |
-| `@pmndrs/reflections/babylon` | Babylon.js WebGPUEngine adapter (experimental): core SSR + probe set, frame-graph tasks (`examples/babylon`) |
+| `@pmndrs/reflections/babylon` | Babylon.js WebGPUEngine adapter (experimental): probes and screen-space reflections as frame-graph tasks (`examples/babylon`). No ray tracing, hybrid resolve or presets |
 | `@pmndrs/reflections/pixi` | pixi.js v8 WebGPURenderer adapter (experimental) for pixi-3d scenes: the frame contract from a `View3D`'s outputs, core SSR + probe set on pixi's device, the composite as a pixi `Filter` (`examples/pixi3d/arcade`). It never imports pixi-3d (closed beta); the example needs the beta unpacked locally ([examples/pixi3d/README.md](examples/pixi3d/README.md)) and shows a setup notice without it |
+
+Which adapter has which feature: [Adapters](https://reflections.docs.pmnd.rs/guides/adapters) in the docs. Each has its own page: [three.js](https://reflections.docs.pmnd.rs/guides/three), [React Three Fiber](https://reflections.docs.pmnd.rs/guides/react-three-fiber), [Babylon.js](https://reflections.docs.pmnd.rs/guides/babylon), [pixi.js](https://reflections.docs.pmnd.rs/guides/pixi).
 
 ## Examples
 
@@ -106,9 +126,10 @@ pnpm examples    # then open http://127.0.0.1:5370/quickstart/
 
 ## Sibling libraries
 
-- [`denoiser`](https://github.com/pmndrs/denoiser) (2.x, not on npm yet): the temporal reflection denoiser (`denoiser/ffx`) behind the `denoiser` option, and OIDN for path-traced frames.
+- [`denoiser`](https://github.com/pmndrs/denoiser) (^2.0.0): the temporal reflection denoiser (`denoiser/ffx`) behind the `denoiser` option, and OIDN for path-traced frames.
 - [`@pmndrs/upscaler`](https://github.com/pmndrs/upscaler): temporal anti-aliasing and upscaling; at ratio 1 it settles the last shimmer. The showcase runs it after the composite.
-- [`@pmndrs/bvh`](https://github.com/pmndrs/bvh): the GPU BVH behind `rayTracing`.
+- [`@pmndrs/raytracer`](https://github.com/pmndrs/pathtracer) (^0.1.0): the ray-tracing provider behind `rayTracing`, with [`@pmndrs/bvh`](https://github.com/pmndrs/bvh) (^0.1.0) for the BVH.
+- [`@pmndrs/pathtracer`](https://github.com/pmndrs/pathtracer): the path tracer the showcase's compare page uses as the reference image.
 - [`@pmndrs/downsampler`](https://github.com/pmndrs/downsampler): the mip chains and Hi-Z pyramid the tracer uses.
 - [`@pmndrs/motion-vectors`](https://github.com/pmndrs/motion-vectors): per-pixel motion for the temporal passes.
 

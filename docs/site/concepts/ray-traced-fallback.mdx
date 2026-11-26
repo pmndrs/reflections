@@ -2,7 +2,7 @@
 title: Ray-traced fallback
 description: BVH rays for the reflections that screen space cannot see.
 nav: 12
-sourcecode: packages/three/src/trace/MeshBVHTraceProvider.ts
+sourcecode: packages/three/src/trace/RaytracerTraceProvider.ts
 ---
 
 When the [screen-space tracer](/concepts/screen-space-reflections) misses, there is a list of pixels whose ray found
@@ -10,27 +10,40 @@ nothing on screen. The ray-traced fallback takes that list and traces the rays t
 bounding volume hierarchy (BVH). A hit gets shaded at the hit point, and the result goes into the same signal as the
 screen-space hits, so everything after it (the resolve, the denoiser) sees one input.
 
-Only the misses are traced. That keeps it affordable: the cost scales with how many rays screen space could not finish.
+Only the misses are traced. That keeps it affordable: the cost scales with how many rays screen space could not finish.## The provider
 
-## Providers
+The tracer asks a *trace provider* for the first hit along a ray. There is one: `@pmndrs/raytracer`.
 
-The tracer asks a *trace provider* for the first hit along a ray. Two exist:
+[`@pmndrs/raytracer`](https://github.com/pmndrs/pathtracer) is the group's WebGPU ray-tracing core: a copy of the
+scene on the GPU, a BVH walk, light sampling and shading helpers, all in WGSL. It builds on
+[`@pmndrs/bvh`](https://github.com/pmndrs/bvh), the engine-free BVH. This library only wraps it: the three.js adapter
+turns your meshes into the scene it expects.
 
-| Provider | What it is |
-| --- | --- |
-| `MeshBVHTraceProvider` | Built on [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh). The one that works on a stock install today. |
-| `createPmndrsBvhTraceProviderFromObjects` | Built on `@pmndrs/bvh`, the group's engine-free BVH (builders on the CPU and GPU, a WGSL ray walk). Not on npm yet. |
+Both are optional peers. Install them to use the fallback (`npm install @pmndrs/raytracer @pmndrs/bvh`, both
+`^0.1.0`). `Reflections.create({ rayTracing: true })` and `createRaytracerTraceProviderFromObjects` load them on demand.
+If they are missing, `Reflections.create` warns once and keeps going with screen space and probes. Calling
+`createRaytracerTraceProviderFromObjects` yourself throws instead, so you can decide.
 
-Both give the same hits on the test scenes. They sit behind a small interface (a WGSL snippet plus a bind group), so
-another BVH can plug in.
+The provider sits behind a small interface (a WGSL snippet plus a bind group), called the trace seam. The core
+exports that interface, so a different BVH can plug in.
+
+The compare page of the [live showcase](/examples/showcase/compare.html) shows the result against
+[`@pmndrs/pathtracer`](https://github.com/pmndrs/pathtracer), a path tracer built on the same raytracer. It is the
+reference image. It is not a dependency of this package.
+
+
 
 ## Using it
 
 {/* snippet: ray-traced */}
 ```ts
-const provider = await MeshBVHTraceProvider.fromObjects(getDevice(renderer), meshes);
+// needs `npm install @pmndrs/raytracer @pmndrs/bvh`
+const { provider } = await createRaytracerTraceProviderFromObjects(getDevice(renderer), meshes);
 const ssr = new ScreenSpaceReflectionsPass(renderer, { trace: { provider } });
 ```
+
+With `Reflections.create` it is one option: `rayTracing: true` traces every visible mesh, and an array of objects
+traces only those. The helper above returns `{ provider, refit }`. Call `refit()` each frame for meshes that move.
 
 The ray-traced pass is off unless you pass `trace`. It lights hits with the scene's environment (or the probes), and
 with the scene's directional lights, shadowed by one ray each. Pass `trace.settings` to tune the ray budget, length,
@@ -41,7 +54,14 @@ origin offset, and whether on-screen hits are reused instead of re-traced.
 - **Cost.** It is the most expensive source. `maxTracedRaysPerFrame` and `maxRaysPerTile` cap it, and
   `missRoughnessThreshold` limits it to glossy misses.
 - **Static BVH.** The BVH is built from the meshes you give it. Build it again when the scene's geometry changes.
+  Moving meshes keep their geometry: call `refit()` to update their transforms. That rebuilds the scene copy, so its
+  CPU cost grows with the scene.
 - **Hit materials.** Hits are shaded from a per-triangle material table (colour, roughness, metalness), not from your
   full material graph. Colours match three's on-screen look closely for standard materials.
-- **Bindings.** The pass adds its own storage buffers and textures to the provider's. If the total passes the
-  device's limit, the build fails with what to change. See [Troubleshooting](/guides/troubleshooting).
+- **Bindings.** The pass adds its own storage buffers and textures to the provider's. The scene copy is bound packed
+  (one buffer), so three's default setup uses 8 storage buffers per stage and fits a plain `WebGPURenderer`. If a
+  configuration does not fit, the pass warns once, sets `pass.traceError`, and screen space and probes carry on. It
+  does not throw. See [Troubleshooting](/guides/troubleshooting).
+- **Hit shading.** By default a traced hit is lit from the probes (or the environment) plus the scene's directional
+  lights. `raytracerHitShading: true` in the `trace` options uses `@pmndrs/raytracer`'s own one-bounce shading
+  instead. It is noisy, so use it with a denoiser.

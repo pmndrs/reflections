@@ -10,7 +10,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createReflectionsRenderer } from '@pmndrs/reflections/three';
 // Optional, but glossy reflections are noisy without it. In your project: `import { FfxReflectionDenoiser } from 'denoiser/ffx'`
-// (this repo's examples resolve the name to a sibling checkout, or to null when there is none).
+// (`denoiser` ^2.0.0 from npm).
 import { FfxReflectionDenoiser } from 'denoiser/ffx';
 import { useReflections } from './useReflections';
 
