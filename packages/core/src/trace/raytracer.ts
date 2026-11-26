@@ -191,6 +191,11 @@ interface RaytracerModule {
 export async function loadRaytracer(module?: unknown, bvhModule?: unknown): Promise<{ rt: RaytracerModule; bvh: BvhModule }> {
   const rt = (module ?? (await import('@pmndrs/raytracer'))) as unknown as RaytracerModule;
   const bvh = (bvhModule ?? (await import('@pmndrs/bvh'))) as unknown as BvhModule;
+  // W91: a bundler can stand an empty module in for a missing optional peer (Vite does): name the package, not a layout
+  const missing = [typeof rt?.rtModuleWgsl !== 'function' && '@pmndrs/raytracer', typeof bvh?.createMeshLayoutBuilder !== 'function' && '@pmndrs/bvh'].filter(Boolean);
+  if (missing.length) {
+    throw new Error(`RaytracerTraceProvider: ${missing.join(' and ')} ${missing.length > 1 ? 'are' : 'is'} not installed (ray tracing needs both optional peers: @pmndrs/raytracer and @pmndrs/bvh)`);
+  }
   if (rt.BVH_LAYOUT_VERSION !== RAYTRACER_BVH_LAYOUT_VERSION || bvh.GPU_LAYOUT_VERSION !== RAYTRACER_BVH_LAYOUT_VERSION) {
     throw new Error(`RaytracerTraceProvider: @pmndrs/raytracer reads bvh layout ${rt.BVH_LAYOUT_VERSION}, @pmndrs/bvh writes ${bvh.GPU_LAYOUT_VERSION}; this provider was written for ${RAYTRACER_BVH_LAYOUT_VERSION}`);
   }

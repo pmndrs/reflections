@@ -36,7 +36,7 @@ export interface ReflectionsOptions {
   /** Cube face size of the automatic probe. Default 256 (128 with the 'performance' preset). */
   probeResolution?: number;
   /**
-   * Ray-traced fallback for rays the screen cannot answer, through `@pmndrs/raytracer` (an optional peer: install it).
+   * Ray-traced fallback for rays the screen cannot answer, through `@pmndrs/raytracer` and `@pmndrs/bvh` (optional peers: install both).
    * `true`: every visible mesh of the scene, a BVH built once at `create()` (static meshes; for moving
    * ones use `reflections.trace.refit()` each frame). An array: only these objects. Default false.
    * Ray tracing degrades, with one console warning, to screen space + probes when it can't run: the package isn't
@@ -58,6 +58,9 @@ export interface ReflectionsOptions {
 /**
  * A `WebGPURenderer` with the device limits the reflection passes need (`reflectionsRequiredLimits`),
  * initialised. `parameters` are `WebGPURenderer`'s (a `canvas`, ...); R3F's `renderer` prop can call this.
+ * A plain `new WebGPURenderer()` works too, at WebGPU's default limits: the G-buffer then renders three's
+ * lit image in a second pass (one more scene draw per frame, one console warning, D5480) and ray tracing
+ * turns itself off where the device has too few storage buffers (D5451).
  */
 export async function createReflectionsRenderer(parameters: { canvas?: HTMLCanvasElement | OffscreenCanvas; antialias?: boolean; [option: string]: unknown } = {}): Promise<THREE.WebGPURenderer> {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -137,7 +140,7 @@ export class Reflections {
         trace = { provider: built.provider as { destroy(): void }, refit: built.refit };
       } catch (e) {
         // W89 (D5451): no ray tracing (the optional peer is missing or failed to build); SSR + probes go on
-        console.warn('Reflections: ray tracing is off (@pmndrs/raytracer could not be loaded or built; install it for rayTracing). Screen-space reflections and probes continue.', e);
+        console.warn('Reflections: ray tracing is off (@pmndrs/raytracer / @pmndrs/bvh could not be loaded or built; install both for rayTracing). Screen-space reflections and probes continue.', e);
       }
     }
 

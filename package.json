@@ -1,6 +1,6 @@
 {
   "name": "@pmndrs/reflections",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
   "description": "Reflections for WebGPU: reflection probes (box-projected, prefiltered), screen-space reflections and ray-traced fallbacks, composed into one hybrid. Engine-agnostic core, three.js adapter.",
   "author": "Dennis Smolek <dennis@smolek.dev>",
   "license": "MIT",
@@ -22,9 +22,12 @@
     "reflection-probes",
     "ssr",
     "sssr",
+    "screen-space-reflections",
     "ray-tracing",
+    "hybrid",
     "pmrem",
     "octahedral",
+    "babylonjs",
     "pixi",
     "pixijs"
   ],
@@ -37,29 +40,53 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./three": {
       "types": "./dist/three.d.ts",
-      "import": "./dist/three.js"
+      "import": "./dist/three.js",
+      "default": "./dist/three.js"
     },
     "./core": {
       "types": "./dist/core.d.ts",
-      "import": "./dist/core.js"
+      "import": "./dist/core.js",
+      "default": "./dist/core.js"
     },
     "./babylon": {
       "types": "./dist/babylon.d.ts",
-      "import": "./dist/babylon.js"
+      "import": "./dist/babylon.js",
+      "default": "./dist/babylon.js"
     },
     "./pixi": {
       "types": "./dist/pixi.d.ts",
-      "import": "./dist/pixi.js"
-    }
+      "import": "./dist/pixi.js",
+      "default": "./dist/pixi.js"
+    },
+    "./package.json": "./package.json"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "three": [
+        "./dist/three.d.ts"
+      ],
+      "core": [
+        "./dist/core.d.ts"
+      ],
+      "babylon": [
+        "./dist/babylon.d.ts"
+      ],
+      "pixi": [
+        "./dist/pixi.d.ts"
+      ]
+    }
+  },
   "files": [
-    "dist"
+    "dist",
+    "NOTICE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "examples": "vite --config examples/vite.config.ts",
@@ -76,7 +103,9 @@
     "site:build": "node tools/site-build.ts",
     "site:check": "node tools/site-check.ts",
     "settings:doc": "UPDATE_SETTINGS_DOC=1 vitest run test/settings-doc.test.ts",
-    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build"
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build",
+    "prepack": "node scripts/pack-manifest.mjs strip",
+    "postpack": "node scripts/pack-manifest.mjs restore"
   },
   "peerDependencies": {
     "@babylonjs/core": ">=9.35.0 <10",

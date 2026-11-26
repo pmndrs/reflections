@@ -1,0 +1,22 @@
+# Changelog
+
+## 0.1.0-alpha.0
+
+First release (npm dist-tag `alpha`).
+
+Reflections for WebGPU: box-projected, prefiltered reflection probes, stochastic screen-space reflections
+(a WGSL port of FidelityFX SSSR) and an optional ray-traced fallback for what the screen can't see,
+composed into one hybrid with a temporal denoise seam.
+
+- `@pmndrs/reflections/three` (also `.`): the three.js `WebGPURenderer` adapter (three >= 0.187).
+  `Reflections.create(renderer, scene, options)` wires the G-buffer, screen-space reflections, probes,
+  ray tracing (optional), a denoiser (optional) and the composite; `createReflectionsRenderer()` builds a
+  renderer with the device limits the passes want. A plain `new WebGPURenderer()` works too: with
+  WebGPU's default 32 colour bytes per sample the lit image is rendered in a second pass (one warning).
+- `@pmndrs/reflections/core`: the engine-agnostic WGSL passes on a bare `GPUDevice`.
+- `@pmndrs/reflections/babylon` (Babylon.js `WebGPUEngine`, >= 9.35) and `@pmndrs/reflections/pixi`
+  (PixiJS v8 `WebGPURenderer`, >= 8.22): experimental adapters.
+- Optional peers: `three`, `@babylonjs/core`, `pixi.js` (the engine you use); `@pmndrs/raytracer` and
+  `@pmndrs/bvh` ^0.1.0 for ray tracing (install both). A denoiser is not bundled: `denoiser` ^2.0.0
+  (`denoiser/ffx`) plugs into the denoise seam.
+- ESM only, WebGPU only.
