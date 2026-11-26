@@ -3081,6 +3081,41 @@ async function benchChecks(pages) {
 }
 
 /**
+ * W89 (`--only pt-reference`, opt-in): the path-traced reference per bench scene, to A/B a reference change. Per scene at
+ * its hero pose: bench Measure with `PT_SPP` (default 32) reference samples (+ OIDN), ours + RT and ours denoised (16 warm-up
+ * frames, 4 measured): per region (frame, glossy) the reference's mean luma and each method's MAD against it. The reference
+ * image goes to OUT/pt-reference-<label>-<scene>.png, the numbers to OUT/pt-reference-<label>.json (`PT_LABEL`, default 'run').
+ */
+async function ptReferenceRun(pages) {
+  console.log('W89 path-traced reference per scene (bench Measure):');
+  const label = process.env.PT_LABEL ?? 'run';
+  const spp = Number(process.env.PT_SPP ?? 32);
+  const out = { label, spp, date: new Date().toISOString(), scenes: {} };
+  const p0 = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual`);
+  pages.push(p0);
+  const scenes = (process.env.PT_SCENES ? process.env.PT_SCENES.split(',') : await p0.T('window.__p.entries()'));
+  p0.close();
+  for (const scene of scenes) {
+    const before = results.logs.length;
+    const p = await openPage(`http://127.0.0.1:${PORT}/showcase/bench.html?manual&scene=${scene}&pose=hero&left=ours-rt&right=ours-denoised`);
+    pages.push(p);
+    const m = await p.T(`window.__p.measure({ samples: ${spp}, warmup: 16, frames: 4, methods: ['ours-rt', 'ours-denoised'] })`);
+    const info = await p.T("(async () => { const P = window.__p; const pt = P.ptInfo ? await P.ptInfo() : null; return pt; })()").catch(() => null);
+    const ref = await p.T("(() => { const P = window.__p; const i = P.metrics?.lastImages; if (!i) return null; const [w, h] = P.lastMeasure.size; const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(i.ref), w, h), 0, 0); return c.toDataURL('image/png'); })()");
+    if (ref) savePng(`pt-reference-${label}-${scene}.png`, ref);
+    const errs = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    const rows = Object.fromEntries(m.rows.filter((r) => ['frame', 'glossy'].includes(r.region)).map((r) => [r.region, { px: r.px, ptLuma: r.refLuma, rt: r.methods['ours-rt']?.mad, denoised: r.methods['ours-denoised']?.mad, rtLuma: r.methods['ours-rt']?.luma }]));
+    out.scenes[scene] = { referenceSamples: m.referenceSamples, rows, info, seconds: m.seconds };
+    const f = (r) => r ? `PT luma ${r.ptLuma.toFixed(1)}, MAD ours+RT ${r.rt?.toFixed(2)} / ours ${r.denoised?.toFixed(2)}` : '-';
+    check(`pt-reference ${scene}: Measure ran (${m.referenceSamples} spp), no GPU errors`, errs.length === 0 && m.referenceSamples > 0,
+      `frame: ${f(rows.frame)}; glossy (${rows.glossy?.px ?? 0} px): ${f(rows.glossy)}${errs.length ? '; ' + errs[0] : ''}`);
+    p.close();
+  }
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, `pt-reference-${label}.json`), JSON.stringify(out, null, 1));
+}
+
+/**
  * examples/showcase/compare.html (smoke, W21/W23): the split renders with our denoised pipeline on the
  * left and three's SSRNode + FFX on the right, with no GPU errors and a non-black image; the WebGPU
  * path tracer stops at the page's max samples (no more samples or dispatches at rest) and its OIDN
@@ -3744,6 +3779,7 @@ async function main() {
     if (runs('bench')) await benchChecks(pages); // W51: the tuning bench
     if (only === 'ssr-exp-metrics') await ssrExpMetricsSmoke({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)
     if (only === 'ssr-exp-baseline') await ssrExpBaseline({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)
+    if (only === 'pt-reference') await ptReferenceRun(pages); // W89: the PT reference per bench scene (PT_LABEL, PT_SPP, PT_SCENES)
     if (only === 'flicker') await flicker({ openPage, check, PORT, OUT, results, savePng }, pages); // W85 (T1): flicker metrics over scenes x configs (scripts/flicker.mjs)
     if (only === 'ssr-exp-run') await ssrExpRun({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70): one metric call on one page (SSR_EXP_URL, SSR_EXP_EVAL)
 

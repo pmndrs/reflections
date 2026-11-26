@@ -150,6 +150,17 @@ async function examplesChecks() {
       check(`showcase ${scene}: renders, denoiser active, no GPU / console errors`, info.gpuErrors === 0 && !!info.denoiser && lum > 8 && p.logs.length === 0, `denoiser=${info.denoiser} lum=${lum.toFixed(1)} bvh=${info.bvh?.kind ?? 'none'} ${p.logs.join(' | ')}`);
     } finally { p.close(); }
   }
+  // W89: the compare page ships: its path tracer (@pmndrs/pathtracer) converges and OIDN denoises, from npm packages only
+  {
+    const p = await openPage(`${origin}/examples/showcase/compare.html?manual&scene=toyCar&left=ours-denoised&right=pathtraced`);
+    try {
+      const ready = await waitFor(p, '!!window.__p && window.__p.entries().length > 0', 240000);
+      const conv = ready ? JSON.parse(await p.evalJs('(async () => JSON.stringify(await window.__p.converge()))()')) : null;
+      const errs: string[] = ready ? JSON.parse(await p.evalJs('JSON.stringify(window.__p.gpuErrors())')) : [];
+      check('showcase compare: the path tracer converges and OIDN denoises, no GPU / console errors', !!conv?.done && !!conv?.denoised && errs.length === 0 && p.logs.length === 0,
+        `${conv ? `${conv.samples} / ${conv.maxSamples} spp, denoiser ${conv.denoiser}` : 'not ready'} ${[...errs, ...p.logs].join(' | ')}`);
+    } finally { p.close(); }
+  }
   for (const path of ['/examples/', '/examples/ssr/?manual', '/examples/probes/?manual', '/examples/scenes/?manual', '/examples/babylon/?manual', '/examples/quickstart/', '/examples/quickstart/probes.html', '/examples/r3f/']) {
     const p = await openPage(`${origin}${path}`);
     try {

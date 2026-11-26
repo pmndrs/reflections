@@ -74,9 +74,6 @@ importers:
       three:
         specifier: ^0.187.0
         version: 0.187.0
-      three-gpu-pathtracer:
-        specifier: 0.0.28
-        version: 0.0.28(three-mesh-bvh@0.9.18(three@0.187.0))(three@0.187.0)(xatlas-web@0.1.0)
       typedoc:
         specifier: ^0.28.20
         version: 0.28.20(typescript@5.9.3)
@@ -89,9 +86,6 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.7(yaml@2.9.1)
-      xatlas-web:
-        specifier: ^0.1.0
-        version: 0.1.0
 
   packages/babylon:
     dependencies:
@@ -875,18 +869,6 @@ packages:
     peerDependencies:
       react: '>=17.0'
 
-  three-gpu-pathtracer@0.0.28:
-    resolution: {integrity: sha512-Ybfa6qpRIU2QP4EXQJaawYZzVN4raSFqsr9qhXXVSiCi59fjef0pyyXztYYWqAnX7bweKmD70p2xMEWehl019A==}
-    peerDependencies:
-      three: '>=0.187.0'
-      three-mesh-bvh: '>=0.9.17'
-      xatlas-web: ^0.1.0
-
-  three-mesh-bvh@0.9.18:
-    resolution: {integrity: sha512-S76hOBnsSG4jsuEyCu98K63klONG4NwJANabPY1LUD5l7oUgu2xtKC0IwnX/XyPzo4YZ1D7ZU+gHVA479UdQmA==}
-    peerDependencies:
-      three: '>= 0.159.0'
-
   three@0.187.0:
     resolution: {integrity: sha512-Qiu7R+Cmh8CstZsY1uJOSWnVlfo7ZtNLV7mF8Jltk3LB3AtDu9cRZlcnRKkAk8Y4z6KKw35z7Y7Urd7jWY8etA==}
 
@@ -1013,9 +995,6 @@ packages:
     resolution: {integrity: sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w==}
     engines: {node: '>=8'}
     hasBin: true
-
-  xatlas-web@0.1.0:
-    resolution: {integrity: sha512-PprVfuXbaIskxLTLBUQRaWfgSy9xUQqAMIRooOw0P6NYqwgh6T0voeer6+Z5M7AFt5SGXUybuww/uDGs1yw8vQ==}
 
   yaml@2.9.1:
     resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
@@ -1656,16 +1635,6 @@ snapshots:
     dependencies:
       react: 19.3.1
 
-  three-gpu-pathtracer@0.0.28(three-mesh-bvh@0.9.18(three@0.187.0))(three@0.187.0)(xatlas-web@0.1.0):
-    dependencies:
-      three: 0.187.0
-      three-mesh-bvh: 0.9.18(three@0.187.0)
-      xatlas-web: 0.1.0
-
-  three-mesh-bvh@0.9.18(three@0.187.0):
-    dependencies:
-      three: 0.187.0
-
   three@0.187.0: {}
 
   tiny-lru@11.4.7: {}
@@ -1778,8 +1747,6 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
-
-  xatlas-web@0.1.0: {}
 
   yaml@2.9.1: {}
 

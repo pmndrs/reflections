@@ -1,8 +1,8 @@
 // examples/showcase: the whole pipeline on real assets. Pick a scene; the page bakes the scene's
 // suggested reflection probes, renders ScreenSpaceReflectionsPass (G-buffer + screen-space trace,
 // hit colour from last frame's image) and resolves with HybridReflections (SSR -> RT -> probes ->
-// environment, denoised through the denoise seam by denoiser/ffx when the sibling Denoiser repo is
-// there); the ray-traced fallback (core's @pmndrs/raytracer provider behind the trace seam) is a toggle that builds
+// environment, denoised through the denoise seam by denoiser/ffx from the `denoiser` package);
+// the ray-traced fallback (core's @pmndrs/raytracer provider behind the trace seam) is a toggle that builds
 // the BVH on first use.
 //
 // Sources: probes on/off swaps `scene.environmentNode` (and the composite's probe term) between the

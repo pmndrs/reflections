@@ -89,11 +89,9 @@ for (const a of shipped) {
 const manifest = ASSETS.filter((a) => !a.devOnly).map(({ dir, file, license }) => ({ dir, file, license, devOnly: false }));
 writeFileSync(join(assetsOut, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
-// 4. the examples' landing page, and the showcase's links to pages this site leaves out
+// 4. the examples' landing page (the showcase keeps its links to compare.html and bench.html: both ship since W89)
 const docsHref = `${basePath}/`;
 writeFileSync(join(dist, 'index.html'), readFileSync(join(ROOT, 'tools/site-index.html'), 'utf8').replaceAll('__DOCS__', docsHref));
-const showcase = join(dist, 'showcase/index.html');
-writeFileSync(showcase, readFileSync(showcase, 'utf8').replace(/<a href="\.\/compare\.html">[^<]*<\/a> · <a href="\.\/bench\.html">[^<]*<\/a> · /, ''));
 
 // 5. GitHub Pages: no Jekyll
 writeFileSync(join(out, '.nojekyll'), '');

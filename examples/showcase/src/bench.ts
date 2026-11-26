@@ -547,7 +547,7 @@ async function main() {
     while (!(pt.done?.() ?? true) && performance.now() - t0 < 600_000) { pt.frame(camera); onStep?.(); await pt.idle(); await nextFrame(); }
   }
   async function measure(opts: { samples?: number; warmup?: number; frames?: number; methods?: MethodId[] } = {}): Promise<Measure> {
-    if (!pathTracerAvailable) throw new Error('Measure needs the path tracer (the sibling Denoiser repo\'s three-gpu-pathtracer)');
+    if (!pathTracerAvailable) throw new Error('Measure needs the path tracer (@pmndrs/pathtracer)');
     const samples = opts.samples ?? Number(sampIn.value), warmup = opts.warmup ?? Number(warmIn.value), K = opts.frames ?? Number(framesIn.value);
     // the ticked methods, else the shown sides (not the reference)
     const ticked = METHOD_IDS.filter((id) => id !== 'pathtraced' && measureBoxes.get(id)?.checked);
@@ -970,7 +970,7 @@ async function main() {
     timingsEl.textContent = lines.length ? lines.join('\n') + '\n(G-buffer and composite not timed; live loop, not a measurement)' : '(no timed method shown: ours methods time their passes when timestamp-query exists)';
     statusEl.textContent = [
       `${entry.title} | ${W}x${H} | three r${THREE.REVISION}`,
-      `path tracer: ${pathTracerAvailable ? 'three-gpu-pathtracer (WebGPU)' : 'not found'}; OIDN: ${oidnAvailable ? 'yes' : 'not found'}; FFX: ${denoiserAvailable ? 'yes' : 'not found'}`,
+      `path tracer: ${pathTracerAvailable ? '@pmndrs/pathtracer' : 'not found'}; OIDN: ${oidnAvailable ? 'yes' : 'not found'}; FFX: ${denoiserAvailable ? 'yes' : 'not found'}`,
       errs ? `GPU errors: ${errs}` : '',
     ].filter(Boolean).join('\n');
   }, 500);

@@ -238,7 +238,7 @@ three r187's stock SSRNode, its TemporalReproject + RecurrentDenoise, and denois
 
 ## Path tracer (reference)
 
-three-gpu-pathtracer (WebGPU) + OIDN, the ground truth Measure compares against.
+@pmndrs/pathtracer + OIDN, the ground truth Measure compares against.
 
 | Setting | URL key | API | Default | Range | Apply | Trade-off | GPU cost | Applies to |
 |---|---|---|---|---|---|---|---|---|

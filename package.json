@@ -125,11 +125,9 @@
     "rollup": "^4.62.2",
     "rollup-plugin-dts": "^6.2.1",
     "three": "^0.187.0",
-    "three-gpu-pathtracer": "0.0.28",
     "typedoc": "^0.28.20",
     "typescript": "^5.9.3",
     "vite": "^6.1.0",
-    "vitest": "^3.0.0",
-    "xatlas-web": "^0.1.0"
+    "vitest": "^3.0.0"
   }
 }

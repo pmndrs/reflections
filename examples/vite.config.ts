@@ -1,5 +1,5 @@
 import { dirname, resolve } from 'path';
-import { readdirSync, existsSync, readFileSync, realpathSync, statSync } from 'fs';
+import { readdirSync, existsSync, readFileSync, realpathSync } from 'fs';
 import { defineConfig } from 'vite';
 
 // Examples dev server: http://127.0.0.1:5370/<name>/ ($REFLECTIONS_PORT overrides; worktrees use their own) for each examples/<name>/index.html.
@@ -29,21 +29,13 @@ if (existsSync(pixi3dDir)) {
 // are devDependencies (W89): no sibling checkout. The OIDN weights (.tza) load from the denoiser's default
 // `DEFAULT_TZA_URL` (a pinned CDN copy of the upstream weights).
 // The public site build (tools/site-build.ts, EXAMPLES_SITE=1) leaves out pixi (a redirect), nrc (the private pathtracer
-// bench, below) and the closed pixi-3d beta.
+// bench, below) and the closed pixi-3d beta. The showcase's compare and bench pages ship (W89: their path tracer and OIDN
+// come from npm now).
 const siteBuild = process.env.EXAMPLES_SITE === '1';
 if (siteBuild) for (const k of Object.keys(pages)) if (k === 'pixi' || k === 'nrc' || k.startsWith('pixi3d-')) delete pages[k];
 
-// The compare page's path-traced reference: three-gpu-pathtracer's WebGPU tracer (`three-gpu-pathtracer/webgpu`,
-// 0.0.28, a devDependency: the first release built for three r187). $PATHTRACER_REPO points the alias at another
-// checkout or package.
-function findPathTracer(): string | null {
-  const entry = (repo: string) => resolve(repo, 'src/webgpu/index.js');
-  const env = process.env.PATHTRACER_REPO;
-  if (env) return existsSync(entry(env)) ? realpathSync(env) : null;
-  const installed = resolve(root, '../node_modules/three-gpu-pathtracer');
-  return existsSync(entry(installed)) ? realpathSync(installed) : null;
-}
-const pathTracerRepo = findPathTracer();
+// The compare / bench pages' path-traced reference is @pmndrs/pathtracer from npm (W89; a devDependency), like the
+// raytracer: nothing to resolve here.
 
 // W86 (examples/nrc, experimental, never on the site): pmndrs/pathtracer's bench-only neural/hash radiance cache
 // (`bench/nrc/*`) and its bench scene fixtures are not published, so this page alone resolves a sibling `pathtracer`
@@ -74,9 +66,9 @@ const nrcSources = {
   },
 };
 
-// Sources served as-is from outside the dep optimizer (the aliased tracer, the nrc checkout) resolve `three`,
+// Sources served as-is from outside the dep optimizer (the nrc checkout) resolve `three`,
 // `@pmndrs/bvh` and `@pmndrs/downsampler` from here, never from their own node_modules: one copy per page.
-const outside = [pathTracerRepo, nrcRoot].filter((x): x is string => !!x);
+const outside = [nrcRoot].filter((x): x is string => !!x);
 const sharedDeps = {
   name: 'reflections-shared-deps',
   enforce: 'pre' as const,
@@ -106,9 +98,9 @@ export default defineConfig({
   }, nrcSources, sharedDeps],
   server: {
     port: Number(process.env.REFLECTIONS_PORT ?? 5370), strictPort: true, host: '127.0.0.1',
-    fs: { allow: [resolve(root, '..'), ...(pathTracerRepo ? [pathTracerRepo] : []), ...(nrcRoot ? [nrcRoot] : [])] },
+    fs: { allow: [resolve(root, '..'), ...(nrcRoot ? [nrcRoot] : [])] },
   },
-  define: { __NRC_AVAILABLE__: JSON.stringify(!!nrcRoot), __PATHTRACER_SOURCE__: JSON.stringify(pathTracerRepo ?? '') },
+  define: { __NRC_AVAILABLE__: JSON.stringify(!!nrcRoot) },
   resolve: {
     alias: [
       ...(hasPixi3d
@@ -123,11 +115,7 @@ export default defineConfig({
       { find: /^@pmndrs\/reflections\/pixi$/, replacement: resolve(root, '../src/pixi.ts') },
       { find: /^@pmndrs\/reflections$/, replacement: resolve(root, '../src/index.ts') },
       nrcRoot ? { find: /^@nrc-bench\//, replacement: resolve(nrcRoot, 'bench') + '/' } : { find: /^@nrc-bench\/.*$/, replacement: resolve(root, 'shared/nrc-missing.ts') },
-      { find: /^three-gpu-pathtracer-webgpu$/, replacement: pathTracerRepo ? resolve(pathTracerRepo, 'src/webgpu/index.js') : resolve(root, 'shared/pathtracer-missing.ts') },
     ],
   },
-  // Behind an alias, vite would pre-bundle the tracer with its own copy of
-  // three (two three instances: broken TSL). Served as source instead, `sharedDeps` resolves its three.
-  optimizeDeps: { exclude: ['three-gpu-pathtracer-webgpu'] },
-  build: { target: 'esnext', outDir: resolve(root, process.env.EXAMPLES_OUT ?? 'dist'), emptyOutDir: true, rollupOptions: { input: { ...pages, 'quickstart-probes': resolve(root, 'quickstart/probes.html'), ...(siteBuild ? {} : { 'showcase-compare': resolve(root, 'showcase/compare.html'), 'showcase-bench': resolve(root, 'showcase/bench.html') }) } } },
+  build: { target: 'esnext', outDir: resolve(root, process.env.EXAMPLES_OUT ?? 'dist'), emptyOutDir: true, rollupOptions: { input: { ...pages, 'quickstart-probes': resolve(root, 'quickstart/probes.html'), 'showcase-compare': resolve(root, 'showcase/compare.html'), 'showcase-bench': resolve(root, 'showcase/bench.html') } } },
 });

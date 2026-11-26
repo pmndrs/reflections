@@ -29,7 +29,7 @@ export const GROUPS: { id: GroupId; title: string; blurb: string }[] = [
   { id: 'probes', title: 'Probes', blurb: '`ReflectionProbes` and its `bake()` options. A change re-bakes (Rebuild).' },
   { id: 'materials', title: 'Materials (examples)', blurb: 'Example-side material options, not package API: roughness from normal variance (specAA, W46) and the W45 experiments.' },
   { id: 'three', title: 'three SSRNode (reference)', blurb: 'three r187\'s stock SSRNode, its TemporalReproject + RecurrentDenoise, and denoiser/three\'s ffxReflections: the three SSR methods only.' },
-  { id: 'pathtracer', title: 'Path tracer (reference)', blurb: 'three-gpu-pathtracer (WebGPU) + OIDN, the ground truth Measure compares against.' },
+  { id: 'pathtracer', title: 'Path tracer (reference)', blurb: '@pmndrs/pathtracer + OIDN, the ground truth Measure compares against.' },
 ];
 
 export type Value = number | boolean | string;
