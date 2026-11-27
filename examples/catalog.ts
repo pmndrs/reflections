@@ -272,24 +272,25 @@ export const EXAMPLES: readonly ExampleEntry[] = [
   },
   {
     slug: 'probes/live',
-    path: 'probes/',
+    path: 'features/probes/live/',
     title: 'Live probes',
-    summary: 'Reflection probes re-captured as the scene changes: a spinning torus knot and a colour-cycling light, in two rooms.',
+    summary: 'Probes re-captured while the scene runs, one per frame: a turning knot and two colour-cycling lights in two rooms.',
     description:
-      'A port of three.js #35046\'s example (Ben Houston\'s two rooms joined by a doorway, one probe per room and a doorway probe that wins where they overlap) on ' +
-      '`@pmndrs/reflections/three`, re-captured every frame. Also the probe storage options (a real cube array through the #35053 shim, or the 2D array with its seam handling). ' +
-      '`?static` freezes, `?grid` shows the test grid, `?refit` the LightProbeGrid re-fit. To be rebuilt to the example rules (docs/EXAMPLES.md, E2).',
+      'Ben Houston\'s two rooms with a probe per room and a doorway probe. Every frame `probes.bake(renderer, scene, { probes: [next], bounces: 1 })` ' +
+      're-captures one probe, round-robin (time-sliced): each probe is at most three frames old, at a third of the cost of capturing all of them. ' +
+      'One capture pass (`bounces: 1`) because a sliced bake covers only its slice. The moving mirror ball stays out of the captures ' +
+      '(`userData.reflectionProbeExclude`). The compare is a second set baked once at load. The lab page `probes/` has every storage and lookup option.',
     brief: {
       kind: 'feature',
-      shows: 'Probes that follow the scene: captured again as objects move and lights change, so reflections of them stay current.',
-      tryThis: ['Watch the torus knot and the cycling light in the floor and the mirror sphere', 'Add `?static` to the URL: probes baked once, the reflections freeze'],
-      compare: '`?static` (baked once)',
+      shows: 'Probes that follow the scene: captured again, one probe per frame, as the lights change colour and the knot turns, so the reflections stay current.',
+      tryThis: ['Untick Live capture: the floor and the mirror ball keep the light colours of the moment the page loaded', 'Set Probes per frame to all 3: the same image at three times the capture cost'],
+      compare: 'Live capture off: the same probes baked once at load',
     },
     category: 'features',
-    status: 'experimental',
-    tags: ['probes', 'live capture', '#35046'],
+    status: 'stable',
+    tags: ['probes', 'live capture', 'time-sliced'],
     docs: 'concepts/reflection-probes',
-    source: 'examples/probes/src/main.ts',
+    source: 'examples/features/probes/live/main.ts',
   },
   {
     slug: 'probes/exclude',
@@ -485,6 +486,11 @@ export const EXAMPLES: readonly ExampleEntry[] = [
   lab('ssr', 'ssr/', 'Screen-space test scenes', 'Every kit scene with every switch: SSR, rays, probes, the denoiser and the debug views.',
     'The scene kit (examples/shared) with `ScreenSpaceReflectionsPass` and the hybrid composite. `?scene=mirrorWall|offscreen|contact|roughnessRamp|boxRoom|moving|explainer|rooms|facingMirrors`, `?rt=1`, `?probes=0`, `?denoise=0`.',
     ['ssr', 'ray tracing', 'debug views'], 'examples/ssr/src/main.ts', 'concepts/screen-space-reflections', { kind: 'debugging', status: 'experimental' }),
+  lab('probes', 'probes/', 'Probe parity page', 'Three.js #35046\'s example on our probes, live-captured: every storage, lookup and capture option, and the probe checks.',
+    'A port of #35046\'s webgpu_reflection_probes.html (the two rooms, a test grid, a mirror sphere) on `@pmndrs/reflections/three`, re-captured every frame. ' +
+    'Lookups `auto`, `cube-array` (the #35053 shim), the 2D array with `warp` / `none`, the legacy TSL node and a hardware-cube diagnostic; capture resolution, bounces, ' +
+    'the LightProbeGrid re-fit. `?static`, `?grid`, `?refit`, `?lookup=`. `pnpm check -- --only probes` runs its checks; `--compare` diffs it against the denoiser repo\'s page.',
+    ['probes', '#35046', 'parity'], 'examples/probes/src/main.ts', 'concepts/reflection-probes', { status: 'experimental' }),
   lab('scenes', 'scenes/', 'Scene kit and G-buffer', 'The test scenes and every frame-contract target: depth, normals, roughness, motion, scene colour.',
     '`FrameGBuffer` renders the scene once with MRT; a fullscreen pass shows one target or all of them in a grid. `?scene=…`.',
     ['g-buffer', 'frame contract'], 'examples/scenes/src/main.ts', 'concepts/frame-contract'),
