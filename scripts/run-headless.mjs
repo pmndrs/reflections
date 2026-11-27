@@ -3477,7 +3477,7 @@ async function catalogChecks() {
  * out of 255) with probes + screen space, and again with screen space off (probes only); the bound is a stated one, not
  * identity (three, Babylon and the core page's renderer light, shadow and tone-map differently). Also each page's rest
  * stability: two consecutive shots of the stopped page.
- *   ENGINE_VIEWS=default,table   the views (rooms.ts names)
+ *   ENGINE_VIEWS=default,table   the views (rooms.ts names); ENGINE_PAGES=three,core: the pages; ENGINE_QUERY=a=1: added to each URL
  */
 async function engineChecks() {
   console.log('examples/engines (side by side):');
@@ -3488,7 +3488,7 @@ async function engineChecks() {
   const shots = {};
   for (const name of engines) {
     const before = results.logs.length;
-    const p = await openPage(`http://127.0.0.1:${PORT}/engines/${name}/?thumb`);
+    const p = await openPage(`http://127.0.0.1:${PORT}/engines/${name}/?thumb${process.env.ENGINE_QUERY ? `&${process.env.ENGINE_QUERY}` : ''}`);
     try {
       await p.cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false });
       await sleep(1500);

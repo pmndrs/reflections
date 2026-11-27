@@ -52,7 +52,10 @@ export class ScreenSpaceReflections {
   readonly device: GPUDevice;
   readonly frame: BabylonFrame;
   readonly probes: BabylonProbeSet | null;
-  /** Tracer settings, read every dispatch. `iblFactor` scales the fallback (Babylon: scene.environmentIntensity). */
+  /**
+   * Tracer settings, read every dispatch. `iblFactor` scales the fallback (Babylon: scene.environmentIntensity). `frameIndex`
+   * (default: the frame's) fixes the noise pattern: there is no denoiser here, so a fixed one keeps a still view still.
+   */
   settings: ScreenSpaceReflectionsSettings;
   /**
    * Trace screen-space rays. Off: every reflective pixel takes the radiance fallback at its own
@@ -127,7 +130,8 @@ export class ScreenSpaceReflections {
     const frame = this.frame.build(encoder, gbuffer, camera);
     this.lastFrame = frame;
     const inputs = screenSpaceInputsFromFrame(frame, tracer, { fallbackBindGroup: this.probes?.set.bindGroup });
-    const settings: ScreenSpaceReflectionsSettings = { ...this.settings, frameIndex: frame.frameIndex };
+    // `settings.frameIndex` fixes the blue-noise rotation (core's override; without a denoiser, a still image then stays still)
+    const settings: ScreenSpaceReflectionsSettings = { ...this.settings, frameIndex: this.settings.frameIndex ?? frame.frameIndex };
     // disabled: nothing traced, and no hit-colour pyramid built for it (W76: the cone is the default)
     if (!this.enabled) { settings.roughnessThreshold = 0; settings.hitColorFilter = 'off'; }
     tracer.dispatch(encoder, inputs, settings);

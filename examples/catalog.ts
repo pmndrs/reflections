@@ -439,24 +439,27 @@ export const EXAMPLES: readonly ExampleEntry[] = [
   },
   {
     slug: 'engines/babylon',
-    path: 'babylon/',
+    path: 'engines/babylon/',
     title: 'Babylon.js',
-    summary: 'Screen-space reflections and a probe on Babylon.js (WebGPUEngine), as frame-graph tasks.',
+    summary: 'The two rooms built in Babylon.js: probes and screen-space reflections as frame-graph tasks.',
     description:
-      'The mirrorWall scene rebuilt in Babylon.js with `@pmndrs/reflections/babylon`: core\'s screen-space tracer and probe set on Babylon\'s device, ' +
-      'a frame graph of geometry, `FrameGraphReflectionsTask` and `FrameGraphReflectionsCompositeTask`. Babylon is left-handed; the scene negates x so the ' +
-      'image matches the three page. `?ssr=0`, `?probes=0`, `?view=…`, `?variant=workgroup`. To be rebuilt on the shared scene (E4).',
+      'The rooms of `examples/shared/rooms.ts` rebuilt in Babylon.js on a `WebGPUEngine` (same sizes, colours, roughness, point lights with cube shadow maps), ' +
+      'x negated for Babylon\'s left-handed world so the image matches three\'s. `BabylonProbeSet` captures the same three probes with Babylon cube renders; ' +
+      'a frame graph renders the G-buffer, then `FrameGraphReflectionsTask` (core\'s tracer, the probes as its fallback) and ' +
+      '`FrameGraphReflectionsCompositeTask` (lit + split-sum weight x radiance), then ACES. **Missing against engines/three** (`guides/adapters`): ' +
+      'the ray-traced fallback, the denoiser (the glossy floor shows the tracer\'s raw samples), presets, the hybrid resolve; and Babylon\'s materials do not ' +
+      'sample the probes, so the rooms get no bounce light. The older mirror-wall page (lab: babylon) keeps the adapter\'s orientation and IBL checks.',
     brief: {
       kind: 'feature',
-      shows: 'The engine-agnostic core on a second engine: the same tracer and probes, wired into Babylon\'s frame graph.',
-      tryThis: ['Add `?ssr=0` to the URL: probes only', 'Compare with the three page on the same scene (lab: ssr, `?scene=mirrorWall`)'],
-      compare: '`?ssr=0` / `?probes=0`',
+      shows: 'The engine-agnostic core on Babylon.js: the same probes and tracer as engines/three, wired into Babylon\'s frame graph, on the same two rooms.',
+      tryThis: ['Turn Screen space off: probes only, as on the three page', 'Set Debug to radiance or confidence: what the tracer hands the composite', 'Open engines/three at the same View: the difference is lighting, shadows and the missing denoiser'],
+      compare: 'Screen space off (probes only); and engines/three at the same View',
     },
     category: 'engines',
     status: 'experimental',
-    tags: ['babylon', 'frame graph'],
+    tags: ['babylon', 'frame graph', 'probes', 'ssr'],
     docs: 'guides/babylon',
-    source: 'examples/babylon/src/main.ts',
+    source: 'examples/engines/babylon',
   },
   {
     slug: 'engines/pixi',
@@ -497,6 +500,9 @@ export const EXAMPLES: readonly ExampleEntry[] = [
   lab('scenes', 'scenes/', 'Scene kit and G-buffer', 'The test scenes and every frame-contract target: depth, normals, roughness, motion, scene colour.',
     '`FrameGBuffer` renders the scene once with MRT; a fullscreen pass shows one target or all of them in a grid. `?scene=…`.',
     ['g-buffer', 'frame contract'], 'examples/scenes/src/main.ts', 'concepts/frame-contract'),
+  lab('babylon', 'babylon/', 'Babylon.js adapter checks', 'The mirror-wall scene on Babylon.js: the adapter\'s orientation, velocity and IBL checks.',
+    'The first Babylon page (W15): mirrorWall with a gradient sky, `?scene=ibl` compares the composite with Babylon\'s own specular IBL. `pnpm check -- --only babylon` runs on it. The user-facing page is engines/babylon.',
+    ['babylon', 'frame graph'], 'examples/babylon/src/main.ts', 'guides/babylon', { kind: 'debugging', status: 'experimental' }),
   lab('sssr-core', 'sssr-core/', 'Screen-space tracer (core)', 'The core tracer on exact analytic inputs, raw WebGPU: debug views and variant parity.',
     'No engine: analytic depth and normals, the core tracer, its classify / intersect passes and debug views.', ['core', 'ssr'], 'examples/sssr-core/src/main.ts', 'concepts/screen-space-reflections'),
   lab('probe-core', 'probe-core/', 'Probe set (core)', 'The core probe set and its radiance fallback on a bare device.',
