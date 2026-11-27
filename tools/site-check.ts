@@ -19,6 +19,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { builtExamples } from '../examples/catalog.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const args = process.argv.slice(2);
@@ -161,11 +162,25 @@ async function examplesChecks() {
         `${conv ? `${conv.samples} / ${conv.maxSamples} spp, denoiser ${conv.denoiser}` : 'not ready'} ${[...errs, ...p.logs].join(' | ')}`);
     } finally { p.close(); }
   }
-  for (const path of ['/examples/', '/examples/ssr/?manual', '/examples/probes/?manual', '/examples/scenes/?manual', '/examples/babylon/?manual', '/examples/quickstart/', '/examples/quickstart/probes.html', '/examples/r3f/']) {
+  // W92: the gallery shows every page the site builds, and each of them (examples/catalog.ts; the showcase and its compare page
+  // are checked above) loads without errors
+  const site = builtExamples(true);
+  {
+    const p = await openPage(`${origin}/examples/`);
+    try {
+      const ok = await waitFor(p, '!!window.__p', 30000);
+      const cards: { slug: string; href: string | null }[] = ok ? await p.evalJs('window.__p.cards()') : [];
+      const missing = site.filter((e) => !cards.some((c) => c.slug === e.slug && c.href)).map((e) => e.slug);
+      await sleep(500);
+      check(`/examples/ (gallery): a linked card for each of the ${site.length} pages, no errors`, ok && cards.length === site.length && !missing.length && p.logs.length === 0,
+        `${cards.length} cards${missing.length ? `; missing ${missing.join(', ')}` : ''} ${p.logs.join(' | ')}`);
+    } finally { p.close(); }
+  }
+  for (const e of site.filter((x) => x.slug !== 'showcase' && x.slug !== 'showcase/compare')) {
+    const path = `/examples/${e.path}${e.check?.query ? `?${e.check.query}` : ''}`;
     const p = await openPage(`${origin}${path}`);
     try {
-      const ok = await waitFor(p, "document.readyState === 'complete'", 30000);
-      if (path !== '/examples/') await waitFor(p, '!!window.__p', 120000);
+      const ok = await waitFor(p, "document.readyState === 'complete'", 30000) && await waitFor(p, '!!window.__p', 120000);
       await sleep(1000);
       check(`${path} loads without errors`, ok && p.logs.length === 0, p.logs.join(' | '));
     } finally { p.close(); }
