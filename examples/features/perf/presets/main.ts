@@ -4,15 +4,12 @@
 // upsamples the result with a joint bilateral filter. The reflection passes cost about half; the price is softer reflections,
 // jagged reflected edges on mirrors and lost thin bright lines (docs/SETTINGS.md "Presets"). Rough surfaces barely change.
 //
-// The frame is built from the pieces (`ScreenSpaceReflectionsPass`, `HybridReflections`, a `RenderPipeline`), as
-// `Reflections.create` builds it, because the pass's per-pass GPU timestamps are an option of its constructor (`timestamps`).
-// Switching a preset at run time: `applyReflectionsPreset({ ssr, hybrid }, name)`; when it changes the resolution the hybrid is
-// rebuilt and the composite built again (`hybrid.rebuild()`, `hybrid.composite()`). `Reflections` users call `reflections.rebuild()`.
+//   const reflections = await Reflections.create(renderer, scene, { preset, timestamps: true, ... }); // timestamps: per-pass GPU ms
+//   applyReflectionsPreset(reflections, 'performance');   // at run time; rebuilds `reflections` when the resolution changes
 import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  HybridReflections, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, applyReflectionsPreset, createReflectionsRenderer,
-  installCubeArraySupport, reflectionProbes, type ReflectionsPresetName,
+  Reflections, ReflectionProbe, ReflectionProbes, applyReflectionsPreset, createReflectionsRenderer, installCubeArraySupport, type ReflectionsPresetName,
 } from '@pmndrs/reflections/three';
 import { FfxReflectionDenoiser } from 'denoiser/ffx';
 import { rooms } from '../../../shared';
@@ -50,23 +47,18 @@ async function main() {
   }
   scene.add(probes);
   probes.bake(renderer, scene);
-  scene.environmentNode = reflectionProbes(probes) as never;
 
   // ---- the part to copy ------------------------------------------------------------------------
   let preset: ReflectionsPresetName = 'default';
-  const ssr = new ScreenSpaceReflectionsPass(renderer, { preset, timestamps: true }); // timestamps: needs 'timestamp-query'
-  const denoiser = new FfxReflectionDenoiser(ssr.device, { roughnessThreshold: 0.447 ** 2 }); // times its passes when it can
-  const hybrid = new HybridReflections(ssr, { preset, denoiser, probes, environment: scene.environment, environmentIntensity: scene.environmentIntensity });
-  const pipeline = new THREE.RenderPipeline(renderer);
-  pipeline.outputNode = hybrid.composite().final;
-
+  let denoiser: FfxReflectionDenoiser | null = null; // kept for its GPU ms (it times its passes when it can)
+  const reflections = await Reflections.create(renderer, scene, {
+    preset, probes,
+    timestamps: true, // per-pass GPU ms (reflections.ssr.readTimings()); needs 'timestamp-query'
+    denoiser: (device, { roughnessThreshold }) => (denoiser = new FfxReflectionDenoiser(device, { roughnessThreshold: roughnessThreshold ** 2 })),
+  });
+  const { ssr, hybrid } = reflections;
   const setPreset = (name: ReflectionsPresetName) => {
-    const { resolutionChanged } = applyReflectionsPreset({ ssr, hybrid }, name); // drops the history
-    if (resolutionChanged) {
-      hybrid.rebuild();                               // its passes for the new resolution
-      pipeline.outputNode = hybrid.composite().final; // and the composite, which reads different textures at half size
-      pipeline.needsUpdate = true;
-    }
+    applyReflectionsPreset(reflections, name); // drops the history; rebuilds the composite when the resolution changes
     preset = name;
   };
   // ----------------------------------------------------------------------------------------------
@@ -95,7 +87,7 @@ async function main() {
     Promise.all([ssr.readTimings(), hybrid.readTimings()]).then(([trace, up]) => {
       for (const [k, v] of trace) if (k !== 'total') add(k, v);
       for (const [k, v] of up) if (k !== 'total') add(k, v);
-      for (const [k, v] of denoiser.gpuTimings ?? []) if (k !== 'total') add(`denoise ${k}`, v);
+      for (const [k, v] of denoiser?.gpuTimings ?? []) if (k !== 'total') add(`denoise ${k}`, v);
     }).catch(() => {}).finally(() => { reading = false; });
   };
 
@@ -104,9 +96,7 @@ async function main() {
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); // a no-op unless the size changed (the G-buffer follows)
     camera.aspect = canvas.clientWidth / canvas.clientHeight;
     camera.updateProjectionMatrix();
-    ssr.render(scene, camera); // G-buffer + trace
-    hybrid.update();           // resolve + denoise (+ upsample at half resolution)
-    pipeline.render();         // composite
+    reflections.render(camera);
     sinceSwitch++;
     readTimings();
   };
@@ -140,7 +130,7 @@ async function main() {
       frame();
       await new Promise((r) => setTimeout(r, 50));
       const [trace, up] = await Promise.all([ssr.readTimings(), hybrid.readTimings()]);
-      return { ...Object.fromEntries(trace), ...Object.fromEntries([...up].filter(([k]) => k !== 'total')), ...Object.fromEntries([...(denoiser.gpuTimings ?? [])].map(([k, v]) => [`denoise ${k}`, v])) };
+      return { ...Object.fromEntries(trace), ...Object.fromEntries([...up].filter(([k]) => k !== 'total')), ...Object.fromEntries([...(denoiser?.gpuTimings ?? [])].map(([k, v]) => [`denoise ${k}`, v])) };
     },
   };
 }

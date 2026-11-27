@@ -58,4 +58,23 @@ describe('reflection presets', () => {
       }
     }
   });
+
+  it('applyReflectionsPreset rebuilds a target with rebuild() (a Reflections) when the resolution changes, without the warning (W98)', async () => {
+    const { applyReflectionsPreset } = await import('../packages/three/src/sssr/presets');
+    let rebuilds = 0, resets = 0;
+    const ssr = { settings: {} as Record<string, unknown>, presetBase: {}, resetHistory: () => { resets++; } };
+    const hybrid = { setDenoiserHitSource() {}, restoreDenoiserHitSource() {}, resetHistory() {} };
+    const target = { ssr, hybrid, rebuild: () => { rebuilds++; } } as never;
+    const warn = console.warn; const warned: unknown[] = []; console.warn = (...a: unknown[]) => { warned.push(a); };
+    try {
+      expect(applyReflectionsPreset(target, 'performance').resolutionChanged).toBe(true);
+      expect(rebuilds).toBe(1);
+      expect(applyReflectionsPreset(target, 'performance').resolutionChanged).toBe(false);
+      expect(rebuilds).toBe(1);
+      applyReflectionsPreset(target, 'default');
+      expect([rebuilds, resets, ssr.settings.reflectionResolution]).toEqual([2, 3, undefined]);
+      expect(warned).toEqual([]);
+    } finally { console.warn = warn; }
+  });
 });
+

@@ -453,19 +453,19 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     summary: 'A camera path, moving objects and a camera cut with resetHistory().',
     description:
       'The two rooms of three.js #35046 with a polished floor, the knot turning and the mirror ball on its figure eight; the camera runs three 6 s shots with a cut ' +
-      'between each. Reflections are temporal: the denoiser blends each pixel with where it was last frame, and screen-space hits take their colour from last ' +
-      'frame\'s image, which keeps motion steady between cuts. At a cut last frame is another shot, so the page calls `reflections.ssr.resetHistory()` and ' +
-      '`reflections.hybrid.resetHistory()` (`ScreenSpaceReflectionsPass` and `HybridReflections` when built from the pieces); do the same on a teleport or a scene switch.',
+      'between each. Reflections are temporal: the denoiser blends each pixel with where it was last frame (by the G-buffer\'s motion vectors and the camera\'s ' +
+      'matrices), which keeps a moving camera and moving objects steady. At a cut last frame is another shot, so the page calls `reflections.ssr.resetHistory()` and ' +
+      '`reflections.hybrid.resetHistory()` (`ScreenSpaceReflectionsPass` and `HybridReflections` when built from the pieces); do the same on a teleport or a scene ' +
+      'switch, and nowhere else: unlike a path tracer\'s accumulation, the history is not reset when the camera moves.',
     brief: {
       kind: 'feature',
-      shows: 'A whole animated scene, camera path and moving objects, steady between cuts; and why a camera cut needs `resetHistory()`.',
-      tryThis: ['Watch the floor through the camera moves and the cuts: steady between cuts, no shimmer', 'Pause: the image holds still (the rest-flicker check holds it to the quick start\'s bound)', 'Tick No history reset and Slow motion, then press Cut to the next shot'],
+      shows: 'A whole animated scene, camera path and moving objects, steady through the moves; `resetHistory()` at the camera cuts and only there.',
+      tryThis: ['Watch the floor through the camera moves and the cuts: steady, no shimmer', 'Tick Reset history on camera moves: the floor sparkles until the shot ends', 'Pause: the image holds still (the rest-flicker check holds it to the quick start\'s bound)'],
       compare:
-        'No history reset at the cuts. With `denoiser/ffx` the difference is small (measured: 0.08 / 255 mean the frame after the cut, against a 0.07 noise floor): its ' +
-        'reprojection rejects history whose depth and normals disagree, so the previous shot barely shows through. The reset is still what a cut needs; a denoiser without that rejection depends on it',
+        'The history reset on every camera move too, as a path tracer\'s accumulation is: the denoiser never gets past its first frame and the glossy floor shows the tracer\'s ' +
+        'raw noise while the camera moves. (Leaving out the reset at a cut barely shows with `denoiser/ffx`, which rejects history whose depth and normals disagree; it is still what a cut needs.)',
     },
     category: 'features', status: 'stable', tags: ['motion', 'history'], docs: 'guides/flicker-and-stability', source: 'examples/features/motion/animated/main.ts',
-    check: { compare: false },
   },
   {
     slug: 'perf/presets',
@@ -473,10 +473,10 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     title: 'Presets',
     summary: 'default vs performance (half-resolution reflections), GPU ms per pass.',
     description:
-      'The two rooms with probes, screen-space reflections and the denoiser, built from the pieces (`ScreenSpaceReflectionsPass` with `timestamps: true`, ' +
-      '`HybridReflections`, a `RenderPipeline`) so the trace passes report GPU ms. `performance` sets `reflectionResolution: \'half\'`: trace and denoise at half ' +
-      'size per axis, then a joint bilateral upsample. At run time `applyReflectionsPreset({ ssr, hybrid }, name)` switches it; when the resolution changes, ' +
-      '`hybrid.rebuild()` and a new `hybrid.composite()` (with `Reflections`: `reflections.rebuild()`). GPU ms need `timestamp-query`; compare them on one machine. ' +
+      'The two rooms with probes, screen-space reflections and the denoiser through `Reflections.create` with `timestamps: true`, so the trace passes report GPU ms ' +
+      '(`reflections.ssr.readTimings()`). `performance` sets `reflectionResolution: \'half\'`: trace and denoise at half size per axis, then a joint bilateral upsample. ' +
+      'At run time `applyReflectionsPreset(reflections, name)` switches it and rebuilds the composite when the resolution changes (built from the pieces: ' +
+      '`applyReflectionsPreset({ ssr, hybrid }, name)`, then `hybrid.rebuild()` and a new `hybrid.composite()`). GPU ms need `timestamp-query`; compare them on one machine. ' +
       'Trade-offs per scene: docs/SETTINGS.md "Presets".',
     brief: {
       kind: 'performance',
@@ -492,10 +492,10 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     title: 'Upscaling',
     summary: 'TAA / upscaling after the composite with @pmndrs/upscaler, jitter wired through.',
     description:
-      'The two rooms with probes, screen-space reflections and the denoiser render at 1 / 1.5 of the display size per axis (the G-buffer sized by ' +
+      'The two rooms with probes, screen-space reflections and the denoiser (`Reflections.create`) render at 1 / 1.5 of the display size per axis (the G-buffer sized by ' +
       '`gbufferOptions`), and `@pmndrs/upscaler` rebuilds the display size after the composite. The upscaler\'s jitter goes in through ' +
-      '`ssr.render(scene, camera, { jitter, projection })`: the G-buffer rasterises jittered while its motion, the tracer and the denoiser stay unjittered. ' +
-      'The composite is output linear (the upscaler\'s contract) and tone-mapped after it. The upscaler side (jitter, motion in its convention, present) is the ' +
+      '`reflections.render(camera, { jitter, projection })`: the G-buffer rasterises jittered while its motion, the tracer and the denoiser stay unjittered. ' +
+      'The composite renders into the upscaler\'s input, linear (`reflections.pipeline.outputColorTransform = false`, the upscaler\'s contract), and is tone-mapped after it. The upscaler side (jitter, motion in its convention, present) is the ' +
       'examples\' `DisplayAA` helper (examples/shared/antialias.ts). At 1x it is temporal anti-aliasing alone.',
     brief: {
       kind: 'performance',

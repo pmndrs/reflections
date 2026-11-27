@@ -4,6 +4,8 @@
 
 - `Reflections.create` takes `gbufferOptions` (e.g. a render size below the canvas, for an upscaler after the
   composite) and `timestamps` (per-pass GPU ms through `reflections.ssr.readTimings()`), passed to the pass.
+- `applyReflectionsPreset(reflections, name)` takes a `Reflections` and rebuilds it when the preset changes the
+  reflection resolution (no "rebuild your composites" warning); `{ ssr, hybrid }` works as before.
 - The examples: a catalog of pages, one per feature and one per engine, each with what it shows, what to try
   and a compare switch (`examples/catalog.ts`, the gallery at `/examples/`).
 

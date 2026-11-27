@@ -5,21 +5,20 @@
 // size per axis costs about 44 % of the pixels. The upscaler jitters the camera by a sub-pixel each frame and accumulates the jittered
 // frames, which also smooths the edges and the denoised reflections' last shimmer. At 1x it is temporal anti-aliasing alone.
 //
-// The wiring, per frame (examples/shared/antialias.ts `DisplayAA` holds the upscaler's side: its jitter, the motion conversion, the
-// present pass):
-//   const j = aa.begin(camera);          // the upscaler's jitter, as `{ jitter, projection }`
-//   ssr.render(scene, camera, j);        // the G-buffer rasterises jittered; motion, the tracer and the denoiser stay unjittered
+// The wiring (examples/shared/antialias.ts `DisplayAA` holds the upscaler's side: its jitter, the motion conversion, the present pass):
+//   const reflections = await Reflections.create(renderer, scene, { gbufferOptions: { width, height } }); // the render size
+//   reflections.pipeline.outputColorTransform = false;   // linear out: the upscaler tone-maps after it
+//   // per frame
+//   const j = aa.begin(camera);                          // the upscaler's jitter, as `{ jitter, projection }`
+//   renderer.setRenderTarget(aa.target);
+//   reflections.render(camera, j);                       // G-buffer jittered (motion, tracer, denoiser unjittered), composite
+//   renderer.setRenderTarget(null);
 //   aa.end(camera);
-//   hybrid.update();
-//   renderer.setRenderTarget(aa.target); pipeline.render(); renderer.setRenderTarget(null);   // the composite, linear, render size
-//   aa.resolve(camera);                  // upscale, tone-map, present
-// The G-buffer is sized to the render size (`gbufferOptions`), which is why this page builds the pieces instead of `Reflections.create`.
+//   aa.resolve(camera);                                  // upscale, tone-map, present
 import * as THREE from 'three/webgpu';
-import { renderOutput, vec4 } from 'three/tsl';
+import { renderOutput } from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import {
-  HybridReflections, ReflectionProbe, ReflectionProbes, ScreenSpaceReflectionsPass, createReflectionsRenderer, installCubeArraySupport, reflectionProbes,
-} from '@pmndrs/reflections/three';
+import { Reflections, ReflectionProbe, ReflectionProbes, createReflectionsRenderer, installCubeArraySupport } from '@pmndrs/reflections/three';
 import { FfxReflectionDenoiser } from 'denoiser/ffx';
 import { DisplayAA, UPSCALER_DEFAULTS, type AAMode } from '../../../shared/antialias';
 import { rooms } from '../../../shared';
@@ -29,6 +28,7 @@ mountShell('perf/upscaler');
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
+
 const canvas = document.querySelector<HTMLCanvasElement>('#view')!;
 const status = document.querySelector<HTMLElement>('#status')!;
 const infoEl = document.querySelector<HTMLElement>('#info')!;
@@ -38,6 +38,7 @@ const viewSelect = document.querySelector<HTMLSelectElement>('#cameraView')!;
 
 async function main() {
   const renderer = await createReflectionsRenderer({ canvas, antialias: false });
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
   renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
@@ -61,16 +62,15 @@ async function main() {
   }
   scene.add(probes);
   probes.bake(renderer, scene);
-  scene.environmentNode = reflectionProbes(probes) as never;
 
   // ---- the part to copy ------------------------------------------------------------------------
-  const ssr = new ScreenSpaceReflectionsPass(renderer, { gbufferOptions: { width: 1, height: 1 } }); // sized below, to the render size
-  const denoiser = new FfxReflectionDenoiser(ssr.device, { roughnessThreshold: 0.447 ** 2 });
-  const hybrid = new HybridReflections(ssr, { denoiser, probes, environment: scene.environment, environmentIntensity: scene.environmentIntensity });
-  const pipeline = new THREE.RenderPipeline(renderer);
-  pipeline.outputColorTransform = false; // the upscaler wants linear colour; DisplayAA tone-maps after it
-  const tone = (c: N) => (renderOutput(c, THREE.ACESFilmicToneMapping, THREE.SRGBColorSpace) as N).rgb;
-  const final = (hybrid.composite().final as N).rgb;
+  const reflections = await Reflections.create(renderer, scene, {
+    probes,
+    denoiser: (device, { roughnessThreshold }) => new FfxReflectionDenoiser(device, { roughnessThreshold: roughnessThreshold ** 2 }),
+    gbufferOptions: { width: 1, height: 1 }, // a fixed size: set below to the render size (else it follows the canvas)
+  });
+  const { ssr, hybrid, pipeline } = reflections;
+  const tone = (c: N) => (renderOutput(c, THREE.ACESFilmicToneMapping, THREE.SRGBColorSpace) as N).rgb; // DisplayAA's, after the upscaler
 
   let aa: DisplayAA | null = null, mode: AAMode = 'upscaler', ratio = 1.5, sinceSwitch = 0, aaFrames = 0;
   /** (Re)build the upscaler for `mode` and `ratio`: the G-buffer goes to the render size, the history starts over. */
@@ -81,8 +81,8 @@ async function main() {
     await next.init();
     ssr.gbuffer.setSize(next.renderWidth, next.renderHeight);
     ssr.resetHistory(); hybrid.resetHistory();
-    // linear while the upscaler runs (it tone-maps after); tone-mapped when the composite goes straight to the canvas
-    pipeline.outputNode = vec4((next.linear as N).equal(1).select(final, tone(final)), 1);
+    // linear while the upscaler runs (it tone-maps after); the renderer's tone mapping when the composite goes straight to the canvas
+    pipeline.outputColorTransform = mode === 'off';
     pipeline.needsUpdate = true;
     aa = next; sinceSwitch = 0; aaFrames = 0;
   };
@@ -115,12 +115,10 @@ async function main() {
     camera.updateProjectionMatrix();
     // mode 'off' renders at the display size (ratio 1): no jitter, the composite straight to the canvas
     const j = aa.begin(camera);
-    ssr.render(scene, camera, j);
-    aa.end(camera);
-    hybrid.update();
-    renderer.setRenderTarget(aa.target);
-    pipeline.render();
+    renderer.setRenderTarget(aa.target); // the upscaler's input (null when off: the canvas)
+    reflections.render(camera, j);
     renderer.setRenderTarget(null);
+    aa.end(camera);
     const now = performance.now();
     aa.resolve(camera, Math.min((now - last) / 1000, 0.1));
     last = now;
