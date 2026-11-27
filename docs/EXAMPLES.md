@@ -109,6 +109,39 @@ links here, so they exist once. `reflect-bench` stays there (it compares denoise
 E2 and E3 start once E1 is merged. Each wave logs in `docs/HANDOFF.md`; divergences from the denoiser's pages go in
 `docs/DIVERGES.md`.
 
+## Conventions (settled in E1, W92)
+
+- **Catalog.** `examples/catalog.ts` holds every page above, built or not. A page not built yet has `planned: true`: the gallery
+  hides it (the "Show planned pages" box shows it), the build and the check skip it. `devOnly: '<reason>'` keeps a page out of
+  the public site (pixi3d/arcade: the closed beta; nrc: a private checkout). `check: { query, wait, image, thumbQuery }` tunes the
+  headless load.
+- **Paths.** Existing pages keep theirs; where the plan says `rebuild`, the entry points at the existing page until the rebuild
+  (`probes/live` = `probes/`, `engines/babylon` = `babylon/`, `engines/pixi` = `pixi3d/arcade/`). A new page lives at
+  `examples/<category>/<slug without its category prefix>/`: `probes/box-projection` is
+  `examples/features/probes/box-projection/`, `engines/three` is `examples/engines/three/`. The catalog test enforces it for
+  planned entries.
+- **Shell.** `mountShell('<slug>', { placement? })` from `examples/shell`: the nav pill (gallery, breadcrumb, status, Info, Docs,
+  Source, previous / next in the category) and the info panel with the brief, open on a first visit. A full-window canvas takes
+  a corner (`'top-left'` default); a page that flows like a document takes `'inline'`. `?thumb` hides it.
+- **`window.__p`.** Every page sets it once ready (the check waits for it). A feature page gives `stop()`, `shot(n)` (render n
+  frames, return a PNG data URL) and `setCompare(on)` (on = the baseline of `brief.compare`); the catalog check then asserts
+  the switch changes the image and switching back restores it.
+- **Checks.** `pnpm check -- --only catalog` loads the gallery (a linked card per built page, the committed images) and every
+  built page at 1280 x 720 (renders, no console error, no validation error). `--pages a,b` narrows it (`gallery` is a page).
+  `--thumbs` writes the card images: `<path>thumb.webp` for a folder, `<name>.thumb.webp` beside an html file (640 x 360).
+  `site:check` loads every page the site builds, from the catalog.
+
+### Adding a page (E2 to E4)
+
+1. Copy `examples/features/probes/box-projection/` (the reference page: `index.html` with a full-window canvas, a panel whose
+   first control is the compare switch, and `main.ts` under 300 lines on the public API) to the page's path.
+2. In `examples/catalog.ts`, drop `planned` from its entry and write `summary`, `description` and the `brief` (`compare` is
+   required for feature, quality and performance pages).
+3. In `main.ts`: `mountShell('<slug>')`, a scene from `examples/shared`, the feature as an app would set it up, the compare
+   switch, the loop, `window.__p` (`stop`, `shot`, `setCompare`).
+4. `REFLECTIONS_PORT=<port> pnpm check -- --only catalog --pages <slug>`, then `--thumbs --pages <slug>` and commit the webp.
+   `pnpm test` (the catalog test) and `pnpm typecheck`.
+
 ## Decided
 
 - **Scope:** every page above (maintainer, 2026-11-27).
