@@ -47,7 +47,9 @@ import { SHOWCASE, type FloorKind, type ShowcaseEntry, type ShowcaseScene } from
 import { geometryRoughnessFromQuery, setGeometryRoughness } from './geometryRoughness';
 import { SPEC_AA_DEFAULT, setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } from './specAA';
 import { ssrSettingsFromQuery } from '../../shared/ssrQuery';
+import { mountShell } from '../../shell';
 
+mountShell('showcase');
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 const q = new URLSearchParams(location.search);

@@ -39,6 +39,9 @@ import { createOurs } from './compare/ours';
 import { createThreeSSR, ffxAvailable } from './compare/three-ssr';
 import { DEFAULT_MAX_SAMPLES, createPathTracer, oidnAvailable, pathTracerAvailable } from './compare/pathtracer';
 import { denoiserAvailable } from '../../shared/denoiser';
+import { mountShell } from '../../shell';
+
+mountShell('showcase/compare', { placement: 'bottom-left' });
 
 const q = new URLSearchParams(location.search);
 const W = Number(q.get('w') ?? 960), H = Number(q.get('h') ?? 540);

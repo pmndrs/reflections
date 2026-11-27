@@ -5,6 +5,7 @@
 //   pnpm check -- --compare <url>    # also diff examples/probes against another build of the same
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-builders (alias ssr-rt-bvh) | pixi3d | probe-core | probe-bench | ssr-bench | nrc | showcase | showcase-compare | quickstart | r3f | bench | probe-layouts)
+//   pnpm check -- --only catalog [--thumbs] [--pages a,b]   # W92: every page in examples/catalog.ts loads, renders, logs no error; --thumbs writes the card images
 //   pnpm check -- --only flicker                 # W85 (T1): the X0 flicker metrics per scene x config (FLICKER_SCENES / FLICKER_CONFIGS / FLICKER_LABEL, scripts/flicker.mjs)
 //   pnpm check -- --only ssr-exp-metrics         # X0 (W70): the experiment metrics smoke (examples/shared/metrics); ssr-exp-baseline = the full baseline (scripts/ssr-exp.mjs)
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
@@ -3381,6 +3382,93 @@ const DROP_IN_DIFF = `async (a, b) => {
   }
   return { lum: lum / (w * h), lo, hi, regionMean: sum / n, regionOver: over / n };
 }`;
+
+/** Mean and standard deviation of the luminance (0-255) of an image data URL, decoded in a page. */
+const IMAGE_SPREAD = `async (u) => {
+  const i = new Image(); i.src = u; await i.decode();
+  const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0);
+  const d = g.getImageData(0, 0, i.width, i.height).data; let s = 0, s2 = 0; const n = d.length / 4;
+  for (let k = 0; k < d.length; k += 4) { const l = (d[k] + d[k + 1] + d[k + 2]) / 3; s += l; s2 += l * l; }
+  return { mean: s / n, std: Math.sqrt(Math.max(0, s2 / n - (s / n) ** 2)) };
+}`;
+
+/**
+ * W92 (E1): every built page in examples/catalog.ts, at 1280 x 720: it loads (`window.__p` exists), shows an image (luminance spread;
+ * not for `check.image: false` pages), and logs no console error, exception or WebGPU validation error. A page with
+ * `__p.setCompare(on)` (the feature pages, docs/EXAMPLES.md) must change its image when the compare switch flips.
+ *   --thumbs           also write each page's card image (640 x 360 webp at catalog.thumbPath, the shell hidden by `?thumb`)
+ *   --pages a,b        only these slugs
+ */
+async function catalogChecks() {
+  const { builtExamples, thumbPath } = await import('../examples/catalog.ts');
+  const thumbs = args.includes('--thumbs');
+  const pick = args.includes('--pages') ? args[args.indexOf('--pages') + 1].split(',') : null;
+  // card images only for pages the gallery shows with their own content (a dev-only page shows a notice without its checkout / beta)
+  const entries = builtExamples().filter((e) => (!pick || pick.includes(e.slug)) && !(thumbs && e.devOnly));
+  console.log(`examples/catalog (${entries.length} pages${thumbs ? ', + thumbnails' : ''}):`);
+  const W = 1280, H = 720;
+  if (!thumbs && (!pick || pick.includes('gallery'))) {
+    // the gallery: one card per built page (planned ones hidden), linked, with its card image where one is committed
+    const before = results.logs.length;
+    const g = await openPage(`http://127.0.0.1:${PORT}/`);
+    try {
+      await g.cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+      await sleep(1000);
+      const shot = await g.cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width: W, height: 2400, scale: 0.5 } });
+      savePng('catalog-gallery.png', `data:image/png;base64,${shot.data}`);
+      const cards = await g.T('window.__p.cards()');
+      const want = builtExamples();
+      const withThumb = want.filter((e) => fs.existsSync(path.join(ROOT, 'examples', thumbPath(e)))).map((e) => e.slug);
+      const missing = want.filter((e) => !cards.some((c) => c.slug === e.slug && c.href)).map((e) => e.slug);
+      const noImage = withThumb.filter((s) => !cards.find((c) => c.slug === s)?.thumb);
+      const errors = results.logs.slice(before).filter((l) => /^(error|exception|log\.error)/.test(l));
+      check('catalog: the gallery shows a linked card for every built page and the committed card images', cards.length === want.length && !missing.length && !noImage.length && !errors.length,
+        `${cards.length} cards for ${want.length} pages, ${withThumb.length - noImage.length} / ${withThumb.length} images${missing.length ? `; missing ${missing.join(', ')}` : ''}${noImage.length ? `; no image ${noImage.join(', ')}` : ''} ${errors.join(' | ')}`);
+    } finally { g.close(); }
+  }
+  for (const e of entries) {
+    const query = [thumbs ? (e.check?.thumbQuery ?? e.check?.query) : e.check?.query, thumbs ? 'thumb' : null].filter(Boolean).join('&');
+    const url = `http://127.0.0.1:${PORT}/${e.path}${query ? `?${query}` : ''}`;
+    const before = results.logs.length;
+    let p;
+    try {
+      p = await openPage(url);
+      await p.cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false }); // the window's size includes its frame
+    } catch (err) {
+      check(`catalog ${e.slug}: loads`, false, String(err?.message ?? err).split('\n').slice(0, 3).join(' | ').slice(0, 400));
+      continue;
+    }
+    try {
+      await sleep(Math.max(e.check?.wait ?? 1500, thumbs ? 3000 : 0)); // a card image: the denoiser's history settled
+      const size = await p.cdp.evalJs('[innerWidth, innerHeight]', false);
+      const png = await p.cdp.send('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: W, height: H, scale: 0.5 } });
+      savePng(`catalog-${e.slug.replace(/[^a-z0-9]+/gi, '-')}.png`, `data:image/png;base64,${png.data}`);
+      const spread = await p.cdp.evalJs(`(${IMAGE_SPREAD})(${JSON.stringify(`data:image/png;base64,${png.data}`)})`);
+      const errors = results.logs.slice(before).filter((l) => /^(error|exception|log\.error)/.test(l) || /invalid|validation|uncaptured/i.test(l));
+      const image = e.check?.image !== false;
+      check(`catalog ${e.slug}: loads${image ? ', renders' : ''}, no console errors or validation errors`, errors.length === 0 && (!image || spread.std > 2),
+        `${size.join('x')}, luminance ${spread.mean.toFixed(1)} +- ${spread.std.toFixed(1)}${errors.length ? ` | ${errors.slice(0, 3).join(' | ')}` : ''}`.slice(0, 600));
+      if (thumbs) {
+        const webp = await p.cdp.send('Page.captureScreenshot', { format: 'webp', quality: 80, clip: { x: 0, y: 0, width: W, height: H, scale: 0.5 } });
+        const file = path.join(ROOT, 'examples', thumbPath(e));
+        fs.writeFileSync(file, Buffer.from(webp.data, 'base64'));
+        console.log('  saved', path.relative(process.cwd(), file));
+      } else if (await p.cdp.evalJs('typeof window.__p.setCompare === "function"', false)) {
+        await p.T('window.__p.stop()');
+        const a = await p.T('window.__p.shot(2)');
+        await p.T('window.__p.setCompare(true)');
+        const b = await p.T('window.__p.shot(2)');
+        await p.T('window.__p.setCompare(false)');
+        const back = await p.T('window.__p.shot(2)');
+        const d = await p.cdp.evalJs(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
+        const r = await p.cdp.evalJs(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(back)})`);
+        check(`catalog ${e.slug}: the compare switch changes the image, and switching back restores it`, d.mean > 0.2 && r.mean < 0.05,
+          `on vs compare mean ${d.mean.toFixed(3)} / 255 (max ${d.max}); on vs back mean ${r.mean.toFixed(4)}`);
+      }
+    } finally { p.close(); }
+  }
+}
+
 async function dropInChecks(pages, name, url, { frames = 30, maxFlicker = 0.5 } = {}) {
   console.log(`${name}:`);
   const slug = name.replace(/[^a-z0-9]+/gi, '-');
@@ -3428,7 +3516,7 @@ async function dropInChecks(pages, name, url, { frames = 30, maxFlicker = 0.5 } 
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' || only === 'ssr-exp-baseline' || only === 'ssr-exp-grazing' ? 3_600_000 : 600_000).unref();
+  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' || only === 'ssr-exp-baseline' || only === 'ssr-exp-grazing' ? 3_600_000 : only === 'catalog' ? 1_800_000 : 600_000).unref();
   let server = null;
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
@@ -3792,6 +3880,7 @@ async function main() {
     }
     if (runs('showcase')) await showcaseChecks(pages);
     if (runs('showcase-compare')) await showcaseCompareChecks(pages);
+    if (runs('catalog')) await catalogChecks(); // W92 (E1): every page in examples/catalog.ts (--thumbs: card images)
     if (runs('bench')) await benchChecks(pages); // W51: the tuning bench
     if (only === 'ssr-exp-metrics') await ssrExpMetricsSmoke({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)
     if (only === 'ssr-exp-baseline') await ssrExpBaseline({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)

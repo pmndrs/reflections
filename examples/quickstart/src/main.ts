@@ -19,7 +19,9 @@ import { Reflections, createRaytracerTraceProviderFromObjects, createReflections
 //   import { FfxReflectionDenoiser } from 'denoiser/ffx';
 import { FfxReflectionDenoiser } from 'denoiser/ffx';
 import { createScene } from './scene';
+import { mountShell } from '../../shell'; // the examples' nav and info panel (not part of the quick start)
 
+mountShell('start/hello', { placement: 'inline' });
 const q = new URLSearchParams(location.search);
 const canvas = document.querySelector<HTMLCanvasElement>('#view')!;
 const status = document.querySelector<HTMLElement>('#status')!;
