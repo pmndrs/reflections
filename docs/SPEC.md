@@ -383,6 +383,8 @@ Debug views:
 
 ## Roadmap
 
+**2026-11-27:** every phase is built. `@pmndrs/reflections` 0.1.0 is on npm (`latest`), with the 38-page examples set and the site at https://pmndrs.github.io/reflections/. @pmndrs/raytracer is the only ray-tracing provider (W89), and bvh, the downsampler, the raytracer and the denoiser all come from npm. No workstream is running. What is left is open backlog, ranked in `docs/TRIAGE.md`. The table below is the phase record as of 2026-11-11.
+
 ### Where we are (2026-11-11)
 
 | Phase | State | Left |

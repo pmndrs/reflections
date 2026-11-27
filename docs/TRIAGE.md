@@ -32,6 +32,8 @@ Status values:
 
 ## Top 10, in order
 
+**Status 2026-11-27 (0.1.0 published).** The Top 10 below is from 2026-11-13. Since then T1 and T53 are done (W85: `--only flicker`, the T53 scenes, baseline), T10 moved to `decide` (W85), and T58 is done (0.1.0 on npm as `latest`). No workstream is running and none is queued. Every row left in the table is open backlog that nobody has started.
+
 1. **T1: flicker and firefly metrics.** Flicker is the #1 pain point, and none of the flicker experiments (T2-T7) can be judged without numbers per region (D3622, X0). First step: build X0's rest drift, orbit flicker, 2x2 energy, edge pan and raw speckle count as bench Measure columns, then baseline every scene.
 2. **T53: simple test scenes.** The maintainer asked for these so the bevels stop deciding the tuning. T10 and T14 are queued behind them (decisions 20, 21). First step: as bench scenes with the PT reference, add a cube or slab on the mirror, sharp edges above it, and a thin plate over the floor. Build T1 and T53 in one worktree (they are X0).
 3. **T10: quadCopy 'sameSurface' as the default.** It's accepted (decision 21) and cheap (+0.27 ms), and it removes the raw stair step that seeds the halo (W58). First step: run W58's Measure on chess, toyCar, Sponza and T53's scenes, then flip the default if they're flat or better.
@@ -51,8 +53,8 @@ Row ids per cell. Out-of-scope rows are left out.
 
 | impact \ effort | S | M | L |
 |---|---|---|---|
-| **high** | T1, T2, T53 | T3, T10, T30 | T4 |
-| **med** | T5, T12, T16, T17, T21, T22, T24, T29, T69 | T6, T11, T14, T15, T23, T25, T26, T27, T40, T41, T54, T58, T70 | T7, T18, T35, T36, T37, T38, T42, T48, T52, T59 |
+| **high** | T2 | T3, T10, T30 | T4 |
+| **med** | T5, T12, T16, T17, T21, T22, T24, T29, T69 | T6, T11, T14, T15, T23, T25, T26, T27, T40, T41, T54, T70 | T7, T18, T35, T36, T37, T38, T42, T48, T52, T59 |
 | **low** | T8, T9, T13, T19, T32, T33, T43, T45, T47, T49, T55, T56, T57, T60, T61, T62, T63, T64, T71 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
 
 ## The full table
@@ -164,7 +166,6 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T58 | Releases: publish @pmndrs/reflections `0.1.0-alpha.0` then `0.1.0` (release workflow with npm trusted publishing), then denoiser PR #27 (one PR from `reflections-package-catchup` on the npm dependency) | med | M | ready | SPEC follow-ups, decision 8, D3590, D905, D1705, W24, W82, D5300 | bvh + downsampler are on npm and linked from npm since W82. W89: raytracer 0.1.0 and denoiser 2.0.0 are on npm and used from there; the bvh wrapper is deleted (the packed raytracer binds 4 too, D5452). The maintainer asked for the npm release once the sibling + docs work is in (2026-11-26); needs a trusted publisher set on npmjs.com. |
 | T59 | three lighting-model hook: direct highlights in scene colour; coat, sheen, iridescence in the specular swap | med | L | waiting | D400, D603, D3540, W50 | Waiting on a three hook; D1002's history mode covers the worst symptom meanwhile. |
 | T60 | three cube arrays (#35053) and #35046's node output: drop the shim and the 2D fallback; converge the nodes | low | S | waiting | D1, D2, D2200, D2201, D2202, D20, D22, W20 | Waiting on three #35053 / #35046. Re-run --only probes on every three bump (the shim is version-gated). |
 | T61 | three upstream issues: per-object uniforms, shadow maps across cameras, velocity reset, node props on stock materials | low | S | waiting | D500, D501, D802, D700, D3572 | File D500 / D802 with their repros; #35485 (D3572) is filed. Workarounds stay. |
