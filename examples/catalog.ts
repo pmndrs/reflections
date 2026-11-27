@@ -333,10 +333,20 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     slug: 'ssr/what-it-misses',
     path: 'features/ssr/what-it-misses/',
     title: 'What screen space misses',
-    summary: 'Off screen, behind, occluded: what screen-space reflections cannot see.',
-    description: 'Planned (E2).',
-    brief: { kind: 'educational', shows: 'Where screen-space reflections run out: things off screen, behind the camera or hidden behind other objects.', tryThis: PLANNED_TRY, compare: 'Probe fill vs black' },
-    category: 'features', status: 'stable', tags: ['ssr', 'misses'], docs: 'concepts/screen-space-reflections', source: 'examples/features/ssr/what-it-misses', planned: true,
+    summary: 'Off screen, behind the camera, hidden: what screen-space reflections cannot see, and the probes filling it in.',
+    description:
+      'A polished floor and a wall mirror. The floor reflects a glowing ring and a lamp bar above the top of the frame; the mirror reflects three bars on the wall ' +
+      'behind the camera. A screen-space ray can only find what is on screen, so all of them are misses, and so is anything hidden behind an object (its back, its ' +
+      'underside: ssr/mirror-floor, At the sphere). The composite fills every miss from the probes (box-projected cubes captured inside the room). The compare draws ' +
+      'screen space alone from the composite\'s terms (`lit + weight x (ssr - probeSpecular)`, raw tracer hits): black where a ray missed. ' +
+      'Rays fill the same misses with the real geometry: **rt/fallback**.',
+    brief: {
+      kind: 'educational',
+      shows: 'Where screen-space reflections run out: things off screen, behind the camera or hidden behind other objects. The probes fill those pixels so the image stays whole.',
+      tryThis: ['Untick Fill misses from the probes: the ring in the floor and the whole wall mirror go black', 'Tick Tint the misses: magenta marks how much of each smooth pixel the probes filled', 'Pick Behind the camera: the mirror shows the bars behind you only through the probe'],
+      compare: 'Screen space alone, without the probe fill: black where a ray found nothing on screen',
+    },
+    category: 'features', status: 'stable', tags: ['ssr', 'misses', 'probes'], docs: 'concepts/screen-space-reflections', source: 'examples/features/ssr/what-it-misses/main.ts',
   },
   {
     slug: 'rt/fallback',
