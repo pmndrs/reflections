@@ -4,8 +4,8 @@ name: Build the site and deploy to GitHub Pages
 # built examples at /examples/. It is served at https://pmndrs.github.io/reflections/, like the
 # siblings (bvh, pathtracer, denoiser, upscaler). The `site` step reads the address from the Pages
 # settings, so a custom domain set there later gives an empty base path with no change here.
-# Pushes and pull requests only build it, to catch MDX and build errors. Deploying is manual
-# (Actions > this workflow > Run workflow) until Dennis decides to publish.
+# A push to main builds and deploys it (maintainer, 2026-11-27); a pull request only builds it, to
+# catch MDX and build errors. Run workflow (Actions > this workflow) redeploys main by hand.
 # tools/site-build.ts is the build both here and locally (`pnpm docs:api && pnpm site:build`).
 #
 # The denoiser is the `denoiser` package from npm (a devDependency), installed with the rest; site-check
@@ -84,13 +84,13 @@ jobs:
           SOURCECODE_BASEURL: https://github.com/${{ github.repository }}/tree/${{ github.event.pull_request.head.sha || github.sha }}
           EDIT_BASEURL: https://github.com/${{ github.repository }}/edit/${{ github.head_ref || 'main' }}/docs/site
           CONTRIBUTORS_PAT: ${{ secrets.GITHUB_TOKEN }}
-      - if: github.event_name == 'workflow_dispatch'
+      - if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
   deploy:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs: build
     runs-on: ubuntu-latest
     # Grant GITHUB_TOKEN the permissions a Pages deployment needs.
