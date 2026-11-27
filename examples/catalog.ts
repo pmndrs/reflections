@@ -296,10 +296,19 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     slug: 'probes/exclude',
     path: 'features/probes/exclude/',
     title: 'Keep a mirror out of its own probe',
-    summary: 'bake({ exclude }): a moving mirror kept out of its own captures.',
-    description: 'Planned (E2).',
-    brief: { kind: 'feature', shows: 'A moving mirror kept out of the captures that it reflects, so it does not paint itself into the probe.', tryThis: PLANNED_TRY, compare: 'Without exclude (the mirror paints itself in)' },
-    category: 'features', status: 'stable', tags: ['probes', 'exclude'], docs: 'concepts/reflection-probes', source: 'examples/features/probes/exclude', planned: true,
+    summary: 'bake({ exclude }): a moving mirror kept out of the live probe it reflects, so it does not paint itself onto the room.',
+    description:
+      'A mirror floor facing a patterned wall, a polished gold knot sliding in front of it, and the room\'s probe re-captured every frame so the reflections ' +
+      'follow the scene. Box projection paints what the probe saw onto the room\'s box: right for the wall and the floor, wrong for anything standing inside. ' +
+      '`probes.bake(renderer, scene, { exclude: [knot] })` hides the knot for the capture only; `userData.reflectionProbeExclude = true` does the same for every bake. ' +
+      'Screen-space reflections and rays still see it (the ssr/* pages); the probe is the fallback for what they miss.',
+    brief: {
+      kind: 'feature',
+      shows: 'Why moving mirrors are kept out of the probes: captured, the knot is painted onto the wall and the floor, and the mirror floor shows a second, smeared knot where none is.',
+      tryThis: ['Untick Exclude the mirror knot: a ghost knot slides across the floor\'s reflection of the wall', 'Untick Move, tick Show the probe and orbit: the ghost is the knot as seen from the capture point (the mirror sphere), painted onto the wall'],
+      compare: 'Without exclude: the knot is captured into the probe and painted onto the room',
+    },
+    category: 'features', status: 'stable', tags: ['probes', 'exclude', 'live capture'], docs: 'concepts/reflection-probes', source: 'examples/features/probes/exclude/main.ts',
   },
   {
     slug: 'ssr/mirror-floor',
