@@ -1319,6 +1319,15 @@ function f2Checks(r) {
       `wrong size: ${rh.wrongSize.threw ?? 'no error'}${rh.wrongSize.validationError ? ` (validation: ${rh.wrongSize.validationError.slice(0, 80)})` : ''}; missing: ${rh.missing.threw ?? 'no error'}`);
     check('rtHistory: no WebGPU errors', rh.gpuErrors.length === 0, rh.gpuErrors.slice(0, 2).join(' | '));
   }
+  // W97: traced hits read the base colour texture at the hit's uv (examples/regressions/src/rtTextures.ts)
+  const tx = section('rtTextures');
+  if (tx) {
+    const q = tx.quadrants;
+    check('rt: traced hits read their base colour texture (four quadrants of a canvas map, flipY, sRGB, x the material colour)',
+      q.length === 4 && q.every((x) => x.t > 2.9 && x.t < 3.1 && x.err < 0.02),
+      q.map((x) => `${x.quadrant} want ${x.want.join(',')} got ${x.got.join(',')}`).join('; '));
+    check('rtTextures: no WebGPU errors', tx.gpuErrors.length === 0, tx.gpuErrors.slice(0, 2).join(' | '));
+  }
   // W27 (D603): the composite's specular swap vs three's own term (examples/regressions/src/swap.ts)
   const sw = section('specularSwap');
   if (sw) {
@@ -1607,7 +1616,9 @@ async function ssrRtChecks(pages) {
   console.log('examples/ssr (?rt=1):');
   // probes at 128 px: the size W25 / W28 measured the hit-shading checks at (the page follows the
   // 256 px default since 443e35d; at 256 contact's D901 ratio reads 1.10 with @pmndrs/bvh, HANDOFF backlog)
-  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&probeRes=128`);
+  // rtCone=0.012: these checks hold traced-hit lighting (D901) and confidence, not texture LOD; the default cone (0.05, blur over
+  // flicker, maintainer 2026-11-27) reads textured hits softer and ~5 % brighter on contact (ratio 1.12 vs 1.07 at 0.012)
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&probeRes=128&rtCone=0.012`);
   pages.push(p);
   const before = results.logs.length;
   await p.T("window.__p.load('offscreen')");

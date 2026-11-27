@@ -15,8 +15,8 @@
 // - Vertex normals (the `normal` attribute, read the same way) shade traced hits (D1700); a
 //   geometry without them is shaded flat.
 import * as THREE from 'three/webgpu';
-import { BVH_TRIANGLE_MATERIAL_NONE, type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceScene } from '@pmndrs/reflections-core';
-import { defaultHitMaterial, hitMaterialSource, type HitMaterial, type HitMaterialSource } from './hitMaterial';
+import { BVH_TRIANGLE_MATERIAL_NONE, type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceScene, type BvhTraceTexture } from '@pmndrs/reflections-core';
+import { defaultHitMaterial, hitMaterialSource, textureMeanColor, textureTexels, type HitMaterial, type HitMaterialSource } from './hitMaterial';
 import { isMultiMaterial, triangleMaterialIndices } from './materialGroups';
 
 export interface TraceSceneFromObjectsOptions {
@@ -89,12 +89,44 @@ export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3
   const sources: ThreeBvhTraceScene['sources'] = [];
   const m = new THREE.Matrix4();
   // One entry per three material, unless a custom material function makes it per mesh and material.
+  // W97: base colour maps, decoded once per texture; the materials that use one, and the mesh trees that then need uvs
+  const textures: BvhTraceTexture[] = [];
+  const textureIds = new Map<THREE.Texture, number>();
+  const texturedMaterials = new Set<number>();
+  const textureOf = (t: THREE.Texture) => {
+    let id = textureIds.get(t);
+    if (id === undefined) {
+      const texels = textureTexels(t);
+      if (!texels) return undefined;
+      const wrap = t.wrapS === THREE.ClampToEdgeWrapping ? 'clamp' : t.wrapS === THREE.MirroredRepeatWrapping ? 'mirror' : 'repeat';
+      id = textures.length;
+      textures.push({ ...texels, colorSpace: t.colorSpace === THREE.SRGBColorSpace ? 'srgb' : 'linear', wrap, label: t.name || undefined });
+      textureIds.set(t, id);
+    }
+    return id;
+  };
+  const traceMaterial = (hm: HitMaterial): BvhTraceMaterial => {
+    const { map, ...m } = hm;
+    if (!map) return m;
+    const id = textureOf(map);
+    if (id !== undefined && map.colorSpace === THREE.SRGBColorSpace) return { ...m, baseColorTexture: id };
+    // not decodable (or a linear colour map, which the scene copy refuses for base colour): its mean, as before W97
+    const mean = textureMeanColor(map) ?? [1, 1, 1];
+    return { ...m, baseColor: m.baseColor?.map((c, i) => c * mean[i]) as [number, number, number] | undefined };
+  };
   const entry = (mesh: THREE.Mesh, source: HitMaterialSource) => {
     const key = options.material ? `${mesh.id}:${source.materialIndex}` : source.material ?? mesh;
     let id = materialIds.get(key);
-    if (id === undefined) { id = materials.length; materials.push(materialOf(mesh, source)); materialSources.push({ mesh, ...source }); materialIds.set(key, id); }
+    if (id === undefined) {
+      id = materials.length;
+      const m = traceMaterial(materialOf(mesh, source));
+      if (m.baseColorTexture !== undefined) texturedMaterials.add(id);
+      materials.push(m); materialSources.push({ mesh, ...source }); materialIds.set(key, id);
+    }
     return id;
   };
+  const meshGeometries: THREE.BufferGeometry[] = [];
+  const needUvs = new Set<number>();
   const visit = (o: THREE.Object3D) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh || !filter(mesh)) return;
@@ -124,8 +156,10 @@ export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3
         for (let t = 0; t < tri.length; t++) { const id = groups.get(tri[t]); if (id !== undefined) triangleMaterials[t] = id; }
       }
       meshes.push(triangleMaterials ? { ...input, triangleMaterials } : input);
+      meshGeometries.push(mesh.geometry);
       trees.set(signature, mi);
     }
+    if (texturedMaterials.has(material) || (groups && [...groups.values()].some((id) => texturedMaterials.has(id)))) needUvs.add(mi);
     const inst = mesh as THREE.InstancedMesh;
     if (inst.isInstancedMesh) {
       for (let i = 0; i < inst.count; i++) {
@@ -139,9 +173,26 @@ export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3
     }
   };
   for (const root of ([] as THREE.Object3D[]).concat(objects)) root.traverseVisible(visit);
+  // W97: uvs (three's, as they are: `textureTexels` flipped the rows to match) for the trees a textured material is drawn on
+  for (const mi of needUvs) {
+    const uv = meshGeometries[mi].getAttribute('uv') as THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined;
+    if (!uv || uv.count !== meshGeometries[mi].getAttribute('position').count) continue;
+    const uvs = new Float32Array(uv.count * 2);
+    for (let i = 0; i < uv.count; i++) { uvs[i * 2] = uv.getX(i); uvs[i * 2 + 1] = uv.getY(i); }
+    meshes[mi] = { ...meshes[mi], uvs };
+  }
+  // no textured mesh has uvs: the scene copy can't take textures; the maps' means instead
+  if (textures.length && !meshes.some((m) => m.uvs)) {
+    for (const id of texturedMaterials) {
+      const { baseColorTexture, ...m } = materials[id];
+      const mean = textureMeanColor([...textureIds].find(([, i]) => i === baseColorTexture)![0]) ?? [1, 1, 1];
+      materials[id] = { ...m, baseColor: m.baseColor?.map((c, i) => c * mean[i]) as [number, number, number] | undefined };
+    }
+    textures.length = 0;
+  }
   const materialIdOf = (mesh: THREE.Mesh, materialIndex = 0) => {
     const e = meshMaterials.get(mesh);
     return e && (e.groups?.get(materialIndex) ?? e.instance);
   };
-  return { scene: { meshes, instances, materials }, sources, materialSources, materialIdOf };
+  return { scene: { meshes, instances, materials, ...(textures.length ? { textures } : {}) }, sources, materialSources, materialIdOf };
 }
