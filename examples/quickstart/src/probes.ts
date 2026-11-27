@@ -8,6 +8,9 @@ import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { ReflectionProbe, ReflectionProbes, installCubeArraySupport, reflectionProbes } from '@pmndrs/reflections/three';
 import { createScene } from './scene';
+import { mountShell } from '../../shell'; // the examples' nav and info panel (not part of the quick start)
+
+mountShell('start/probes-only', { placement: 'inline' });
 
 const canvas = document.querySelector<HTMLCanvasElement>('#view')!;
 const status = document.querySelector<HTMLElement>('#status')!;

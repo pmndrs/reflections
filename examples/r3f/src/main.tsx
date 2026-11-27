@@ -13,6 +13,9 @@ import { createReflectionsRenderer } from '@pmndrs/reflections/three';
 // (`denoiser` ^2.0.0 from npm).
 import { FfxReflectionDenoiser } from 'denoiser/ffx';
 import { useReflections } from './useReflections';
+import { mountShell } from '../../shell'; // the examples' nav and info panel (not part of the example)
+
+mountShell('start/r3f');
 
 const q = new URLSearchParams(location.search);
 const Ffx = q.get('denoise') !== '0' ? FfxReflectionDenoiser : null;

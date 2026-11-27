@@ -4,58 +4,88 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>@pmndrs/reflections examples</title>
+  <meta name="description" content="Examples of @pmndrs/reflections: reflection probes, screen-space reflections and a ray-traced fallback on WebGPU.">
+  <link rel="icon" type="image/svg+xml" href="/shell/favicon.svg">
   <style>
-    :root { color-scheme: light dark; --bg: #fafafa; --fg: #1a1a1a; --muted: #666; --line: #ddd; --link: #0b5fff; }
-    @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; --muted: #999; --line: #333; --link: #7aa7ff; } }
-    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
-    main { max-width: 820px; margin: 0 auto; padding: 32px 16px; }
-    h1 { font-size: 22px; margin: 0 0 4px; }
-    p.lead { color: var(--muted); margin: 0 0 24px; }
-    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 28px 0 8px; }
-    ul { list-style: none; padding: 0; margin: 0; }
-    li { padding: 10px 0; border-top: 1px solid var(--line); }
-    a { color: var(--link); font-weight: 600; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    code { font-size: 13px; }
-    .d { color: var(--muted); }
+    :root { color-scheme: dark; --bg: #08090b; --panel: #0d0f13; --card: #111419; --line: #ffffff1a; --fg: #e6e6e6; --muted: #9aa0a8; --accent: #7aa7ff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    a { color: var(--accent); }
+    code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px; }
+    header.top { border-bottom: 1px solid var(--line); }
+    .top-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 60px; }
+    .brand { display: flex; align-items: center; gap: 10px; color: var(--fg); text-decoration: none; font-weight: 600; }
+    .brand img { width: 28px; height: 28px; }
+    .brand em { font-style: normal; color: var(--muted); font-weight: 400; }
+    .links { display: flex; gap: 4px; flex-wrap: wrap; }
+    .links a { color: var(--fg); text-decoration: none; padding: 6px 10px; border-radius: 999px; font-size: 14px; }
+    .links a:hover { background: #7aa7ff26; color: var(--accent); }
+    .intro { padding: 32px 0 8px; }
+    .intro h1 { font-size: 28px; line-height: 1.2; margin: 0 0 10px; }
+    .intro p { color: #cfd3d8; max-width: 760px; margin: 0 0 12px; }
+    .gpu { display: inline-flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; color: var(--muted); }
+    .gpu b { color: var(--fg); }
+    .gpu.bad { border-color: #ff6b6b66; color: #ffb3b3; }
+    .gpu .feat { padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); font-size: 11px; }
+    .gpu .feat.on { color: #9be39b; } .gpu .feat.off { color: #777; text-decoration: line-through; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 20px 0 4px; font-size: 13px; color: var(--muted); }
+    .controls label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+    section.cat { padding: 20px 0 8px; }
+    section.cat h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 2px; }
+    section.cat > p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .card { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; color: var(--fg); text-decoration: none; transition: border-color .15s, transform .15s; }
+    a.card:hover { border-color: #7aa7ff80; transform: translateY(-1px); }
+    .card.unavailable, .card.planned { opacity: .55; }
+    .thumb { position: relative; aspect-ratio: 16 / 9; background: #000; }
+    .thumb img, .thumb svg { width: 100%; height: 100%; display: block; object-fit: cover; }
+    .badge { position: absolute; top: 8px; left: 8px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: #000b; border: 1px solid currentColor; }
+    .badge.experimental { color: #ffc35a; } .badge.research { color: #c9a7ff; } .badge.planned { color: #9aa0a8; }
+    .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+    .body h3 { margin: 0; font-size: 15px; }
+    .body p { margin: 0; color: #c3c8ce; font-size: 13px; line-height: 1.45; }
+    .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; padding-top: 4px; }
+    .tags span { font-size: 11px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+    .tags span.mark { color: #ffc35a; border-color: #ffc35a55; }
+    .warn { font-size: 12px; color: #ffb3b3; }
+    .note { border-left: 3px solid var(--line); padding: 4px 12px; color: var(--muted); font-size: 13px; margin: 16px 0; }
+    footer { border-top: 1px solid var(--line); margin-top: 32px; padding: 20px 16px 48px; color: var(--muted); font-size: 13px; }
+    footer p { margin: 0 0 8px; }
   </style>
 </head>
 <body>
-<main>
-  <h1>@pmndrs/reflections examples</h1>
-  <p class="lead">Each page also accepts <code>?manual</code> (render loop stopped). See <code>docs/HANDOFF.md</code> for status.</p>
+  <header class="top">
+    <div class="wrap top-row">
+      <a class="brand" href="./"><img src="/shell/favicon.svg" alt=""><span>@pmndrs/reflections <em>examples</em></span></a>
+      <nav class="links" aria-label="Project links">
+        <a id="docs-link" href="../">Docs</a>
+        <a href="https://github.com/pmndrs/reflections">GitHub</a>
+        <a href="https://www.npmjs.com/package/@pmndrs/reflections">npm</a>
+      </nav>
+    </div>
+  </header>
 
-  <h2>Start here</h2>
-  <ul>
-    <li><a href="quickstart/">quickstart</a> — the smallest complete page: a three.js scene (glossy floor, PBR objects, room environment) with reflections from one <code>Reflections.create()</code>; screen space, a baked probe, the denoiser. <span class="d"><code>?rt=1</code> ray-traced fallback, <code>?preset=performance</code>, <code>?denoise=0</code>. Probes only (the cheapest path): <a href="quickstart/probes.html">quickstart/probes.html</a>.</span></li>
-    <li><a href="r3f/">r3f</a> — the same scene in React Three Fiber v10 (WebGPURenderer): a <code>useReflections()</code> hook over <code>Reflections</code>. <span class="d">Same query keys.</span></li>
-  </ul>
+  <main class="wrap">
+    <section class="intro">
+      <h1>Reflections for WebGPU</h1>
+      <p>Reflection probes, screen-space reflections and a ray-traced fallback, composed per pixel and denoised. The core is engine-agnostic; three.js is the main adapter, with Babylon.js and pixi.js beside it. Each example is one page with its source on GitHub and an info panel that says what to look at.</p>
+      <div id="gpu" class="gpu" role="status">Checking WebGPU…</div>
+      <p class="note">These pages need a browser with WebGPU (current Chrome or Edge, Safari 26+, Firefox 141+ on Windows). Pages marked <em>streams models</em> load Khronos sample models from a CDN; the first load is a few tens of MB.</p>
+    </section>
 
-  <h2>Demos</h2>
-  <ul>
-    <li><a href="showcase/">showcase</a> — start here: the whole pipeline on real assets (car concept, toy car, chess set on a mirror floor; Sponza with a polished floor). Probes, SSR, ray-traced fallback and denoising as toggles, an off baseline, debug views, GPU ms. <span class="d">Needs <code>pnpm assets</code>. <code>?scene=carConcept|toyCar|chess|sponza</code>, <code>?rt=1</code>, <code>?denoise=0</code>, <code>?off</code>.</span></li>
-    <li><a href="showcase/bench.html">showcase/bench</a> — the tuning bench: every setting (SSR, ray tracing, hybrid, denoiser, probes, AA / upscaler, specAA, scene, three's SSR) on one panel, two methods side by side (ours, three SSR ± its denoisers, path traced, probes only) as a split, side by side or a difference heat map, Measure vs the path tracer per region (drag to add one), copy as code. Every setting with its default, trade-off and GPU cost: <a href="https://github.com/pmndrs/reflections/blob/main/docs/SETTINGS.md">docs/SETTINGS.md</a>. <span class="d">Needs <code>pnpm assets</code> (the path tracer and three's FFX need the sibling Denoiser repo). <code>?scene=carConcept&amp;pose=w50&amp;left=ours-rt&amp;right=pathtraced</code>.</span></li>
-    <li><a href="ssr/">ssr</a> — screen-space reflections in three on the scene kit. <span class="d"><code>?scene=mirrorWall|offscreen|contact|roughnessRamp|boxRoom|moving|explainer|rooms|facingMirrors</code>, <code>?rt=1</code> ray-traced misses, <code>?hit=final</code> mirrors-in-mirrors, <code>?probes=0</code>.</span></li>
-    <li><a href="probes/">probes</a> — live reflection probes: a spinning torus and a colour-cycling light, re-captured every frame. Same API as three.js #35046 (built alongside Ben Houston). <code>?static</code> to freeze. <span class="d"><code>?grid</code> for the test grid, <code>?refit</code> for LightProbeGrid re-fit.</span></li>
-    <li><a href="probes/">probes</a> — reflection probes (three #35046 API) in Ben's rooms. <span class="d"><code>?grid</code> for the test grid, <code>?refit</code> for LightProbeGrid re-fit.</span></li>
-    <li><a href="babylon/">babylon</a> — mirrorWall on Babylon.js (WebGPUEngine) through <code>@pmndrs/reflections/babylon</code>: core SSR + probe set on Babylon's device, frame-graph composite. <span class="d"><code>?ssr=0</code>, <code>?probes=0</code>, <code>?view=…</code>, <code>?variant=workgroup</code>.</span></li>
-    <li><a href="pixi3d/arcade/">pixi3d/arcade</a> — a neon arcade built with pixi-3d (<code>@pixi/3d</code>, closed beta) through <code>@pmndrs/reflections/pixi</code>: pixi Text and Graphics as <code>ContainerTexture</code>s on 3-D planes, pixi-3d's depth and motion plus one G-buffer pass, core SSR + probes on pixi's device, composited by a pixi <code>Filter</code>. Without the beta in <code>examples/pixi3d/vendor/</code> it shows the setup notice (<a href="https://github.com/pmndrs/reflections/blob/main/examples/pixi3d/README.md">README</a>). <span class="d"><code>?ssr=0</code>, <code>?probes=0</code>, <code>?denoise=0</code>, <code>?view=…</code>, <code>?variant=workgroup</code>, <code>?manual</code>.</span></li>
-    <li><a href="scenes/">scenes</a> — the scene kit and every G-buffer target (depth, normal, roughness, motion, scene colour without specular). <span class="d"><code>?scene=…</code></span></li>
-  </ul>
+    <div class="controls" aria-label="Filter examples">
+      <label><input id="show-planned" type="checkbox"> Show planned pages</label>
+      <span id="counts"></span>
+    </div>
 
-  <h2>Core (raw WebGPU, no three)</h2>
-  <ul>
-    <li><a href="sssr-core/">sssr-core</a> — the screen-space tracer on exact analytic inputs, with debug views and variant parity.</li>
-    <li><a href="probe-core/">probe-core</a> — the core probe set and its radiance fallback.</li>
-    <li><a href="bc6h/">bc6h</a> — the BC6H GPU encoder against the hardware decoder.</li>
-  </ul>
+    <div id="sections"></div>
+  </main>
 
-  <h2>Benches and tests</h2>
-  <ul>
-    <li><a href="probe-bench/">probe-bench</a> — probe layout × format bench (cube array, 2D array, octahedral; rgba16f, rgb9e5, rg11b10, BC6H).</li>
-    <li><a href="ssr-bench/">ssr-bench</a> — ours vs three r187's SSRNode (± its denoiser): error, flicker, GPU ms.</li>
-    <li><a href="regressions/">regressions</a> — GPU repros of review bugs, each failing before its fix.</li>
-  </ul>
-</main>
+  <footer class="wrap">
+    <p>MIT licensed. Part of <a href="https://pmnd.rs">Poimandres</a>. Settings and their costs: <a id="settings-link" href="../reference/settings">the settings reference</a>.</p>
+    <p>Credits: models from the <a href="https://github.com/KhronosGroup/glTF-Sample-Assets">Khronos glTF Sample Assets</a>: Sponza (Crytek, CC-BY 3.0), CarConcept and ABeautifulGame (CC-BY 4.0), ToyCar, FlightHelmet and MetalRoughSpheres (CC0). HDRIs from <a href="https://polyhaven.com">Poly Haven</a> (CC0).</p>
+  </footer>
+  <script type="module" src="/gallery.ts"></script>
 </body>
 </html>

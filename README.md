@@ -125,7 +125,7 @@ pnpm assets      # Khronos sample models + two Poly Haven HDRIs into examples/as
 pnpm examples    # then open http://127.0.0.1:5370/quickstart/
 ```
 
-[`examples/quickstart`](examples/quickstart/) is the smallest complete page (and `probes.html` beside it, probes only); [`examples/r3f`](examples/r3f/) is the same in React Three Fiber. [`examples/showcase`](examples/showcase/) is the whole pipeline on real assets: pick a scene (a car concept, a toy car and a chess set on a mirror floor in a studio HDRI, or Sponza with a polished floor) and switch the sources on and off: probes, screen-space reflections, the ray-traced fallback and the denoiser, with debug views and GPU ms per pass. Every setting, its default and its cost is in [docs/SETTINGS.md](docs/SETTINGS.md). Every page is listed in [`examples/index.html`](examples/index.html).
+[`examples/quickstart`](examples/quickstart/) is the smallest complete page (and `probes.html` beside it, probes only); [`examples/r3f`](examples/r3f/) is the same in React Three Fiber. [`examples/showcase`](examples/showcase/) is the whole pipeline on real assets: pick a scene (a car concept, a toy car and a chess set on a mirror floor in a studio HDRI, or Sponza with a polished floor) and switch the sources on and off: probes, screen-space reflections, the ray-traced fallback and the denoiser, with debug views and GPU ms per pass. Every setting, its default and its cost is in [docs/SETTINGS.md](docs/SETTINGS.md). Every page is listed once in [`examples/catalog.ts`](examples/catalog.ts), which the gallery at the examples server's root is built from.
 
 ## Sibling libraries
 

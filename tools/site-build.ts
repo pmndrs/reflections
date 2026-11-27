@@ -24,7 +24,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ASSETS } from '../scripts/fetch-assets.mjs';
@@ -89,9 +89,9 @@ for (const a of shipped) {
 const manifest = ASSETS.filter((a) => !a.devOnly).map(({ dir, file, license }) => ({ dir, file, license, devOnly: false }));
 writeFileSync(join(assetsOut, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
-// 4. the examples' landing page (the showcase keeps its links to compare.html and bench.html: both ship since W89)
+// 4. the examples' landing page is the gallery (examples/index.html + gallery.ts, from examples/catalog.ts), built by Vite in
+// step 2; it links the docs as `../` (W92: it replaced tools/site-index.html).
 const docsHref = `${basePath}/`;
-writeFileSync(join(dist, 'index.html'), readFileSync(join(ROOT, 'tools/site-index.html'), 'utf8').replaceAll('__DOCS__', docsHref));
 
 // 5. GitHub Pages: no Jekyll
 writeFileSync(join(out, '.nojekyll'), '');

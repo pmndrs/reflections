@@ -1,15 +1,12 @@
 import { dirname, resolve } from 'path';
-import { readdirSync, existsSync, readFileSync, realpathSync } from 'fs';
+import { existsSync, readFileSync, realpathSync } from 'fs';
 import { defineConfig } from 'vite';
+import { builtExamples, htmlPath, inputName } from './catalog';
 
-// Examples dev server: http://127.0.0.1:5370/<name>/ ($REFLECTIONS_PORT overrides; worktrees use their own) for each examples/<name>/index.html.
+// Examples dev server: http://127.0.0.1:5370/<path> ($REFLECTIONS_PORT overrides; worktrees use their own) for every page in
+// examples/catalog.ts; `/` is the gallery (index.html + gallery.ts, generated from the catalog).
 // The package is resolved to its source, so edits under packages/ show up without a build.
 const root = __dirname;
-const pages = Object.fromEntries(
-  readdirSync(root, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && existsSync(resolve(root, d.name, 'index.html')))
-    .map((d) => [d.name, resolve(root, d.name, 'index.html')]),
-);
 
 // pixi-3d (`@pixi/3d`) is in closed beta: not on npm, and its code and builds must stay inside the
 // beta, so this repo never commits or bundles it. Its examples (examples/pixi3d/<name>/) run against
@@ -18,21 +15,19 @@ const pages = Object.fromEntries(
 // also what CI and a public build get. The upscaler repo's split, copied.
 const pixi3dVendor = resolve(root, 'pixi3d/vendor');
 const hasPixi3d = existsSync(resolve(pixi3dVendor, 'package.json'));
-const pixi3dDir = resolve(root, 'pixi3d');
-if (existsSync(pixi3dDir)) {
-  for (const d of readdirSync(pixi3dDir, { withFileTypes: true })) {
-    if (d.isDirectory() && existsSync(resolve(pixi3dDir, d.name, 'index.html'))) pages[`pixi3d-${d.name}`] = resolve(pixi3dDir, d.name, 'index.html');
-  }
-}
 
 // The denoiser (`denoiser` 2.x on npm: `denoiser/ffx`, `denoiser/three`, OIDN at its root) and `@pmndrs/raytracer`
 // are devDependencies (W89): no sibling checkout. The OIDN weights (.tza) load from the denoiser's default
 // `DEFAULT_TZA_URL` (a pinned CDN copy of the upstream weights).
-// The public site build (tools/site-build.ts, EXAMPLES_SITE=1) leaves out pixi (a redirect), nrc (the private pathtracer
-// bench, below) and the closed pixi-3d beta. The showcase's compare and bench pages ship (W89: their path tracer and OIDN
-// come from npm now).
+// The build inputs are the gallery and the catalog's built pages (W92). The public site build (tools/site-build.ts,
+// EXAMPLES_SITE=1) leaves out the catalog's `devOnly` pages (the closed pixi-3d beta; nrc, the private pathtracer bench,
+// below) and the old pixi redirect. The showcase's compare and bench pages ship (W89: their path tracer and OIDN come from npm).
 const siteBuild = process.env.EXAMPLES_SITE === '1';
-if (siteBuild) for (const k of Object.keys(pages)) if (k === 'pixi' || k === 'nrc' || k.startsWith('pixi3d-')) delete pages[k];
+const pages: Record<string, string> = {
+  index: resolve(root, 'index.html'),
+  ...Object.fromEntries(builtExamples(siteBuild).map((e) => [inputName(e), resolve(root, htmlPath(e))])),
+  ...(siteBuild ? {} : { pixi: resolve(root, 'pixi/index.html') }), // a redirect to pixi3d/arcade/ for old links
+};
 
 // The compare / bench pages' path-traced reference is @pmndrs/pathtracer from npm (W89; a devDependency), like the
 // raytracer: nothing to resolve here.
@@ -100,7 +95,7 @@ export default defineConfig({
     port: Number(process.env.REFLECTIONS_PORT ?? 5370), strictPort: true, host: '127.0.0.1',
     fs: { allow: [resolve(root, '..'), ...(nrcRoot ? [nrcRoot] : [])] },
   },
-  define: { __NRC_AVAILABLE__: JSON.stringify(!!nrcRoot) },
+  define: { __NRC_AVAILABLE__: JSON.stringify(!!nrcRoot), __EXAMPLES_SITE__: JSON.stringify(siteBuild) },
   resolve: {
     alias: [
       ...(hasPixi3d
@@ -117,5 +112,5 @@ export default defineConfig({
       nrcRoot ? { find: /^@nrc-bench\//, replacement: resolve(nrcRoot, 'bench') + '/' } : { find: /^@nrc-bench\/.*$/, replacement: resolve(root, 'shared/nrc-missing.ts') },
     ],
   },
-  build: { target: 'esnext', outDir: resolve(root, process.env.EXAMPLES_OUT ?? 'dist'), emptyOutDir: true, rollupOptions: { input: { ...pages, 'quickstart-probes': resolve(root, 'quickstart/probes.html'), 'showcase-compare': resolve(root, 'showcase/compare.html'), 'showcase-bench': resolve(root, 'showcase/bench.html') } } },
+  build: { target: 'esnext', outDir: resolve(root, process.env.EXAMPLES_OUT ?? 'dist'), emptyOutDir: true, rollupOptions: { input: pages } },
 });
