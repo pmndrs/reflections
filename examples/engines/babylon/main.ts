@@ -6,8 +6,8 @@
 //   reflectivity, linear velocity) -> FrameGraphReflectionsTask -> FrameGraphReflectionsCompositeTask -> ACES -> canvas
 //
 // What the Babylon adapter does not have (docs/site/guides/adapters.mdx): the ray-traced fallback, the denoiser, presets
-// and the hybrid resolve. Without a denoiser, the glossy floor shows the tracer's raw samples. Babylon's materials do not
-// sample the probes either, so the rooms have no bounce light (three's do, from the probes' irradiance).
+// and the hybrid resolve. Without a denoiser, the glossy floor shows the tracer's raw samples. The bounce light (diffuse IBL)
+// comes from the probes too: `probeIrradiance(material, probes)` runs core's probe lookup inside Babylon's PBR shader.
 //
 // Babylon's world is left-handed: the rooms are built with x negated (L()), so the image is three's, not its mirror.
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera.js';
@@ -38,8 +38,8 @@ import { Scene } from '@babylonjs/core/scene.js';
 import '@babylonjs/core/Engines/WebGPU/Extensions/index.js';
 import '@babylonjs/core/Rendering/geometryBufferRendererSceneComponent.js';
 import {
-  BabylonProbeSet, COMPOSITE_VIEWS, FrameGraphReflectionsCompositeTask, FrameGraphReflectionsTask, ScreenSpaceReflections, getDevice, stripSpecularIBL,
-  type CompositeView,
+  BabylonProbeSet, COMPOSITE_VIEWS, FrameGraphReflectionsCompositeTask, FrameGraphReflectionsTask, ScreenSpaceReflections, getDevice, probeIrradiance,
+  stripSpecularIBL, type CompositeView,
 } from '@pmndrs/reflections/babylon';
 import { mountShell } from '../../shell';
 
@@ -154,6 +154,8 @@ async function main() {
     { position: [-4, 2.3, 0], influenceSize: [8.4, 5.8, 8.4], projectionSize: [8, 5, 8], projectionOffset: [0, 0.2, 0], originOffset: [0, 0.2, 0], renderList: captured },
     { position: [0, 1.6, 0], influenceSize: [2.4, 4.4, 2.5], projectionSize: [16, 3.8, 8], projectionOffset: [0, 0.3, 0], originOffset: [0, 0.3, 0], renderList: captured },
   ]);
+  // Bounce light: every PBR material takes its diffuse IBL from the probes (three's materials do, through scene.environmentNode).
+  for (const m of scene.materials) if (m instanceof PBRMaterial) probeIrradiance(m, probes);
   // No denoiser in this adapter: a fixed blue-noise pattern (frameIndex) keeps the glossy floor's samples from flickering.
   const ssr = new ScreenSpaceReflections({ engine, probes, settings: { frameIndex: 0 } });
 
