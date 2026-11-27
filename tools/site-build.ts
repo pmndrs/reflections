@@ -46,7 +46,8 @@ const run = (cmd: string, args: string[], env: Record<string, string | undefined
     }
 };
 
-// 1. docs + api
+// 1. docs + api (the examples page is written from the catalog first)
+run('node', ['tools/examples-doc.ts']);
 run('node', ['tools/docs-site.ts', out], { BASE_PATH: basePath || undefined });
 
 // 2. examples (EXAMPLES_SITE=1: leaves out the pages that need the pixi-3d beta or the private pathtracer bench)
