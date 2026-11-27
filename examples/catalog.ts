@@ -352,28 +352,62 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     slug: 'rt/fallback',
     path: 'features/rt/fallback/',
     title: 'Ray-traced fallback',
-    summary: 'Rays fill what screen space misses.',
-    description: 'Planned (E2).',
-    brief: { kind: 'feature', shows: 'The ray-traced fallback: rays against a BVH for the pixels screen space could not resolve.', tryThis: PLANNED_TRY, compare: '`rayTracing` off' },
-    category: 'features', status: 'experimental', tags: ['ray tracing'], docs: 'concepts/ray-traced-fallback', source: 'examples/features/rt/fallback', planned: true,
+    summary: 'Rays fill what screen space misses: reflections of things above the frame and behind the camera.',
+    description:
+      'The wall mirror faces the camera, so it shows what is behind it: a wall of coloured bars, a glow sphere, and the backs of the cylinder and the box. ' +
+      'Screen space cannot see any of that, and the floor near the camera reflects a ring above the frame. `Reflections.create(renderer, scene, { probes, rayTracing: true, denoiser })` builds a BVH over every visible mesh once ' +
+      '(`@pmndrs/raytracer` and `@pmndrs/bvh`, optional peers) and traces a ray for each pixel screen space misses; hits are lit from the probes and the ' +
+      'sun. `reflections.ssr.rayTracing` switches it at run time. Where the device cannot fit the traced pass, it turns itself off with one warning and ' +
+      '`reflections.ssr.traceError` says why (shown in the status line); screen space and the probes carry on.',
+    brief: {
+      kind: 'feature',
+      shows: 'What the ray-traced fallback adds over screen space + probes: sharp reflections of things off the screen, in the right place, including objects the probe never captured.',
+      tryThis: ['Untick Ray-traced fallback and watch the wall mirror: the cylinder and the box vanish from it (the probe never saw them) and the bars go soft', 'Switch the view to Wall mirror and toggle again', 'Show where each pixel\'s reflection comes from: blue is a traced ray, green screen space, red the probe'],
+      compare: 'Ray-traced fallback off (`reflections.ssr.rayTracing = false`): the misses take the probe',
+    },
+    category: 'features', status: 'experimental', tags: ['ray tracing', 'probes', 'denoiser'], docs: 'concepts/ray-traced-fallback', source: 'examples/features/rt/fallback/main.ts',
+    check: { wait: 3000 },
   },
   {
     slug: 'rt/animated',
     path: 'features/rt/animated/',
     title: 'Ray tracing moving meshes',
-    summary: 'trace.refit() each frame keeps the BVH on moving meshes.',
-    description: 'Planned (E2).',
-    brief: { kind: 'feature', shows: 'Moving meshes in the ray-traced fallback: the BVH refitted every frame.', tryThis: PLANNED_TRY, compare: 'Refit off (stale reflections)' },
-    category: 'features', status: 'experimental', tags: ['ray tracing', 'refit'], docs: 'concepts/ray-traced-fallback', source: 'examples/features/rt/animated', planned: true,
+    summary: 'reflections.trace.refit() each frame keeps the ray-traced reflections of moving meshes where the meshes are.',
+    description:
+      'A knot slides and turns and a ball bounces over a mirror floor. Screen space reflects what the camera sees of them; the rest (their undersides, parts ' +
+      'hidden or off screen) comes from rays against the BVH that `Reflections.create(..., { rayTracing: true })` builds once, from the meshes as they are. ' +
+      'Each frame the page moves the meshes, calls `scene.updateMatrixWorld()`, then `reflections.trace.refit()`, which copies every traced mesh\'s world matrix ' +
+      'into the BVH. **Refit covers rigid motion** (position, rotation, scale, instanced matrices), not changed geometry: skinned or morphing meshes and edited ' +
+      'vertices need a new build. The moving meshes are kept out of the probe (`userData.reflectionProbeExclude`), or it would hold their first pose.',
+    brief: {
+      kind: 'feature',
+      shows: 'Why moving meshes need `trace.refit()` each frame: without it the rays still hit them where they stood at load, so their reflections lag or ghost.',
+      tryThis: ['Untick Refit: the traced part of the knot\'s and the ball\'s reflections stays where they started', 'Show traced pixels: those are the ones a stale BVH gets wrong', 'Untick Animate to hold a pose and compare'],
+      compare: 'Refit off: the BVH keeps the pose it was built with (stale reflections)',
+    },
+    category: 'features', status: 'experimental', tags: ['ray tracing', 'refit', 'animation'], docs: 'concepts/ray-traced-fallback', source: 'examples/features/rt/animated/main.ts',
+    check: { wait: 3000 },
   },
   {
     slug: 'hybrid/explained',
     path: 'features/hybrid/explained/',
     title: 'The hybrid, explained',
-    summary: 'Probe, screen space, rays and the composite side by side, with the per-pixel source map.',
-    description: 'Planned (E2): rebuilds the denoiser repo\'s reflections-hybrid page on our pipeline.',
-    brief: { kind: 'educational', shows: 'How the hybrid resolve picks a source per pixel: screen space where it hits, rays where it misses, the probe where neither reaches.', tryThis: PLANNED_TRY, compare: 'Each source alone' },
-    category: 'features', status: 'stable', tags: ['hybrid', 'source map'], docs: 'concepts/hybrid-resolve', source: 'examples/features/hybrid/explained', planned: true,
+    summary: 'Probe, screen space, rays and the hybrid in one room: where each is right, where it breaks, and which source each pixel took.',
+    description:
+      'The teaching page, rebuilt from the denoiser repo\'s reflections-hybrid page on this package\'s pipeline. One `Reflections.create(renderer, scene, ' +
+      '{ probes, rayTracing: true, denoiser })` over the `explainer` room; each method is a setting on it: **probe only** is three\'s lit image with the probe ' +
+      'as its environment, **screen space + probe** is `reflections.ssr.rayTracing = false`, **rays, every pixel** sends every pixel to the ray-traced pass, ' +
+      'and the **hybrid** is the default. Seven situations (a mirror, off the top of the screen, things that move, contact, rough surfaces, the source map, ' +
+      'explore) set the camera and name the two methods worth comparing. The source map is `HybridReflections.sourceIndex` of the composite. ' +
+      'The turning sculpture is refitted into the BVH each frame (`reflections.trace.refit()`).',
+    brief: {
+      kind: 'educational',
+      shows: 'How the hybrid picks a source per pixel: screen space where it hits, rays where it misses, the prefiltered probe for rough surfaces, and why each alone falls short.',
+      tryThis: ['Step through the situations and switch between the two methods under the image', 'Show "where reflections come from" and tilt the view down at the floor', 'Drag the roughness cutoff to 1 in "Rough surfaces"'],
+      compare: 'Each source alone: probe only, screen space + probe, rays for every pixel (the switch under the image, or "Reflections from")',
+    },
+    category: 'features', status: 'stable', tags: ['hybrid', 'source map', 'probes', 'ssr', 'ray tracing', 'denoiser'], docs: 'concepts/hybrid-resolve', source: 'examples/features/hybrid/explained/main.ts',
+    check: { wait: 3000 },
   },
   {
     slug: 'denoise/glossy',
