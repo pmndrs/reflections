@@ -343,7 +343,7 @@ async function main() {
     const A = await capture(main), B = await capture(b);
     const res = {
       variants: [main.variant, b.variant],
-      settings: { minTraversalOccupancy: s.minTraversalOccupancy ?? 4, samplesPerQuad: s.samplesPerQuad ?? 1 },
+      settings: { minTraversalOccupancy: s.minTraversalOccupancy ?? 0, samplesPerQuad: s.samplesPerQuad ?? 1 },
       rays: [A.counter[1], B.counter[1]], tiles: [A.counter[3], B.counter[3]], misses: [A.missCounter[1], B.missCounter[1]],
       rayListSame: A.counter[1] === B.counter[1] && sameSorted(A.rays, B.rays),
       tileListSame: A.counter[3] === B.counter[3] && sameSorted(A.tiles, B.tiles),

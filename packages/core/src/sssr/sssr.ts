@@ -261,7 +261,12 @@ export interface ScreenSpaceReflectionsSettings {
   samplesPerQuad?: 1 | 2 | 4;
   /** Default 128. */
   maxTraversalIntersections?: number;
-  /** Glossy rays stop once this few invocations of their subgroup (workgroup in the fallback) still march. Mirrors ignore it. Default 4. */
+  /**
+   * Glossy rays stop once this few invocations of their subgroup (workgroup in the fallback) still march (FFX's
+   * early exit, FFX's value 4). Mirrors ignore it. Default 0 (W101, D5560): every glossy ray marches to its end. Which
+   * rays share a subgroup follows the ray list's atomic append order, which changes every dispatch, so with the exit
+   * a still frame traces differently each time (rest flicker); 0 costs intersect +0.05-0.14 ms at 1080p.
+   */
   minTraversalOccupancy?: number;
   /**
    * Hit acceptance thickness (view-space units, = world units when the view matrix has no scale).
@@ -944,7 +949,7 @@ export function createScreenSpaceReflections(device: GPUDevice, options: ScreenS
     f[108] = s.varianceThreshold ?? 0;
     u[109] = s.frameIndex ?? frameIndex;
     u[110] = s.maxTraversalIntersections ?? 128;
-    u[111] = s.minTraversalOccupancy ?? 4;
+    u[111] = s.minTraversalOccupancy ?? 0; // W101 (D5560): FFX's early exit (4) off by default
     u[112] = s.mostDetailedMip ?? 0;
     u[113] = s.samplesPerQuad ?? 1;
     u[114] = inputs.variance && (s.temporalVarianceGuidedTracing ?? true) ? 1 : 0;
