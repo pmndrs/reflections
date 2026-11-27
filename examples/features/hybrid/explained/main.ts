@@ -9,7 +9,7 @@
 //   hybrid  the default: probe above the roughness cutoff, below it screen space, a ray where screen space misses
 //
 // The source map is `HybridReflections.sourceIndex(composite, roughnessThreshold)`: what answered each pixel this frame.
-// What changed from the denoiser page, and why: docs/DIVERGES.md (D-W94).
+// What changed from the denoiser page, and why: docs/DIVERGES.md (D5510).
 import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { float, renderOutput, uniform, vec3, vec4 } from 'three/tsl';
