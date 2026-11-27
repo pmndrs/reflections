@@ -116,7 +116,7 @@ E2 and E3 start once E1 is merged. Each wave logs in `docs/HANDOFF.md`; divergen
   the public site (pixi3d/arcade: the closed beta; nrc: a private checkout). `check: { query, wait, image, thumbQuery }` tunes the
   headless load.
 - **Paths.** Existing pages keep theirs; where the plan says `rebuild`, the entry points at the existing page until the rebuild
-  (`probes/live` = `probes/`, `engines/babylon` = `babylon/`, `engines/pixi` = `pixi3d/arcade/`). A new page lives at
+  (`engines/babylon` = `babylon/`, `engines/pixi` = `pixi3d/arcade/`; `probes/live` was `probes/` until W93 rebuilt it at `features/probes/live/`, and `probes/` stays as the lab entry `probes`). A new page lives at
   `examples/<category>/<slug without its category prefix>/`: `probes/box-projection` is
   `examples/features/probes/box-projection/`, `engines/three` is `examples/engines/three/`. The catalog test enforces it for
   planned entries.

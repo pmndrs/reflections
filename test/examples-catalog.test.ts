@@ -38,9 +38,9 @@ describe('examples catalog', () => {
     });
   }
 
-  // probes/live and engines/babylon get the shell when they are rebuilt (E2, E4); the lab and the pixi beta page keep their own UI
+  // engines/babylon gets the shell when it is rebuilt (E4); the lab and the pixi beta page keep their own UI
   it('built pages outside the lab mount the shell with their own slug', () => {
-    const shelled = builtExamples().filter((e) => e.category !== 'lab' && !e.devOnly && e.slug !== 'probes/live' && e.slug !== 'engines/babylon');
+    const shelled = builtExamples().filter((e) => e.category !== 'lab' && !e.devOnly && e.slug !== 'engines/babylon');
     for (const e of shelled) {
       const src = resolve(EXAMPLES_DIR, '..', e.source);
       const files = src.endsWith('.ts') || src.endsWith('.tsx') ? [src] : [resolve(src, 'main.tsx'), resolve(src, 'main.ts')].filter(existsSync);
