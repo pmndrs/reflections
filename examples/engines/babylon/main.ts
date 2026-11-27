@@ -172,7 +172,7 @@ async function main() {
     const clear = new FrameGraphClearTextureTask('clear', graph);
     Object.assign(clear, { targetTexture: color, depthTexture: depth, color: scene.clearColor, clearColor: true, clearDepth: true });
     graph.addTask(clear);
-    const shadows = lights.filter(() => new URLSearchParams(location.search).get('shadows') !== '0').map((light, i) => {
+    const shadows = lights.map((light, i) => {
       const task = new FrameGraphShadowGeneratorTask(`shadows ${i}`, graph!);
       Object.assign(task, { light, camera, mapSize: 256, objectList: { meshes: casters, particleSystems: [] }, filter: ShadowGenerator.FILTER_POISSONSAMPLING, bias: 0.002, normalBias: 0.02 });
       graph!.addTask(task);
@@ -198,7 +198,7 @@ async function main() {
     trace.reflectivityTexture = geometry.geometryReflectivityTexture;
     trace.velocityTexture = geometry.geometryLinearVelocityTexture;
     graph.addTask(trace);
-    const debugView = composite?.debugView ?? Math.max(0, COMPOSITE_VIEWS.indexOf((new URLSearchParams(location.search).get('debug') ?? 'final') as CompositeView));
+    const debugView = composite?.debugView ?? Math.max(0, COMPOSITE_VIEWS.indexOf((new URLSearchParams(location.search).get('debug') ?? 'final') as CompositeView)); // ?debug=<view>
     composite = new FrameGraphReflectionsCompositeTask('composite', graph, scene);
     composite.debugView = debugView;
     composite.camera = camera;
@@ -244,6 +244,7 @@ async function main() {
   viewSelect.onchange = () => setView(viewSelect.value);
   setView('default');
   for (const v of COMPOSITE_VIEWS) debugSelect.append(new Option(v, v));
+  debugSelect.value = COMPOSITE_VIEWS[composite!.debugView];
   debugSelect.onchange = () => composite!.setView(debugSelect.value as CompositeView);
 
   let time = 0;

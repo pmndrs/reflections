@@ -3513,17 +3513,35 @@ async function engineChecks() {
       check(`engines ${name}: loads, shoots every view, no errors`, errors.length === 0, errors.slice(0, 3).join(' | '));
     } finally { p.close(); }
   }
-  // per-channel difference to three (decoded in a scratch page)
+  // per-channel difference to three (decoded in a scratch page). Whole image: the stated bound per engine (r3f is three;
+  // core's renderer lights a little brighter; Babylon's materials get no bounce light, D in the brief). Screen space alone:
+  // what turning it on adds, (on - off), against three's (on - off): the reflections' own difference.
+  if (!shots.three) return;
+  const BOUND = { r3f: 1, core: 16, babylon: 64 };
+  const SSR_BOUND = { r3f: 0.5, core: 2, babylon: 2 };
+  const DELTA = `async (a0, a1, b0, b1) => {
+    const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+    const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+    const [A0, A1, B0, B1] = await Promise.all([a0, a1, b0, b1].map(px));
+    let s = 0, sa = 0, sb = 0, n = 0;
+    for (let k = 0; k < A0.length; k++) { if ((k & 3) === 3) continue; const da = A1[k] - A0[k], db = B1[k] - B0[k]; s += Math.abs(da - db); sa += Math.abs(da); sb += Math.abs(db); n++; }
+    return { mean: s / n, three: sa / n, other: sb / n };
+  }`;
   const p = await openPage(`http://127.0.0.1:${PORT}/engines/three/?thumb`);
   try {
     await p.T('window.__p.stop()');
     for (const name of engines.filter((e) => e !== 'three' && shots[e])) {
-      for (const mode of ['on', 'off']) for (const v of views) {
-        const d = await p.cdp.evalJs(`(${IMAGE_STATS})(${JSON.stringify(shots.three[mode][v])}, ${JSON.stringify(shots[name][mode][v])})`);
-        const lum = (await p.cdp.evalJs(`(${IMAGE_STATS})(${JSON.stringify(shots[name][mode][v])})`)).lum;
-        const bound = 24;
-        check(`engines ${name} vs three, ${mode === 'on' ? 'probes + screen space' : 'probes only'}, view ${v}: mean per channel < ${bound} / 255`, d.mean < bound,
-          `mean ${d.mean.toFixed(2)} / 255, max ${d.max}; mean luminance three ${d.lum.toFixed(1)}, ${name} ${lum.toFixed(1)}`);
+      const bound = BOUND[name] ?? 24, ssrBound = SSR_BOUND[name] ?? 2;
+      for (const v of views) {
+        for (const mode of ['on', 'off']) {
+          const d = await p.cdp.evalJs(`(${IMAGE_STATS})(${JSON.stringify(shots.three[mode][v])}, ${JSON.stringify(shots[name][mode][v])})`);
+          const lum = (await p.cdp.evalJs(`(${IMAGE_STATS})(${JSON.stringify(shots[name][mode][v])})`)).lum;
+          check(`engines ${name} vs three, ${mode === 'on' ? 'probes + screen space' : 'probes only'}, view ${v}: mean per channel < ${bound} / 255`, d.mean < bound,
+            `mean ${d.mean.toFixed(2)} / 255, max ${d.max}; mean luminance three ${d.lum.toFixed(1)}, ${name} ${lum.toFixed(1)}`);
+        }
+        const s = await p.cdp.evalJs(`(${DELTA})(${[shots.three.off[v], shots.three.on[v], shots[name].off[v], shots[name].on[v]].map((x) => JSON.stringify(x)).join(', ')})`);
+        check(`engines ${name} vs three, what screen space adds (on - off), view ${v}: mean per channel < ${ssrBound} / 255`, s.mean < ssrBound,
+          `mean ${s.mean.toFixed(2)} / 255 (three adds ${s.three.toFixed(2)}, ${name} ${s.other.toFixed(2)})`);
       }
     }
   } finally { p.close(); }

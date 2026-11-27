@@ -487,10 +487,22 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     slug: 'engines/core',
     path: 'engines/core/',
     title: 'Raw WebGPU',
-    summary: 'The probe set and the screen-space tracer on a bare GPUDevice, no engine.',
-    description: 'Planned (E4).',
-    brief: { kind: 'feature', shows: 'The core API with no engine: what an adapter wraps.', tryThis: PLANNED_TRY, compare: 'Reflections off' },
-    category: 'engines', status: 'experimental', tags: ['core', 'webgpu'], docs: 'guides/adapters', source: 'examples/engines/core', planned: true,
+    summary: 'The probe set and the screen-space tracer on a bare GPUDevice, no engine, on the two rooms.',
+    description:
+      '`@pmndrs/reflections/core` with a renderer written for the page (examples/engines/core/renderer.ts): one forward pass fills the frame contract ' +
+      '(depth, world normal + roughness, base colour + metalness, uv motion, and the scene colour: direct light with its specular, cube shadow maps, the probes\' ' +
+      'diffuse as bounce light). The core `ProbeSet` takes the renderer\'s 90-degree captures (two bounces, as three bakes) and prefilters them; ' +
+      '`createScreenSpaceReflections` traces with `probeRadianceFallback(probes)` behind it; `createReflectionDenoiseSeam` runs `denoiser/ffx`; ' +
+      'the composite adds split-sum weight x radiance and tone-maps with three\'s ACES. Not here: the ray-traced fallback (core has it, ' +
+      '`RaytracerTraceProvider`, left out to keep the page to probes and the tracer), the hybrid resolve and presets (three.js objects). ' +
+      'The page is about 640 lines in three files: what an adapter does for an engine, written out once.',
+    brief: {
+      kind: 'feature',
+      shows: 'The core API with no engine: what every adapter wraps. A minimal renderer fills the frame contract, and core\'s probes, tracer and the denoise seam do the rest.',
+      tryThis: ['Turn Screen space off: probes only', 'Set Show to lit, then reflection: the scene colour the tracer reads, and what the composite adds', 'Open engines/three at the same View'],
+      compare: 'Screen space off (probes only); and engines/three at the same View',
+    },
+    category: 'engines', status: 'experimental', tags: ['core', 'webgpu', 'probes', 'ssr', 'denoiser'], docs: 'concepts/frame-contract', source: 'examples/engines/core',
   },
 
   // ---- lab ------------------------------------------------------------------------------------------
