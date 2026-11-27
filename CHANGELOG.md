@@ -5,6 +5,8 @@
 - Babylon: `probeIrradiance(material, probes)`, a PBR material plugin that lights the material's diffuse
   image-based lighting from a `BabylonProbeSet` per pixel (bounce light, as three's materials get from
   `scene.environmentNode`). `BabylonProbeSet.bake()` now captures with the set disabled. `engines/babylon` uses it.
+- Babylon: `ScreenSpaceReflections` defaults `minTraversalOccupancy` to 0, so a still view is bit-identical from frame
+  to frame (the early exit made glossy rays end differently every dispatch; no denoiser hides it there).
 - `Reflections.create` takes `gbufferOptions` (e.g. a render size below the canvas, for an upscaler after the
   composite) and `timestamps` (per-pass GPU ms through `reflections.ssr.readTimings()`), passed to the pass.
 - `applyReflectionsPreset(reflections, name)` takes a `Reflections` and rebuilds it when the preset changes the

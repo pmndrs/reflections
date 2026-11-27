@@ -89,7 +89,9 @@ own light. Without the plugin, a scene with no environment texture gets direct l
 `engines/babylon` read about 60 / 255 darker than three's.
 
 Without a denoiser in this adapter, a glossy surface shows the tracer's raw samples, and they move every frame. Set
-`ssr.settings.frameIndex` (for example to 0) to fix the noise pattern, so a still view stays still.
+`ssr.settings.frameIndex` (for example to 0) to fix the noise pattern, so a still view stays still. The adapter also
+lets every glossy ray march to the end (`minTraversalOccupancy: 0`; core's default stops rays early in a way that changes
+from frame to frame). Leave it at 0 unless you trade a still image for a faster tracer.
 
 `BabylonProbeSet.bake()` needs `scene.activeCamera` to be set, because the captures take its near and far planes.
 `ssr.configure(width, height)` allocates the tracer's textures. Call it again, and rebuild the frame graph, when the
