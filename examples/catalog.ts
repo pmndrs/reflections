@@ -495,9 +495,21 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     path: 'features/setup/device-limits/',
     title: 'Device limits',
     summary: 'A plain new WebGPURenderer(): the second lit pass, traceError when ray tracing does not fit.',
-    description: 'Planned (E3).',
-    brief: { kind: 'informative', shows: 'What changes on a renderer with WebGPU\'s default limits, and how the package degrades.', tryThis: PLANNED_TRY, compare: '`createReflectionsRenderer`' },
-    category: 'features', status: 'stable', tags: ['limits', 'setup'], docs: 'guides/troubleshooting', source: 'examples/features/setup/device-limits', planned: true,
+    description:
+      'A plain `new WebGPURenderer()` asks for WebGPU\'s default limits. On 32 colour-attachment bytes per sample the G-buffer cannot hold three\'s lit image ' +
+      'too (it needs 36), so it draws the scene a second time for it and estimates three\'s specular weights; one console warning says so. Ray tracing binds 8 ' +
+      'storage buffers per stage with the packed scene copy and runs on the default 8; a setup that needs more (the split copy: 9) turns ray tracing off with one ' +
+      'warning and sets `pass.traceError`, and screen space and probes go on. `createReflectionsRenderer()` (or `requiredLimits: reflectionsRequiredLimits(adapter)`) ' +
+      'asks for what the passes need. The two images are by nature nearly identical (the quick start measured 0.44 / 255 mean, from the estimated weights); ' +
+      'the difference is the extra scene draw per frame, which the panel and the status line show. `?renderer=plain|reflections`, `?rt=1|split|0` (each a reload).',
+    brief: {
+      kind: 'informative',
+      shows: 'What changes on a renderer with WebGPU\'s default limits: a second scene draw for the lit image, estimated specular weights, and ray tracing turning itself off (with `traceError`) when it cannot fit. Nothing fails.',
+      tryThis: ['Read the panel, then switch Renderer to createReflectionsRenderer(): one scene draw, specular from the material', 'Set Ray tracing to the 9-buffer scene copy on the plain renderer: the status line shows pass.traceError'],
+      compare: '`createReflectionsRenderer()` (a reload). The image barely changes by nature: what differs is the extra scene draw and the estimated specular weights, shown in the panel',
+    },
+    category: 'features', status: 'stable', tags: ['limits', 'setup'], docs: 'guides/troubleshooting', source: 'examples/features/setup/device-limits/main.ts',
+    check: { compare: false },
   },
 
   // ---- engines --------------------------------------------------------------------------------------

@@ -114,7 +114,7 @@ async function main() {
 
   setInterval(() => {
     const W = ssr.gbuffer.width, H = ssr.gbuffer.height, half = (ssr.settings.reflectionResolution ?? 'full') === 'half';
-    const head = `${preset}: reflections at ${half ? `${Math.ceil(W / 2)} x ${Math.ceil(H / 2)}` : `${W} x ${H}`} (frame ${W} x ${H})`;
+    const head = `${preset}\nframe ${W} x ${H}, reflections ${half ? `${Math.ceil(W / 2)} x ${Math.ceil(H / 2)}` : `${W} x ${H}`}`;
     if (!timed) { timingsEl.textContent = `${head}\n(no timestamp-query on this device: no GPU times)`; return; }
     const lines = [...ms].map(([k, v]) => `${k.padEnd(24)}${v.toFixed(2).padStart(6)} ms`);
     const sum = [...ms.values()].reduce((s, v) => s + v, 0);
