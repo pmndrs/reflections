@@ -82,7 +82,7 @@ async function main() {
     ssr.gbuffer.setSize(next.renderWidth, next.renderHeight);
     ssr.resetHistory(); hybrid.resetHistory();
     // linear while the upscaler runs (it tone-maps after); tone-mapped when the composite goes straight to the canvas
-    pipeline.outputNode = vec4(next.linear.equal(1).select(final, tone(final)), 1);
+    pipeline.outputNode = vec4((next.linear as N).equal(1).select(final, tone(final)), 1);
     pipeline.needsUpdate = true;
     aa = next; sinceSwitch = 0; aaFrames = 0;
   };

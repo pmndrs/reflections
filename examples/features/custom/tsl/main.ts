@@ -59,7 +59,7 @@ async function main() {
     m.position.set(x, h / 2, z); m.castShadow = m.receiveShadow = true;
     scene.add(m);
   }
-  const pool = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshBasicMaterial());
+  const pool = new THREE.Mesh<THREE.PlaneGeometry, THREE.Material>(new THREE.PlaneGeometry(W, D));
   pool.rotation.x = -Math.PI / 2;
   pool.position.set(cx, h * 0.7, cz);
   scene.add(pool);
