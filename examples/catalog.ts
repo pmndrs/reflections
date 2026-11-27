@@ -468,13 +468,15 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     summary: 'A neon arcade in pixi-3d with screen-space reflections, a probe and the denoiser. Needs the closed pixi-3d beta.',
     description:
       'pixi Text and Graphics on 3-D planes as `ContainerTexture`s; pixi-3d draws the scene, its depth and motion; one G-buffer pass adds the normals and ' +
-      'materials; core\'s tracer and probe set run on pixi\'s device and a pixi `Filter` composites. Without the beta unpacked in `examples/pixi3d/vendor/` ' +
-      'the page shows the setup notice (examples/pixi3d/README.md).',
+      'materials; core\'s tracer and probe set run on pixi\'s device, the denoise seam runs `denoiser/ffx`, and a pixi `Filter` composites (`ReflectionsView`). ' +
+      '**Missing against engines/three** (`guides/adapters`): the ray-traced fallback, presets, the hybrid resolve, a one-call setup. Unlike the other engine ' +
+      'pages it is not on the two rooms: pixi-3d is a closed beta, so the page cannot be rebuilt or checked without it. Without the beta unpacked in ' +
+      '`examples/pixi3d/vendor/` it shows the setup notice (examples/pixi3d/README.md), and the public site leaves it out.',
     brief: {
       kind: 'feature',
-      shows: 'The core on pixi.js v8 through pixi-3d: reflections of pixi\'s own 2-D content on a wet 3-D floor.',
-      tryThis: ['Add `?ssr=0` or `?probes=0` to the URL', 'Add `?denoise=0`: the raw reflections'],
-      compare: '`?ssr=0` / `?probes=0` / `?denoise=0`',
+      shows: 'The core on pixi.js v8 through pixi-3d: reflections of pixi\'s own 2-D content on a wet 3-D floor, denoised. Probes, screen space and the denoiser; no ray tracing.',
+      tryThis: ['Add `?ssr=0` to the URL: probes only (the switch every engine page has)', 'Add `?denoise=0`: the raw reflections', 'Add `?view=radiance` or `?view=confidence`: what the tracer hands the composite'],
+      compare: '`?ssr=0` (probes only), `?denoise=0` (no denoiser); engines/three for what pixi lacks',
     },
     category: 'engines',
     status: 'experimental',
@@ -495,7 +497,7 @@ export const EXAMPLES: readonly ExampleEntry[] = [
       '`createScreenSpaceReflections` traces with `probeRadianceFallback(probes)` behind it; `createReflectionDenoiseSeam` runs `denoiser/ffx`; ' +
       'the composite adds split-sum weight x radiance and tone-maps with three\'s ACES. Not here: the ray-traced fallback (core has it, ' +
       '`RaytracerTraceProvider`, left out to keep the page to probes and the tracer), the hybrid resolve and presets (three.js objects). ' +
-      'The page is about 640 lines in three files: what an adapter does for an engine, written out once.',
+      'The page is about 700 lines in three files (scene 200, renderer 320, main 190): what an adapter does for an engine, written out once.',
     brief: {
       kind: 'feature',
       shows: 'The core API with no engine: what every adapter wraps. A minimal renderer fills the frame contract, and core\'s probes, tracer and the denoise seam do the rest.',
