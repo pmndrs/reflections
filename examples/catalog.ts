@@ -88,7 +88,7 @@ export interface ExampleEntry {
    * (default 1500), and `image: false` for a page that shows text, not a rendered image. `thumbQuery` is used instead when capturing
    * the card image (`--thumbs`).
    */
-  check?: { query?: string; wait?: number; image?: boolean; thumbQuery?: string };
+  check?: { query?: string; wait?: number; image?: boolean; thumbQuery?: string; /** false: don't require `__p.setCompare` to change the image (the brief says why). W95. */ compare?: boolean };
 }
 
 export const CATEGORIES: readonly Category[] = [
@@ -377,9 +377,21 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     path: 'features/motion/animated/',
     title: 'Animation and camera cuts',
     summary: 'A camera path, moving objects and a camera cut with resetHistory().',
-    description: 'Planned (E3).',
-    brief: { kind: 'feature', shows: 'A whole animated scene, and why a camera cut needs `resetHistory()`.', tryThis: PLANNED_TRY, compare: 'History reset off at the cut (the smear)' },
-    category: 'features', status: 'stable', tags: ['motion', 'history'], docs: 'guides/flicker-and-stability', source: 'examples/features/motion/animated', planned: true,
+    description:
+      'The two rooms of three.js #35046 with a polished floor, the knot turning and the mirror ball on its figure eight; the camera runs three 6 s shots with a cut ' +
+      'between each. Reflections are temporal: the denoiser blends each pixel with where it was last frame, and screen-space hits take their colour from last ' +
+      'frame\'s image, which keeps motion steady between cuts. At a cut last frame is another shot, so the page calls `reflections.ssr.resetHistory()` and ' +
+      '`reflections.hybrid.resetHistory()` (`ScreenSpaceReflectionsPass` and `HybridReflections` when built from the pieces); do the same on a teleport or a scene switch.',
+    brief: {
+      kind: 'feature',
+      shows: 'A whole animated scene, camera path and moving objects, steady between cuts; and why a camera cut needs `resetHistory()`.',
+      tryThis: ['Watch the floor through the camera moves and the cuts: steady between cuts, no shimmer', 'Pause: the image holds still (the rest-flicker check holds it to the quick start\'s bound)', 'Tick No history reset and Slow motion, then press Cut to the next shot'],
+      compare:
+        'No history reset at the cuts. With `denoiser/ffx` the difference is small (measured: 0.08 / 255 mean the frame after the cut, against a 0.07 noise floor): its ' +
+        'reprojection rejects history whose depth and normals disagree, so the previous shot barely shows through. The reset is still what a cut needs; a denoiser without that rejection depends on it',
+    },
+    category: 'features', status: 'stable', tags: ['motion', 'history'], docs: 'guides/flicker-and-stability', source: 'examples/features/motion/animated/main.ts',
+    check: { compare: false },
   },
   {
     slug: 'perf/presets',
