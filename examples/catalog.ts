@@ -476,9 +476,19 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     path: 'features/custom/tsl/',
     title: 'Probes in your own TSL material',
     summary: 'sampleReflectionProbes in a custom TSL material (a water or glass surface).',
-    description: 'Planned (E3).',
-    brief: { kind: 'feature', shows: 'Sampling the probes from your own node material.', tryThis: PLANNED_TRY, compare: 'The stock material' },
-    category: 'features', status: 'stable', tags: ['tsl', 'probes'], docs: 'guides/three', source: 'examples/features/custom/tsl', planned: true,
+    description:
+      'The box room\'s baked probe serves three\'s materials through `scene.environmentNode = reflectionProbes(probes)`. The water in the basin is a ' +
+      '`MeshBasicNodeMaterial` that calls the lookup itself: `sampleReflectionProbes(probes, positionWorld, reflected, roughness)` returns the box-projected, ' +
+      'blended radiance along any direction, here the view ray reflected about a normal made of travelling waves, mixed with a dark tint by Schlick\'s fresnel. ' +
+      'Unlit custom materials get no screen-space reflections from `Reflections` (no physical specular term to replace, README "Which materials get reflections"); ' +
+      'the probe sample is their reflection. Probes only, `renderer.render()`.',
+    brief: {
+      kind: 'feature',
+      shows: 'Sampling the reflection probes from your own TSL material: a rippled water surface that reflects the room through `sampleReflectionProbes()`.',
+      tryThis: ['Tick Stock material: a glossy MeshStandardMaterial, the same probe through three\'s lighting, flat', 'Untick Ripples: the custom material becomes a fresnel mirror', 'Orbit low over the pool: the fresnel brings the windows up at grazing angles'],
+      compare: 'The stock material: a glossy, flat MeshStandardMaterial reflecting the same probe',
+    },
+    category: 'features', status: 'stable', tags: ['tsl', 'probes'], docs: 'guides/three', source: 'examples/features/custom/tsl/main.ts',
   },
   {
     slug: 'setup/device-limits',
