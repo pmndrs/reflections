@@ -1,0 +1,48 @@
+examples/ssr (?rt=1):
+  [PASS] rt provider (@pmndrs/raytracer) agrees with THREE.Raycaster - 4096/4096 agree (0 both miss), gpu-only 0, cpu-only 0, p99 rel 3.4e-7, max rel 5.1e-7; BVH 13 meshes, 3760 tris, 18 ms
+  [PASS] rt @pmndrs/raytracer: traceAny agrees with traceFirstHit, camera rays - hit/miss 4096/4096 (4096 hits); nothing before 0.5 t 4096/4096, something before 1.5 t 4096/4096
+  [PASS] rt @pmndrs/raytracer: traceAny agrees with traceFirstHit, scene rays - hit/miss 4096/4096 (1768 hits); nothing before 0.5 t 1768/1768, something before 1.5 t 1768/1768
+  [PASS] rt offscreen: renders, no validation errors, finite outputs - 41759 misses -> {"misses":41759,"traced":41759,"capped":0,"hits":41470,"tracedMisses":289,"onScreenHits":2964,"tilesWithMisses":1035,"tileCap":64,"halfRateSkipped":0,"fillOverflow":0,"filled":0,"fillFallbacks":0,"frame":2}
+  [PASS] rt offscreen: the wall mirror shows the wall behind the camera with RT on, not off - confidence 0.031 -> 1.000 over 38616 px; traced hit distance vs analytic: median rel err 1.64e-3, 97.5% of 28992 px within 2%
+  [PASS] rt offscreen: the emissive bars behind the camera appear in the mirror - panel px with luminance > 1: 0.24% -> 4.10%; mean panel radiance 0.007 -> 0.131
+  saved out/ssr-rt-offscreen-mirror-grid.png
+  saved out/ssr-rt-offscreen-mirror-final.png
+  saved out/ssr-rt-offscreen-mirror-source.png
+  [PASS] rt cap: traced rays never exceed the per-tile cap or the frame budget - 41885 misses: 3000 traced (budget 3000), 38885 capped; tile cap 3 over 1154 tiles with misses, max traced in a tile 3, 1126 tiles traced
+  saved out/ssr-rt-offscreen-capped.png
+  [PASS] rt mirrorWall: renders, finite, no validation errors - 9606 misses -> {"misses":9606,"traced":9606,"capped":0,"hits":3020,"tracedMisses":6586,"onScreenHits":1904,"tilesWithMisses":538,"tileCap":64,"halfRateSkipped":0,"fillOverflow":0,"filled":0,"fillFallbacks":0,"frame":2}; wall: 100.0% confident, corr 0.997
+  rt mirrorWall: D901 at the package defaults (W76): probes: mean 0.185 vs 0.177 (ratio 1.046), mean abs rel 0.071
+  rt mirrorWall: hit shading vs on-screen colour over 1639 traced hits the camera sees: shadows off mean 0.328 vs 0.311 (ratio 1.055), mean abs rel 0.068; on mean 0.323 vs 0.311 (ratio 1.037), mean abs rel 0.051; > 1% darker with shadows 2.4% (off vs off 0.0%), brighter 0.00% (off vs off 0.00%)
+  [PASS] rt mirrorWall: shadow rays only darken shaded hits (D903) - 1217 shaded hits: 25.2% > 1% darker, 0.00% brighter (same rays twice without shadows: 0.00% / 0.00%); mean 0.365 -> 0.340
+  [PASS] rt mirrorWall: traced hits lit by the probes at the hit match the on-screen brightness (D901) - probes: mean 0.323 vs 0.311 (ratio 1.037), mean abs rel 0.051; environment mean: mean 0.218 vs 0.311 (ratio 0.700), mean abs rel 0.306
+  [PASS] rt contact: renders, finite, no validation errors - 26303 misses -> {"misses":26303,"traced":26303,"capped":0,"hits":17861,"tracedMisses":8442,"onScreenHits":8121,"tilesWithMisses":2207,"tileCap":64,"halfRateSkipped":0,"fillOverflow":0,"filled":0,"fillFallbacks":0,"frame":2}
+  rt contact: D901 at the package defaults (W76): probes: mean 0.218 vs 0.202 (ratio 1.077), mean abs rel 0.211
+  rt contact: hit shading vs on-screen colour over 25380 traced hits the camera sees: shadows off mean 0.272 vs 0.253 (ratio 1.074), mean abs rel 0.196; on mean 0.271 vs 0.253 (ratio 1.071), mean abs rel 0.194; > 1% darker with shadows 0.2% (off vs off 0.0%), brighter 0.00% (off vs off 0.00%)
+  [PASS] rt contact: shadow rays only darken shaded hits (D903) - 38469 shaded hits: 6.2% > 1% darker, 0.00% brighter (same rays twice without shadows: 0.00% / 0.00%); mean 0.277 -> 0.273
+  [PASS] rt contact: traced hits lit by the probes at the hit match the on-screen brightness (D901) - probes: mean 0.271 vs 0.253 (ratio 1.071), mean abs rel 0.194; environment mean: mean 0.215 vs 0.253 (ratio 0.851), mean abs rel 0.260
+  [PASS] rt @pmndrs/raytracer: shading normal = three's interpolated normal, contact, camera rays (D1700) - 3989/3989 hits within cos 0.999, mean 1.4e-6 deg (flat geometric normal: mean 0.513 deg)
+  [PASS] rt @pmndrs/raytracer: shading normal = three's interpolated normal, contact, scene rays (D1700) - 1623/1623 hits within cos 0.999, mean 2.6e-7 deg (flat geometric normal: mean 0.043 deg)
+  [PASS] rt moving: renders, finite, no validation errors - 35696 misses -> {"misses":35696,"traced":35696,"capped":0,"hits":27429,"tracedMisses":8267,"onScreenHits":11347,"tilesWithMisses":1329,"tileCap":64,"halfRateSkipped":0,"fillOverflow":0,"filled":0,"fillFallbacks":0,"frame":2}
+  rt moving: D901 at the package defaults (W76): probes: mean 0.268 vs 0.257 (ratio 1.044), mean abs rel 0.134
+  rt moving: hit shading vs on-screen colour over 10979 traced hits the camera sees: shadows off mean 0.373 vs 0.359 (ratio 1.041), mean abs rel 0.077; on mean 0.372 vs 0.359 (ratio 1.037), mean abs rel 0.074; > 1% darker with shadows 0.7% (off vs off 0.0%), brighter 0.00% (off vs off 0.00%)
+  [PASS] rt moving: shadow rays only darken shaded hits (D903) - 18900 shaded hits: 14.5% > 1% darker, 0.00% brighter (same rays twice without shadows: 0.00% / 0.00%); mean 0.356 -> 0.345
+  [PASS] rt moving: traced hits lit by the probes at the hit match the on-screen brightness (D901) - probes: mean 0.372 vs 0.359 (ratio 1.037), mean abs rel 0.074; environment mean: mean 0.259 vs 0.359 (ratio 0.722), mean abs rel 0.289
+  [PASS] rt tracedMissRate 'half': fewer traced rays, the skipped quads filled from their traced neighbours, no validation errors - traced 26394 -> 21796, 4616 quads on the fill list, 18202 px filled, 245 kept the probe, overflow 0
+  [PASS] rt tracedMissRate 'half': filled px match full-rate tracing on average (contact, still frame: radiance bias and 8x8 block means) - 9740 px changed (18165 filled, 306 kept the probe): bias -2.5 %, 8x8 block mean error 9.5 % over 490 blocks, confidence 0.800 vs 0.815
+  [PASS] rt @pmndrs/raytracer: each material of a multi-material mesh at its own triangles, camera rays (D1701) - of 2552 hits (2 multi-material meshes, 12 groups): green emissive 321/321 (first material's colour 251), red 215/215 (first material's colour 195), mirror floor (alone) 1982/1982, blue (one material) (alone) 34/34
+  [PASS] rt @pmndrs/raytracer: each material of a multi-material mesh at its own triangles, scene rays (D1701) - of 1766 hits (2 multi-material meshes, 12 groups): mirror floor (alone) 1617/1617, green emissive 71/71 (first material's colour 46), red 64/64 (first material's colour 43), blue (one material) (alone) 14/14
+  saved out/ssr-rt-multi-material-pmndrs-raytracer.png
+  [PASS] facingMirrors: the probe fallback in the SSR misses stays near the ray-traced fill (objects out of the captures, D4301) - mean abs diff / 255 vs rt=1 over the misses; default: 33097 miss px, all captured 14.57 -> kit 11.85; left: 131843 miss px, all captured 23.82 -> kit 21.77 (limits {"default":22.5,"left":27})
+  [PASS] offscreen: the ring shows in the RT-off fallback where ?rt=1 has it (emissives captured, floor probe lidded at the ring, D4400; floor + mirror probes 512 px, D4701) - kit (3 probes, atlases 256,512 px): warm px rt 1153, rt-off 1657, both 1150; floor ring rt 3249, rt-off 3646, both 3231; all 256 px: warm px rt 1161, rt-off 1980, both 1158; floor ring rt 3271, rt-off 3877, both 3256; one room probe: warm px rt 1118, rt-off 1724, both 486; floor ring rt 3104, rt-off 3226, both 524
+  [PASS] offscreen: per-probe sizes (floor and mirror at 512 px) fill the SSR misses closer to RT than all 256 px (D4701) - default 17.77 -> 17.26, mirror 13.26 -> 13.02; atlases 16.8 -> 41.9 MB (all 512: 67.1)
+  [PASS] offscreen: the probe fallback in the SSR misses stays near the ray-traced fill (D4400) - mean abs diff / 255 vs rt=1 over the misses (mirror: the wall mirror's upper part); default: 69097 miss px, one room probe 26.70 -> kit 17.26; mirror: 28363 miss px, one room probe 17.44 -> kit 13.02 (limits {"default":18.3,"mirror":14.2}, margins {"default":5,"mirror":2})
+  saved out/w47-rt-default-final.png
+  saved out/w47-rt-default-ssr.png
+  saved out/w47-rt-mirror-final.png
+  saved out/w47-rt-mirror-ssr.png
+  [PASS] rt: traced hits over a mixed-size probe set see the probes outside the primary atlas (offscreen, floor + mirror 512 px, D4702) - default: 166862 hit px, vs all 512: kit 0.0003 (rel 0.003), room only 0.0005 (rel 0.005), self 0.0e+0; kit != room on 4186 px (all 512 != room on 68185), there vs all 512: kit 0.0001, room 0.0061; mirror: 51901 hit px, vs all 512: kit 0.0003 (rel 0.003), room only 0.0012 (rel 0.010), self 0.0e+0; kit != room on 6711 px (all 512 != room on 10230), there vs all 512: kit 0.0001, room 0.0066; kit atlases 2 [256,512]
+  rt GPU ms at 1920x1080 (offscreen 'mirror', median of 20): threshold 0: 0 misses, trace 0.005 ms (all passes 1.528); threshold 0.3: 160991 misses, trace 0.490 ms (all passes 1.924); threshold 0.9: 166141 misses, trace 0.896 ms (all passes 5.391); threshold 1.01: 280847 misses, trace 0.950 ms (all passes 4.956)
+  [PASS] rt GPU ms scales with the miss count - 0: 0.005 ms, 160991: 0.490 ms, 166141: 0.896 ms, 280847: 0.950 ms
+  [PASS] no WebGPU validation errors or exceptions
+
+all checks passed

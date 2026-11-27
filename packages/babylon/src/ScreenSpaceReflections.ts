@@ -55,10 +55,11 @@ export class ScreenSpaceReflections {
   /**
    * Tracer settings, read every dispatch. `iblFactor` scales the fallback (Babylon: scene.environmentIntensity). `frameIndex`
    * (default: the frame's) fixes the noise pattern: there is no denoiser here, so a fixed one keeps a still view still.
-   * `minTraversalOccupancy` defaults to 0 here (core: 4, FFX's early exit): glossy rays march to the end instead of
-   * stopping when few rays of their subgroup still march. Which rays share a subgroup follows the ray list's atomic
-   * append order, which changes every dispatch, so with the early exit the same frame traced twice differs in ~13k
-   * confidence texels at 1280x720; nothing denoises that here (D5521).
+   * `minTraversalOccupancy` is pinned to 0 here (core's default since W101, D5560; FFX's early exit is 4): glossy rays
+   * march to the end instead of stopping when few rays of their subgroup still march. Which rays share a subgroup
+   * follows the ray list's atomic append order, which changes every dispatch, so with the early exit the same frame
+   * traced twice differs in ~13k confidence texels at 1280x720; nothing denoises that here, so it stays 0 even if
+   * core's default changes (D5521).
    */
   settings: ScreenSpaceReflectionsSettings;
   /**

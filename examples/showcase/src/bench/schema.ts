@@ -204,7 +204,11 @@ export const SETTINGS: Setting[] = [
     cost: 'classify +0.06 ms at 1080p (pattern: 0.154 -> 0.211, contact + RT; intersect / rt trace within noise; W71)',
   }),
   num('s.maxTraversalIntersections', 'sssr', 'Max march steps', 0, 256, 1, 128, { appliesTo: OURS_SSR, api: 'settings.maxTraversalIntersections', tradeoff: 'Hi-Z march steps per ray: fewer is cheaper and sends long rays to the miss list (probe or RT); 0 = SSR off.' }),
-  num('s.minTraversalOccupancy', 'sssr', 'Min occupancy', 0, 64, 1, 4, { appliesTo: OURS_SSR, api: 'settings.minTraversalOccupancy', tradeoff: 'Glossy rays stop once this few lanes of their subgroup still march (FFX): higher ends long tails earlier (cheaper, more misses). Mirrors ignore it.' }),
+  num('s.minTraversalOccupancy', 'sssr', 'Min occupancy', 0, 64, 1, 0, {
+    appliesTo: OURS_SSR, api: 'settings.minTraversalOccupancy',
+    tradeoff: 'Glossy rays stop once this few lanes of their subgroup still march (FFX\'s early exit, FFX: 4): higher ends long tails earlier (cheaper, more misses). Mirrors ignore it. W101 (D5560): 0 by default. Subgroup membership follows the ray list\'s atomic order, which changes every dispatch, so with the exit a still frame traces differently each time: at 4, quickstart rest flicker 0.30-0.32 % of px (0 gives 0.24-0.25), engines/three rest 0.0078-0.0081 / 255 (0 gives 0.0072-0.0075), contact orbit std +5 %; 0 also finds hits the exit dropped (contact: image 0.18 / 255 mean vs a 0.10 noise floor).',
+    cost: '0 vs 4, 1080p intersect: +0.05-0.14 ms on glossy scenes (contact, Sponza, carConcept; +10-21 % of the pass, 2-6 % of the tracer), mirrorWall 0; half res +0.03-0.06 ms (W101)',
+  }),
   num('s.depthBufferThickness', 'sssr', 'Thickness', 0, 0.5, 0.001, 0.2, {
     defaultNote: 'showcase scenes set their own (kit.thickness)', appliesTo: OURS_SSR, api: 'settings.depthBufferThickness (THICKNESS_HYBRID)',
     tradeoff: 'Hit acceptance thickness in view-space units. Thicker accepts rays that pass behind objects (streaks, the dark band under carConcept\'s sill, D2402); thinner cuts holes (FFX\'s 0.015 holes the sphere, D4303). Room scale 0.2 is too thick for a car (W11).',

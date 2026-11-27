@@ -1,0 +1,50 @@
+examples/engines (side by side):
+  saved out/engines-three-on-default.png
+  three default: at rest, one frame to the next: mean 0.007 / 255, max 5
+  saved out/engines-three-on-table.png
+  three table: at rest, one frame to the next: mean 0.007 / 255, max 3
+  saved out/engines-three-off-default.png
+  saved out/engines-three-off-table.png
+  [PASS] engines three: loads, shoots every view, no errors
+  saved out/engines-r3f-on-default.png
+  r3f default: at rest, one frame to the next: mean 0.008 / 255, max 3
+  saved out/engines-r3f-on-table.png
+  r3f table: at rest, one frame to the next: mean 0.007 / 255, max 10
+  saved out/engines-r3f-off-default.png
+  saved out/engines-r3f-off-table.png
+  [PASS] engines r3f: loads, shoots every view, no errors
+  saved out/engines-babylon-on-default.png
+  babylon default: at rest, one frame to the next: mean 0.000 / 255, max 0
+  saved out/engines-babylon-on-table.png
+  babylon table: at rest, one frame to the next: mean 0.000 / 255, max 0
+  saved out/engines-babylon-off-default.png
+  saved out/engines-babylon-off-table.png
+  [PASS] engines babylon: loads, shoots every view, no errors
+  saved out/engines-core-on-default.png
+  core default: at rest, one frame to the next: mean 0.008 / 255, max 8
+  saved out/engines-core-on-table.png
+  core table: at rest, one frame to the next: mean 0.008 / 255, max 7
+  saved out/engines-core-off-default.png
+  saved out/engines-core-off-table.png
+  [PASS] engines core: loads, shoots every view, no errors
+  [PASS] engines r3f vs three, probes + screen space, view default: mean per channel < 1 / 255 - mean 0.02 / 255, max 8; mean luminance three 84.1, r3f 84.1
+  [PASS] engines r3f vs three, probes only, view default: mean per channel < 1 / 255 - mean 0.00 / 255, max 0; mean luminance three 83.9, r3f 83.9
+  [PASS] engines r3f vs three, what screen space adds (on - off), view default: mean per channel < 0.5 / 255 - mean 0.02 / 255 (three adds 2.07, r3f 2.07)
+  [PASS] engines r3f vs three, probes + screen space, view table: mean per channel < 1 / 255 - mean 0.01 / 255, max 9; mean luminance three 68.4, r3f 68.4
+  [PASS] engines r3f vs three, probes only, view table: mean per channel < 1 / 255 - mean 0.00 / 255, max 0; mean luminance three 68.2, r3f 68.2
+  [PASS] engines r3f vs three, what screen space adds (on - off), view table: mean per channel < 0.5 / 255 - mean 0.01 / 255 (three adds 2.39, r3f 2.39)
+  [PASS] engines babylon vs three, probes + screen space, view default: mean per channel < 54 / 255 - mean 50.25 / 255, max 238; mean luminance three 84.1, babylon 34.6
+  [PASS] engines babylon vs three, probes only, view default: mean per channel < 54 / 255 - mean 50.36 / 255, max 223; mean luminance three 83.9, babylon 34.3
+  [PASS] engines babylon vs three, what screen space adds (on - off), view default: mean per channel < 2 / 255 - mean 1.50 / 255 (three adds 2.07, babylon 0.77)
+  [PASS] engines babylon vs three, probes + screen space, view table: mean per channel < 54 / 255 - mean 45.10 / 255, max 189; mean luminance three 68.4, babylon 23.4
+  [PASS] engines babylon vs three, probes only, view table: mean per channel < 54 / 255 - mean 45.51 / 255, max 189; mean luminance three 68.2, babylon 22.9
+  [PASS] engines babylon vs three, what screen space adds (on - off), view table: mean per channel < 2 / 255 - mean 1.65 / 255 (three adds 2.39, babylon 1.08)
+  [PASS] engines core vs three, probes + screen space, view default: mean per channel < 16 / 255 - mean 11.83 / 255, max 175; mean luminance three 84.1, core 95.8
+  [PASS] engines core vs three, probes only, view default: mean per channel < 16 / 255 - mean 12.43 / 255, max 134; mean luminance three 83.9, core 96.2
+  [PASS] engines core vs three, what screen space adds (on - off), view default: mean per channel < 2 / 255 - mean 0.98 / 255 (three adds 2.07, core 2.32)
+  [PASS] engines core vs three, probes + screen space, view table: mean per channel < 16 / 255 - mean 11.77 / 255, max 73; mean luminance three 68.4, core 80.1
+  [PASS] engines core vs three, probes only, view table: mean per channel < 16 / 255 - mean 12.63 / 255, max 76; mean luminance three 68.2, core 80.8
+  [PASS] engines core vs three, what screen space adds (on - off), view table: mean per channel < 2 / 255 - mean 1.15 / 255 (three adds 2.39, core 2.95)
+  [PASS] no WebGPU validation errors or exceptions
+
+all checks passed

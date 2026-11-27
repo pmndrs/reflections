@@ -5,6 +5,10 @@
 - Babylon: `probeIrradiance(material, probes)`, a PBR material plugin that lights the material's diffuse
   image-based lighting from a `BabylonProbeSet` per pixel (bounce light, as three's materials get from
   `scene.environmentNode`). `BabylonProbeSet.bake()` now captures with the set disabled. `engines/babylon` uses it.
+- `minTraversalOccupancy` defaults to 0 (was 4, FFX's early exit) in core, so in three, r3f and pixi too: every glossy
+  ray marches to its end. The exit made a still frame trace differently every dispatch; 0 lowers rest flicker
+  (quickstart 0.31 -> 0.25 % of px, engines/three 0.0080 -> 0.0074 / 255) for intersect +0.05-0.14 ms at 1080p.
+  Pass `settings: { minTraversalOccupancy: 4 }` for the old behaviour.
 - Babylon: `ScreenSpaceReflections` defaults `minTraversalOccupancy` to 0, so a still view is bit-identical from frame
   to frame (the early exit made glossy rays end differently every dispatch; no denoiser hides it there).
 - Ray-traced hits sample the material's base colour texture at the hit (was the texture's average colour, which

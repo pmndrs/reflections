@@ -1,0 +1,54 @@
+examples/sssr-core:
+  stats {"variant":"subgroups","size":[960,540],"mipCount":7,"rays":123689,"tiles":3017,"misses":3716,"missDropped":0,"mirrorPixels":101689,"mirrorHitFraction":0.8234420635466962,"rampPixels":102933,"rampTracedFraction":0.7960906609153527,"maxTracedRoughness":0.19637063145637512,"thresholdAlpha":0.19980900000000001,"minUntracedRampRoughness":0.19986160099506378}
+  [PASS] sssr: rays traced, denoiser tiles listed - 123689 rays, 3017 tiles, 3716 misses
+  [PASS] sssr: sane hit fraction on the mirror floor - 82.3% of 101689 px
+  [PASS] sssr: no ray above the roughness threshold (perceptual, squared at the pass) - max traced alpha 0.1964 < 0.1998 <= min untraced ramp alpha 0.1999
+  [PASS] sssr: roughness ramp partly traced - 79.6%
+  saved out/sssr-core-grid.png
+  [PASS] sssr parity (occupancy 0, 1 spq): ray, tile, miss lists and tile flags - rays 123689,123689, tiles 3017,3017, misses 3363,3363
+  [PASS] sssr parity (occupancy 0, 1 spq): radiance, hit distance, roughness, pyramid bit for bit - differing px: radiance 0, hit 0, roughness 0, pyramid 0
+  [PASS] sssr parity (occupancy 0, 2 spq): ray, tile, miss lists and tile flags - rays 143777,143777, tiles 3017,3017, misses 5981,5981
+  [PASS] sssr parity (occupancy 0, 2 spq): radiance, hit distance, roughness, pyramid bit for bit - differing px: radiance 0, hit 0, roughness 0, pyramid 0
+  [PASS] sssr parity (occupancy 0, 4 spq): ray, tile, miss lists and tile flags - rays 183831,183831, tiles 3017,3017, misses 11184,11184
+  [PASS] sssr parity (occupancy 0, 4 spq): radiance, hit distance, roughness, pyramid bit for bit - differing px: radiance 0, hit 0, roughness 0, pyramid 0
+  [PASS] sssr parity (occupancy 0, 1 spq, maxCandidates 4): ray, tile, miss lists and tile flags - rays 123689,123689, tiles 3017,3017, misses 2728,2728
+  [PASS] sssr parity (occupancy 0, 1 spq, maxCandidates 4): radiance, hit distance, roughness, pyramid bit for bit - differing px: radiance 0, hit 0, roughness 0, pyramid 0
+  [PASS] sssr parity (occupancy 0, 4 spq, maxCandidates 8): ray, tile, miss lists and tile flags - rays 183831,183831, tiles 3017,3017, misses 8633,8633
+  [PASS] sssr parity (occupancy 0, 4 spq, maxCandidates 8): radiance, hit distance, roughness, pyramid bit for bit - differing px: radiance 0, hit 0, roughness 0, pyramid 0
+  [PASS] sssr: miss count deterministic at occupancy 0 - 3363, 3363 then 3363, 3363
+  [PASS] sssr parity (occupancy 4): lists - rays 123689,123689
+  occupancy 4: radiance differs on 2818 px, misses 3605 vs 3510 (informational)
+  [PASS] sssr X1 quadBaseRotation: default "fixed" = absent, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr X1 thicknessDepthFactor: default 0 = absent, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr X1 thicknessDepthMode: default "add" = absent, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr X1 hitColorConeGrazing: default 0 = absent, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr X1 all of them: default {"quadBaseRotation":"fixed","thicknessDepthFactor":0,"thicknessDepthMode":"add","hitColorConeGrazing":0} = absent, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr X1 relative at k 0: default {"thicknessDepthMode":"relative","thicknessDepthFactor":0} = absent, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: absent = cone + compensate + bias 0.5, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: hitColorFilter 'off' = the pre-W76 explicit path, bit for bit - rays 123689 / 123689, misses 4210 / 4210, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: explicit mirrorBias 0.5 = cone + truncation (no compensation), bit for bit - rays 123689 / 123689, misses 2420 / 2420, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: explicit mirrorBias 0 + compensate = the cone alone, bit for bit - rays 123689 / 123689, misses 4210 / 4210, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: missesTraced: unset thickness = 'relative' 0.02, bit for bit - rays 123689 / 123689, misses 3381 / 3381, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: missesTraced + thicknessDepthMode 'add' = RT off's thickness, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: missesTraced + thicknessDepthFactor 0 = RT off's thickness, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: missesTraced + explicit thicknessDepthFactor 0.01 keeps 'add' (review), bit for bit - rays 123689 / 123689, misses 3359 / 3359, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults act: RT on changes the thickness (more misses), the cone default changes the hits vs off - misses 3363 to 3381 with missesTraced; off vs default: 71623 px differ, misses 4210 / 3363
+  [PASS] sssr X1 thicknessDepthFactor and its relative mode change the hits (k 0.05 added: fewer misses; relative 0.001: more) - misses 3363 to 3339 at k 0.05, 3363 to 3393 relative 0.001
+  [PASS] sssr X1 quadBaseRotation: fixed = top-left, frame cycles the corner, pattern spreads all four per frame - copy-carrying rays per corner [tl, tr, bl, br]: fixed [20016,0,0,0], frame [20016,0,0,0] [0,0,0,20090] [0,19978,0,0] [0,0,20090,0], pattern f0 [5004,4993,5022,5024]
+  [PASS] sssr X1 parity (quadBaseRotation frame, frameIndex 5): lists and images - rays 123812,123812, misses 3674,3674, radiance 0 px
+  [PASS] sssr X1 parity (quadBaseRotation pattern, frameIndex 6): lists and images - rays 123749,123749, misses 3601,3601, radiance 0 px
+  [PASS] sssr X1 parity (quadBaseRotation pattern, frameIndex 6, samplesPerQuad 2): lists and images - rays 143777,143777, misses 6216,6216, radiance 0 px
+  [PASS] sssr X1 parity (quadBaseRotation pattern, frameIndex 3, quadCopy sameSurface): lists and images - rays 123799,123799, misses 3413,3413, radiance 0 px
+  [PASS] sssr reverse-Z: hit fraction matches forward Z - 82.3% vs 82.3%, rays 123689 vs 123689
+  [PASS] sssr reverse-Z parity: lists and images - radiance 0 px
+  [PASS] sssr cube-environment fallback: same rays and hits - rays 123689, hit 82.3%
+  saved out/sssr-core-env.png
+  [PASS] sssr W76 hitColorConeGrazing 1 (default 0) changes the cone hits only (cube environment: same lists) - radiance 48092 px differ, hit distance 0, lists same true
+  fallbackRoughness {"misses":12319,"partials":1895,"mirrors":103724,"mirrorsDiffer":0,"confident":65695,"confidentDiffer":0,"missMirror":{"mean":2.564,"p99":85.048,"max":116.827},"missSurface":{"mean":0,"p99":0,"max":0},"partialMirror":{"mean":0.018,"p99":0.068,"max":3.11},"partialSurface":{"mean":0.011,"p99":0.04,"max":0.043}}
+  [PASS] sssr fallbackRoughness 'surface': glossy misses at the probe lookup of their own roughness - misses 12319: |radiance - lookup(r)| mean / p99 (/255) mirror 2.564 / 85.048, surface 0 / 0; partial confidence 1895: mirror 0.018 / 0.068, surface 0.011 / 0.04
+  [PASS] sssr fallbackRoughness 'surface': mirrors and confidence-1 pixels unchanged - 0 of 103724 mirror px, 0 of 65695 confidence-1 px differ
+  [PASS] sssr 3840x2160 all-mirror: intersect runs past 65535 x 64 rays - 7560122 rays, 118310 tiles, mirror floor hit 82.6%
+  GPU ms 1920x1080 (subgroups, median of 30): {"depth downsample":0.2754,"classify":0.225,"blue noise":0.0033,"indirect args":0.0027,"hit colour pyramid":0.2257,"intersect":0.6889,"miss args":0.0032,"total":1.5986}
+  [PASS] no WebGPU validation errors or exceptions
+
+all checks passed

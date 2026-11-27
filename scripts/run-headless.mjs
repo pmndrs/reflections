@@ -225,10 +225,10 @@ async function sssrCoreChecks(pages) {
     const m1 = await s.T('window.__p.parity({ minTraversalOccupancy: 0 })');
     const m2 = await s.T('window.__p.parity({ minTraversalOccupancy: 0 })');
     check('sssr: miss count deterministic at occupancy 0', m1.misses[0] === m2.misses[0] && m1.misses[1] === m2.misses[1], `${m1.misses.join(', ')} then ${m2.misses.join(', ')}`);
-    // Default occupancy (4) counts per subgroup vs per workgroup, so images may differ (D3xx); lists must not.
-    const r = await s.T('window.__p.parity({})');
-    check('sssr parity (default occupancy): lists', r.rayListSame && r.tileListSame && r.tileFlagsSame, `rays ${r.rays}`);
-    console.log(`  default occupancy: radiance differs on ${r.radianceDiffPixels} px, misses ${r.misses.join(' vs ')} (informational)`);
+    // Occupancy 4 (FFX's early exit; core's default until W101, D5560) counts per subgroup vs per workgroup, so images may differ (D3xx); lists must not.
+    const r = await s.T('window.__p.parity({ minTraversalOccupancy: 4 })');
+    check('sssr parity (occupancy 4): lists', r.rayListSame && r.tileListSame && r.tileFlagsSame, `rays ${r.rays}`);
+    console.log(`  occupancy 4: radiance differs on ${r.radianceDiffPixels} px, misses ${r.misses.join(' vs ')} (informational)`);
   }
   await x1CoreChecks(s, hasSubgroups); // W71 (X1)
   // Reverse-Z: same scene, max-reduced pyramid; the hit fraction should match the forward-Z page closely.

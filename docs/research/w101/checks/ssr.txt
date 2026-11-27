@@ -1,0 +1,52 @@
+examples/ssr:
+  [PASS] ssr mirrorWall (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 197902 rays, 9582 misses, mean confidence 0.335 on geometry, mirror floor 0.651
+  [PASS] ssr mirrorWall (subgroups): mirror floor shows the wall - 97187 floor px reflect a visible wall point; 99.2% with confidence >= 0.9; luminance correlation 0.998, mean abs rel diff 0.018; hit distance median rel err 0.0001
+  [PASS] ssr mirrorWall (subgroups): reflected sphere and cube not striped - cube hf 0.033 vs direct 0.0190 (ratio 1.7), 97.7% of 6007 px confident; sphere hf 0.029 vs direct 0.0036 (ratio 7.9), 92.5% of 4616 px confident
+  saved out/ssr-mirrorWall-grid.png
+  saved out/ssr-mirrorWall-final.png
+  saved out/ssr-mirrorWall-noSSR.png
+  [PASS] ssr offscreen (subgroups): renders, no validation errors, finite outputs - 3 probe(s), 103114 rays, 69055 misses, mean confidence 0.256 on geometry, mirror floor 0.430
+  [PASS] ssr offscreen (subgroups): low confidence where the reflection comes from behind the camera - wall mirror (38616 px, view 'mirror'): mean confidence 0.0314; floor reflecting above the frame (default view): 0.430
+  saved out/ssr-offscreen-mirror-grid.png
+  [PASS] ssr contact (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 69831 rays, 24201 misses, mean confidence 0.363 on geometry, mirror floor 0.705
+  saved out/ssr-contact-grid.png
+  [PASS] ssr roughnessRamp (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 19142 rays, 8547 misses, mean confidence 0.066 on geometry, mirror floor 0.075
+  saved out/ssr-roughnessRamp-grid.png
+  [PASS] ssr boxRoom (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 42860 rays, 11960 misses, mean confidence 0.262 on geometry, mirror floor 0.000
+  saved out/ssr-boxRoom-grid.png
+  [PASS] ssr moving (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 198000 rays, 33939 misses, mean confidence 0.294 on geometry, mirror floor 0.535
+  saved out/ssr-moving-grid.png
+  [PASS] ssr explainer (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 63518 rays, 39617 misses, mean confidence 0.205 on geometry, mirror floor 0.000
+  saved out/ssr-explainer-grid.png
+  [PASS] ssr rooms (subgroups): renders, no validation errors, finite outputs - 3 probe(s), 41476 rays, 14729 misses, mean confidence 0.204 on geometry, mirror floor 0.900
+  saved out/ssr-rooms-grid.png
+  [PASS] ssr facingMirrors (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 147042 rays, 33091 misses, mean confidence 0.312 on geometry, mirror floor 0.000
+  saved out/ssr-facingMirrors-current.png
+  saved out/ssr-facingMirrors-lit.png
+  saved out/ssr-facingMirrors-final.png
+  saved out/ssr-facingMirrors-reshade.png
+  [PASS] ssr facingMirrors (subgroups): mirror seen in a mirror is not black with last frame's colour - 9938 left-mirror px reflect the right mirror (95.9% confident), hitShading 'off'; current: 99.6% black, mean lum 0.001; lit: 0.0% black, mean lum 0.171; final: 0.5% black, mean lum 0.173
+  [PASS] ssr facingMirrors (subgroups): mirror seen in a mirror is not black with the re-shade (this frame's colour) - hitShading 'reshade', hitColor 'current': reshade: 0.0% black, mean lum 0.242
+  saved out/ssr-facingMirrors-grid.png
+  [PASS] ssr mirrorWall (workgroup): renders, no validation errors, finite outputs - 1 probe(s), 197902 rays, 9582 misses, mean confidence 0.335 on geometry, mirror floor 0.651
+  [PASS] ssr mirrorWall (workgroup): mirror floor shows the wall - 97187 floor px reflect a visible wall point; 99.2% with confidence >= 0.9; luminance correlation 0.998, mean abs rel diff 0.018; hit distance median rel err 0.0001
+  [PASS] ssr mirrorWall (workgroup): reflected sphere and cube not striped - cube hf 0.033 vs direct 0.0190 (ratio 1.7), 97.7% of 6007 px confident; sphere hf 0.029 vs direct 0.0036 (ratio 7.9), 92.5% of 4616 px confident
+  [PASS] ssr offscreen (workgroup): renders, no validation errors, finite outputs - 3 probe(s), 103114 rays, 69074 misses, mean confidence 0.256 on geometry, mirror floor 0.430
+  [PASS] ssr offscreen (workgroup): low confidence where the reflection comes from behind the camera - wall mirror (38616 px, view 'mirror'): mean confidence 0.0314; floor reflecting above the frame (default view): 0.430
+  GPU ms 1920x1080 through the three adapter (subgroups, mirrorWall, median of 30): {"depth downsample":0.1661,"classify":0.2767,"blue noise":0.0039,"indirect args":0.0032,"hit colour pyramid":0.2368,"intersect":1.3429,"miss args":0.0039,"total":2.2664}
+  [PASS] ssr mirrorBias (hitColorFilter 'off'): 0 is the default path, 0.5 changes the rays - {"0":"a0fdeeab","unset":"a0fdeeab","unset again":"a0fdeeab","0.5":"db87c2e4"}
+  [PASS] ssr mirrorBias 0.5 (hitColorFilter 'off', D49): less raw noise on the roughnessRamp strips (r 0.2-0.4) - r 0.2: std 10.01 -> 4.97 (15917 px); r 0.3: std 11.79 -> 8.76 (36891 px); r 0.4: std 9.51 -> 6.43 (49486 px)
+  [PASS] ssr mirrorBiasCompensate at f 0.3 vs 0.7 (cone): raw noise falls with f on the roughnessRamp strips (sample alpha sqrt(1 - f); a swapped split would raise it) - r 0.2: std 9.02 -> 6.73; r 0.3: std 9.86 -> 8.41; r 0.4: std 7.91 -> 7.12
+  [PASS] ssr rayReuse: 'copy' is the default path, 'ratio' copies until its pipelines are built, then changes the radiance - {"unset":"a0fdeeab","copy":"a0fdeeab","ratio (first frame)":"a0fdeeab","ratio":"da74389e","copy again":"a0fdeeab"}
+  [PASS] ssr rayReuse 'ratio': less raw noise on the roughnessRamp strips (r 0.2-0.4) - r 0.2: std 10.03 -> 7.58 (15917 px); r 0.3: std 11.80 -> 8.32 (36891 px); r 0.4: std 9.53 -> 7.51 (49486 px)
+  [PASS] ssr rayReuse 'ratio': mean luma within 1.5 / 255 of copy@4 on the same strips (no dimming, no bias) - r 0.2: copy -0.03, ratio 0.80 (copy@4 mean 90.7); r 0.3: copy 0.00, ratio 0.77 (copy@4 mean 115.3); r 0.4: copy 0.02, ratio 0.45 (copy@4 mean 122.5)
+  [PASS] ssr hitColorFilter / mirrorBiasCompensate (W72, W76 defaults): unset = cone + compensation 0.5 bit for bit, 'off' = the old path (compensation ignored), the cone changes the hits, means within 10 % of off, no GPU errors - {"unset":"1b43e64c","off":"a0fdeeab","off + compensate (ignored)":"a0fdeeab","off + bias 0.5":"db87c2e4","off + bias 0.5 + compensate (ignored)":"db87c2e4","cone":"1b43e64c","cone + compensate 0.5 (explicit)":"1b43e64c","cone alone":"538e56a8","unset again":"1b43e64c","ratio, off":"1caa6e46","ratio (default cone)":"59626121","ratio, cone alone":"058dd137"}; glossy mean cone alone / off 1.0028, default / off 1.1331; GPU errors 0
+  [PASS] ssr hitColorFilter 'cone' with rayReuse 'ratio' (W72 + W73): the ratio intersect variant reads the pyramid - ratio off 1caa6e46, ratio + default cone 59626121, ratio + cone alone 058dd137
+  [PASS] ssr hitColorFilter 'cone' with hitColor 'history' and hitShading 'off' (the pyramid of last frame's colour) - off b2424cf5 / cone 6c263550, mean ratio 1.0233; GPU errors 0
+  [PASS] ssr hitColorFilter 'cone' with ?rt=1 (traced pass after the tracer): unset = explicit cone + compensation 0.5, stable; off and the cone alone differ - {"unset":"8ce3e7fd","off":"de0c15cb","cone":"aba944f0","comp 0.5":"8ce3e7fd","unset again":"8ce3e7fd"}; GPU errors 0
+  [PASS] ssr hitColorFilter 'cone' on a 97x61 canvas (odd sizes, a short pyramid) - active true, GPU errors 0
+  [PASS] ssr denoiser gate follows the roughness threshold (D1402) - threshold 0.8: gate 0.8, denoised (output != input): glossy 93.4% of 111202 px, between 99.9% of 135175 px, above 0.0% of 99717 px; gate back to 0.447
+  [PASS] ssr specOcc (GTAO -> Lagarde, probe part): darkens the contact creases only, no GPU errors - 1.28% px darker > 4/255, 83% of them where AO < 0.95; mean |change| where AO > 0.97: 0.180; min AO 0.02, min factor 0.00; GPU errors 0
+  [PASS] no WebGPU validation errors or exceptions
+
+all checks passed

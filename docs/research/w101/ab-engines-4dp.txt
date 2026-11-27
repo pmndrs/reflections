@@ -1,0 +1,80 @@
+=== round 0 occ 4 engines 18:38:55
+  three default: at rest, one frame to the next: mean 0.0081 / 255, max 13
+  three table: at rest, one frame to the next: mean 0.0079 / 255, max 4
+  r3f default: at rest, one frame to the next: mean 0.0080 / 255, max 2
+  r3f table: at rest, one frame to the next: mean 0.0076 / 255, max 9
+  babylon default: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.0083 / 255, max 13
+  core table: at rest, one frame to the next: mean 0.0083 / 255, max 11
+all checks passed
+=== round 0 occ 0 engines 18:39:25
+  three default: at rest, one frame to the next: mean 0.0072 / 255, max 2
+  three table: at rest, one frame to the next: mean 0.0073 / 255, max 5
+  r3f default: at rest, one frame to the next: mean 0.0077 / 255, max 10
+  r3f table: at rest, one frame to the next: mean 0.0073 / 255, max 2
+  babylon default: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.0079 / 255, max 13
+  core table: at rest, one frame to the next: mean 0.0077 / 255, max 4
+all checks passed
+=== round 1 occ 0 engines 18:39:54
+  three default: at rest, one frame to the next: mean 0.0074 / 255, max 5
+  three table: at rest, one frame to the next: mean 0.0076 / 255, max 10
+  r3f default: at rest, one frame to the next: mean 0.0076 / 255, max 8
+  r3f table: at rest, one frame to the next: mean 0.0073 / 255, max 4
+  babylon default: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.0079 / 255, max 13
+  core table: at rest, one frame to the next: mean 0.0077 / 255, max 4
+all checks passed
+=== round 1 occ 4 engines 18:40:24
+  three default: at rest, one frame to the next: mean 0.0078 / 255, max 2
+  three table: at rest, one frame to the next: mean 0.0079 / 255, max 3
+  r3f default: at rest, one frame to the next: mean 0.0080 / 255, max 3
+  r3f table: at rest, one frame to the next: mean 0.0078 / 255, max 11
+  babylon default: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.0085 / 255, max 8
+  core table: at rest, one frame to the next: mean 0.0086 / 255, max 7
+all checks passed
+=== round 2 occ 4 engines 18:40:52
+  three default: at rest, one frame to the next: mean 0.0080 / 255, max 13
+  three table: at rest, one frame to the next: mean 0.0078 / 255, max 4
+  r3f default: at rest, one frame to the next: mean 0.0080 / 255, max 3
+  r3f table: at rest, one frame to the next: mean 0.0078 / 255, max 11
+  babylon default: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.0083 / 255, max 13
+  core table: at rest, one frame to the next: mean 0.0083 / 255, max 4
+all checks passed
+=== round 2 occ 0 engines 18:41:20
+  three default: at rest, one frame to the next: mean 0.0074 / 255, max 5
+  three table: at rest, one frame to the next: mean 0.0072 / 255, max 3
+  r3f default: at rest, one frame to the next: mean 0.0075 / 255, max 3
+  r3f table: at rest, one frame to the next: mean 0.0073 / 255, max 10
+  babylon default: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.0079 / 255, max 13
+  core table: at rest, one frame to the next: mean 0.0077 / 255, max 4
+all checks passed
+=== round 3 occ 0 engines 18:41:47
+  three default: at rest, one frame to the next: mean 0.0075 / 255, max 3
+  three table: at rest, one frame to the next: mean 0.0073 / 255, max 10
+  r3f default: at rest, one frame to the next: mean 0.0072 / 255, max 2
+  r3f table: at rest, one frame to the next: mean 0.0073 / 255, max 5
+  babylon default: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.0079 / 255, max 13
+  core table: at rest, one frame to the next: mean 0.0077 / 255, max 4
+all checks passed
+=== round 3 occ 4 engines 18:42:16
+  three default: at rest, one frame to the next: mean 0.0080 / 255, max 4
+  three table: at rest, one frame to the next: mean 0.0077 / 255, max 3
+  r3f default: at rest, one frame to the next: mean 0.0081 / 255, max 13
+  r3f table: at rest, one frame to the next: mean 0.0078 / 255, max 4
+  babylon default: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.0000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.0085 / 255, max 8
+  core table: at rest, one frame to the next: mean 0.0086 / 255, max 7
+all checks passed

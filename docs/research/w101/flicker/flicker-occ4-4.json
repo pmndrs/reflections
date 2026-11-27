@@ -1,0 +1,220 @@
+{
+ "date": "2026-11-27T09:33:30.259Z",
+ "label": "occ4-4",
+ "results": [
+  {
+   "config": "occ4",
+   "scene": "ssr:contact",
+   "regions": {
+    "reflection": {
+     "px": 279484,
+     "drift": 0.377,
+     "pct8": 0.0014,
+     "rest": 0.0067,
+     "orbitStd": 0.4768,
+     "d2": 0.5834,
+     "quad": 0.3495,
+     "quadRaw": 0.6645,
+     "speckle": 0.017
+    },
+    "_pan": 3.6627
+   }
+  },
+  {
+   "config": "occ4",
+   "scene": "ssr:mirrorWall",
+   "regions": {
+    "reflection": {
+     "px": 201664,
+     "drift": 0.3087,
+     "pct8": 0.0555,
+     "rest": 0.0093,
+     "orbitStd": 0.4579,
+     "d2": 0.7503,
+     "quad": 0.0191,
+     "quadRaw": 0.1511,
+     "speckle": 0.0146
+    },
+    "_pan": 7.6815
+   }
+  },
+  {
+   "config": "occ4",
+   "scene": "bench:cubeFloor",
+   "regions": {
+    "reflection": {
+     "px": 405650,
+     "drift": 0.0357,
+     "pct8": 0,
+     "rest": 0.0012,
+     "orbitStd": 0.0719,
+     "d2": 0.1524,
+     "quad": 0.29,
+     "quadRaw": 0.5273,
+     "speckle": 0
+    },
+    "cubeRefl": {
+     "px": 24650,
+     "drift": 0.1778,
+     "pct8": 0,
+     "rest": 0.0061,
+     "orbitStd": 0.2455,
+     "d2": 0.2188,
+     "quad": 0.2175,
+     "quadRaw": 0.2235,
+     "speckle": 0
+    },
+    "slabRefl": {
+     "px": 11700,
+     "drift": 0.2514,
+     "pct8": 0,
+     "rest": 0.0053,
+     "orbitStd": 0.2907,
+     "d2": 0.1924,
+     "quad": 0.3708,
+     "quadRaw": 0.9132,
+     "speckle": 0
+    },
+    "contact": {
+     "px": 14400,
+     "drift": 0.3264,
+     "pct8": 0,
+     "rest": 0.0073,
+     "orbitStd": 0.3197,
+     "d2": 0.1519,
+     "quad": 0.1856,
+     "quadRaw": 0.0986,
+     "speckle": 0
+    },
+    "_pan": 0.4018
+   }
+  },
+  {
+   "config": "occ4",
+   "scene": "bench:edgesFloor",
+   "regions": {
+    "reflection": {
+     "px": 411632,
+     "drift": 0.1993,
+     "pct8": 0.0425,
+     "rest": 0.0032,
+     "orbitStd": 0.2076,
+     "d2": 0.3654,
+     "quad": 0.0748,
+     "quadRaw": 0.8903,
+     "speckle": 0
+    },
+    "panelRefl": {
+     "px": 29280,
+     "drift": 1.24,
+     "pct8": 0.1264,
+     "rest": 0.018,
+     "orbitStd": 1.167,
+     "d2": 1.0403,
+     "quad": 0.0839,
+     "quadRaw": 1,
+     "speckle": 0
+    },
+    "_pan": 0.4891
+   }
+  },
+  {
+   "config": "occ4",
+   "scene": "bench:plateFloor",
+   "regions": {
+    "reflection": {
+     "px": 427045,
+     "drift": 0.011,
+     "pct8": 0,
+     "rest": 0.0004,
+     "orbitStd": 0.056,
+     "d2": 0.1322,
+     "quad": 0.0985,
+     "quadRaw": 0.82,
+     "speckle": 0.0001
+    },
+    "plateRefl": {
+     "px": 16430,
+     "drift": 0.1084,
+     "pct8": 0,
+     "rest": 0.0012,
+     "orbitStd": 0.1517,
+     "d2": 0.1278,
+     "quad": 0.4658,
+     "quadRaw": 1,
+     "speckle": 0
+    },
+    "underPlate": {
+     "px": 22940,
+     "drift": 0.014,
+     "pct8": 0,
+     "rest": 0.0004,
+     "orbitStd": 0.1417,
+     "d2": 0.0589,
+     "quad": 0.0856,
+     "quadRaw": 0.2556,
+     "speckle": 0
+    },
+    "_pan": 0.3752
+   }
+  },
+  {
+   "config": "occ4",
+   "scene": "bench:carConcept@w50",
+   "regions": {
+    "reflection": {
+     "px": 458630,
+     "drift": 0.2695,
+     "pct8": 0.0044,
+     "rest": 0.0073,
+     "orbitStd": 0.3923,
+     "d2": 0.3275,
+     "quad": 0.0491,
+     "quadRaw": 0.896,
+     "speckle": 0.0576
+    },
+    "wheel": {
+     "px": 9900,
+     "drift": 1.216,
+     "pct8": 0.0202,
+     "rest": 0.025,
+     "orbitStd": 2.1331,
+     "d2": 1.6058,
+     "quad": 0.2007,
+     "quadRaw": 1,
+     "speckle": 0
+    },
+    "car": {
+     "px": 85400,
+     "drift": 0.5847,
+     "pct8": 0.0035,
+     "rest": 0.0115,
+     "orbitStd": 0.7771,
+     "d2": 0.6414,
+     "quad": 0.1143,
+     "quadRaw": 0.9843,
+     "speckle": 0.012
+    },
+    "_pan": 0.6816
+   }
+  },
+  {
+   "config": "occ4",
+   "scene": "bench:sponza@hero",
+   "regions": {
+    "reflection": {
+     "px": 119966,
+     "drift": 0.3006,
+     "pct8": 0.0008,
+     "rest": 0.0113,
+     "orbitStd": 0.5544,
+     "d2": 5.318,
+     "quad": -0.0046,
+     "quadRaw": 0.2735,
+     "speckle": 0.3586
+    },
+    "_pan": 7.0835
+   }
+  }
+ ]
+}

@@ -1,0 +1,49 @@
+examples/ssr (hybrid + denoise):
+  [PASS] hybrid: denoiser found - ffx-reflections
+  saved out/hybrid-rooms-final.png
+  saved out/hybrid-rooms-raw.png
+  saved out/hybrid-rooms-split.png
+  saved out/hybrid-rooms-source.png
+  saved out/hybrid-rooms-confidence.png
+  [PASS] hybrid rooms: denoised composite renders, no validation errors
+  saved out/hybrid-mirrorWall-final.png
+  saved out/hybrid-mirrorWall-raw.png
+  saved out/hybrid-mirrorWall-split.png
+  saved out/hybrid-mirrorWall-source.png
+  saved out/hybrid-mirrorWall-confidence.png
+  [PASS] hybrid mirrorWall: denoised composite renders, no validation errors
+  saved out/hybrid-explainer-final.png
+  saved out/hybrid-explainer-raw.png
+  saved out/hybrid-explainer-split.png
+  saved out/hybrid-explainer-source.png
+  saved out/hybrid-explainer-confidence.png
+  [PASS] hybrid explainer: denoised composite renders, no validation errors
+  saved out/hybrid-mirrorWall-low-final.png
+  [PASS] hybrid mirrorWall low: the probe fallback behind the sphere is not dark - 2179 fallback px around the sphere's reflection: mean 154.6 / 255 (probes-only 153.8), wall 195.6
+  saved out/hybrid-mirrorWall-lowSphere-final.png
+  [PASS] hybrid mirrorWall lowSphere: the probe does not show through the reflected sphere - 41464 px reflect the sphere: probe weight 0.005 (FFX blend 0.048); 17669 px reflect the wall behind it: hit weight 0.095 (FFX 0.009)
+  seam mirrorWall floor r 0.3: 2008 blocks, step off 27.24 (bias -25.00), dist 26.71 (bias -24.40) / 255 luma
+  [PASS] hybrid seam (D53): glossy mirrorWall floor, distance roughness (the default) narrows the SSR-to-probe step - step off 27.24 -> distanceRoughness 26.71 / 255 over 2013 blocks (run-to-run <= 0.15)
+  saved out/half-res-mirrorWall-final.png
+  [PASS] half-res mirrorWall: traced and denoised at half size, the upsampled residual carries the reflection and stays near full res - 132860 reflection px: full vs probe-only 50.98, this vs probe-only 50.88, this vs full 6.09 (max 183); tracer 480x270 of 960x540, 2590 traced rays
+  saved out/half-res-contact-final.png
+  [PASS] half-res contact: traced and denoised at half size, the upsampled residual carries the reflection and stays near full res - 203444 reflection px: full vs probe-only 50.02, this vs probe-only 49.75, this vs full 7.27 (max 184); tracer 480x270 of 960x540, 6697 traced rays
+  saved out/half-res-ratio-halfrate-contact.png
+  [PASS] half-res + rayReuse 'ratio' + tracedMissRate 'half' (contact, rt): all finite, the fill ran, no validation errors - non-finite 0; traced 5467, half-rate skipped 1230, filled 4880; residual non-zero 1075470 of 2073600
+  [PASS] half-res odd size 961x541 contact: tracer 481x271, reflection carried, near full - 203701 reflection px: full vs probe-only 50.12, this vs probe-only 49.82, this vs full 7.35 (max 182); tracer 481x271
+  [PASS] half-res runtime switch full -> half -> full ends identical to full, half-res targets released - final after the switch back vs before: mean 0.000, max 0/255; upsampled targets 961 px wide at half, 1 after
+  [PASS] W76 review 3: a rebuilt tracer runs the cone from its first frame (resize, full / half, hit-shading change): no frame on the 'off' path, no validation errors - [{"label":"full -> half","rebuilt":true,"size":[480,270],"cone":true},{"label":"half -> full","rebuilt":true,"size":[960,540],"cone":true},{"label":"hit shading probes -> environment","rebuilt":true,"size":[960,540],"cone":true},{"label":"environment -> probes","rebuilt":true,"size":[960,540],"cone":true}]
+  [PASS] preset 'performance' (?preset=): half-res trace, same frame as ?res=half, the denoiser's options untouched (no hit source) - preset: half 480/960 px, hit source own (false), FFX options false/false; by hand: half 480/960 px, hit source own (false), FFX options false/false; frame vs by hand mean 0.000, max 0/255
+  [PASS] preset 'performance' + explicit ?res=full: the explicit setting wins - full 960/960 px, hit source own (false), FFX options false/false
+  [PASS] an unknown ?preset= warns and renders as no preset - warned true; full 960/960 px, hit source own (false), FFX options false/false
+  [PASS] preset 'default' after 'performance': the tracer runs the package defaults from core's resolution (W76: cone + compensation at 0.5; 'relative' 0.02 with RT) - {"hitColorFilter":"cone","mirrorBias":0.5,"mirrorBiasCompensate":true,"thicknessDepthMode":"relative","thicknessDepthFactor":0.02}
+  [PASS] applyReflectionsPreset at runtime rebuilds from the page's own settings: performance + 'all' -> default returns to its half + 'hits'; a ?preset=performance page goes to the package default - own: half 480/960 px, hit source own (true), FFX options true/true; performance + all: half 480/960 px, hit source all (true), FFX options true/false; default: half 480/960 px, hit source own (true), FFX options true/true; ?preset=performance page -> default: full 960/960 px, hit source own (false), FFX options false/false
+  [PASS] a hit source a denoiser without setOptions cannot take: hybrid.hitSourceUnsupported is set and a warning logged - before false, after true, warned true
+  [PASS] no WebGPU validation errors or exceptions
+console warnings/errors:
+  warning: ScreenSpaceReflectionsPass: unknown preset 'fast' (default, performance); ignored
+  warning: HybridReflections: unknown preset 'fast' (default, performance); ignored
+  warning: applyReflectionsPreset('default'): reflectionResolution is now full; rebuild your composites (hybrid.composite()) or reflections are wrong
+  warning: HybridReflections: hit source 'hits' needs a denoiser that takes it (FFX: setOptions, or pass denoiserHitSourceOptions('hits') to its constructor); this one has no setOptions
+
+all checks passed
