@@ -332,10 +332,21 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     slug: 'rt/animated',
     path: 'features/rt/animated/',
     title: 'Ray tracing moving meshes',
-    summary: 'trace.refit() each frame keeps the BVH on moving meshes.',
-    description: 'Planned (E2).',
-    brief: { kind: 'feature', shows: 'Moving meshes in the ray-traced fallback: the BVH refitted every frame.', tryThis: PLANNED_TRY, compare: 'Refit off (stale reflections)' },
-    category: 'features', status: 'experimental', tags: ['ray tracing', 'refit'], docs: 'concepts/ray-traced-fallback', source: 'examples/features/rt/animated', planned: true,
+    summary: 'reflections.trace.refit() each frame keeps the ray-traced reflections of moving meshes where the meshes are.',
+    description:
+      'A knot slides and turns and a ball bounces over a mirror floor. Screen space reflects what the camera sees of them; the rest (their undersides, parts ' +
+      'hidden or off screen) comes from rays against the BVH that `Reflections.create(..., { rayTracing: true })` builds once, from the meshes as they are. ' +
+      'Each frame the page moves the meshes, calls `scene.updateMatrixWorld()`, then `reflections.trace.refit()`, which copies every traced mesh\'s world matrix ' +
+      'into the BVH. **Refit covers rigid motion** (position, rotation, scale, instanced matrices), not changed geometry: skinned or morphing meshes and edited ' +
+      'vertices need a new build. The moving meshes are kept out of the probe (`userData.reflectionProbeExclude`), or it would hold their first pose.',
+    brief: {
+      kind: 'feature',
+      shows: 'Why moving meshes need `trace.refit()` each frame: without it the rays still hit them where they stood at load, so their reflections lag or ghost.',
+      tryThis: ['Untick Refit: the traced part of the knot\'s and the ball\'s reflections stays where they started', 'Show traced pixels: those are the ones a stale BVH gets wrong', 'Untick Animate to hold a pose and compare'],
+      compare: 'Refit off: the BVH keeps the pose it was built with (stale reflections)',
+    },
+    category: 'features', status: 'experimental', tags: ['ray tracing', 'refit', 'animation'], docs: 'concepts/ray-traced-fallback', source: 'examples/features/rt/animated/main.ts',
+    check: { wait: 3000 },
   },
   {
     slug: 'hybrid/explained',
