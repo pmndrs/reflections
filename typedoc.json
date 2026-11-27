@@ -5,6 +5,7 @@
     "tsconfig": "tsconfig.json",
     "out": "api-docs",
     "readme": "none",
+    "favicon": "tools/favicon.svg",
     "includeVersion": false,
     "excludePrivate": true,
     "excludeProtected": true,
@@ -13,8 +14,8 @@
     "exclude": ["**/*.test.ts"],
     "sort": ["kind", "alphabetical"],
     "navigationLinks": {
-        "Docs": "https://reflections.docs.pmnd.rs",
-        "Examples": "https://reflections.docs.pmnd.rs/examples/",
+        "Docs": "https://pmndrs.github.io/reflections/",
+        "Examples": "https://pmndrs.github.io/reflections/examples/",
         "GitHub": "https://github.com/pmndrs/reflections"
     },
     "validation": {

@@ -2,7 +2,7 @@
 
 Reflections for WebGPU. Reflection probes (box-projected, GGX-prefiltered), screen-space reflections and a ray-traced fallback, composed per pixel into one denoised hybrid. The core is engine-agnostic WGSL on a bare `GPUDevice`; three.js `WebGPURenderer` is the first adapter (with Babylon.js and pixi.js adapters experimental).
 
-> Early: the API can still change. Needs a browser with WebGPU. Docs: https://reflections.docs.pmnd.rs. The plan and its gates are in [docs/SPEC.md](docs/SPEC.md).
+> Early: the API can still change. Needs a browser with WebGPU. Docs: https://pmndrs.github.io/reflections/. The plan and its gates are in [docs/SPEC.md](docs/SPEC.md).
 
 ## Install
 
@@ -115,7 +115,7 @@ The probes are this library's: an engine-agnostic core (GGX prefilter, cube-arra
 | `@pmndrs/reflections/babylon` | Babylon.js WebGPUEngine adapter (experimental): probes and screen-space reflections as frame-graph tasks (`examples/babylon`). No ray tracing, hybrid resolve or presets |
 | `@pmndrs/reflections/pixi` | pixi.js v8 WebGPURenderer adapter (experimental) for pixi-3d scenes: the frame contract from a `View3D`'s outputs, core SSR + probe set on pixi's device, the composite as a pixi `Filter` (`examples/pixi3d/arcade`). It never imports pixi-3d (closed beta); the example needs the beta unpacked locally ([examples/pixi3d/README.md](examples/pixi3d/README.md)) and shows a setup notice without it |
 
-Which adapter has which feature: [Adapters](https://reflections.docs.pmnd.rs/guides/adapters) in the docs. Each has its own page: [three.js](https://reflections.docs.pmnd.rs/guides/three), [React Three Fiber](https://reflections.docs.pmnd.rs/guides/react-three-fiber), [Babylon.js](https://reflections.docs.pmnd.rs/guides/babylon), [pixi.js](https://reflections.docs.pmnd.rs/guides/pixi).
+Which adapter has which feature: [Adapters](https://pmndrs.github.io/reflections/guides/adapters) in the docs. Each has its own page: [three.js](https://pmndrs.github.io/reflections/guides/three), [React Three Fiber](https://pmndrs.github.io/reflections/guides/react-three-fiber), [Babylon.js](https://pmndrs.github.io/reflections/guides/babylon), [pixi.js](https://pmndrs.github.io/reflections/guides/pixi).
 
 ## Examples
 

@@ -12,8 +12,8 @@
  * tools/site-check.ts fails a showcase that runs without it.
  *
  * Environment:
- *   BASE_PATH      where the site is served from: '' (default, a custom domain such as
- *                  https://reflections.docs.pmnd.rs) or '/reflections' (pmndrs.github.io/reflections).
+ *   BASE_PATH      where the site is served from: '/reflections' for https://pmndrs.github.io/reflections/ (what pages.yml
+ *                  passes), '' (the default) for a custom domain or a local serve at /.
  *   KHRONOS_REF    the glTF-Sample-Assets commit the models are loaded from at runtime (pinned below).
  *   ASSETS_CDN     where Khronos models load from (default: raw.githubusercontent.com at the pinned commit). Set to 'local' to bundle examples/assets
  *                  instead (`pnpm assets` first; about 160 MB).
