@@ -121,8 +121,8 @@ async function main() {
   (window as unknown as { __p: unknown }).__p = {
     reflections,
     stop() { renderer.setAnimationLoop(null); },
-    /** Render n frames (at least until the denoiser's history has settled after a switch), then the PNG data URL of the canvas. */
-    async shot(n = 1) { const k = Math.max(n, 60 - sinceSwitch); for (let i = 0; i < k; i++) frame(); return canvas.toDataURL('image/png'); },
+    /** Render n frames (at least 120 after a switch: the denoiser's history settles), then the PNG data URL of the canvas. */
+    async shot(n = 1) { const k = Math.max(n, 120 - sinceSwitch); for (let i = 0; i < k; i++) frame(); return canvas.toDataURL('image/png'); },
     /** The baseline of `brief.compare`: true shows it (denoiser off). */
     setCompare(on: boolean) { setDenoiseOff(on); },
     setView,

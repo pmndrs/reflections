@@ -358,9 +358,19 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     path: 'features/materials/roughness/',
     title: 'Materials',
     summary: 'Roughness, metalness and clearcoat; why basic, Lambert and Phong get no reflections.',
-    description: 'Planned (E3).',
-    brief: { kind: 'feature', shows: 'Which materials reflect and how roughness and metalness shape it.', tryThis: PLANNED_TRY, compare: 'A basic material next to a standard one' },
-    category: 'features', status: 'stable', tags: ['materials', 'roughness'], docs: 'guides/three', source: 'examples/features/materials/roughness', planned: true,
+    description:
+      'The roughness ramp: gold metal spheres, blue plastic spheres and chrome floor strips from roughness 0 (left) to 1 (right), through `Reflections.create` ' +
+      'with a probe and the denoiser. Every reflection the package adds takes the place of three\'s own specular environment term, so it follows the material: ' +
+      'metal reflects in its colour, plastic weakly and in white, roughness widens the lobe (above 0.447 the probe alone reflects), and a `MeshPhysicalMaterial` ' +
+      'clear coat adds a sharp layer over a rough base. `MeshBasicMaterial`, `MeshLambertMaterial` and `MeshPhongMaterial` get no reflections, by design: they have ' +
+      'no physical specular term to replace (README "Which materials get reflections"). Give a surface that should reflect a standard material.',
+    brief: {
+      kind: 'feature',
+      shows: 'Which materials get reflections and how roughness, metalness and clear coat shape them; Basic, Lambert and Phong get none.',
+      tryThis: ['Tick Classic materials: the spheres turn Phong and lose their reflections (the highlight is the lights\', not a reflection)', 'Set the Blue row to Physical, clear coat: a sharp coat over a rough base', 'Switch the view to Floor strips: chrome from mirror to rough'],
+      compare: 'Classic materials (Phong, Lambert or Basic) on the spheres, the floor strips still standard',
+    },
+    category: 'features', status: 'stable', tags: ['materials', 'roughness'], docs: 'guides/three', source: 'examples/features/materials/roughness/main.ts',
   },
   {
     slug: 'motion/animated',
