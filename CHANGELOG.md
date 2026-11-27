@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `Reflections.create` takes `gbufferOptions` (e.g. a render size below the canvas, for an upscaler after the
+  composite) and `timestamps` (per-pass GPU ms through `reflections.ssr.readTimings()`), passed to the pass.
+- The examples: a catalog of pages, one per feature and one per engine, each with what it shows, what to try
+  and a compare switch (`examples/catalog.ts`, the gallery at `/examples/`).
+
 ## 0.1.0-alpha.0
 
 First release (npm dist-tag `alpha`).

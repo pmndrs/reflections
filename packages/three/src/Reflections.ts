@@ -17,6 +17,7 @@ import { ReflectionProbe, ReflectionProbes } from './probes/ReflectionProbes';
 import { reflectionProbes } from './probes/ReflectionProbesNode';
 import { installCubeArraySupport } from './compat/cubeArray';
 import { ScreenSpaceReflectionsPass, type ScreenSpaceReflectionsPassSettings } from './sssr/ScreenSpaceReflectionsPass';
+import type { FrameGBufferOptions } from './frame/FrameGBuffer';
 import { HybridReflections } from './sssr/HybridReflections';
 import { createRaytracerTraceProviderFromObjects } from './trace/RaytracerTraceProvider';
 
@@ -53,6 +54,13 @@ export interface ReflectionsOptions {
   settings?: ScreenSpaceReflectionsPassSettings;
   /** Install the cube-array shim for the probes on three r187 (default true; harmless where three has cube arrays). */
   cubeArrays?: boolean;
+  /**
+   * Options for the G-buffer (`FrameGBufferOptions`): e.g. `{ width, height }` to render below the canvas size for an
+   * upscaler after the composite. Default: the renderer's drawing-buffer size, `lit: 'auto'`.
+   */
+  gbufferOptions?: FrameGBufferOptions;
+  /** Per-pass GPU timestamps, read with `reflections.ssr.readTimings()`; needs the 'timestamp-query' feature. Default false. */
+  timestamps?: boolean;
 }
 
 /**
@@ -109,7 +117,7 @@ export class Reflections {
     const wantProbes = options.probes ?? true;
     if (wantProbes && options.cubeArrays !== false) await installCubeArraySupport(renderer);
 
-    const ssr = new ScreenSpaceReflectionsPass(renderer, { preset, settings: options.settings });
+    const ssr = new ScreenSpaceReflectionsPass(renderer, { preset, settings: options.settings, gbufferOptions: options.gbufferOptions, timestamps: options.timestamps });
     const device = ssr.device;
     const threshold = ssr.settings.roughnessThreshold ?? 0.447;
     const denoiser = typeof options.denoiser === 'function' ? options.denoiser(device, { roughnessThreshold: threshold }) : (options.denoiser ?? null);
