@@ -312,10 +312,21 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     slug: 'rt/fallback',
     path: 'features/rt/fallback/',
     title: 'Ray-traced fallback',
-    summary: 'Rays fill what screen space misses.',
-    description: 'Planned (E2).',
-    brief: { kind: 'feature', shows: 'The ray-traced fallback: rays against a BVH for the pixels screen space could not resolve.', tryThis: PLANNED_TRY, compare: '`rayTracing` off' },
-    category: 'features', status: 'experimental', tags: ['ray tracing'], docs: 'concepts/ray-traced-fallback', source: 'examples/features/rt/fallback', planned: true,
+    summary: 'Rays fill what screen space misses: reflections of things above the frame and behind the camera.',
+    description:
+      'The wall mirror faces the camera, so it shows what is behind it: a wall of coloured bars, a glow sphere, and the backs of the cylinder and the box. ' +
+      'Screen space cannot see any of that, and the floor near the camera reflects a ring above the frame. `Reflections.create(renderer, scene, { probes, rayTracing: true, denoiser })` builds a BVH over every visible mesh once ' +
+      '(`@pmndrs/raytracer` and `@pmndrs/bvh`, optional peers) and traces a ray for each pixel screen space misses; hits are lit from the probes and the ' +
+      'sun. `reflections.ssr.rayTracing` switches it at run time. Where the device cannot fit the traced pass, it turns itself off with one warning and ' +
+      '`reflections.ssr.traceError` says why (shown in the status line); screen space and the probes carry on.',
+    brief: {
+      kind: 'feature',
+      shows: 'What the ray-traced fallback adds over screen space + probes: sharp reflections of things off the screen, in the right place, including objects the probe never captured.',
+      tryThis: ['Untick Ray-traced fallback and watch the wall mirror: the cylinder and the box vanish from it (the probe never saw them) and the bars go soft', 'Switch the view to Wall mirror and toggle again', 'Show where each pixel\'s reflection comes from: blue is a traced ray, green screen space, red the probe'],
+      compare: 'Ray-traced fallback off (`reflections.ssr.rayTracing = false`): the misses take the probe',
+    },
+    category: 'features', status: 'experimental', tags: ['ray tracing', 'probes', 'denoiser'], docs: 'concepts/ray-traced-fallback', source: 'examples/features/rt/fallback/main.ts',
+    check: { wait: 3000 },
   },
   {
     slug: 'rt/animated',

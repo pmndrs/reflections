@@ -3456,14 +3456,18 @@ async function catalogChecks() {
       } else if (await p.cdp.evalJs('typeof window.__p.setCompare === "function"', false)) {
         await p.T('window.__p.stop()');
         const a = await p.T('window.__p.shot(2)');
+        // W94: a denoised page differs a little from one shot to the next (each frame's rays are new): that noise floor, measured
+        // here with no switch, widens the restore bound (0.05 + 2 x floor) and must stay well under the switch's own change
+        const a2 = await p.T('window.__p.shot(2)');
         await p.T('window.__p.setCompare(true)');
         const b = await p.T('window.__p.shot(2)');
         await p.T('window.__p.setCompare(false)');
         const back = await p.T('window.__p.shot(2)');
+        const n = await p.cdp.evalJs(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(a2)})`);
         const d = await p.cdp.evalJs(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
         const r = await p.cdp.evalJs(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(back)})`);
-        check(`catalog ${e.slug}: the compare switch changes the image, and switching back restores it`, d.mean > 0.2 && r.mean < 0.05,
-          `on vs compare mean ${d.mean.toFixed(3)} / 255 (max ${d.max}); on vs back mean ${r.mean.toFixed(4)}`);
+        check(`catalog ${e.slug}: the compare switch changes the image, and switching back restores it`, d.mean > Math.max(0.2, 5 * n.mean) && r.mean < 0.05 + 2 * n.mean,
+          `on vs compare mean ${d.mean.toFixed(3)} / 255 (max ${d.max}); on vs back mean ${r.mean.toFixed(4)}; shot to shot (no switch) ${n.mean.toFixed(4)}`);
       }
     } finally { p.close(); }
   }
