@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0
+
+First stable release (npm dist-tag `latest`), with the examples set. Changes since 0.1.0-alpha.0:
 
 - Babylon: `probeIrradiance(material, probes)`, a PBR material plugin that lights the material's diffuse
   image-based lighting from a `BabylonProbeSet` per pixel (bounce light, as three's materials get from

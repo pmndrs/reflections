@@ -1,6 +1,6 @@
 {
   "name": "@pmndrs/reflections",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0",
   "description": "Reflections for WebGPU: reflection probes (box-projected, prefiltered), screen-space reflections and ray-traced fallbacks, composed into one hybrid. Engine-agnostic core, three.js adapter.",
   "author": "Dennis Smolek <dennis@smolek.dev>",
   "license": "MIT",
