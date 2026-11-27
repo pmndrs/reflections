@@ -115,6 +115,7 @@ The working state of the project: who is on what, which interfaces the workstrea
 | W97 | Bug: ray-traced hits on moving `noProbe` meshes (rt/animated's knot and ball) shade light grey (~0.85) instead of their material colour under `Reflections.create`; the ssr lab page sometimes shows them coloured | bug | `packages/three/src/trace`, `packages/core/src/trace` as needed; a regression check | 5419 | running (2026-11-27) | - |
 | W98 | Examples follow-up: perf/presets and perf/upscaler on `Reflections.create` (`timestamps`, `gbufferOptions`); a visible motion compare for motion/animated | code | `examples/features/{perf,motion}/`, their catalog entries; `packages/three/src/sssr/presets.ts` (`applyReflectionsPreset` takes a `Reflections`) | 5420 | done (2026-11-27), not merged | - |
 | W99 | Babylon adapter: probe irradiance (bounce light) for Babylon's PBR materials, as three's materials take it through `scene.environmentNode`; engines/babylon was 60.5/255 darker than engines/three | code + measure | `packages/babylon/src`, `examples/engines/babylon/`, the `engines` check bounds | 5421 | running (2026-11-27) | - |
+| W100 | Examples E5: generated docs examples page from the catalog, README + docs links to the pages, copy edit of every brief and page description | docs | `docs/site/getting-started/examples.mdx` + its generator, README.md, `docs/site/**` links, briefs in `examples/catalog.ts` (not engines/babylon: W99) | 5422 | running (2026-11-27) | - |
 
 ## Platform
 
