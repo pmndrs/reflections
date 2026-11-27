@@ -1,16 +1,17 @@
 // A whole animated scene: the camera on a path, objects moving, and camera cuts that reset the history.
 //
 // What it shows: reflections are temporal. The denoiser blends each pixel with where it was last frame (by the G-buffer's motion
-// vectors), and the screen-space tracer takes its hit colours from last frame's image. Between cuts that is what keeps a moving
-// camera and moving objects steady. At a camera cut there is no "where it was last frame": the previous shot's image is unrelated,
-// so the page drops the history at each cut:
+// vectors and the camera's matrices), and that history is what keeps a moving camera and moving objects steady. At a camera cut there
+// is no "where it was last frame": the previous shot's image is unrelated, so the page drops the history at each cut, and only there:
 //
-//   reflections.ssr.resetHistory();     // hit colours: this frame's scene colour, not last frame's image
+//   reflections.ssr.resetHistory();     // the G-buffer's motion, the tracer's temporal state
 //   reflections.hybrid.resetHistory();  // the denoiser starts over
 //
-// With denoiser/ffx the compare (no reset) shows little: its reprojection rejects history whose depth and normals disagree, so the
-// previous shot barely shows through (the frame after the doorway -> front cut: 0.08 / 255 mean against a 0.07 noise floor). The
-// reset is still the contract; a denoiser without that rejection depends on it. The catalog check does not require an image change.
+// The compare resets it on every frame the camera moves too, as a path tracer's accumulation is reset on a camera change: the
+// denoiser then never gets past its first frame and the glossy floor sparkles with the tracer's raw noise for as long as the camera
+// moves. (Two quieter mistakes do not show here, W95 / W98: no reset at a cut, because denoiser/ffx rejects history whose depth and
+// normals disagree; and motion vectors from the camera alone, without the objects' own motion, because the moving mirror ball is the
+// only glossy moving surface and it is small: 0.04 / 255 mean, 0.12 % px > 8 on the ball.)
 //
 // The scene: Ben Houston's two rooms (three.js #35046) with a polished floor, the knot turning and the mirror ball on its figure
 // eight. Three shots of 6 s, each a slow camera move, then a cut.
@@ -24,7 +25,7 @@ mountShell('motion/animated');
 
 const canvas = document.querySelector<HTMLCanvasElement>('#view')!;
 const status = document.querySelector<HTMLElement>('#status')!;
-const noResetBox = document.querySelector<HTMLInputElement>('#noReset')!;
+const resetOnMoveBox = document.querySelector<HTMLInputElement>('#resetOnMove')!;
 const slowBox = document.querySelector<HTMLInputElement>('#slow')!;
 const pauseBox = document.querySelector<HTMLInputElement>('#pause')!;
 const cutButton = document.querySelector<HTMLButtonElement>('#cut')!;
@@ -73,33 +74,36 @@ async function main() {
     denoiser: (device, { roughnessThreshold }) => new FfxReflectionDenoiser(device, { roughnessThreshold: roughnessThreshold ** 2 }),
   });
 
-  let resetAtCuts = true, paused = false, speed = 1, time = 0, current = -1, sinceCut = 0;
+  let resetOnMove = false, paused = false, speed = 1, time = 0, current = -1, sinceCut = 0;
   const resetHistory = () => {
     // ---- the part to copy: on a camera cut (or a teleport, a scene switch) -------------------------
     reflections.ssr.resetHistory();
     reflections.hybrid.resetHistory();
     // ----------------------------------------------------------------------------------------------
   };
-  const look = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3();
+  const look = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), lastPos = new THREE.Vector3(), lastLook = new THREE.Vector3();
   /** One frame `dt` seconds after the last (0 = paused: the camera and the objects hold still). */
   const frame = (dt: number) => {
     time += dt * speed;
     const { index, k } = shotAt(time);
     if (index !== current) {
-      if (current >= 0 && resetAtCuts) resetHistory(); // a cut
+      if (current >= 0) resetHistory(); // a cut
       current = index; sinceCut = 0;
     }
     sinceCut++;
     const s = SHOTS[index], e = k * k * (3 - 2 * k); // ease in and out
     camera.position.copy(a.set(...s.from[0]).lerp(b.set(...s.to[0]), e));
     camera.lookAt(look.copy(a.set(...s.from[1]).lerp(b.set(...s.to[1]), e)));
+    // the compare: a reset whenever the camera moved (what not to do; a cut is the only place for it)
+    if (resetOnMove && (!camera.position.equals(lastPos) || !look.equals(lastLook))) resetHistory();
+    lastPos.copy(camera.position); lastLook.copy(look);
     kit.update?.(time);
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); // a no-op unless the size changed
     camera.aspect = canvas.clientWidth / canvas.clientHeight;
     camera.updateProjectionMatrix();
     reflections.render(camera);
   };
-  /** Jump to time t: a cut of its own, so the history resets whatever the switch says. */
+  /** Jump to time t: a cut of its own. */
   const seek = (t: number) => { time = t; current = shotAt(t).index; sinceCut = 0; resetHistory(); };
 
   let last = 0;
@@ -108,31 +112,34 @@ async function main() {
     last = now;
     frame(paused ? 0 : dt);
     status.textContent = `shot ${current + 1} / ${SHOTS.length}: ${SHOTS[current].name}` +
-      (sinceCut < 40 ? (resetAtCuts ? '   CUT: history reset' : '   CUT: no history reset') : '');
+      (resetOnMove ? '   history reset on every camera move (the compare)' : sinceCut < 40 ? '   CUT: history reset' : '');
   });
 
-  noResetBox.onchange = () => { resetAtCuts = !noResetBox.checked; };
+  resetOnMoveBox.onchange = () => { resetOnMove = resetOnMoveBox.checked; };
   slowBox.onchange = () => { speed = slowBox.checked ? 0.25 : 1; };
   pauseBox.onchange = () => { paused = pauseBox.checked; };
   cutButton.onclick = () => { time = Math.floor(time / LOOP) * LOOP + shotStart(current + 1) + 1e-3; }; // the next frame cuts
 
   // headless driver (scripts/run-headless.mjs, section `catalog`). Time steps by 1/60 s per frame here, so shots repeat exactly.
-  const CUT = shotStart(2); // doorway -> front: the floor's reflections change the most
+  const SHOT = shotStart(2) + 1.5; // the front shot, mid-move: the camera pans across both rooms' floors
   (window as unknown as { __p: unknown }).__p = {
     reflections,
-    /** Stops the loop and pins the tracer's noise (frame index 0), so shots repeat exactly (the check compares them). */
-    stop() { renderer.setAnimationLoop(null); reflections.ssr.settings.frameIndex = 0; },
     /**
-     * The frame `max(n, 6)` frames after a camera cut, as a PNG data URL: seek to 1.5 s before the doorway -> front cut (the history
-     * settles over the doorway shot), play through the cut, and stop 6 frames into the front shot.
+     * Stops the loop and pins the tracer's noise (frame index 0), so shots repeat exactly (the check compares them); then 0.6 s of
+     * frames, so the tracer's variants compiled asynchronously on the first frames are in before the first shot.
      */
+    async stop() {
+      renderer.setAnimationLoop(null); reflections.ssr.settings.frameIndex = 0;
+      for (let i = 0; i < 30; i++) { frame(0); await new Promise((r) => setTimeout(r, 20)); }
+    },
+    /** 1.5 s (90 frames, at least n) into the front shot from its cut, camera moving, as a PNG data URL. */
     async shot(n = 1) {
-      seek(CUT - 1.5 + 0.5 / 60);
-      for (let i = 0; i < 90 + Math.max(n, 6); i++) frame(1 / 60);
+      seek(SHOT - 1.5 + 0.5 / 60);
+      for (let i = 0; i < Math.max(n, 90); i++) frame(1 / 60);
       return canvas.toDataURL('image/png');
     },
-    /** The baseline of `brief.compare`: true = no history reset at the cuts. */
-    setCompare(on: boolean) { resetAtCuts = !on; noResetBox.checked = on; },
+    /** The baseline of `brief.compare`: true = the history reset on every camera move too. */
+    setCompare(on: boolean) { resetOnMove = on; resetOnMoveBox.checked = on; },
     seek,
     /** Rest flicker (the quick start's measure): paused mid-shot, settled 120 frames; % of px whose mean |change| over 6 frame pairs > 1/255. */
     async restFlicker() {

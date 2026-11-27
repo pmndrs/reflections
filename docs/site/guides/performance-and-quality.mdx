@@ -25,6 +25,9 @@ if (resolutionChanged) {
 }
 ```
 
+With `Reflections.create`, pass the `Reflections` itself: `applyReflectionsPreset(reflections, 'performance')` rebuilds
+its composite when the resolution changes.
+
 At construction, pass `preset: 'performance'` to both `ScreenSpaceReflectionsPass` and `HybridReflections`. Settings
 you pass explicitly win over the preset, key by key.
 

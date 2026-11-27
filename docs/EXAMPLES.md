@@ -62,7 +62,7 @@ One page each. Each turns on one thing over a baseline the visitor can switch ba
 | `hybrid/explained` | The teaching page: probe, screen space, rays and the composite side by side, with the per-pixel source map | `explainer` | Each source alone | rebuild (denoiser `reflections-hybrid`, on our pipeline) |
 | `denoise/glossy` | The denoiser on glossy surfaces, with a live flicker meter | `roughnessRamp` | Denoiser off | new |
 | `materials/roughness` | Roughness, metalness, clearcoat; why basic / Lambert / Phong get none | `roughnessRamp` + `multiMaterial` | A basic material next to a standard one | new |
-| `motion/animated` | A whole animated scene: camera path, moving objects, a camera cut with `resetHistory` | `moving` + `rooms` | History reset off at the cut (the smear) | new |
+| `motion/animated` | A whole animated scene: camera path, moving objects, a camera cut with `resetHistory` | `moving` + `rooms` | History reset on every camera move too (W98; the planned "no reset at the cut" does not show with denoiser/ffx) | new |
 | `perf/presets` | `default` vs `performance` (half-resolution reflections), GPU ms per pass | `rooms` | The other preset | new |
 | `perf/upscaler` | TAA / upscaling after the composite with `@pmndrs/upscaler`, jitter wired through | `rooms` | Upscaler off | new (from showcase's `DisplayAA`) |
 | `custom/tsl` | `sampleReflectionProbes` in your own TSL material (a water or glass surface) | `boxRoom` | The stock material | new |

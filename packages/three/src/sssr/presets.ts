@@ -16,12 +16,13 @@ const warnedNames = new Set<string>();
  * is rebuilt from those layers, so 'performance' -> 'default' returns to where the app started; other
  * keys keep their current values. Drops history. When `resolutionChanged` is true the app must rebuild
  * its own composites (`hybrid.composite()`), as after any `reflectionResolution` change (warned once);
- * the hybrid rebuilds its own passes on the next `update()`. At construction, pass `preset` to
+ * the hybrid rebuilds its own passes on the next `update()`. A target with a `rebuild()` (a `Reflections`:
+ * `applyReflectionsPreset(reflections, name)`) is rebuilt here instead, with no warning. At construction, pass `preset` to
  * `ScreenSpaceReflectionsPass` and `HybridReflections` instead (there the app's `settings` win over the
  * preset). An unknown name warns once and changes nothing.
  */
 export function applyReflectionsPreset(
-  target: { ssr: ScreenSpaceReflectionsPass; hybrid?: HybridReflections | null },
+  target: { ssr: ScreenSpaceReflectionsPass; hybrid?: HybridReflections | null; rebuild?(): void },
   name: ReflectionsPresetName,
   overrides: { tracer?: ReflectionsPresetTracer; denoiser?: ReflectionsPresetDenoiser } = {},
 ): ReflectionsPreset & { resolutionChanged: boolean } {
@@ -37,7 +38,7 @@ export function applyReflectionsPreset(
   for (const k of REFLECTION_PRESET_KEYS.tracer) { if (base[k] !== undefined) settings[k] = base[k]; else delete settings[k]; }
   Object.assign(ssr.settings, p.tracer);
   const resolutionChanged = (ssr.settings.reflectionResolution ?? 'full') !== before;
-  if (resolutionChanged && !warnedResolution) {
+  if (resolutionChanged && !target.rebuild && !warnedResolution) {
     warnedResolution = true;
     console.warn(`applyReflectionsPreset('${name}'): reflectionResolution is now ${ssr.settings.reflectionResolution ?? 'full'}; rebuild your composites (hybrid.composite()) or reflections are wrong`);
   }
@@ -47,5 +48,6 @@ export function applyReflectionsPreset(
     hybrid.resetHistory();
   }
   ssr.resetHistory();
+  if (resolutionChanged) target.rebuild?.(); // a Reflections: its composite for the new resolution
   return { ...p, resolutionChanged };
 }
