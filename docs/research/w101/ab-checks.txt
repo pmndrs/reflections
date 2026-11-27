@@ -1,0 +1,144 @@
+=== round 0 occ 4 quickstart 18:13:01
+  [PASS] examples/quickstart: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.315 % of px
+  [PASS] examples/quickstart probes only: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.000 % of px
+  [PASS] examples/quickstart rt + preset performance: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.649 % of px
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.307 % of px
+  [PASS] examples/quickstart rt, default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.370 % of px
+  [PASS] examples/quickstart rt (split scene copy), default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.325 % of px
+all checks passed
+=== round 0 occ 4 engines 18:13:14
+  three default: at rest, one frame to the next: mean 0.008 / 255, max 6
+  three table: at rest, one frame to the next: mean 0.008 / 255, max 8
+  r3f default: at rest, one frame to the next: mean 0.008 / 255, max 9
+  r3f table: at rest, one frame to the next: mean 0.008 / 255, max 11
+  babylon default: at rest, one frame to the next: mean 0.000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.008 / 255, max 13
+  core table: at rest, one frame to the next: mean 0.008 / 255, max 9
+all checks passed
+=== round 0 occ 0 quickstart 18:13:38
+  [PASS] examples/quickstart: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.251 % of px
+  [PASS] examples/quickstart probes only: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.000 % of px
+  [PASS] examples/quickstart rt + preset performance: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.712 % of px
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.226 % of px
+  [PASS] examples/quickstart rt, default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.361 % of px
+  [PASS] examples/quickstart rt (split scene copy), default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.229 % of px
+all checks passed
+=== round 0 occ 0 engines 18:13:48
+  three default: at rest, one frame to the next: mean 0.008 / 255, max 6
+  three table: at rest, one frame to the next: mean 0.007 / 255, max 6
+  r3f default: at rest, one frame to the next: mean 0.008 / 255, max 3
+  r3f table: at rest, one frame to the next: mean 0.007 / 255, max 3
+  babylon default: at rest, one frame to the next: mean 0.000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.008 / 255, max 13
+  core table: at rest, one frame to the next: mean 0.008 / 255, max 4
+all checks passed
+=== round 1 occ 0 quickstart 18:14:12
+  [PASS] examples/quickstart: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.247 % of px
+  [PASS] examples/quickstart probes only: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.000 % of px
+  [PASS] examples/quickstart rt + preset performance: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.651 % of px
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.232 % of px
+  [PASS] examples/quickstart rt, default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.372 % of px
+  [PASS] examples/quickstart rt (split scene copy), default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.266 % of px
+all checks passed
+=== round 1 occ 0 engines 18:14:24
+  three default: at rest, one frame to the next: mean 0.008 / 255, max 3
+  three table: at rest, one frame to the next: mean 0.007 / 255, max 10
+  r3f default: at rest, one frame to the next: mean 0.008 / 255, max 2
+  r3f table: at rest, one frame to the next: mean 0.007 / 255, max 4
+  babylon default: at rest, one frame to the next: mean 0.000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.008 / 255, max 13
+  core table: at rest, one frame to the next: mean 0.008 / 255, max 4
+all checks passed
+=== round 1 occ 4 quickstart 18:14:49
+  [PASS] examples/quickstart: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.296 % of px
+  [PASS] examples/quickstart probes only: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.000 % of px
+  [PASS] examples/quickstart rt + preset performance: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.698 % of px
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.317 % of px
+  [PASS] examples/quickstart rt, default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.376 % of px
+  [PASS] examples/quickstart rt (split scene copy), default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.307 % of px
+all checks passed
+=== round 1 occ 4 engines 18:15:02
+  three default: at rest, one frame to the next: mean 0.008 / 255, max 4
+  three table: at rest, one frame to the next: mean 0.008 / 255, max 4
+  r3f default: at rest, one frame to the next: mean 0.008 / 255, max 3
+  r3f table: at rest, one frame to the next: mean 0.008 / 255, max 5
+  babylon default: at rest, one frame to the next: mean 0.000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.008 / 255, max 13
+  core table: at rest, one frame to the next: mean 0.008 / 255, max 4
+all checks passed
+=== round 2 occ 4 quickstart 18:15:30
+  [PASS] examples/quickstart: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.322 % of px
+  [PASS] examples/quickstart probes only: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.000 % of px
+  [PASS] examples/quickstart rt + preset performance: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.687 % of px
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.306 % of px
+  [PASS] examples/quickstart rt, default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.379 % of px
+  [PASS] examples/quickstart rt (split scene copy), default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.320 % of px
+all checks passed
+=== round 2 occ 4 engines 18:15:42
+  three default: at rest, one frame to the next: mean 0.008 / 255, max 13
+  three table: at rest, one frame to the next: mean 0.008 / 255, max 5
+  r3f default: at rest, one frame to the next: mean 0.008 / 255, max 4
+  r3f table: at rest, one frame to the next: mean 0.008 / 255, max 5
+  babylon default: at rest, one frame to the next: mean 0.000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.008 / 255, max 13
+  core table: at rest, one frame to the next: mean 0.008 / 255, max 4
+all checks passed
+=== round 2 occ 0 quickstart 18:16:07
+  [PASS] examples/quickstart: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.248 % of px
+  [PASS] examples/quickstart probes only: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.000 % of px
+  [PASS] examples/quickstart rt + preset performance: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.673 % of px
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.259 % of px
+  [PASS] examples/quickstart rt, default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.347 % of px
+  [PASS] examples/quickstart rt (split scene copy), default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.244 % of px
+all checks passed
+=== round 2 occ 0 engines 18:16:20
+  three default: at rest, one frame to the next: mean 0.008 / 255, max 10
+  three table: at rest, one frame to the next: mean 0.007 / 255, max 2
+  r3f default: at rest, one frame to the next: mean 0.008 / 255, max 4
+  r3f table: at rest, one frame to the next: mean 0.007 / 255, max 4
+  babylon default: at rest, one frame to the next: mean 0.000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.008 / 255, max 13
+  core table: at rest, one frame to the next: mean 0.008 / 255, max 4
+all checks passed
+=== round 3 occ 0 quickstart 18:16:46
+  [PASS] examples/quickstart: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.241 % of px
+  [PASS] examples/quickstart probes only: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.000 % of px
+  [PASS] examples/quickstart rt + preset performance: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.677 % of px
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.249 % of px
+  [PASS] examples/quickstart rt, default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.372 % of px
+  [PASS] examples/quickstart rt (split scene copy), default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.266 % of px
+all checks passed
+=== round 3 occ 0 engines 18:17:01
+  three default: at rest, one frame to the next: mean 0.008 / 255, max 10
+  three table: at rest, one frame to the next: mean 0.007 / 255, max 2
+  r3f default: at rest, one frame to the next: mean 0.008 / 255, max 5
+  r3f table: at rest, one frame to the next: mean 0.007 / 255, max 3
+  babylon default: at rest, one frame to the next: mean 0.000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.008 / 255, max 8
+  core table: at rest, one frame to the next: mean 0.008 / 255, max 7
+all checks passed
+=== round 3 occ 4 quickstart 18:17:27
+  [PASS] examples/quickstart: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.297 % of px
+  [PASS] examples/quickstart probes only: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.000 % of px
+  [PASS] examples/quickstart rt + preset performance: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.662 % of px
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.319 % of px
+  [PASS] examples/quickstart rt, default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.375 % of px
+  [PASS] examples/quickstart rt (split scene copy), default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.298 % of px
+all checks passed
+=== round 3 occ 4 engines 18:17:40
+  three default: at rest, one frame to the next: mean 0.008 / 255, max 10
+  three table: at rest, one frame to the next: mean 0.008 / 255, max 5
+  r3f default: at rest, one frame to the next: mean 0.008 / 255, max 3
+  r3f table: at rest, one frame to the next: mean 0.008 / 255, max 4
+  babylon default: at rest, one frame to the next: mean 0.000 / 255, max 0
+  babylon table: at rest, one frame to the next: mean 0.000 / 255, max 0
+  core default: at rest, one frame to the next: mean 0.008 / 255, max 13
+  core table: at rest, one frame to the next: mean 0.008 / 255, max 10
+all checks passed
