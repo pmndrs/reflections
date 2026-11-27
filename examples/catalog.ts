@@ -255,10 +255,20 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     slug: 'probes/two-rooms',
     path: 'features/probes/two-rooms/',
     title: 'Two rooms',
-    summary: 'Several probes blended by influence box: walk through the doorway.',
-    description: 'Planned (E2): rebuilds the denoiser repo\'s reflections-rooms page on `Reflections`.',
-    brief: { kind: 'feature', shows: 'Several probes, each with its own influence box, blended across a doorway between two rooms.', tryThis: PLANNED_TRY, compare: 'One probe for both rooms; influence boxes and weights as overlays' },
-    category: 'features', status: 'experimental', tags: ['probes', 'blending'], docs: 'concepts/reflection-probes', source: 'examples/features/probes/two-rooms', planned: true,
+    summary: 'A probe per room and one in the doorway, blended by their influence boxes: each room reflects itself.',
+    description:
+      'Ben Houston\'s two rooms from three.js #35046: a warm-lit and a cool-lit room joined by a doorway. Each room has a `ReflectionProbe` whose ' +
+      'influence box is the room and whose projection box (`projectionSize`) is its walls; a small doorway probe takes priority where the boxes overlap ' +
+      '(the smallest box wins) and fades into the room probes over its `blendDistance`. All three are baked once into one set, and ' +
+      '`scene.environmentNode = reflectionProbes(probes)` makes every material look them up at its own position. The mirror ball is kept out of the captures ' +
+      '(`userData.reflectionProbeExclude`) because it moves. **Show blend weights** colours each surface by the probes it blends.',
+    brief: {
+      kind: 'feature',
+      shows: 'Why a level needs more than one probe: each room reflects its own walls and light, and the doorway probe blends one room into the other without a seam.',
+      tryThis: ['Untick One probe per room: the cool room\'s floor and the mirror ball now show the warm room', 'Show blend weights, then pick Across the doorway: the colours mix where the boxes overlap', 'Watch the mirror ball roll through the doorway: its reflection hands over from one room to the other'],
+      compare: 'One probe for both rooms: captured in the warm room, projected onto the whole building',
+    },
+    category: 'features', status: 'stable', tags: ['probes', 'blending', 'influence volumes', '#35046'], docs: 'concepts/reflection-probes', source: 'examples/features/probes/two-rooms/main.ts',
   },
   {
     slug: 'probes/live',
