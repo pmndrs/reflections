@@ -340,9 +340,18 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     path: 'features/denoise/glossy/',
     title: 'Denoising glossy reflections',
     summary: 'The denoiser on glossy surfaces, with a live flicker meter.',
-    description: 'Planned (E3).',
-    brief: { kind: 'quality', shows: 'What the denoiser does for glossy reflections: noise and shimmer gone, measured live.', tryThis: PLANNED_TRY, compare: 'Denoiser off' },
-    category: 'features', status: 'stable', tags: ['denoiser', 'flicker'], docs: 'concepts/denoising-and-upscaling', source: 'examples/features/denoise/glossy', planned: true,
+    description:
+      'The screen-space tracer sends one ray per 2x2 quad per frame through each glossy pixel\'s lobe, so a single frame is noise and frames in a row ' +
+      'shimmer. `Reflections.create(..., { denoiser })` runs a temporal denoiser (`denoiser/ffx`, through the denoise seam) between the trace and the ' +
+      'composite: it reprojects the last frames and filters spatially. `reflections.hybrid.denoise = false` shows the raw signal. The meter reads a 1:1 crop ' +
+      'of the canvas centre each frame once the camera has settled: the mean change per pixel (8-bit luma) and the share of pixels that change by more than 1/255.',
+    brief: {
+      kind: 'quality',
+      shows: 'What the denoiser does for glossy reflections: the tracer\'s one noisy sample per quad becomes a steady image, and the meter shows how steady.',
+      tryThis: ['Tick Denoiser off and watch the middle of the ramp (roughness 0.2 to 0.4) and the meter', 'Switch the view to Floor strips: the chrome strips go from mirror to rough', 'Orbit, let go, and watch the meter settle'],
+      compare: 'Denoiser off: the raw signal (one ray per 2x2 quad per frame)',
+    },
+    category: 'features', status: 'stable', tags: ['denoiser', 'flicker'], docs: 'concepts/denoising-and-upscaling', source: 'examples/features/denoise/glossy/main.ts',
   },
   {
     slug: 'materials/roughness',
