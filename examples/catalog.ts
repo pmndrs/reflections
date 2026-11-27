@@ -398,18 +398,38 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     path: 'features/perf/presets/',
     title: 'Presets',
     summary: 'default vs performance (half-resolution reflections), GPU ms per pass.',
-    description: 'Planned (E3).',
-    brief: { kind: 'performance', shows: 'What the performance preset saves and what it costs in quality.', tryThis: PLANNED_TRY, compare: 'The other preset' },
-    category: 'features', status: 'stable', tags: ['presets', 'gpu ms'], docs: 'guides/performance-and-quality', source: 'examples/features/perf/presets', planned: true,
+    description:
+      'The two rooms with probes, screen-space reflections and the denoiser, built from the pieces (`ScreenSpaceReflectionsPass` with `timestamps: true`, ' +
+      '`HybridReflections`, a `RenderPipeline`) so the trace passes report GPU ms. `performance` sets `reflectionResolution: \'half\'`: trace and denoise at half ' +
+      'size per axis, then a joint bilateral upsample. At run time `applyReflectionsPreset({ ssr, hybrid }, name)` switches it; when the resolution changes, ' +
+      '`hybrid.rebuild()` and a new `hybrid.composite()` (with `Reflections`: `reflections.rebuild()`). GPU ms need `timestamp-query`; compare them on one machine. ' +
+      'Trade-offs per scene: docs/SETTINGS.md "Presets".',
+    brief: {
+      kind: 'performance',
+      shows: 'What the performance preset saves (the reflection passes run on a quarter of the pixels) and what it costs: softer reflections, jagged edges in mirrors.',
+      tryThis: ['Tick Performance preset and read the GPU ms in the panel', 'Set the view to Mirror ball and toggle again: the ball\'s reflected edges are where half resolution shows', 'Orbit near the floor: the rough floor barely changes'],
+      compare: 'The other preset: performance (half-resolution reflections) against default',
+    },
+    category: 'features', status: 'stable', tags: ['presets', 'gpu ms'], docs: 'guides/performance-and-quality', source: 'examples/features/perf/presets/main.ts',
   },
   {
     slug: 'perf/upscaler',
     path: 'features/perf/upscaler/',
     title: 'Upscaling',
     summary: 'TAA / upscaling after the composite with @pmndrs/upscaler, jitter wired through.',
-    description: 'Planned (E3).',
-    brief: { kind: 'performance', shows: 'Rendering below the display size and upscaling after the reflections composite.', tryThis: PLANNED_TRY, compare: 'Upscaler off' },
-    category: 'features', status: 'experimental', tags: ['upscaler', 'taa'], docs: 'concepts/denoising-and-upscaling', source: 'examples/features/perf/upscaler', planned: true,
+    description:
+      'The two rooms with probes, screen-space reflections and the denoiser render at 1 / 1.5 of the display size per axis (the G-buffer sized by ' +
+      '`gbufferOptions`), and `@pmndrs/upscaler` rebuilds the display size after the composite. The upscaler\'s jitter goes in through ' +
+      '`ssr.render(scene, camera, { jitter, projection })`: the G-buffer rasterises jittered while its motion, the tracer and the denoiser stay unjittered. ' +
+      'The composite is output linear (the upscaler\'s contract) and tone-mapped after it. The upscaler side (jitter, motion in its convention, present) is the ' +
+      'examples\' `DisplayAA` helper (examples/shared/antialias.ts). At 1x it is temporal anti-aliasing alone.',
+    brief: {
+      kind: 'performance',
+      shows: 'Rendering the scene and its reflections below the display size and upscaling after the composite: fewer pixels for every reflection pass, and anti-aliasing with it.',
+      tryThis: ['Tick Upscaler off: display resolution, no anti-aliasing (edges and the last shimmer return)', 'Set Upscale to Performance (2x): a quarter of the pixels; orbit and let go', 'Set Upscale to Native AA: the upscaler as temporal anti-aliasing only'],
+      compare: 'Upscaler off: every pass at the display resolution, no anti-aliasing',
+    },
+    category: 'features', status: 'experimental', tags: ['upscaler', 'taa'], docs: 'concepts/denoising-and-upscaling', source: 'examples/features/perf/upscaler/main.ts',
   },
   {
     slug: 'custom/tsl',

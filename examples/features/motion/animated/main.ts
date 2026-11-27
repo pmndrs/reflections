@@ -120,7 +120,8 @@ async function main() {
   const CUT = shotStart(2); // doorway -> front: the floor's reflections change the most
   (window as unknown as { __p: unknown }).__p = {
     reflections,
-    stop() { renderer.setAnimationLoop(null); },
+    /** Stops the loop and pins the tracer's noise (frame index 0), so shots repeat exactly (the check compares them). */
+    stop() { renderer.setAnimationLoop(null); reflections.ssr.settings.frameIndex = 0; },
     /**
      * The frame `max(n, 6)` frames after a camera cut, as a PNG data URL: seek to 1.5 s before the doorway -> front cut (the history
      * settles over the doorway shot), play through the cut, and stop 6 frames into the front shot.
@@ -136,6 +137,7 @@ async function main() {
     /** Rest flicker (the quick start's measure): paused mid-shot, settled 120 frames; % of px whose mean |change| over 6 frame pairs > 1/255. */
     async restFlicker() {
       renderer.setAnimationLoop(null);
+      delete reflections.ssr.settings.frameIndex; // the real per-frame noise (stop() pins it)
       seek(shotStart(1) + 3);
       for (let i = 0; i < 120; i++) frame(0);
       const c = document.createElement('canvas'); c.width = canvas.width; c.height = canvas.height;
