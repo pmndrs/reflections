@@ -116,9 +116,10 @@ async function main() {
   // headless driver (scripts/run-headless.mjs, section `catalog`). stop() freezes the animation: shots are at a fixed time.
   (window as unknown as { __p: unknown }).__p = {
     reflections,
-    stop() { renderer.setAnimationLoop(null); settle = 60; }, // the denoiser's history was built on motion: let it settle on the frozen pose
-    /** Render n frames at the current time, then the PNG data URL of the canvas. */
-    async shot(n = 1) { for (let i = 0; i < n + settle; i++) { step(); reflections.render(camera); } settle = 0; return canvas.toDataURL('image/png'); },
+    // the loop stops, the tracer's noise is pinned (frameIndex 0) and the denoiser's history (built on motion) settles on the frozen pose
+    stop() { renderer.setAnimationLoop(null); reflections.ssr.settings.frameIndex = 0; settle = 60; },
+    /** Render n frames (at least 30) at the current time, then the PNG data URL of the canvas. */
+    async shot(n = 1) { for (let i = 0; i < Math.max(n, 30) + settle; i++) { step(); reflections.render(camera); } settle = 0; return canvas.toDataURL('image/png'); },
     /** The baseline of `brief.compare`: true shows it (refit off: the BVH as built). */
     setCompare(on: boolean) { setRefit(!on); },
     setTime(t: number) { time = t; step(); },

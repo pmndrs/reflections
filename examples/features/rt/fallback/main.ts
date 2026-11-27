@@ -64,7 +64,6 @@ async function main() {
   let settle = 0; // frames to let the denoiser's history settle after a switch (the check's shots)
   const setRayTracing = (on: boolean) => {
     reflections.ssr.rayTracing = on; rtBox.checked = on;
-    reflections.hybrid.resetHistory(); reflections.ssr.resetHistory();
     settle = 60;
   };
   rtBox.onchange = () => setRayTracing(rtBox.checked);
@@ -112,9 +111,10 @@ async function main() {
   // headless driver (scripts/run-headless.mjs, section `catalog`)
   (window as unknown as { __p: unknown }).__p = {
     reflections,
-    stop() { renderer.setAnimationLoop(null); },
-    /** Render n frames (more right after a switch: the denoiser's history), then the PNG data URL of the canvas. */
-    async shot(n = 1) { for (let i = 0; i < n + settle; i++) frame(); settle = 0; return canvas.toDataURL('image/png'); },
+    /** Stops the loop and pins the tracer's noise (frameIndex 0), so shots of a still view repeat exactly. */
+    stop() { renderer.setAnimationLoop(null); reflections.ssr.settings.frameIndex = 0; },
+    /** Render n frames (at least 60, more right after a switch: the denoiser settles), then the PNG data URL of the canvas. */
+    async shot(n = 1) { for (let i = 0; i < Math.max(n, 60) + settle; i++) frame(); settle = 0; return canvas.toDataURL('image/png'); },
     /** The baseline of `brief.compare`: true shows it (ray tracing off, misses take the probe). */
     setCompare(on: boolean) { setRayTracing(!on); },
     setView,
