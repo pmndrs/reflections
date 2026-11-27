@@ -65,3 +65,8 @@ origin offset, and whether on-screen hits are reused instead of re-traced.
 - **Hit shading.** By default a traced hit is lit from the probes (or the environment) plus the scene's directional
   lights. `raytracerHitShading: true` in the `trace` options uses `@pmndrs/raytracer`'s own one-bounce shading
   instead. It is noisy, so use it with a denoiser.
+
+## Live examples
+
+- [Ray-traced fallback](/examples/features/rt/fallback/): switch it off and the wall mirror loses what screen space cannot see.
+- [Ray tracing moving meshes](/examples/features/rt/animated/): why `trace.refit()` runs every frame.
