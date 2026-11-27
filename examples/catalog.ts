@@ -88,7 +88,7 @@ export interface ExampleEntry {
    * (default 1500), and `image: false` for a page that shows text, not a rendered image. `thumbQuery` is used instead when capturing
    * the card image (`--thumbs`).
    */
-  check?: { query?: string; wait?: number; image?: boolean; thumbQuery?: string };
+  check?: { query?: string; wait?: number; image?: boolean; thumbQuery?: string; /** false: don't require `__p.setCompare` to change the image (the brief says why). W95. */ compare?: boolean };
 }
 
 export const CATEGORIES: readonly Category[] = [
@@ -414,63 +414,136 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     path: 'features/denoise/glossy/',
     title: 'Denoising glossy reflections',
     summary: 'The denoiser on glossy surfaces, with a live flicker meter.',
-    description: 'Planned (E3).',
-    brief: { kind: 'quality', shows: 'What the denoiser does for glossy reflections: noise and shimmer gone, measured live.', tryThis: PLANNED_TRY, compare: 'Denoiser off' },
-    category: 'features', status: 'stable', tags: ['denoiser', 'flicker'], docs: 'concepts/denoising-and-upscaling', source: 'examples/features/denoise/glossy', planned: true,
+    description:
+      'The screen-space tracer sends one ray per 2x2 quad per frame through each glossy pixel\'s lobe, so a single frame is noise and frames in a row ' +
+      'shimmer. `Reflections.create(..., { denoiser })` runs a temporal denoiser (`denoiser/ffx`, through the denoise seam) between the trace and the ' +
+      'composite: it reprojects the last frames and filters spatially. `reflections.hybrid.denoise = false` shows the raw signal. The meter reads a 1:1 crop ' +
+      'of the canvas centre each frame once the camera has settled: the mean change per pixel (8-bit luma) and the share of pixels that change by more than 1/255.',
+    brief: {
+      kind: 'quality',
+      shows: 'What the denoiser does for glossy reflections: the tracer\'s one noisy sample per quad becomes a steady image, and the meter shows how steady.',
+      tryThis: ['Tick Denoiser off and watch the middle of the ramp (roughness 0.2 to 0.4) and the meter', 'Switch the view to Floor strips: the chrome strips go from mirror to rough', 'Orbit, let go, and watch the meter settle'],
+      compare: 'Denoiser off: the raw signal (one ray per 2x2 quad per frame)',
+    },
+    category: 'features', status: 'stable', tags: ['denoiser', 'flicker'], docs: 'concepts/denoising-and-upscaling', source: 'examples/features/denoise/glossy/main.ts',
   },
   {
     slug: 'materials/roughness',
     path: 'features/materials/roughness/',
     title: 'Materials',
     summary: 'Roughness, metalness and clearcoat; why basic, Lambert and Phong get no reflections.',
-    description: 'Planned (E3).',
-    brief: { kind: 'feature', shows: 'Which materials reflect and how roughness and metalness shape it.', tryThis: PLANNED_TRY, compare: 'A basic material next to a standard one' },
-    category: 'features', status: 'stable', tags: ['materials', 'roughness'], docs: 'guides/three', source: 'examples/features/materials/roughness', planned: true,
+    description:
+      'The roughness ramp: gold metal spheres, blue plastic spheres and chrome floor strips from roughness 0 (left) to 1 (right), through `Reflections.create` ' +
+      'with a probe and the denoiser. Every reflection the package adds takes the place of three\'s own specular environment term, so it follows the material: ' +
+      'metal reflects in its colour, plastic weakly and in white, roughness widens the lobe (above 0.447 the probe alone reflects), and a `MeshPhysicalMaterial` ' +
+      'clear coat adds a sharp layer over a rough base. `MeshBasicMaterial`, `MeshLambertMaterial` and `MeshPhongMaterial` get no reflections, by design: they have ' +
+      'no physical specular term to replace (README "Which materials get reflections"). Give a surface that should reflect a standard material.',
+    brief: {
+      kind: 'feature',
+      shows: 'Which materials get reflections and how roughness, metalness and clear coat shape them; Basic, Lambert and Phong get none.',
+      tryThis: ['Tick Classic materials: the spheres turn Phong and lose their reflections (the highlight is the lights\', not a reflection)', 'Set the Blue row to Physical, clear coat: a sharp coat over a rough base', 'Switch the view to Floor strips: chrome from mirror to rough'],
+      compare: 'Classic materials (Phong, Lambert or Basic) on the spheres, the floor strips still standard',
+    },
+    category: 'features', status: 'stable', tags: ['materials', 'roughness'], docs: 'guides/three', source: 'examples/features/materials/roughness/main.ts',
   },
   {
     slug: 'motion/animated',
     path: 'features/motion/animated/',
     title: 'Animation and camera cuts',
     summary: 'A camera path, moving objects and a camera cut with resetHistory().',
-    description: 'Planned (E3).',
-    brief: { kind: 'feature', shows: 'A whole animated scene, and why a camera cut needs `resetHistory()`.', tryThis: PLANNED_TRY, compare: 'History reset off at the cut (the smear)' },
-    category: 'features', status: 'stable', tags: ['motion', 'history'], docs: 'guides/flicker-and-stability', source: 'examples/features/motion/animated', planned: true,
+    description:
+      'The two rooms of three.js #35046 with a polished floor, the knot turning and the mirror ball on its figure eight; the camera runs three 6 s shots with a cut ' +
+      'between each. Reflections are temporal: the denoiser blends each pixel with where it was last frame, and screen-space hits take their colour from last ' +
+      'frame\'s image, which keeps motion steady between cuts. At a cut last frame is another shot, so the page calls `reflections.ssr.resetHistory()` and ' +
+      '`reflections.hybrid.resetHistory()` (`ScreenSpaceReflectionsPass` and `HybridReflections` when built from the pieces); do the same on a teleport or a scene switch.',
+    brief: {
+      kind: 'feature',
+      shows: 'A whole animated scene, camera path and moving objects, steady between cuts; and why a camera cut needs `resetHistory()`.',
+      tryThis: ['Watch the floor through the camera moves and the cuts: steady between cuts, no shimmer', 'Pause: the image holds still (the rest-flicker check holds it to the quick start\'s bound)', 'Tick No history reset and Slow motion, then press Cut to the next shot'],
+      compare:
+        'No history reset at the cuts. With `denoiser/ffx` the difference is small (measured: 0.08 / 255 mean the frame after the cut, against a 0.07 noise floor): its ' +
+        'reprojection rejects history whose depth and normals disagree, so the previous shot barely shows through. The reset is still what a cut needs; a denoiser without that rejection depends on it',
+    },
+    category: 'features', status: 'stable', tags: ['motion', 'history'], docs: 'guides/flicker-and-stability', source: 'examples/features/motion/animated/main.ts',
+    check: { compare: false },
   },
   {
     slug: 'perf/presets',
     path: 'features/perf/presets/',
     title: 'Presets',
     summary: 'default vs performance (half-resolution reflections), GPU ms per pass.',
-    description: 'Planned (E3).',
-    brief: { kind: 'performance', shows: 'What the performance preset saves and what it costs in quality.', tryThis: PLANNED_TRY, compare: 'The other preset' },
-    category: 'features', status: 'stable', tags: ['presets', 'gpu ms'], docs: 'guides/performance-and-quality', source: 'examples/features/perf/presets', planned: true,
+    description:
+      'The two rooms with probes, screen-space reflections and the denoiser, built from the pieces (`ScreenSpaceReflectionsPass` with `timestamps: true`, ' +
+      '`HybridReflections`, a `RenderPipeline`) so the trace passes report GPU ms. `performance` sets `reflectionResolution: \'half\'`: trace and denoise at half ' +
+      'size per axis, then a joint bilateral upsample. At run time `applyReflectionsPreset({ ssr, hybrid }, name)` switches it; when the resolution changes, ' +
+      '`hybrid.rebuild()` and a new `hybrid.composite()` (with `Reflections`: `reflections.rebuild()`). GPU ms need `timestamp-query`; compare them on one machine. ' +
+      'Trade-offs per scene: docs/SETTINGS.md "Presets".',
+    brief: {
+      kind: 'performance',
+      shows: 'What the performance preset saves (the reflection passes run on a quarter of the pixels) and what it costs: softer reflections, jagged edges in mirrors.',
+      tryThis: ['Tick Performance preset and read the GPU ms in the panel', 'Set the view to Mirror ball and toggle again: the ball\'s reflected edges are where half resolution shows', 'Orbit near the floor: the rough floor barely changes'],
+      compare: 'The other preset: performance (half-resolution reflections) against default',
+    },
+    category: 'features', status: 'stable', tags: ['presets', 'gpu ms'], docs: 'guides/performance-and-quality', source: 'examples/features/perf/presets/main.ts',
   },
   {
     slug: 'perf/upscaler',
     path: 'features/perf/upscaler/',
     title: 'Upscaling',
     summary: 'TAA / upscaling after the composite with @pmndrs/upscaler, jitter wired through.',
-    description: 'Planned (E3).',
-    brief: { kind: 'performance', shows: 'Rendering below the display size and upscaling after the reflections composite.', tryThis: PLANNED_TRY, compare: 'Upscaler off' },
-    category: 'features', status: 'experimental', tags: ['upscaler', 'taa'], docs: 'concepts/denoising-and-upscaling', source: 'examples/features/perf/upscaler', planned: true,
+    description:
+      'The two rooms with probes, screen-space reflections and the denoiser render at 1 / 1.5 of the display size per axis (the G-buffer sized by ' +
+      '`gbufferOptions`), and `@pmndrs/upscaler` rebuilds the display size after the composite. The upscaler\'s jitter goes in through ' +
+      '`ssr.render(scene, camera, { jitter, projection })`: the G-buffer rasterises jittered while its motion, the tracer and the denoiser stay unjittered. ' +
+      'The composite is output linear (the upscaler\'s contract) and tone-mapped after it. The upscaler side (jitter, motion in its convention, present) is the ' +
+      'examples\' `DisplayAA` helper (examples/shared/antialias.ts). At 1x it is temporal anti-aliasing alone.',
+    brief: {
+      kind: 'performance',
+      shows: 'Rendering the scene and its reflections below the display size and upscaling after the composite: fewer pixels for every reflection pass, and anti-aliasing with it.',
+      tryThis: ['Tick Upscaler off: display resolution, no anti-aliasing (edges and the last shimmer return)', 'Set Upscale to Performance (2x): a quarter of the pixels; orbit and let go', 'Set Upscale to Native AA: the upscaler as temporal anti-aliasing only'],
+      compare: 'Upscaler off: every pass at the display resolution, no anti-aliasing',
+    },
+    category: 'features', status: 'experimental', tags: ['upscaler', 'taa'], docs: 'concepts/denoising-and-upscaling', source: 'examples/features/perf/upscaler/main.ts',
   },
   {
     slug: 'custom/tsl',
     path: 'features/custom/tsl/',
     title: 'Probes in your own TSL material',
     summary: 'sampleReflectionProbes in a custom TSL material (a water or glass surface).',
-    description: 'Planned (E3).',
-    brief: { kind: 'feature', shows: 'Sampling the probes from your own node material.', tryThis: PLANNED_TRY, compare: 'The stock material' },
-    category: 'features', status: 'stable', tags: ['tsl', 'probes'], docs: 'guides/three', source: 'examples/features/custom/tsl', planned: true,
+    description:
+      'The box room\'s baked probe serves three\'s materials through `scene.environmentNode = reflectionProbes(probes)`. The water in the basin is a ' +
+      '`MeshBasicNodeMaterial` that calls the lookup itself: `sampleReflectionProbes(probes, positionWorld, reflected, roughness)` returns the box-projected, ' +
+      'blended radiance along any direction, here the view ray reflected about a normal made of travelling waves, mixed with a dark tint by Schlick\'s fresnel. ' +
+      'Unlit custom materials get no screen-space reflections from `Reflections` (no physical specular term to replace, README "Which materials get reflections"); ' +
+      'the probe sample is their reflection. Probes only, `renderer.render()`.',
+    brief: {
+      kind: 'feature',
+      shows: 'Sampling the reflection probes from your own TSL material: a rippled water surface that reflects the room through `sampleReflectionProbes()`.',
+      tryThis: ['Tick Stock material: a glossy MeshStandardMaterial, the same probe through three\'s lighting, flat', 'Untick Ripples: the custom material becomes a fresnel mirror', 'Orbit low over the pool: the fresnel brings the windows up at grazing angles'],
+      compare: 'The stock material: a glossy, flat MeshStandardMaterial reflecting the same probe',
+    },
+    category: 'features', status: 'stable', tags: ['tsl', 'probes'], docs: 'guides/three', source: 'examples/features/custom/tsl/main.ts',
   },
   {
     slug: 'setup/device-limits',
     path: 'features/setup/device-limits/',
     title: 'Device limits',
     summary: 'A plain new WebGPURenderer(): the second lit pass, traceError when ray tracing does not fit.',
-    description: 'Planned (E3).',
-    brief: { kind: 'informative', shows: 'What changes on a renderer with WebGPU\'s default limits, and how the package degrades.', tryThis: PLANNED_TRY, compare: '`createReflectionsRenderer`' },
-    category: 'features', status: 'stable', tags: ['limits', 'setup'], docs: 'guides/troubleshooting', source: 'examples/features/setup/device-limits', planned: true,
+    description:
+      'A plain `new WebGPURenderer()` asks for WebGPU\'s default limits. On 32 colour-attachment bytes per sample the G-buffer cannot hold three\'s lit image ' +
+      'too (it needs 36), so it draws the scene a second time for it and estimates three\'s specular weights; one console warning says so. Ray tracing binds 8 ' +
+      'storage buffers per stage with the packed scene copy and runs on the default 8; a setup that needs more (the split copy: 9) turns ray tracing off with one ' +
+      'warning and sets `pass.traceError`, and screen space and probes go on. `createReflectionsRenderer()` (or `requiredLimits: reflectionsRequiredLimits(adapter)`) ' +
+      'asks for what the passes need. The two images are by nature nearly identical (the quick start measured 0.44 / 255 mean, from the estimated weights); ' +
+      'the difference is the extra scene draw per frame, which the panel and the status line show. `?renderer=plain|reflections`, `?rt=1|split|0` (each a reload).',
+    brief: {
+      kind: 'informative',
+      shows: 'What changes on a renderer with WebGPU\'s default limits: a second scene draw for the lit image, estimated specular weights, and ray tracing turning itself off (with `traceError`) when it cannot fit. Nothing fails.',
+      tryThis: ['Read the panel, then switch Renderer to createReflectionsRenderer(): one scene draw, specular from the material', 'Set Ray tracing to the 9-buffer scene copy on the plain renderer: the status line shows pass.traceError'],
+      compare: '`createReflectionsRenderer()` (a reload). The image barely changes by nature: what differs is the extra scene draw and the estimated specular weights, shown in the panel',
+    },
+    category: 'features', status: 'stable', tags: ['limits', 'setup'], docs: 'guides/troubleshooting', source: 'examples/features/setup/device-limits/main.ts',
+    check: { compare: false },
   },
 
   // ---- engines --------------------------------------------------------------------------------------

@@ -3453,6 +3453,8 @@ async function catalogChecks() {
         const file = path.join(ROOT, 'examples', thumbPath(e));
         fs.writeFileSync(file, Buffer.from(webp.data, 'base64'));
         console.log('  saved', path.relative(process.cwd(), file));
+      } else if (e.check?.compare === false) {
+        console.log(`  (catalog ${e.slug}: compare not image-checked, check.compare false: the brief says why)`);
       } else if (await p.cdp.evalJs('typeof window.__p.setCompare === "function"', false)) {
         await p.T('window.__p.stop()');
         const a = await p.T('window.__p.shot(2)');
@@ -3464,6 +3466,12 @@ async function catalogChecks() {
         const r = await p.cdp.evalJs(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(back)})`);
         check(`catalog ${e.slug}: the compare switch changes the image, and switching back restores it`, d.mean > 0.2 && r.mean < 0.05,
           `on vs compare mean ${d.mean.toFixed(3)} / 255 (max ${d.max}); on vs back mean ${r.mean.toFixed(4)}`);
+      }
+      // W95 (E3): an animated page gives `__p.restFlicker()` (paused, settled: % of px whose mean |change| over consecutive frames
+      // is > 1/255, the quick start's measure) and is held to the quick start's bound (docs/EXAMPLES.md: "a rest-flicker reading")
+      if (!thumbs && await p.cdp.evalJs('typeof window.__p.restFlicker === "function"', false)) {
+        const f = await p.T('window.__p.restFlicker()');
+        check(`catalog ${e.slug}: at rest, < 0.5 % of px change by more than 1/255 between frames`, f < 0.5, `${f.toFixed(3)} % of px`);
       }
     } finally { p.close(); }
   }
