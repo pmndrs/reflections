@@ -16,6 +16,6 @@ export { RT_SOURCE, RT_STATE, RT_STATE_HEADER } from './shaders';
 // imported on demand) over engine-free geometry.
 export {
   createRaytracerTraceProvider, loadRaytracer, raytracerMaterialOf, RaytracerTraceProvider, RAYTRACER_BVH_LAYOUT_VERSION, BVH_MAX_MATERIAL, BVH_TRIANGLE_MATERIAL_NONE,
-  type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceScene, type BvhTraceScene as RaytracerTraceScene, type BvhBuilderPreference,
+  type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceTexture, type BvhTraceScene, type BvhTraceScene as RaytracerTraceScene, type BvhBuilderPreference,
   type RaytracerTraceProviderOptions, type RaytracerBuildInfo, type RaytracerSun, type RaytracerEnvironment,
 } from './raytracer';

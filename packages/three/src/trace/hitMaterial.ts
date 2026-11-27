@@ -21,6 +21,11 @@ export interface HitMaterial {
   baseColor?: readonly [number, number, number];
   metalness?: number;
   transmission?: number;
+  /**
+   * W97: a base colour texture the trace reads at the hit's uv (`bvhTraceSceneFromObjects` decodes it once); `baseColor` is
+   * then the factor alone (three's `color`), while `albedo` / `specular` keep the map's mean.
+   */
+  map?: THREE.Texture;
 }
 
 /**
@@ -78,6 +83,55 @@ export function textureMeanColor(t: THREE.Texture): [number, number, number] | n
   return mean;
 }
 
+const identity = new THREE.Matrix3();
+
+/**
+ * W97: whether traced hits can sample `t` (at the mesh's `uv`): readable on the CPU (`textureMeanColor`), on uv channel 0, with
+ * no offset / repeat / rotation. Otherwise the hit material keeps the map's mean (D902).
+ */
+export function traceableMap(t: THREE.Texture): boolean {
+  if ((t.channel ?? 0) !== 0 || !textureMeanColor(t)) return false;
+  if (t.matrixAutoUpdate) t.updateMatrix();
+  return t.matrix.equals(identity);
+}
+
+/**
+ * RGBA8 texels of a texture's image for the trace (W97), row 0 = the row three samples at uv v = 0 (a `flipY` image's rows
+ * flipped), at most `maxSize` a side (a larger image is drawn smaller), or null if it can't be read on the CPU.
+ */
+export function textureTexels(t: THREE.Texture, maxSize = 1024): { width: number; height: number; data: Uint8ClampedArray } | null {
+  const img = t.image as { width?: number; height?: number; data?: ArrayLike<number> } | CanvasImageSource | undefined;
+  const w0 = (img as { width?: number } | undefined)?.width ?? 0, h0 = (img as { height?: number } | undefined)?.height ?? 0;
+  if (!img || !w0 || !h0) return null;
+  let w = w0, h = h0, data: Uint8ClampedArray;
+  try {
+    if ('data' in img && img.data) {
+      const d = img.data, n = w * h, ch = Math.round(d.length / n);
+      if (!ch) return null;
+      const scale = d instanceof Uint8Array || d instanceof Uint8ClampedArray ? 1 : 255;
+      data = new Uint8ClampedArray(n * 4);
+      for (let i = 0; i < n; i++) for (let c = 0; c < 4; c++) data[i * 4 + c] = c < ch ? d[i * ch + c] * scale : c === 3 ? 255 : d[i * ch] * scale;
+    } else {
+      const k = Math.min(1, maxSize / Math.max(w0, h0));
+      w = Math.max(1, Math.round(w0 * k)); h = Math.max(1, Math.round(h0 * k));
+      const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
+      const g = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+      if (!g) return null;
+      g.drawImage(img as CanvasImageSource, 0, 0, w, h);
+      data = g.getImageData(0, 0, w, h).data;
+    }
+  } catch { return null; }
+  // three samples an image with `flipY` bottom row first at v = 0; the trace reads row 0 at v = 0
+  if (t.flipY) {
+    const row = w * 4, tmp = new Uint8ClampedArray(row);
+    for (let y = 0; y < h >> 1; y++) {
+      const a = y * row, b = (h - 1 - y) * row;
+      tmp.set(data.subarray(a, a + row)); data.copyWithin(a, b, b + row); data.set(tmp, b);
+    }
+  }
+  return { width: w, height: h, data };
+}
+
 /**
  * Default hit material of a three mesh's material (`source`, W49: one of a multi-material mesh's;
  * default the mesh's, or the first of an array), one set per material from its scalars x the mean of
@@ -102,6 +156,8 @@ export function defaultHitMaterial(mesh: THREE.Mesh, source: HitMaterialSource =
     albedo[0] = base[0] * k; albedo[1] = base[1] * k; albedo[2] = base[2] * k;
     if (pbr) {
       out.baseColor = base as [number, number, number];
+      // W97: a readable map on uv channel 0 with no uv transform is sampled per hit (the trace multiplies it in)
+      if (m.map && traceableMap(m.map)) { out.map = m.map; out.baseColor = [m.color.r, m.color.g, m.color.b]; }
       out.metalness = metalness;
       if (m.transmission) out.transmission = m.transmission;
       out.specular = base.map((b) => 0.04 + (b - 0.04) * metalness) as [number, number, number];

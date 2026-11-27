@@ -1318,6 +1318,15 @@ function f2Checks(r) {
       `wrong size: ${rh.wrongSize.threw ?? 'no error'}${rh.wrongSize.validationError ? ` (validation: ${rh.wrongSize.validationError.slice(0, 80)})` : ''}; missing: ${rh.missing.threw ?? 'no error'}`);
     check('rtHistory: no WebGPU errors', rh.gpuErrors.length === 0, rh.gpuErrors.slice(0, 2).join(' | '));
   }
+  // W97: traced hits read the base colour texture at the hit's uv (examples/regressions/src/rtTextures.ts)
+  const tx = section('rtTextures');
+  if (tx) {
+    const q = tx.quadrants;
+    check('rt: traced hits read their base colour texture (four quadrants of a canvas map, flipY, sRGB, x the material colour)',
+      q.length === 4 && q.every((x) => x.t > 2.9 && x.t < 3.1 && x.err < 0.02),
+      q.map((x) => `${x.quadrant} want ${x.want.join(',')} got ${x.got.join(',')}`).join('; '));
+    check('rtTextures: no WebGPU errors', tx.gpuErrors.length === 0, tx.gpuErrors.slice(0, 2).join(' | '));
+  }
   // W27 (D603): the composite's specular swap vs three's own term (examples/regressions/src/swap.ts)
   const sw = section('specularSwap');
   if (sw) {

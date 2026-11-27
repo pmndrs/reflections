@@ -23,7 +23,8 @@
 //   traceAny                 !rtVisible (bvh's any-hit walk)
 //   traceHitShadingNormal    rtSurface(RT_SURF_SHADING_NORMAL) (the geometric normal where a mesh has no normals)
 //   traceHitMaterial/Specular  from rtMaterial: albedo = base x baseWeight x (1 - metalness) x (1 - transmission),
-//                            F0 = mix(F0(ior) x specularWeight x specularColor, base, metalness)
+//                            F0 = mix(F0(ior) x specularWeight x specularColor, base, metalness); W97: with scene textures, the
+//                            material's base colour texture at the hit's uv (rtApplyMaterialTextures, a fixed-spread ray cone)
 //   traceHitShade            (capability `hitShade`, new) rtShade FULL: emission + one light sample with its shadow ray,
 //                            over the lights of the scene copy (emissive triangles, `lights.sun`, `lights.environment`)
 import type { BindingSlot, ModuleBindingEntry, TraceProvider } from './provider';
@@ -54,6 +55,24 @@ export interface BvhMeshGeometry {
    * instance's material everywhere.
    */
   readonly triangleMaterials?: Uint16Array | Uint32Array | null;
+  /**
+   * `u, v` per vertex (same count as `positions`), for material textures (W97). @pmndrs/raytracer's convention: uv (0, 0) is
+   * the first texel of the texture's first row. Omit when no material on this mesh has a texture.
+   */
+  readonly uvs?: Float32Array | null;
+}
+
+/** A material texture (W97): RGBA8 texels, row 0 first (the row uv v = 0 samples). @pmndrs/raytracer's `TextureInput`. */
+export interface BvhTraceTexture {
+  readonly width: number;
+  readonly height: number;
+  /** `width * height * 4` values, 0-255. */
+  readonly data: ArrayLike<number>;
+  /** 'srgb' for base colour (decoded to linear before filtering), 'linear' for data. */
+  readonly colorSpace: 'srgb' | 'linear';
+  /** Both axes. Default 'repeat'. */
+  readonly wrap?: 'repeat' | 'clamp' | 'mirror';
+  readonly label?: string;
 }
 
 /** One placed copy of a mesh. */
@@ -86,6 +105,11 @@ export interface BvhTraceMaterial {
   readonly baseColor?: readonly [number, number, number];
   readonly metalness?: number;
   readonly transmission?: number;
+  /**
+   * W97: index into the scene's `textures` of a base colour texture (sRGB; its rgb multiplies `baseColor` at traced hits, read
+   * at the mesh's `uvs`). `baseColor` is then the factor alone, without the texture's mean.
+   */
+  readonly baseColorTexture?: number;
   /** @pmndrs/raytracer `RtMaterialInput` fields, applied over the ones derived here. */
   readonly openpbr?: Readonly<Record<string, unknown>>;
 }
@@ -113,6 +137,8 @@ export interface BvhTraceScene {
   readonly meshes: readonly BvhMeshGeometry[];
   readonly instances: readonly BvhTraceInstance[];
   readonly materials?: readonly BvhTraceMaterial[];
+  /** Material textures (W97), referenced by `BvhTraceMaterial.baseColorTexture`. */
+  readonly textures?: readonly BvhTraceTexture[];
   /** The lights `traceHitShade` samples besides emissive triangles. Not read by the probe / environment hit shadings. */
   readonly lights?: { readonly sun?: RaytracerSun | null; readonly environment?: RaytracerEnvironment | null };
 }
@@ -142,6 +168,13 @@ export interface RaytracerTraceProviderOptions {
    * (table and data, two buffers). The packed copy is what fits the trace pass under WebGPU's default 8 storage buffers.
    */
   packing?: 'auto' | 'packed' | 'split';
+  /**
+   * Material textures at traced hits (W97). Stored at most `maxSize` texels a side (default 1024: reflections are filtered) in
+   * at most `maxBuckets` texture arrays (default 4; each binds one sampled texture and one sampler in the trace pass). `cone`:
+   * the level-of-detail ray cone's spread in radians (default 0.005: the footprint at a hit is `t x cone`). `false`: no
+   * textures, the materials' `baseColor` alone.
+   */
+  textures?: false | { maxSize?: number; maxBuckets?: number; cone?: number };
 }
 
 // ---- the parts of @pmndrs/bvh and @pmndrs/raytracer this file uses ------------------------------------------------
@@ -171,8 +204,20 @@ interface BvhModule {
   }[]): BvhTopLevel;
 }
 type SceneCopyPacking = 'split' | 'packed';
-interface SceneCopy { readonly layout: unknown; readonly byteLength: number; readonly lights: readonly unknown[]; readonly triangleLightCount: number; readonly table: Uint32Array<ArrayBuffer>; readonly data: Uint32Array<ArrayBuffer> }
-interface SceneCopyBuffers { readonly packing: SceneCopyPacking; readonly table?: GPUBuffer; readonly data?: GPUBuffer; readonly packed?: GPUBuffer; destroy(): void }
+interface SceneCopy {
+  readonly layout: unknown; readonly byteLength: number; readonly lights: readonly unknown[]; readonly triangleLightCount: number;
+  readonly table: Uint32Array<ArrayBuffer>; readonly data: Uint32Array<ArrayBuffer>;
+  readonly textureLayout: object | null;
+  readonly textures: {
+    readonly buckets: readonly { width: number; height: number; colorSpace: 'srgb' | 'linear'; wrap: 'repeat' | 'clamp' | 'mirror'; mips: Uint8Array[] }[];
+    readonly slots: readonly { bucket: number; layer: number }[];
+  } | null;
+}
+interface SceneCopyBuffers {
+  readonly packing: SceneCopyPacking; readonly table?: GPUBuffer; readonly data?: GPUBuffer; readonly packed?: GPUBuffer;
+  readonly textures?: { readonly views: readonly GPUTextureView[]; readonly samplers: readonly GPUSampler[] };
+  destroy(): void;
+}
 interface RaytracerModule {
   readonly BVH_LAYOUT_VERSION: number;
   buildCaps(source: { features: ReadonlySet<string>; limits: Record<string, unknown> }, wgslLanguageFeatures?: ReadonlySet<string>): unknown;
@@ -180,6 +225,7 @@ interface RaytracerModule {
   rtModuleWgsl(caps: unknown, options: Record<string, unknown>): string;
   rtWalkEntries(format: object): readonly ModuleBindingEntry[];
   rtSceneEntries(packing: SceneCopyPacking): readonly ModuleBindingEntry[];
+  rtSceneCopyLayoutEntries(firstBinding: number, textures: object | null, packing: SceneCopyPacking): readonly GPUBindGroupLayoutEntry[];
   buildSceneCopy(input: Record<string, unknown>): SceneCopy;
   uploadSceneCopy(device: GPUDevice, copy: SceneCopy, options: { label?: string; packing: SceneCopyPacking }): SceneCopyBuffers;
   /** Rewrites a rebuilt copy into earlier buffers when it fits (false: upload again). */
@@ -242,6 +288,29 @@ export function raytracerMaterialOf(m: BvhTraceMaterial): Record<string, unknown
 
 // ---- WGSL ---------------------------------------------------------------------------------------------------------
 
+/** The hit's material record (a scene copy without textures). */
+const materialWgsl = /* wgsl */ `
+fn rtpHitMaterial(hit: Hit) -> RtMaterial { return rtMaterial(hit.material); }
+`;
+
+/**
+ * W97: the hit's material with its textures applied at the hit's uv. Level of detail from a ray cone of fixed spread (no
+ * per-ray cone reaches the seam): a footprint of `t x cone` metres times the triangle's uv density.
+ */
+const texturedMaterialWgsl = (cone: number) => /* wgsl */ `
+fn rtpHitMaterial(hit: Hit) -> RtMaterial {
+  let m = rtMaterial(hit.material);
+  if (m.baseColorTexture == RT_TEXTURE_NONE && m.roughnessMetalTexture == RT_TEXTURE_NONE && m.emissionTexture == RT_TEXTURE_NONE) { return m; }
+  let s = rtSurface(rtpRtHit(hit), RtRay(vec3f(0.0), 0.0, vec3f(0.0, 0.0, 1.0), hit.t), RT_SURF_UV | RT_SURF_TEXFRAME);
+  return rtApplyMaterialTextures(m, s.uv, s.uvDensity * max(hit.t, 0.0) * ${cone.toFixed(6)});
+}
+`;
+
+const textureOptions = (o: RaytracerTraceProviderOptions) => {
+  const t = o.textures || {};
+  return { maxSize: t.maxSize ?? 1024, maxBuckets: t.maxBuckets ?? 4, cone: t.cone ?? 0.005 };
+};
+
 const seamWgsl = /* wgsl */ `
 fn rtpRtHit(hit: Hit) -> RtHit { return RtHit(hit.t, hit.instance, hit.triangle, hit.frontFace, hit.barycentrics, hit.material, hit.normal, 0.0); }
 
@@ -259,13 +328,13 @@ fn traceHitShadingNormal(hit: Hit) -> vec3f {
 
 fn traceHitMaterial(hit: Hit) -> HitMaterial {
   if (hit.material >= rtSceneInfo().materialCount) { return HitMaterial(vec3f(0.5), vec3f(0.0)); }
-  let m = rtMaterial(hit.material);
+  let m = rtpHitMaterial(hit);
   return HitMaterial(m.baseColor * (m.baseWeight * (1.0 - m.metalness) * (1.0 - m.transmissionWeight)), m.emissionColor);
 }
 
 fn traceHitSpecular(hit: Hit) -> HitSpecular {
   if (hit.material >= rtSceneInfo().materialCount) { return HitSpecular(vec3f(0.0), 1.0, 0.0, 0.0); }
-  let m = rtMaterial(hit.material);
+  let m = rtpHitMaterial(hit);
   let d = (m.ior - 1.0) / (m.ior + 1.0);
   let f0 = mix(m.specularColor * (m.specularWeight * d * d), m.baseColor * m.baseWeight, m.metalness);
   return HitSpecular(f0, m.specularRoughness, m.coatWeight, m.coatRoughness);
@@ -342,8 +411,10 @@ export class RaytracerTraceProvider implements TraceProvider {
     const want = options.packing ?? 'auto';
     this.packing = want === 'auto' ? (rt.packedSceneCopyBytes(this.copy) <= device.limits.maxStorageBufferBindingSize ? 'packed' : 'split') : want;
     this.copyBuffers = rt.uploadSceneCopy(device, this.copy, { label: 'reflections rt scene', packing: this.packing });
-    this.entries = [...rt.rtWalkEntries(this.format), ...rt.rtSceneEntries(this.packing)];
-    this.storageBufferCount = this.entries.length;
+    // W97: with textures, the scene copy's texture arrays and their samplers follow its buffer(s)
+    const sceneEntries = rt.rtSceneCopyLayoutEntries(0, this.copy.textureLayout, this.packing).map(({ binding: _, ...e }) => e as ModuleBindingEntry);
+    this.entries = [...rt.rtWalkEntries(this.format), ...sceneEntries];
+    this.storageBufferCount = this.entries.filter((e) => e.buffer?.type === 'storage' || e.buffer?.type === 'read-only-storage').length;
     info.packing = this.packing;
     info.lights = this.copy.lights.length;
     info.sceneCopyBytes = this.copy.byteLength;
@@ -355,34 +426,53 @@ export class RaytracerTraceProvider implements TraceProvider {
   get sceneCopy() { return this.copy; }
   get sceneCopyBuffers() { return this.copyBuffers; }
 
+  /** What the scene copy's textures are built from (W97): the caller's at first, then the stored ones (see `buildCopy`). */
+  private textureInputs: readonly BvhTraceTexture[] | null = null;
+
   private buildCopy(): SceneCopy {
     const s = this.scene;
-    return this.rt.buildSceneCopy({
+    const textures = this.options.textures === false ? null : (this.textureInputs ?? (s.textures?.length ? s.textures : null));
+    const { maxSize, maxBuckets } = textureOptions(this.options);
+    const copy = this.rt.buildSceneCopy({
       meshes: s.meshes,
       instances: s.instances.map((instance, i) => ({ instanceIndex: i, meshIndex: instance.mesh, objectToWorld: instance.matrixWorld, material: instance.material })),
-      materials: (s.materials ?? []).map(raytracerMaterialOf),
+      materials: (s.materials ?? []).map((m) => (textures && m.baseColorTexture !== undefined ? { ...raytracerMaterialOf(m), baseColorTexture: m.baseColorTexture } : raytracerMaterialOf(m))),
       sun: s.lights?.sun ?? null,
       environment: s.lights?.environment ?? null,
+      ...(textures ? { textures, options: { textures: { maxSize, maxBuckets } } } : {}),
     });
+    // Every rebuild (setTransforms, each frame on a moving scene) builds the textures again: from the second on, hand it the
+    // stored level 0 of each, already at its bucket's power-of-two size, so it copies them instead of resampling.
+    if (textures && !this.textureInputs && copy.textures) {
+      const { buckets, slots } = copy.textures;
+      this.textureInputs = slots.map(({ bucket, layer }, i) => {
+        const b = buckets[bucket], n = b.width * b.height * 4;
+        return { width: b.width, height: b.height, data: b.mips[0].subarray(layer * n, (layer + 1) * n), colorSpace: b.colorSpace, wrap: b.wrap, label: textures[i].label };
+      });
+    }
+    return copy;
   }
 
   code(slot: BindingSlot) {
     const walk = this.rt.rtWalkEntries(this.format).length;
+    const textures = this.copy.textureLayout;
     const module = this.rt.rtModuleWgsl(this.caps, {
       ...this.format,
       traceSlot: slot,
       rayMasks: this.options.rayMasks ?? false,
-      scene: { slot: { group: slot.group, firstBinding: slot.firstBinding + walk }, layout: this.copy.layout, packing: this.packing },
+      scene: { slot: { group: slot.group, firstBinding: slot.firstBinding + walk }, layout: this.copy.layout, packing: this.packing, ...(textures ? { textures } : {}) },
       shade: this.options.shade ?? {},
       minify: this.options.minify ?? true,
     });
-    return module + seamWgsl;
+    return module + (textures ? texturedMaterialWgsl(textureOptions(this.options).cone) : materialWgsl) + seamWgsl;
   }
 
   resources(): readonly GPUBindingResource[] {
     const t = this.traceBuffers, c = this.copyBuffers;
     const scene = c.packing === 'packed' ? [c.packed!] : [c.table!, c.data!];
-    return [t.nodes, t.triangles, t.topLevel, ...(t.positions ? [t.positions] : []), ...scene].map((buffer) => ({ buffer }));
+    const buffers: GPUBindingResource[] = [t.nodes, t.triangles, t.topLevel, ...(t.positions ? [t.positions] : []), ...scene].map((buffer) => ({ buffer }));
+    // W97: the texture arrays, then their samplers (rtSceneCopyLayoutEntries' order)
+    return c.textures ? [...buffers, ...c.textures.views, ...c.textures.samplers] : buffers;
   }
 
   /**
@@ -457,6 +547,10 @@ export async function createRaytracerTraceProvider(
     if (!(instance.mesh >= 0 && instance.mesh < layouts.length)) throw new RangeError(`instance uses mesh ${instance.mesh}; there are ${layouts.length}`);
     if (instance.material !== undefined && !(instance.material < materials.length)) throw new RangeError(`instance uses material ${instance.material}; there are ${materials.length}`);
   }
+  const textureCount = scene.textures?.length ?? 0;
+  materials.forEach((m, i) => {
+    if (m.baseColorTexture !== undefined && !(m.baseColorTexture >= 0 && m.baseColorTexture < textureCount)) throw new RangeError(`material ${i} uses texture ${m.baseColorTexture}; there are ${textureCount}`);
+  });
   scene.meshes.forEach((mesh, i) => {
     const tm = mesh.triangleMaterials;
     if (!tm) return;
