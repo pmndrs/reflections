@@ -2731,7 +2731,8 @@ async function ssrRtBuilderChecks(pages) {
   }
   for (const builder of ['auto', 'tinybvh']) {
     // probes at 128 px, as the ssr-rt section (D901 hit-shading checks)
-    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&bvhBuilder=${builder}&probeRes=128`);
+    // rtCone=0.012 as in ssr-rt: these checks hold hit lighting (D901), not texture LOD (the default cone 0.05 reads ~5 % brighter on contact)
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&bvhBuilder=${builder}&probeRes=128&rtCone=0.012`);
     pages.push(p);
     const before = results.logs.length;
     await p.T("window.__p.load('offscreen')");
