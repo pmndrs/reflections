@@ -90,6 +90,8 @@ const bvhRayMasks = q.get('bvhRayMasks') === '1';
 const rtShade = q.get('rtShade') === '1';
 /** W89 (D5450): `&rtPacking=split` binds the scene copy as table + data (5 storage buffers) instead of packed (4). */
 const rtPacking = q.get('rtPacking') === 'split' ? 'split' as const : 'auto' as const;
+// W97: traced hits sample base colour textures. `?rtTextures=0`: the maps' averages (before W97); `?rtCone=0.05`: the LOD ray cone (default 0.012)
+const rtTextures = q.get('rtTextures') === '0' ? false as const : q.get('rtCone') ? { cone: Number(q.get('rtCone')) } : undefined;
 /** `&shadingNormals=0`: traced hits shaded with the flat geometric normal (D1700 A/B). */
 const shadingNormals = q.get('shadingNormals') !== '0';
 const wantDenoise = q.has('denoise') ? q.get('denoise') !== '0' : true;
@@ -457,7 +459,7 @@ async function main() {
   };
   async function buildProvider(meshes: THREE.Mesh[]) {
     const t0 = performance.now();
-    const built = await createRaytracerTraceProviderFromObjects(device, meshes, { builder: bvhBuilder, shadingNormals, rayMasks: bvhRayMasks, packing: rtPacking });
+    const built = await createRaytracerTraceProviderFromObjects(device, meshes, { builder: bvhBuilder, shadingNormals, rayMasks: bvhRayMasks, packing: rtPacking, textures: rtTextures });
     const i = built.provider.info;
     return { provider: built.provider as ExampleProvider, pmndrs: built, refit: built.refit, info: { kind: '@pmndrs/raytracer' as const, meshes: meshes.length, triangles: i.triangles, buildMs: performance.now() - t0, builder: i.builder, fallbackReason: i.fallbackReason, packing: i.packing } };
   }

@@ -171,9 +171,9 @@ export interface RaytracerTraceProviderOptions {
   /**
    * Material textures at traced hits (W97). Stored at most `maxSize` texels a side (default 1024: reflections are filtered) in
    * at most `maxBuckets` texture arrays (default 4; each binds one sampled texture and one sampler in the trace pass). `cone`:
-   * the level-of-detail ray cone's spread in radians (default 0.012: the footprint at a hit is `t x cone`; W97: 0.005 raised the rest flicker on a textured traced wall by 4 %,
-   * 0.05 left blurred silhouettes). `false`: no
-   * textures, the materials' `baseColor` alone.
+   * the level-of-detail ray cone's spread in radians; the footprint at a hit is `t x cone`. Default 0.05 (maintainer, 2026-11-27:
+   * blur over flicker): textures at traced hits read softer, and the rest flicker on a textured traced wall stays where it was
+   * (0.0108 %); 0.012 is sharper and reads 0.0110 %. `false`: no textures, the materials' `baseColor` alone.
    */
   textures?: false | { maxSize?: number; maxBuckets?: number; cone?: number };
 }
@@ -309,7 +309,7 @@ fn rtpHitMaterial(hit: Hit) -> RtMaterial {
 
 const textureOptions = (o: RaytracerTraceProviderOptions) => {
   const t = o.textures || {};
-  return { maxSize: t.maxSize ?? 1024, maxBuckets: t.maxBuckets ?? 4, cone: t.cone ?? 0.012 };
+  return { maxSize: t.maxSize ?? 1024, maxBuckets: t.maxBuckets ?? 4, cone: t.cone ?? 0.05 };
 };
 
 const seamWgsl = /* wgsl */ `

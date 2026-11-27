@@ -1616,7 +1616,9 @@ async function ssrRtChecks(pages) {
   console.log('examples/ssr (?rt=1):');
   // probes at 128 px: the size W25 / W28 measured the hit-shading checks at (the page follows the
   // 256 px default since 443e35d; at 256 contact's D901 ratio reads 1.10 with @pmndrs/bvh, HANDOFF backlog)
-  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&probeRes=128`);
+  // rtCone=0.012: these checks hold traced-hit lighting (D901) and confidence, not texture LOD; the default cone (0.05, blur over
+  // flicker, maintainer 2026-11-27) reads textured hits softer and ~5 % brighter on contact (ratio 1.12 vs 1.07 at 0.012)
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&view=grid&rt=1&probeRes=128&rtCone=0.012`);
   pages.push(p);
   const before = results.logs.length;
   await p.T("window.__p.load('offscreen')");
