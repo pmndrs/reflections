@@ -1,0 +1,105 @@
+examples/catalog (38 pages):
+  saved out/catalog-gallery.png
+  [PASS] catalog: the gallery shows a linked card for every built page and the committed card images - 38 cards for 38 pages, 36 / 36 images 
+  saved out/catalog-showcase.png
+  [PASS] catalog showcase: loads, renders, no console errors or validation errors - 1280x720, luminance 93.8 +- 68.4
+  saved out/catalog-showcase-compare.png
+  [PASS] catalog showcase/compare: loads, renders, no console errors or validation errors - 1280x720, luminance 74.7 +- 73.4
+  saved out/catalog-start-hello.png
+  [PASS] catalog start/hello: loads, renders, no console errors or validation errors - 1280x720, luminance 59.9 +- 56.9
+  saved out/catalog-start-probes-only.png
+  [PASS] catalog start/probes-only: loads, renders, no console errors or validation errors - 1280x720, luminance 56.4 +- 54.1
+  saved out/catalog-start-r3f.png
+  [PASS] catalog start/r3f: loads, renders, no console errors or validation errors - 1280x720, luminance 93.0 +- 54.1
+  saved out/catalog-probes-box-projection.png
+  [PASS] catalog probes/box-projection: loads, renders, no console errors or validation errors - 1280x720, luminance 109.6 +- 64.8
+  [PASS] catalog probes/box-projection: the compare switch changes the image, and switching back restores it - on vs compare mean 10.097 / 255 (max 209); on vs back mean 0.0000
+  saved out/catalog-probes-two-rooms.png
+  [PASS] catalog probes/two-rooms: loads, renders, no console errors or validation errors - 1280x720, luminance 65.7 +- 45.0
+  [PASS] catalog probes/two-rooms: the compare switch changes the image, and switching back restores it - on vs compare mean 13.447 / 255 (max 229); on vs back mean 0.0000
+  saved out/catalog-probes-live.png
+  [PASS] catalog probes/live: loads, renders, no console errors or validation errors - 1280x720, luminance 71.7 +- 45.4
+  [PASS] catalog probes/live: the compare switch changes the image, and switching back restores it - on vs compare mean 7.475 / 255 (max 236); on vs back mean 0.0000
+  saved out/catalog-probes-exclude.png
+  [PASS] catalog probes/exclude: loads, renders, no console errors or validation errors - 1280x720, luminance 110.4 +- 64.7
+  [PASS] catalog probes/exclude: the compare switch changes the image, and switching back restores it - on vs compare mean 3.404 / 255 (max 243); on vs back mean 0.0000
+  saved out/catalog-ssr-mirror-floor.png
+  [PASS] catalog ssr/mirror-floor: loads, renders, no console errors or validation errors - 1280x720, luminance 116.0 +- 70.4
+  [PASS] catalog ssr/mirror-floor: the compare switch changes the image, and switching back restores it - on vs compare mean 10.504 / 255 (max 225); on vs back mean 0.0031
+  saved out/catalog-ssr-what-it-misses.png
+  [PASS] catalog ssr/what-it-misses: loads, renders, no console errors or validation errors - 1280x720, luminance 44.6 +- 41.4
+  [PASS] catalog ssr/what-it-misses: the compare switch changes the image, and switching back restores it - on vs compare mean 22.827 / 255 (max 255); on vs back mean 0.0003
+  saved out/catalog-rt-fallback.png
+  [PASS] catalog rt/fallback: loads, renders, no console errors or validation errors - 1280x720, luminance 41.9 +- 40.0
+  [PASS] catalog rt/fallback: the compare switch changes the image, and switching back restores it - on vs compare mean 3.734 / 255 (max 227); on vs back mean 0.0239
+  saved out/catalog-rt-animated.png
+  [PASS] catalog rt/animated: loads, renders, no console errors or validation errors - 1280x720, luminance 109.7 +- 70.9
+  [PASS] catalog rt/animated: the compare switch changes the image, and switching back restores it - on vs compare mean 1.041 / 255 (max 215); on vs back mean 0.0371
+  saved out/catalog-hybrid-explained.png
+  [PASS] catalog hybrid/explained: loads, renders, no console errors or validation errors - 1280x720, luminance 64.2 +- 80.9
+  [PASS] catalog hybrid/explained: the compare switch changes the image, and switching back restores it - on vs compare mean 7.336 / 255 (max 245); on vs back mean 0.0348
+  saved out/catalog-denoise-glossy.png
+  [PASS] catalog denoise/glossy: loads, renders, no console errors or validation errors - 1280x720, luminance 84.2 +- 67.4
+  [PASS] catalog denoise/glossy: the compare switch changes the image, and switching back restores it - on vs compare mean 0.596 / 255 (max 173); on vs back mean 0.0295
+  saved out/catalog-materials-roughness.png
+  [PASS] catalog materials/roughness: loads, renders, no console errors or validation errors - 1280x720, luminance 95.5 +- 68.4
+  [PASS] catalog materials/roughness: the compare switch changes the image, and switching back restores it - on vs compare mean 5.426 / 255 (max 254); on vs back mean 0.0250
+  saved out/catalog-motion-animated.png
+  [PASS] catalog motion/animated: loads, renders, no console errors or validation errors - 1280x720, luminance 65.0 +- 40.0
+  [PASS] catalog motion/animated: the compare switch changes the image, and switching back restores it - on vs compare mean 0.266 / 255 (max 87); on vs back mean 0.0001
+  [PASS] catalog motion/animated: at rest, < 0.5 % of px change by more than 1/255 between frames - 0.000 % of px
+  saved out/catalog-perf-presets.png
+  [PASS] catalog perf/presets: loads, renders, no console errors or validation errors - 1280x720, luminance 61.0 +- 42.9
+  [PASS] catalog perf/presets: the compare switch changes the image, and switching back restores it - on vs compare mean 0.378 / 255 (max 233); on vs back mean 0.0183
+  saved out/catalog-perf-upscaler.png
+  [PASS] catalog perf/upscaler: loads, renders, no console errors or validation errors - 1280x720, luminance 64.1 +- 44.2
+  [PASS] catalog perf/upscaler: the compare switch changes the image, and switching back restores it - on vs compare mean 1.060 / 255 (max 140); on vs back mean 0.0205
+  saved out/catalog-custom-tsl.png
+  [PASS] catalog custom/tsl: loads, renders, no console errors or validation errors - 1280x720, luminance 63.9 +- 55.2
+  [PASS] catalog custom/tsl: the compare switch changes the image, and switching back restores it - on vs compare mean 1.694 / 255 (max 107); on vs back mean 0.0000
+  saved out/catalog-setup-device-limits.png
+  [PASS] catalog setup/device-limits: loads, renders, no console errors or validation errors - 1280x720, luminance 115.8 +- 70.7
+  (catalog setup/device-limits: compare not image-checked, check.compare false: the brief says why)
+  saved out/catalog-engines-three.png
+  [PASS] catalog engines/three: loads, renders, no console errors or validation errors - 1280x720, luminance 65.4 +- 45.3
+  [PASS] catalog engines/three: the compare switch changes the image, and switching back restores it - on vs compare mean 2.109 / 255 (max 165); on vs back mean 0.0248
+  saved out/catalog-engines-r3f.png
+  [PASS] catalog engines/r3f: loads, renders, no console errors or validation errors - 1280x720, luminance 65.7 +- 44.5
+  [PASS] catalog engines/r3f: the compare switch changes the image, and switching back restores it - on vs compare mean 2.087 / 255 (max 208); on vs back mean 0.0269
+  saved out/catalog-engines-babylon.png
+  [PASS] catalog engines/babylon: loads, renders, no console errors or validation errors - 1280x720, luminance 32.5 +- 36.7
+  [PASS] catalog engines/babylon: the compare switch changes the image, and switching back restores it - on vs compare mean 0.820 / 255 (max 253); on vs back mean 0.0000
+  saved out/catalog-engines-pixi.png
+  [PASS] catalog engines/pixi: loads, renders, no console errors or validation errors - 1280x720, luminance 20.5 +- 32.1
+  saved out/catalog-engines-core.png
+  [PASS] catalog engines/core: loads, renders, no console errors or validation errors - 1280x720, luminance 72.5 +- 47.8
+  [PASS] catalog engines/core: the compare switch changes the image, and switching back restores it - on vs compare mean 2.467 / 255 (max 190); on vs back mean 0.0314
+  saved out/catalog-ssr.png
+  [PASS] catalog ssr: loads, renders, no console errors or validation errors - 1280x720, luminance 95.1 +- 74.3
+  saved out/catalog-probes.png
+  [PASS] catalog probes: loads, renders, no console errors or validation errors - 1280x720, luminance 33.5 +- 47.2
+  saved out/catalog-scenes.png
+  [PASS] catalog scenes: loads, renders, no console errors or validation errors - 1280x720, luminance 71.1 +- 76.0
+  saved out/catalog-babylon.png
+  [PASS] catalog babylon: loads, renders, no console errors or validation errors - 1280x720, luminance 67.6 +- 53.6
+  saved out/catalog-sssr-core.png
+  [PASS] catalog sssr-core: loads, renders, no console errors or validation errors - 1280x720, luminance 93.2 +- 69.8
+  saved out/catalog-probe-core.png
+  [PASS] catalog probe-core: loads, renders, no console errors or validation errors - 1280x720, luminance 7.1 +- 24.9
+  saved out/catalog-bc6h.png
+  [PASS] catalog bc6h: loads, renders, no console errors or validation errors - 1280x720, luminance 44.7 +- 54.6
+  saved out/catalog-probe-bench.png
+  [PASS] catalog probe-bench: loads, no console errors or validation errors - 1280x720, luminance 37.0 +- 46.5
+  saved out/catalog-ssr-bench.png
+  [PASS] catalog ssr-bench: loads, renders, no console errors or validation errors - 1280x720, luminance 91.5 +- 71.9
+  saved out/catalog-regressions.png
+  [PASS] catalog regressions: loads, no console errors or validation errors - 1280x720, luminance 18.4 +- 19.3
+  saved out/catalog-nrc.png
+  [PASS] catalog nrc: loads, no console errors or validation errors - 1280x720, luminance 21.4 +- 26.6
+  saved out/catalog-showcase-bench.png
+  [PASS] catalog showcase/bench: loads, renders, no console errors or validation errors - 1280x720, luminance 86.1 +- 73.0
+  [PASS] no WebGPU validation errors or exceptions
+console warnings/errors:
+  warning: Reflections: maxColorAttachmentBytesPerSample is 32 (WebGPU's default is 32, all a plain new WebGPURenderer() asks for); the G-buffer with three's lit image needs 36. Build the renderer with createReflectionsRenderer() (or new WebGPURenderer({ requiredLimits: reflectionsRequiredLimits(adapter) })) t
+
+all checks passed

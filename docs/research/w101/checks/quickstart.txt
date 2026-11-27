@@ -1,0 +1,45 @@
+examples/quickstart:
+  saved out/examples-quickstart-on.png
+  saved out/examples-quickstart-off.png
+  [PASS] examples/quickstart: renders a non-black frame, no GPU errors - mean 108/255, range 0-255; {"denoiser":true,"probes":true,"rt":false,"baked":1,"storageBuffersPerStage":10,"traced":false,"traceError":null,"colorBytesPerSample":64,"litPass":false,"exactSpecular":true}
+  [PASS] examples/quickstart: reflections are present (floor region differs, on vs off) - mean |on - off| 7.91 / 255, 16.6 % of px over 12
+  [PASS] examples/quickstart: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.246 % of px
+examples/quickstart probes only:
+  saved out/examples-quickstart-probes-only-on.png
+  saved out/examples-quickstart-probes-only-off.png
+  [PASS] examples/quickstart probes only: renders a non-black frame, no GPU errors - mean 98/255, range 7-255; {"baked":1,"layout":"cube-array"}
+  [PASS] examples/quickstart probes only: reflections are present (floor region differs, on vs off) - mean |on - off| 26.88 / 255, 52.8 % of px over 12
+  [PASS] examples/quickstart probes only: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.000 % of px
+examples/quickstart rt + preset performance:
+  saved out/examples-quickstart-rt-preset-performance-on.png
+  saved out/examples-quickstart-rt-preset-performance-off.png
+  [PASS] examples/quickstart rt + preset performance: renders a non-black frame, no GPU errors - mean 106/255, range 0-255; {"denoiser":true,"probes":true,"rt":true,"baked":1,"storageBuffersPerStage":10,"traced":true,"traceError":null,"colorBytesPerSample":64,"litPass":false,"exactSpecular":true}
+  [PASS] examples/quickstart rt + preset performance: reflections are present (floor region differs, on vs off) - mean |on - off| 10.57 / 255, 19.8 % of px over 12
+  [PASS] examples/quickstart rt + preset performance: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.651 % of px
+examples/quickstart, default device limits (plain WebGPURenderer):
+  saved out/examples-quickstart-default-device-limits-plain-WebGPURenderer--on.png
+  saved out/examples-quickstart-default-device-limits-plain-WebGPURenderer--off.png
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): renders a non-black frame, no GPU errors - mean 107/255, range 0-255; {"denoiser":true,"probes":true,"rt":false,"baked":1,"storageBuffersPerStage":8,"traced":false,"traceError":null,"colorBytesPerSample":32,"litPass":true,"exactSpecular":false}
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): reflections are present (floor region differs, on vs off) - mean |on - off| 8.11 / 255, 16.6 % of px over 12
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.233 % of px
+  [PASS] examples/quickstart, default device limits: 32 colour bytes per sample, lit in a second pass, one console warning naming the limit and createReflectionsRenderer - {"denoiser":true,"probes":true,"rt":false,"baked":1,"storageBuffersPerStage":8,"traced":false,"traceError":null,"colorBytesPerSample":32,"litPass":true,"exactSpecular":false}; 1 warning(s): warning: Reflections: maxColorAttachmentBytesPerSample is 32 (WebGPU's default is 32, all a plain new WebGPURenderer() asks for); the G-buffer with three's lit image needs 36. Build the renderer with createReflectionsRenderer() (or new WebGPURenderer({ requiredLimits: reflectionsRequiredLimits(adapter) })) t
+examples/quickstart rt, default device limits:
+  saved out/examples-quickstart-rt-default-device-limits-on.png
+  saved out/examples-quickstart-rt-default-device-limits-off.png
+  [PASS] examples/quickstart rt, default device limits: renders a non-black frame, no GPU errors - mean 106/255, range 0-255; {"denoiser":true,"probes":true,"rt":true,"baked":1,"storageBuffersPerStage":8,"traced":true,"traceError":null,"colorBytesPerSample":32,"litPass":true,"exactSpecular":false}
+  [PASS] examples/quickstart rt, default device limits: reflections are present (floor region differs, on vs off) - mean |on - off| 9.91 / 255, 18.8 % of px over 12
+  [PASS] examples/quickstart rt, default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.361 % of px
+  [PASS] examples/quickstart rt, default device limits: the traced pass runs (8 storage buffers per stage, packed scene copy; lit in a second pass) - {"denoiser":true,"probes":true,"rt":true,"baked":1,"storageBuffersPerStage":8,"traced":true,"traceError":null,"colorBytesPerSample":32,"litPass":true,"exactSpecular":false}
+examples/quickstart rt (split scene copy), default device limits:
+  saved out/examples-quickstart-rt-split-scene-copy-default-device-limits-on.png
+  saved out/examples-quickstart-rt-split-scene-copy-default-device-limits-off.png
+  [PASS] examples/quickstart rt (split scene copy), default device limits: renders a non-black frame, no GPU errors - mean 108/255, range 0-255; {"denoiser":true,"probes":true,"rt":true,"baked":1,"storageBuffersPerStage":8,"traced":false,"traceError":"rt: the trace pipeline binds 9 storage buffers in the compute stage (pass 3, radiance fallback 0, provider '@pmndrs/raytracer' 5, hit shading 1); the device allows 8 (maxStorageBuffersPerShaderStage). Request more at requestDevice ({ requiredLimits: reflectionsRequiredLimits(adapter) } asks for up to what the adapter has, or { maxStorageBuffersPerShaderStage: adapter.limits.maxStorageBuffersPerShaderStage }; three: new WebGPURenderer({ requiredLimits: { maxStorageBuffersPerShaderStage: 9 } })), or use a provider / fallback that binds fewer.","colorBytesPerSample":32,"litPass":true,"exactSpecular":false}
+  [PASS] examples/quickstart rt (split scene copy), default device limits: reflections are present (floor region differs, on vs off) - mean |on - off| 8.09 / 255, 16.6 % of px over 12
+  [PASS] examples/quickstart rt (split scene copy), default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.266 % of px
+  [PASS] examples/quickstart rt (split), default device limits: ray tracing degrades to SSR + probes with one console warning - {"denoiser":true,"probes":true,"rt":true,"baked":1,"storageBuffersPerStage":8,"traced":false,"traceError":"rt: the trace pipeline binds 9 storage buffers in the compute stage (pass 3, radiance fallback 0, provider '@pmndrs/raytracer' 5, hit shading 1); the device allows 8 (maxStorageBuffersPerShaderStage). Request more at requestDevice ({ requiredLimits: reflectionsRequiredLimits(adapter) } asks for up to what the adapter has, or { maxStorageBuffersPerShaderStage: adapter.limits.maxStorageBuffersPerShaderStage }; three: new WebGPURenderer({ requiredLimits: { maxStorageBuffersPerShaderStage: 9 
+  [PASS] no WebGPU validation errors or exceptions
+console warnings/errors:
+  warning: Reflections: maxColorAttachmentBytesPerSample is 32 (WebGPU's default is 32, all a plain new WebGPURenderer() asks for); the G-buffer with three's lit image needs 36. Build the renderer with createReflectionsRenderer() (or new WebGPURenderer({ requiredLimits: reflectionsRequiredLimits(adapter) })) t
+  warning: ScreenSpaceReflectionsPass: ray tracing is off on this device; screen-space reflections and probes continue. rt: the trace pipeline binds 9 storage buffers in the compute stage (pass 3, radiance fallback 0, provider '@pmndrs/raytracer' 5, hit shading 1); the device allows 8 (maxStorageBuffersPerShad
+
+all checks passed

@@ -1,0 +1,24 @@
+examples/showcase:
+  saved out/showcase-carConcept-on.png
+  saved out/showcase-carConcept-off.png
+  saved out/showcase-carConcept-rt.png
+  [PASS] showcase carConcept: renders on / off / rt, no GPU errors - 1 probes (cube-array, 148 ms), denoiser ffx-reflections, mean 151/255, BVH 463377 tris; reflections 5.97 ms
+  saved out/showcase-toyCar-on.png
+  saved out/showcase-toyCar-off.png
+  saved out/showcase-toyCar-rt.png
+  [PASS] showcase toyCar: renders on / off / rt, no GPU errors - 1 probes (cube-array, 32 ms), denoiser ffx-reflections, mean 156/255, BVH 109032 tris; reflections 0.99 ms
+  saved out/showcase-chess-on.png
+  saved out/showcase-chess-off.png
+  saved out/showcase-chess-rt.png
+  [PASS] showcase chess: renders on / off / rt, no GPU errors - 1 probes (cube-array, 122 ms), denoiser ffx-reflections, mean 161/255, BVH 1534496 tris; reflections 1.98 ms
+  saved out/showcase-sponza-on.png
+  saved out/showcase-sponza-off.png
+  saved out/showcase-sponza-rt.png
+  [PASS] showcase sponza: renders on / off / rt, no GPU errors - 7 probes (cube-array, 198 ms), denoiser ffx-reflections, mean 61/255, BVH 262267 tris; reflections 1.10 ms
+  [PASS] showcase carConcept: still camera, reflections settle under anti-aliasing (upscaler; < 0.3% of pixels flicker > 1/255) - upscaler 0.00%, W40 TAA 0.00%, off 0.61% of pixels with mean |frame - previous| > 1/255
+  saved out/showcase-carConcept-upscale-performance.png
+  [PASS] showcase carConcept: ?upscale=performance renders (G-buffer at half size, upscaled) - render 640x360 -> 1280x720, mean 152/255
+  [PASS] showcase carConcept: roughness from normal variance (specAA) reaches the G-buffer and turns off cleanly - door G-buffer roughness off 0.250, on 0.350, off again 0.250
+  [PASS] no WebGPU validation errors or exceptions
+
+all checks passed
