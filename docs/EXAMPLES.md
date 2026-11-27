@@ -125,7 +125,10 @@ E2 and E3 start once E1 is merged. Each wave logs in `docs/HANDOFF.md`; divergen
   a corner (`'top-left'` default); a page that flows like a document takes `'inline'`. `?thumb` hides it.
 - **`window.__p`.** Every page sets it once ready (the check waits for it). A feature page gives `stop()`, `shot(n)` (render n
   frames, return a PNG data URL) and `setCompare(on)` (on = the baseline of `brief.compare`); the catalog check then asserts
-  the switch changes the image and switching back restores it.
+  the switch changes the image and switching back restores it. A temporal page pins the tracer's noise in `stop()`
+  (`ssr.settings.frameIndex = 0`) and lets `shot()` settle after a switch (W93, W95). An animated page adds `restFlicker()` (paused,
+  settled: % of px whose mean change over 6 frame pairs is > 1/255), held to the quick start's 0.5 %. A compare that cannot change the
+  image by nature (a reload, an effect below the noise floor) sets `check: { compare: false }` in the catalog and the brief says why.
 - **Checks.** `pnpm check -- --only catalog` loads the gallery (a linked card per built page, the committed images) and every
   built page at 1280 x 720 (renders, no console error, no validation error). `--pages a,b` narrows it (`gallery` is a page).
   `--thumbs` writes the card images: `<path>thumb.webp` for a folder, `<name>.thumb.webp` beside an html file (640 x 360).
