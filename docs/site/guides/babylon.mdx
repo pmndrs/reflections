@@ -69,6 +69,13 @@ await probes.bake();
 const ssr = new ScreenSpaceReflections({ engine, probes });
 ```
 
+A probe can capture from a point other than its influence box's centre (`originOffset`) and project onto a box
+offset from it (`projectionOffset`), as three's `ReflectionProbe` does: that lets a room's influence box reach below the
+floor, so the floor gets the probe's full weight, while the capture point and the walls stay where the room is.
+
+Without a denoiser in this adapter, a glossy surface shows the tracer's raw samples, and they move every frame. Set
+`ssr.settings.frameIndex` (for example to 0) to fix the noise pattern, so a still view stays still.
+
 `BabylonProbeSet.bake()` needs `scene.activeCamera` to be set, because the captures take its near and far planes.
 `ssr.configure(width, height)` allocates the tracer's textures. Call it again, and rebuild the frame graph, when the
 size changes.
@@ -131,5 +138,8 @@ ray-traced pass here, so the storage-buffer count from the three.js adapter does
 
 ## Live example
 
-[`examples/babylon`](https://github.com/pmndrs/reflections/tree/main/examples/babylon) is the source, and the
-[live page](/examples/babylon/) runs it. It takes `?ssr=0`, `?probes=0`, `?view=` and `?variant=workgroup`.
+[`examples/engines/babylon`](https://github.com/pmndrs/reflections/tree/main/examples/engines/babylon) builds the
+two rooms of the other engine pages in Babylon, with the three probes and screen space as frame-graph tasks; its
+[live page](/examples/engines/babylon/) sits next to the [three.js page](/examples/engines/three/) at the same views.
+[`examples/babylon`](https://github.com/pmndrs/reflections/tree/main/examples/babylon) is the source the snippets above
+come from, and its [live page](/examples/babylon/) takes `?ssr=0`, `?probes=0`, `?view=` and `?variant=workgroup`.

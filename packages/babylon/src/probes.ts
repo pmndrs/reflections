@@ -115,12 +115,20 @@ export class BabylonCubeCapture {
 
 /** One probe: where it captures and the box it lights (world space, Babylon's axes). */
 export interface BabylonProbe {
-  /** Capture position (and influence-box centre). */
+  /** Influence-box centre, and the capture position unless `originOffset` moves it. */
   position: Vec3;
   /** Influence box size, centred on `position`. */
   influenceSize: Vec3;
   /** Box-projection size (parallax). Default: no box projection. */
   projectionSize?: Vec3;
+  /** Projection box centre relative to `position` (three's `ReflectionProbe.projectionOffset`). Default 0. */
+  projectionOffset?: Vec3;
+  /**
+   * Capture point relative to `position` (three's `ReflectionProbe.originOffset`). Default 0. With the offsets an
+   * influence box can reach below the floor (so the floor gets full weight, not the fade at its face) while the
+   * capture point and the projection box stay where the room is.
+   */
+  originOffset?: Vec3;
   /** Influence fade distance (world units). Default 1. */
   fade?: number;
   priority?: number;
@@ -137,6 +145,12 @@ export interface BabylonProbeSetOptions extends Partial<Pick<ProbeSetOptions, 's
    */
   environment?: AbstractMesh[] | null;
 }
+
+/** Where a probe captures: `position + originOffset`. */
+const captureOrigin = (p: BabylonProbe): Vec3 => {
+  const o = p.originOffset ?? [0, 0, 0];
+  return [p.position[0] + o[0], p.position[1] + o[1], p.position[2] + o[2]];
+};
 
 export class BabylonProbeSet {
   readonly scene: Scene;
@@ -183,7 +197,8 @@ export class BabylonProbeSet {
     const volumes: ProbeVolume[] = this.probes.map((p, slot) => ({
       slot, center: p.position, halfSize: [p.influenceSize[0] / 2, p.influenceSize[1] / 2, p.influenceSize[2] / 2],
       fade: p.fade ?? 1, priority: p.priority,
-      ...(p.projectionSize ? { boxProjection: true, projectionSize: p.projectionSize } : { boxProjection: false }),
+      ...(p.projectionSize ? { boxProjection: true, projectionSize: p.projectionSize, projectionOffset: p.projectionOffset } : { boxProjection: false }),
+      ...(p.originOffset ? { origin: captureOrigin(p) } : {}),
     }));
     this.set.setVolumes(volumes);
     this.set.update();
@@ -200,7 +215,7 @@ export class BabylonProbeSet {
     const device = this.set.device;
     if (!this.scene.activeCamera) throw new Error('BabylonProbeSet.bake: set scene.activeCamera first (captures take its near / far)');
     const all = this.scene.meshes.filter((m) => m.isEnabled() && m.isVisible);
-    const jobs: { slot: number; position: Vec3; meshes: AbstractMesh[] }[] = this.probes.map((p, slot) => ({ slot, position: p.position, meshes: p.renderList ?? all }));
+    const jobs: { slot: number; position: Vec3; meshes: AbstractMesh[] }[] = this.probes.map((p, slot) => ({ slot, position: captureOrigin(p), meshes: p.renderList ?? all }));
     if (this.environmentMeshes) jobs.push({ slot: this.set.environmentSlot, position: [0, 0, 0], meshes: this.environmentMeshes });
     // one capture texture: each job is captured, prefiltered and submitted before the next
     for (const job of jobs) {

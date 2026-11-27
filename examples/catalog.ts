@@ -551,40 +551,62 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     slug: 'engines/three',
     path: 'engines/three/',
     title: 'three.js',
-    summary: 'three.js WebGPURenderer with every feature, on the shared two-room scene.',
-    description: 'Planned (E4).',
-    brief: { kind: 'feature', shows: 'The three.js adapter on the scene every engine page shares.', tryThis: PLANNED_TRY, compare: 'Reflections off' },
-    category: 'engines', status: 'stable', tags: ['three'], docs: 'guides/three', source: 'examples/engines/three', planned: true,
+    summary: 'three.js WebGPURenderer with every feature, on the two rooms every engine page shares.',
+    description:
+      'Ben Houston\'s two rooms (`examples/shared/rooms.ts`): a `ReflectionProbes` set with one probe per room and one in the doorway, baked once, then ' +
+      '`Reflections.create(renderer, scene, { probes, denoiser, rayTracing })` and `reflections.render(camera)` in the loop. The ray-traced switch rebuilds ' +
+      'it with a BVH (`@pmndrs/raytracer`) and refits it as the ball moves. This is the reference the other engine pages are measured against: ' +
+      'React Three Fiber has all of it, Babylon.js and raw WebGPU have probes and screen space (no rays; Babylon has no denoiser), ' +
+      'pixi.js needs the closed pixi-3d beta (`guides/adapters` has the table). Each feature on its own page: probes/box-projection, the ssr lab page, the showcase.',
+    brief: {
+      kind: 'feature',
+      shows: 'The three.js adapter with everything on: probes per room, screen-space reflections, the denoiser and, on a switch, the ray-traced fallback. The other engine pages draw this scene from the same views.',
+      tryThis: ['Turn Screen space off: the floor keeps the probes\' blurrier, box-projected reflections', 'Turn the Ray-traced fallback on, View: ball, and watch what the screen cannot see', 'Open engines/babylon or engines/core at the same View and compare'],
+      compare: 'Screen space off (probes only), the switch every engine page has; and the other engine pages at the same View',
+    },
+    category: 'engines', status: 'stable', tags: ['three', 'probes', 'ssr', 'ray tracing', 'denoiser'], docs: 'guides/three', source: 'examples/engines/three',
   },
   {
     slug: 'engines/r3f',
     path: 'engines/r3f/',
     title: 'React Three Fiber',
-    summary: 'Everything through the hook; the two rooms as JSX.',
-    description: 'Planned (E4).',
-    brief: { kind: 'feature', shows: 'The React Three Fiber hook on the scene every engine page shares.', tryThis: PLANNED_TRY, compare: 'Reflections off' },
-    category: 'engines', status: 'experimental', tags: ['react', 'r3f'], docs: 'guides/react-three-fiber', source: 'examples/engines/r3f', planned: true,
+    summary: 'The two rooms as JSX, with every feature of engines/three through the useReflections hook.',
+    description:
+      'React Three Fiber v10 (WebGPURenderer by default; the `renderer` prop calls `createReflectionsRenderer` for the device limits). The rooms of ' +
+      '`examples/shared/rooms.ts` are written as JSX, the probes too (`extend(ReflectionProbes)`, `extend(ReflectionProbe)`), baked in an effect once the ' +
+      'rooms are mounted; `useReflections` (examples/r3f) calls `Reflections.create` and draws each frame through it. Ray tracing is fixed at creation, ' +
+      'so its switch remounts the hook\'s component (a `key`). Nothing is missing against engines/three: R3F is the three.js adapter under a `<Canvas>`.',
+    brief: {
+      kind: 'feature',
+      shows: 'Everything engines/three has, in React: the rooms and their probes as JSX, reflections from one hook.',
+      tryThis: ['Turn Screen space off: probes only', 'Turn the Ray-traced fallback on (the hook\'s component remounts with a BVH)', 'Put engines/three next to it at the same View'],
+      compare: 'Screen space off (probes only); and engines/three, which should look the same',
+    },
+    category: 'engines', status: 'experimental', tags: ['react', 'r3f', 'probes', 'ssr', 'ray tracing', 'denoiser'], docs: 'guides/react-three-fiber', source: 'examples/engines/r3f',
   },
   {
     slug: 'engines/babylon',
-    path: 'babylon/',
+    path: 'engines/babylon/',
     title: 'Babylon.js',
-    summary: 'Screen-space reflections and a probe on Babylon.js (WebGPUEngine), as frame-graph tasks.',
+    summary: 'The two rooms built in Babylon.js: probes and screen-space reflections as frame-graph tasks.',
     description:
-      'The mirrorWall scene rebuilt in Babylon.js with `@pmndrs/reflections/babylon`: core\'s screen-space tracer and probe set on Babylon\'s device, ' +
-      'a frame graph of geometry, `FrameGraphReflectionsTask` and `FrameGraphReflectionsCompositeTask`. Babylon is left-handed; the scene negates x so the ' +
-      'image matches the three page. `?ssr=0`, `?probes=0`, `?view=…`, `?variant=workgroup`. To be rebuilt on the shared scene (E4).',
+      'The rooms of `examples/shared/rooms.ts` rebuilt in Babylon.js on a `WebGPUEngine` (same sizes, colours, roughness, point lights with cube shadow maps), ' +
+      'x negated for Babylon\'s left-handed world so the image matches three\'s. `BabylonProbeSet` captures the same three probes with Babylon cube renders; ' +
+      'a frame graph renders the G-buffer, then `FrameGraphReflectionsTask` (core\'s tracer, the probes as its fallback) and ' +
+      '`FrameGraphReflectionsCompositeTask` (lit + split-sum weight x radiance), then ACES. **Missing against engines/three** (`guides/adapters`): ' +
+      'the ray-traced fallback, the denoiser (the glossy floor shows the tracer\'s raw samples), presets, the hybrid resolve; and Babylon\'s materials do not ' +
+      'sample the probes, so the rooms get no bounce light. The older mirror-wall page (lab: babylon) keeps the adapter\'s orientation and IBL checks.',
     brief: {
       kind: 'feature',
-      shows: 'The engine-agnostic core on a second engine: the same tracer and probes, wired into Babylon\'s frame graph.',
-      tryThis: ['Add `?ssr=0` to the URL: probes only', 'Compare with the three page on the same scene (lab: ssr, `?scene=mirrorWall`)'],
-      compare: '`?ssr=0` / `?probes=0`',
+      shows: 'The engine-agnostic core on Babylon.js: the same probes and tracer as engines/three, wired into Babylon\'s frame graph, on the same two rooms.',
+      tryThis: ['Turn Screen space off: probes only, as on the three page', 'Set Debug to radiance or confidence: what the tracer hands the composite', 'Open engines/three at the same View: the difference is lighting, shadows and the missing denoiser'],
+      compare: 'Screen space off (probes only); and engines/three at the same View',
     },
     category: 'engines',
     status: 'experimental',
-    tags: ['babylon', 'frame graph'],
+    tags: ['babylon', 'frame graph', 'probes', 'ssr'],
     docs: 'guides/babylon',
-    source: 'examples/babylon/src/main.ts',
+    source: 'examples/engines/babylon',
   },
   {
     slug: 'engines/pixi',
@@ -593,13 +615,15 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     summary: 'A neon arcade in pixi-3d with screen-space reflections, a probe and the denoiser. Needs the closed pixi-3d beta.',
     description:
       'pixi Text and Graphics on 3-D planes as `ContainerTexture`s; pixi-3d draws the scene, its depth and motion; one G-buffer pass adds the normals and ' +
-      'materials; core\'s tracer and probe set run on pixi\'s device and a pixi `Filter` composites. Without the beta unpacked in `examples/pixi3d/vendor/` ' +
-      'the page shows the setup notice (examples/pixi3d/README.md).',
+      'materials; core\'s tracer and probe set run on pixi\'s device, the denoise seam runs `denoiser/ffx`, and a pixi `Filter` composites (`ReflectionsView`). ' +
+      '**Missing against engines/three** (`guides/adapters`): the ray-traced fallback, presets, the hybrid resolve, a one-call setup. Unlike the other engine ' +
+      'pages it is not on the two rooms: pixi-3d is a closed beta, so the page cannot be rebuilt or checked without it. Without the beta unpacked in ' +
+      '`examples/pixi3d/vendor/` it shows the setup notice (examples/pixi3d/README.md), and the public site leaves it out.',
     brief: {
       kind: 'feature',
-      shows: 'The core on pixi.js v8 through pixi-3d: reflections of pixi\'s own 2-D content on a wet 3-D floor.',
-      tryThis: ['Add `?ssr=0` or `?probes=0` to the URL', 'Add `?denoise=0`: the raw reflections'],
-      compare: '`?ssr=0` / `?probes=0` / `?denoise=0`',
+      shows: 'The core on pixi.js v8 through pixi-3d: reflections of pixi\'s own 2-D content on a wet 3-D floor, denoised. Probes, screen space and the denoiser; no ray tracing.',
+      tryThis: ['Add `?ssr=0` to the URL: probes only (the switch every engine page has)', 'Add `?denoise=0`: the raw reflections', 'Add `?view=radiance` or `?view=confidence`: what the tracer hands the composite'],
+      compare: '`?ssr=0` (probes only), `?denoise=0` (no denoiser); engines/three for what pixi lacks',
     },
     category: 'engines',
     status: 'experimental',
@@ -612,10 +636,22 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     slug: 'engines/core',
     path: 'engines/core/',
     title: 'Raw WebGPU',
-    summary: 'The probe set and the screen-space tracer on a bare GPUDevice, no engine.',
-    description: 'Planned (E4).',
-    brief: { kind: 'feature', shows: 'The core API with no engine: what an adapter wraps.', tryThis: PLANNED_TRY, compare: 'Reflections off' },
-    category: 'engines', status: 'experimental', tags: ['core', 'webgpu'], docs: 'guides/adapters', source: 'examples/engines/core', planned: true,
+    summary: 'The probe set and the screen-space tracer on a bare GPUDevice, no engine, on the two rooms.',
+    description:
+      '`@pmndrs/reflections/core` with a renderer written for the page (examples/engines/core/renderer.ts): one forward pass fills the frame contract ' +
+      '(depth, world normal + roughness, base colour + metalness, uv motion, and the scene colour: direct light with its specular, cube shadow maps, the probes\' ' +
+      'diffuse as bounce light). The core `ProbeSet` takes the renderer\'s 90-degree captures (two bounces, as three bakes) and prefilters them; ' +
+      '`createScreenSpaceReflections` traces with `probeRadianceFallback(probes)` behind it; `createReflectionDenoiseSeam` runs `denoiser/ffx`; ' +
+      'the composite adds split-sum weight x radiance and tone-maps with three\'s ACES. Not here: the ray-traced fallback (core has it, ' +
+      '`RaytracerTraceProvider`, left out to keep the page to probes and the tracer), the hybrid resolve and presets (three.js objects). ' +
+      'The page is about 700 lines in three files (scene 200, renderer 320, main 190): what an adapter does for an engine, written out once.',
+    brief: {
+      kind: 'feature',
+      shows: 'The core API with no engine: what every adapter wraps. A minimal renderer fills the frame contract, and core\'s probes, tracer and the denoise seam do the rest.',
+      tryThis: ['Turn Screen space off: probes only', 'Set Show to lit, then reflection: the scene colour the tracer reads, and what the composite adds', 'Open engines/three at the same View'],
+      compare: 'Screen space off (probes only); and engines/three at the same View',
+    },
+    category: 'engines', status: 'experimental', tags: ['core', 'webgpu', 'probes', 'ssr', 'denoiser'], docs: 'concepts/frame-contract', source: 'examples/engines/core',
   },
 
   // ---- lab ------------------------------------------------------------------------------------------
@@ -630,6 +666,9 @@ export const EXAMPLES: readonly ExampleEntry[] = [
   lab('scenes', 'scenes/', 'Scene kit and G-buffer', 'The test scenes and every frame-contract target: depth, normals, roughness, motion, scene colour.',
     '`FrameGBuffer` renders the scene once with MRT; a fullscreen pass shows one target or all of them in a grid. `?scene=…`.',
     ['g-buffer', 'frame contract'], 'examples/scenes/src/main.ts', 'concepts/frame-contract'),
+  lab('babylon', 'babylon/', 'Babylon.js adapter checks', 'The mirror-wall scene on Babylon.js: the adapter\'s orientation, velocity and IBL checks.',
+    'The first Babylon page (W15): mirrorWall with a gradient sky, `?scene=ibl` compares the composite with Babylon\'s own specular IBL. `pnpm check -- --only babylon` runs on it. The user-facing page is engines/babylon.',
+    ['babylon', 'frame graph'], 'examples/babylon/src/main.ts', 'guides/babylon', { kind: 'debugging', status: 'experimental' }),
   lab('sssr-core', 'sssr-core/', 'Screen-space tracer (core)', 'The core tracer on exact analytic inputs, raw WebGPU: debug views and variant parity.',
     'No engine: analytic depth and normals, the core tracer, its classify / intersect passes and debug views.', ['core', 'ssr'], 'examples/sssr-core/src/main.ts', 'concepts/screen-space-reflections'),
   lab('probe-core', 'probe-core/', 'Probe set (core)', 'The core probe set and its radiance fallback on a bare device.',
