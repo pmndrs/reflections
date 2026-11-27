@@ -15,32 +15,32 @@ The whole pipeline on real models, and the tools to judge it against a path trac
 
 ### Showcase
 
-Everything on real models: a car concept, a toy car and a chess set on a mirror floor, and Sponza with a polished floor.
+All the reflection sources on real models: a car concept, a toy car, a chess set on a mirror floor, and Sponza with a polished floor.
 
-**What it shows.** The full hybrid on real assets: probes, screen-space reflections, the ray-traced fallback and the denoiser, composed per pixel, with the GPU cost of each pass.
+**What it shows.** The full package on real models: probes, screen-space reflections, the ray-traced fallback and the denoiser, combined per pixel, with the GPU time of each pass.
 
-**Compare.** Reflections: Off (baseline), and each source's checkbox
+**Compare.** Press Off for the baseline, or untick a source's checkbox to see the image without it
 
 **Try this.**
 
-- Press Off (baseline), then On: the difference is every reflection the package adds
-- Turn Screen-space (SSR) off and the Ray-traced fallback on, then the other way round
+- Press Off, then On: the difference is every reflection the package adds
+- Turn off Screen-space (SSR) and turn on the Ray-traced fallback, then the other way round
 - Set Debug view to the source map to see which source each pixel took
 
 [Open the live page](/examples/showcase/) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/showcase/src/main.ts) · [Docs](/getting-started/introduction)
 
 ### Compare with a path tracer
 
-Ours against a path-traced reference (@pmndrs/pathtracer + OIDN) on the same view, split by a draggable divider.
+Real-time reflections next to a path-traced reference of the same view, split by a draggable divider.
 
 **What it shows.** How close the real-time reflections get to a path-traced reference of the same view, and where they differ.
 
-**Compare.** The right side: the path tracer (the reference)
+**Compare.** The right side is the path tracer, the reference. Drag the divider to move between it and the left side.
 
 **Try this.**
 
-- Freeze the camera and wait for the path tracer to converge, then drag the divider
-- Set the left side to three SSR and compare with ours
+- Freeze the camera, wait for the path tracer to converge, then drag the divider
+- Set the left side to three.js SSR and compare it with this package
 
 [Open the live page](/examples/showcase/compare.html) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/showcase/src/compare.ts) · [Docs](/guides/performance-and-quality)
 
@@ -50,43 +50,43 @@ The smallest complete programs: reflections on a three.js scene in a few lines.
 
 ### Quick start
 
-Reflections on an ordinary three.js scene with one Reflections.create() and reflections.render(camera).
+Reflections on an ordinary three.js scene: one `Reflections.create()` and `reflections.render(camera)`.
 
-**What it shows.** The smallest complete program: an existing three.js scene gets screen-space reflections, a probe for what the screen cannot see, and the denoiser from one object.
+**What it shows.** The smallest complete program: an existing three.js scene gets screen-space reflections, a probe for what the screen cannot see, and the denoiser, all from one object.
 
-**Compare.** The reflections checkbox (off: three's own pass)
+**Compare.** The reflections checkbox. Unticked, three.js draws the scene without this package.
 
 **Try this.**
 
-- Untick reflections: three's own pass with the probe as its environment
-- Add `?rt=1` to the URL for the ray-traced fallback, or `?preset=performance`
+- Untick the reflections checkbox: three.js draws the scene alone, with the probe as its environment
+- Add `?rt=1` to the URL for the ray-traced fallback, or `?preset=performance` for half-resolution reflections
 
 [Open the live page](/examples/quickstart/) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/quickstart/src/main.ts) · [Docs](/getting-started/quick-start)
 
 ### Probes only
 
-One baked reflection probe and your own renderer.render(): the cheapest path, no extra passes.
+One baked reflection probe and your own `renderer.render()`: the cheapest way, with no extra passes.
 
 **What it shows.** The cheapest reflections: one baked, box-projected probe that every material samples, with the render loop you already have.
 
-**Compare.** The quick start (screen space + probe + denoiser)
+**Compare.** The quick start page, which adds screen-space reflections and the denoiser on top of the probe
 
 **Try this.**
 
-- Orbit: the reflections in the floor stay where they belong as you move (box projection)
-- Open the quick start beside it: screen space adds the contact-sharp reflections a probe cannot hold
+- Orbit the camera: the reflections in the floor stay where they belong (that is box projection)
+- Open the quick start in another tab: screen-space reflections add the sharp contact reflections a probe cannot hold
 
 [Open the live page](/examples/quickstart/probes.html) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/quickstart/src/probes.ts) · [Docs](/concepts/reflection-probes)
 
 ### React Three Fiber
 
-The quick start in React Three Fiber v10, with a useReflections() hook.
+The quick start in React Three Fiber v10, with a `useReflections()` hook.
 
-**What it shows.** The same reflections in React Three Fiber: a plain R3F scene and one hook.
+**What it shows.** The same reflections in React Three Fiber: a plain scene and one hook.
 
 **Try this.**
 
-- Orbit around the spinning knot: its reflection on the floor follows it (screen space)
+- Orbit around the spinning knot: its reflection on the floor follows it (that is screen-space reflections)
 - Add `?rt=1` or `?preset=performance` to the URL
 
 [Open the live page](/examples/r3f/) · [Source](https://github.com/pmndrs/reflections/tree/main/examples/r3f/src) · [Docs](/guides/react-three-fiber)
@@ -97,58 +97,58 @@ One thing each, over a baseline you can switch back to.
 
 ### Box-projected probe
 
-One baked probe in a room, projected onto the walls: reflections stay where they belong as you move.
+One baked probe in a room, projected onto the walls, so reflections stay put as you move.
 
-**What it shows.** Why a probe is box-projected: without it the windows and walls reflected in the glossy floor sit in the wrong place and slide as the camera moves.
+**What it shows.** Why a probe is box-projected. Without it, the windows and walls reflected in the glossy floor sit in the wrong place and slide as the camera moves.
 
-**Compare.** Box projection off: the same probe looked up by direction only (reflections at infinity)
+**Compare.** Untick Box projection. The same probe is then looked up by direction only, so reflections behave as if infinitely far away.
 
 **Try this.**
 
 - Untick Box projection and orbit: the window reflections slide across the floor
-- Switch the view to Floor and toggle again
-- Show the volumes: the projection box is the room's walls
+- Switch the view to Floor and toggle Box projection again
+- Turn on the volumes: the projection box is the room's walls
 
 [Open the live page](/examples/features/probes/box-projection/) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/features/probes/box-projection/main.ts) · [Docs](/concepts/reflection-probes)
 
 ### Two rooms
 
-A probe per room and one in the doorway, blended by their influence boxes: each room reflects itself.
+A probe in each room and one in the doorway, blended by their influence boxes: each room reflects itself.
 
 **What it shows.** Why a level needs more than one probe: each room reflects its own walls and light, and the doorway probe blends one room into the other without a seam.
 
-**Compare.** One probe for both rooms: captured in the warm room, projected onto the whole building
+**Compare.** Untick One probe per room. One probe, captured in the warm room, is then projected onto the whole building.
 
 **Try this.**
 
 - Untick One probe per room: the cool room's floor and the mirror ball now show the warm room
-- Show blend weights, then pick Across the doorway: the colours mix where the boxes overlap
+- Turn on Show blend weights, then pick Across the doorway: the colours mix where the boxes overlap
 - Watch the mirror ball roll through the doorway: its reflection hands over from one room to the other
 
 [Open the live page](/examples/features/probes/two-rooms/) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/features/probes/two-rooms/main.ts) · [Docs](/concepts/reflection-probes)
 
 ### Live probes
 
-Probes re-captured while the scene runs, one per frame: a turning knot and two colour-cycling lights in two rooms.
+Probes captured again while the scene runs, one per frame: a turning knot and two colour-cycling lights in two rooms.
 
-**What it shows.** Probes that follow the scene: captured again, one probe per frame, as the lights change colour and the knot turns, so the reflections stay current.
+**What it shows.** Probes that follow the scene. One probe is captured again each frame as the lights change colour and the knot turns, so the reflections stay current.
 
-**Compare.** Live capture off: the same probes baked once at load
+**Compare.** Untick Live capture. The same probes are then baked once at load and never updated.
 
 **Try this.**
 
-- Untick Live capture: the floor and the mirror ball keep the light colours of the moment the page loaded
+- Untick Live capture: the floor and the mirror ball keep the light colours from when the page loaded
 - Set Probes per frame to all 3: the same image at three times the capture cost
 
 [Open the live page](/examples/features/probes/live/) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/features/probes/live/main.ts) · [Docs](/concepts/reflection-probes)
 
 ### Keep a mirror out of its own probe
 
-bake(&#123; exclude &#125;): a moving mirror kept out of the live probe it reflects, so it does not paint itself onto the room.
+`bake({ exclude })` keeps a moving mirror out of the live probe it reflects, so it does not paint itself onto the room.
 
-**What it shows.** Why moving mirrors are kept out of the probes: captured, the knot is painted onto the wall and the floor, and the mirror floor shows a second, smeared knot where none is.
+**What it shows.** Why moving mirrors are kept out of probes. Captured, the knot is painted onto the wall and the floor, and the mirror floor shows a second, smeared knot where there is none.
 
-**Compare.** Without exclude: the knot is captured into the probe and painted onto the room
+**Compare.** Untick Exclude the mirror knot. The knot is then captured into the probe and painted onto the room.
 
 **Try this.**
 
@@ -161,25 +161,25 @@ bake(&#123; exclude &#125;): a moving mirror kept out of the live probe it refle
 
 Screen-space reflections on a polished floor, over a probe: the objects stand on their reflections.
 
-**What it shows.** What screen-space reflections add over a probe: exact, contact-sharp reflections of everything on screen, including the objects a probe leaves out.
+**What it shows.** What screen-space reflections add over a probe: sharp reflections of everything on screen, including the objects a probe leaves out.
 
-**Compare.** Screen-space reflections off: the probe alone (three's lit image of the same frame)
+**Compare.** Untick Screen-space reflections. You then see the probe alone (three.js's lit image of the same frame).
 
 **Try this.**
 
-- Untick Screen-space reflections: the sphere and the box lose their reflections, the wall keeps its own
-- Raise Floor roughness: the reflection blurs with distance from the contact, and the denoiser keeps it steady
-- Pick At the sphere: the floor reflects its underside, which the camera cannot see (the probe fills it)
+- Untick Screen-space reflections: the sphere and the box lose their reflections, and the wall keeps its own
+- Raise Floor roughness: the reflection blurs with distance from the contact point, and the denoiser keeps it steady
+- Pick At the sphere: the floor reflects the sphere's underside, which the camera cannot see (the probe fills it in)
 
 [Open the live page](/examples/features/ssr/mirror-floor/) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/features/ssr/mirror-floor/main.ts) · [Docs](/concepts/screen-space-reflections)
 
 ### What screen space misses
 
-Off screen, behind the camera, hidden: what screen-space reflections cannot see, and the probes filling it in.
+Off screen, behind the camera, hidden: what screen-space reflections cannot see, and the probes that fill it in.
 
 **What it shows.** Where screen-space reflections run out: things off screen, behind the camera or hidden behind other objects. The probes fill those pixels so the image stays whole.
 
-**Compare.** Screen space alone, without the probe fill: black where a ray found nothing on screen
+**Compare.** Untick Fill misses from the probes. You then see screen space alone, black wherever a ray found nothing on screen.
 
 **Try this.**
 
@@ -193,47 +193,47 @@ Off screen, behind the camera, hidden: what screen-space reflections cannot see,
 
 Rays fill what screen space misses: reflections of things above the frame and behind the camera.
 
-**What it shows.** What the ray-traced fallback adds over screen space + probes: sharp reflections of things off the screen, in the right place, including objects the probe never captured.
+**What it shows.** What the ray-traced fallback adds over screen space plus probes: sharp reflections of things off screen, in the right place, including objects the probe never captured.
 
-**Compare.** Ray-traced fallback off (`reflections.ssr.rayTracing = false`): the misses take the probe
+**Compare.** Untick Ray-traced fallback (`reflections.ssr.rayTracing = false`). The misses then take the probe instead.
 
 **Try this.**
 
 - Untick Ray-traced fallback and watch the wall mirror: the cylinder and the box vanish from it (the probe never saw them) and the bars go soft
-- Switch the view to Wall mirror and toggle again
-- Show where each pixel's reflection comes from: blue is a traced ray, green screen space, red the probe
+- Switch the view to Wall mirror and toggle the fallback again
+- Turn on the view that shows where each pixel's reflection comes from: blue is a traced ray, green is screen space, red is the probe
 
 [Open the live page](/examples/features/rt/fallback/) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/features/rt/fallback/main.ts) · [Docs](/concepts/ray-traced-fallback)
 
 ### Ray tracing moving meshes
 
-reflections.trace.refit() each frame keeps the ray-traced reflections of moving meshes where the meshes are.
+`reflections.trace.refit()` each frame keeps the ray-traced reflections of moving meshes where the meshes are.
 
-**What it shows.** Why moving meshes need `trace.refit()` each frame: without it the rays still hit them where they stood at load, so their reflections lag or ghost.
+**What it shows.** Why moving meshes need `trace.refit()` each frame. Without it, rays still hit them where they stood at load, so their reflections lag or ghost.
 
-**Compare.** Refit off: the BVH keeps the pose it was built with (stale reflections)
+**Compare.** Untick Refit. The BVH then keeps the pose it was built with, and the reflections go stale.
 
 **Try this.**
 
 - Untick Refit: the traced part of the knot's and the ball's reflections stays where they started
-- Show traced pixels: those are the ones a stale BVH gets wrong
+- Turn on Show traced pixels: those are the pixels a stale BVH gets wrong
 - Untick Animate to hold a pose and compare
 
 [Open the live page](/examples/features/rt/animated/) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/features/rt/animated/main.ts) · [Docs](/concepts/ray-traced-fallback)
 
 ### The hybrid, explained
 
-Probe, screen space, rays and the hybrid in one room: where each is right, where it breaks, and which source each pixel took.
+Probe, screen space, rays and the hybrid in one room: where each is right, where each breaks, and which source each pixel took.
 
-**What it shows.** How the hybrid picks a source per pixel: screen space where it hits, rays where it misses, the prefiltered probe for rough surfaces, and why each alone falls short.
+**What it shows.** How the hybrid picks a source for each pixel: screen space where a ray hits, rays where it misses, the blurred probe for rough surfaces. It also shows why each source alone falls short.
 
-**Compare.** Each source alone: probe only, screen space + probe, rays for every pixel (the switch under the image, or "Reflections from")
+**Compare.** Each source alone: probe only, screen space + probe, or rays for every pixel. Use the switch under the image, or "Reflections from".
 
 **Try this.**
 
 - Step through the situations and switch between the two methods under the image
-- Show "where reflections come from" and tilt the view down at the floor
-- Drag the roughness cutoff to 1 in "Rough surfaces"
+- Turn on "where reflections come from" and tilt the view down at the floor
+- In "Rough surfaces", drag the roughness cutoff to 1
 
 [Open the live page](/examples/features/hybrid/explained/) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/features/hybrid/explained/main.ts) · [Docs](/concepts/hybrid-resolve)
 
@@ -241,9 +241,9 @@ Probe, screen space, rays and the hybrid in one room: where each is right, where
 
 The denoiser on glossy surfaces, with a live flicker meter.
 
-**What it shows.** What the denoiser does for glossy reflections: the tracer's one noisy sample per quad becomes a steady image, and the meter shows how steady.
+**What it shows.** What the denoiser does for glossy reflections. The tracer's one noisy sample per 2x2 block becomes a steady image, and the meter shows how steady.
 
-**Compare.** Denoiser off: the raw signal (one ray per 2x2 quad per frame)
+**Compare.** Tick Denoiser off. You then see the raw signal: one ray per 2x2 block of pixels per frame.
 
 **Try this.**
 
@@ -255,47 +255,47 @@ The denoiser on glossy surfaces, with a live flicker meter.
 
 ### Materials
 
-Roughness, metalness and clearcoat; why basic, Lambert and Phong get no reflections.
+How roughness, metalness and clear coat change reflections, and why basic, Lambert and Phong materials get none.
 
-**What it shows.** Which materials get reflections and how roughness, metalness and clear coat shape them; Basic, Lambert and Phong get none.
+**What it shows.** Which materials get reflections, and how roughness, metalness and clear coat shape them. Basic, Lambert and Phong get none.
 
-**Compare.** Classic materials (Phong, Lambert or Basic) on the spheres, the floor strips still standard
+**Compare.** Tick Classic materials. The spheres switch to Phong, Lambert or Basic, while the floor strips stay standard.
 
 **Try this.**
 
-- Tick Classic materials: the spheres turn Phong and lose their reflections (the highlight is the lights', not a reflection)
+- Tick Classic materials: the spheres turn Phong and lose their reflections (the highlight is from the lights, not a reflection)
 - Set the Blue row to Physical, clear coat: a sharp coat over a rough base
-- Switch the view to Floor strips: chrome from mirror to rough
+- Switch the view to Floor strips: chrome goes from mirror to rough
 
 [Open the live page](/examples/features/materials/roughness/) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/features/materials/roughness/main.ts) · [Docs](/guides/three)
 
 ### Animation and camera cuts
 
-A camera path, moving objects and a camera cut with resetHistory().
+A camera path, moving objects and a camera cut with `resetHistory()`.
 
-**What it shows.** A whole animated scene, camera path and moving objects, steady through the moves; `resetHistory()` at the camera cuts and only there.
+**What it shows.** A whole animated scene, with a camera path and moving objects, staying steady through the moves. `resetHistory()` runs at the camera cuts and only there.
 
-**Compare.** The history reset on every camera move too, as a path tracer's accumulation is: the denoiser never gets past its first frame and the glossy floor shows the tracer's raw noise while the camera moves. (Leaving out the reset at a cut barely shows with `denoiser/ffx`, which rejects history whose depth and normals disagree; it is still what a cut needs.)
+**Compare.** Tick Reset history on camera moves. The denoiser then never gets past its first frame, and the glossy floor shows the tracer's raw noise while the camera moves. (Leaving out the reset at a cut barely shows, because the denoiser rejects history whose depth and normals disagree. A cut still needs it.)
 
 **Try this.**
 
-- Watch the floor through the camera moves and the cuts: steady, no shimmer
+- Watch the floor through the camera moves and the cuts: it stays steady, with no shimmer
 - Tick Reset history on camera moves: the floor sparkles until the shot ends
-- Pause: the image holds still (the rest-flicker check holds it to the quick start's bound)
+- Pause: the image holds still
 
 [Open the live page](/examples/features/motion/animated/) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/features/motion/animated/main.ts) · [Docs](/guides/flicker-and-stability)
 
 ### Presets
 
-default vs performance (half-resolution reflections), GPU ms per pass.
+The `default` and `performance` presets (half-resolution reflections), with GPU time per pass.
 
-**What it shows.** What the performance preset saves (the reflection passes run on a quarter of the pixels) and what it costs: softer reflections, jagged edges in mirrors.
+**What it shows.** What the performance preset saves (the reflection passes run on a quarter of the pixels) and what it costs: softer reflections and jagged edges in mirrors.
 
-**Compare.** The other preset: performance (half-resolution reflections) against default
+**Compare.** Toggle Performance preset: it switches between the `performance` preset (half-resolution reflections) and `default`.
 
 **Try this.**
 
-- Tick Performance preset and read the GPU ms in the panel
+- Tick Performance preset and read the GPU times in the panel
 - Set the view to Mirror ball and toggle again: the ball's reflected edges are where half resolution shows
 - Orbit near the floor: the rough floor barely changes
 
@@ -303,31 +303,31 @@ default vs performance (half-resolution reflections), GPU ms per pass.
 
 ### Upscaling
 
-TAA / upscaling after the composite with @pmndrs/upscaler, jitter wired through.
+Temporal anti-aliasing and upscaling after the composite, with `@pmndrs/upscaler` and its jitter wired through.
 
-**What it shows.** Rendering the scene and its reflections below the display size and upscaling after the composite: fewer pixels for every reflection pass, and anti-aliasing with it.
+**What it shows.** Rendering the scene and its reflections below the display size, then upscaling after the composite. Every reflection pass handles fewer pixels, and you get anti-aliasing with it.
 
-**Compare.** Upscaler off: every pass at the display resolution, no anti-aliasing
+**Compare.** Tick Upscaler off. Every pass then runs at the display resolution, with no anti-aliasing.
 
 **Try this.**
 
-- Tick Upscaler off: display resolution, no anti-aliasing (edges and the last shimmer return)
-- Set Upscale to Performance (2x): a quarter of the pixels; orbit and let go
-- Set Upscale to Native AA: the upscaler as temporal anti-aliasing only
+- Tick Upscaler off: the image is at display resolution with no anti-aliasing (edges and the last shimmer return)
+- Set Upscale to Performance (2x), orbit, then let go: this is a quarter of the pixels
+- Set Upscale to Native AA: the upscaler works as temporal anti-aliasing only
 
 [Open the live page](/examples/features/perf/upscaler/) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/features/perf/upscaler/main.ts) · [Docs](/concepts/denoising-and-upscaling)
 
 ### Probes in your own TSL material
 
-sampleReflectionProbes in a custom TSL material (a water or glass surface).
+`sampleReflectionProbes` in a custom TSL material, here a water surface.
 
 **What it shows.** Sampling the reflection probes from your own TSL material: a rippled water surface that reflects the room through `sampleReflectionProbes()`.
 
-**Compare.** The stock material: a glossy, flat MeshStandardMaterial reflecting the same probe
+**Compare.** Tick Stock material. A glossy, flat MeshStandardMaterial then reflects the same probe.
 
 **Try this.**
 
-- Tick Stock material: a glossy MeshStandardMaterial, the same probe through three's lighting, flat
+- Tick Stock material: a glossy MeshStandardMaterial replaces the water, using the same probe through three.js's lighting, flat
 - Untick Ripples: the custom material becomes a fresnel mirror
 - Orbit low over the pool: the fresnel brings the windows up at grazing angles
 
@@ -335,16 +335,16 @@ sampleReflectionProbes in a custom TSL material (a water or glass surface).
 
 ### Device limits
 
-A plain new WebGPURenderer(): the second lit pass, traceError when ray tracing does not fit.
+What a plain `new WebGPURenderer()` costs: a second lit pass, and `traceError` when ray tracing does not fit.
 
-**What it shows.** What changes on a renderer with WebGPU's default limits: a second scene draw for the lit image, estimated specular weights, and ray tracing turning itself off (with `traceError`) when it cannot fit. Nothing fails.
+**What it shows.** What changes on a renderer with WebGPU's default limits: a second scene draw for the lit image, estimated specular weights, and ray tracing turning itself off (with `traceError`) when it does not fit. Nothing fails.
 
-**Compare.** `createReflectionsRenderer()` (a reload). The image barely changes by nature: what differs is the extra scene draw and the estimated specular weights, shown in the panel
+**Compare.** Set Renderer to createReflectionsRenderer() (the page reloads). The image barely changes. What differs is the extra scene draw and the estimated specular weights, which the panel shows.
 
 **Try this.**
 
-- Read the panel, then switch Renderer to createReflectionsRenderer(): one scene draw, specular from the material
-- Set Ray tracing to the 9-buffer scene copy on the plain renderer: the status line shows pass.traceError
+- Read the panel, then set Renderer to createReflectionsRenderer(): one scene draw, with specular taken from the material
+- On the plain renderer, set Ray tracing to the 9-buffer scene copy: the status line shows pass.traceError
 
 [Open the live page](/examples/features/setup/device-limits/) · [Source](https://github.com/pmndrs/reflections/blob/main/examples/features/setup/device-limits/main.ts) · [Docs](/guides/troubleshooting)
 
@@ -354,33 +354,33 @@ One page per adapter, each with the features that adapter has.
 
 ### three.js
 
-three.js WebGPURenderer with every feature, on the two rooms every engine page shares.
+three.js `WebGPURenderer` with every feature, on the two rooms that all the engine pages share.
 
 **What it shows.** The three.js adapter with everything on: probes per room, screen-space reflections, the denoiser and, on a switch, the ray-traced fallback. The other engine pages draw this scene from the same views.
 
-**Compare.** Screen space off (probes only), the switch every engine page has; and the other engine pages at the same View
+**Compare.** Turn Screen space off (probes only); every engine page has this switch. Or open another engine page at the same View.
 
 **Try this.**
 
 - Turn Screen space off: the floor keeps the probes' blurrier, box-projected reflections
-- Turn the Ray-traced fallback on, View: ball, and watch what the screen cannot see
-- Open engines/babylon or engines/core at the same View and compare
+- Turn the Ray-traced fallback on, set View to ball, and watch what the screen cannot see
+- Open the Babylon.js or Raw WebGPU page at the same View and compare
 
 [Open the live page](/examples/engines/three/) · [Source](https://github.com/pmndrs/reflections/tree/main/examples/engines/three) · [Docs](/guides/three)
 
 ### React Three Fiber
 
-The two rooms as JSX, with every feature of engines/three through the useReflections hook.
+The two rooms as JSX, with every feature of the three.js page through the `useReflections` hook.
 
-**What it shows.** Everything engines/three has, in React: the rooms and their probes as JSX, reflections from one hook.
+**What it shows.** Everything the three.js page has, in React: the rooms and their probes as JSX, and reflections from one hook.
 
-**Compare.** Screen space off (probes only); and engines/three, which should look the same
+**Compare.** Turn Screen space off (probes only). Or open the three.js page, which should look the same.
 
 **Try this.**
 
 - Turn Screen space off: probes only
 - Turn the Ray-traced fallback on (the hook's component remounts with a BVH)
-- Put engines/three next to it at the same View
+- Open the three.js page next to it at the same View
 
 [Open the live page](/examples/engines/r3f/) · [Source](https://github.com/pmndrs/reflections/tree/main/examples/engines/r3f) · [Docs](/guides/react-three-fiber)
 
@@ -402,17 +402,17 @@ The two rooms built in Babylon.js: probes and screen-space reflections as frame-
 
 ### Raw WebGPU
 
-The probe set and the screen-space tracer on a bare GPUDevice, no engine, on the two rooms.
+The probe set and the screen-space tracer on a bare `GPUDevice`, with no engine, on the two rooms.
 
-**What it shows.** The core API with no engine: what every adapter wraps. A minimal renderer fills the frame contract, and core's probes, tracer and the denoise seam do the rest.
+**What it shows.** The core API with no engine, which is what every adapter wraps. A minimal renderer fills the frame contract, and the core's probes, tracer and denoiser do the rest.
 
-**Compare.** Screen space off (probes only); and engines/three at the same View
+**Compare.** Turn Screen space off (probes only). Or open the three.js page at the same View.
 
 **Try this.**
 
 - Turn Screen space off: probes only
 - Set Show to lit, then reflection: the scene colour the tracer reads, and what the composite adds
-- Open engines/three at the same View
+- Open the three.js page at the same View
 
 [Open the live page](/examples/engines/core/) · [Source](https://github.com/pmndrs/reflections/tree/main/examples/engines/core) · [Docs](/concepts/frame-contract)
 
@@ -420,16 +420,16 @@ The probe set and the screen-space tracer on a bare GPUDevice, no engine, on the
 
 Developer pages: the checks and benches the repository runs on a real GPU. To read and poke at, not demos.
 
-- [Screen-space test scenes](/examples/ssr/): Every kit scene with every switch: SSR, rays, probes, the denoiser and the debug views. ([source](https://github.com/pmndrs/reflections/blob/main/examples/ssr/src/main.ts))
-- [Probe parity page](/examples/probes/): Three.js #35046's example on our probes, live-captured: every storage, lookup and capture option, and the probe checks. ([source](https://github.com/pmndrs/reflections/blob/main/examples/probes/src/main.ts))
-- [Scene kit and G-buffer](/examples/scenes/): The test scenes and every frame-contract target: depth, normals, roughness, motion, scene colour. ([source](https://github.com/pmndrs/reflections/blob/main/examples/scenes/src/main.ts))
-- [Babylon.js adapter checks](/examples/babylon/): The mirror-wall scene on Babylon.js: the adapter's orientation, velocity and IBL checks. ([source](https://github.com/pmndrs/reflections/blob/main/examples/babylon/src/main.ts))
-- [Screen-space tracer (core)](/examples/sssr-core/): The core tracer on exact analytic inputs, raw WebGPU: debug views and variant parity. ([source](https://github.com/pmndrs/reflections/blob/main/examples/sssr-core/src/main.ts))
-- [Probe set (core)](/examples/probe-core/): The core probe set and its radiance fallback on a bare device. ([source](https://github.com/pmndrs/reflections/blob/main/examples/probe-core/src/main.ts))
-- [BC6H encoder](/examples/bc6h/): The GPU BC6H encoder against the hardware decoder. ([source](https://github.com/pmndrs/reflections/blob/main/examples/bc6h/src/main.ts))
-- [Probe layout bench](/examples/probe-bench/): Cube array, 2D array and octahedral layouts; rgba16f, rgb9e5, rg11b10, BC6H. ([source](https://github.com/pmndrs/reflections/blob/main/examples/probe-bench/src/main.ts))
-- [SSR bench](/examples/ssr-bench/): Ours against three r187's SSRNode: error, flicker, GPU ms. ([source](https://github.com/pmndrs/reflections/blob/main/examples/ssr-bench/src/main.ts))
-- [Regressions](/examples/regressions/): GPU repros of review bugs, each seen failing before its fix. ([source](https://github.com/pmndrs/reflections/blob/main/examples/regressions/src/main.ts))
+- [Screen-space test scenes](/examples/ssr/): Every test scene with every switch: screen-space reflections, rays, probes, the denoiser and the debug views. ([source](https://github.com/pmndrs/reflections/blob/main/examples/ssr/src/main.ts))
+- [Probe parity page](/examples/probes/): The three.js reflection probe example running on this package's probes, captured live: every storage, lookup and capture option, and the probe checks. ([source](https://github.com/pmndrs/reflections/blob/main/examples/probes/src/main.ts))
+- [Scene kit and G-buffer](/examples/scenes/): The test scenes and every target of the frame contract: depth, normals, roughness, motion and scene colour. ([source](https://github.com/pmndrs/reflections/blob/main/examples/scenes/src/main.ts))
+- [Babylon.js adapter checks](/examples/babylon/): The mirror-wall scene on Babylon.js: the adapter's orientation, motion and environment-lighting checks. ([source](https://github.com/pmndrs/reflections/blob/main/examples/babylon/src/main.ts))
+- [Screen-space tracer (core)](/examples/sssr-core/): The core tracer on exact analytic inputs, on raw WebGPU: debug views and variant parity. ([source](https://github.com/pmndrs/reflections/blob/main/examples/sssr-core/src/main.ts))
+- [Probe set (core)](/examples/probe-core/): The core probe set and its radiance fallback on a bare GPU device. ([source](https://github.com/pmndrs/reflections/blob/main/examples/probe-core/src/main.ts))
+- [BC6H encoder](/examples/bc6h/): The GPU BC6H encoder checked against the hardware decoder. ([source](https://github.com/pmndrs/reflections/blob/main/examples/bc6h/src/main.ts))
+- [Probe layout bench](/examples/probe-bench/): Cube array, 2D array and octahedral layouts, with rgba16f, rgb9e5, rg11b10 and BC6H formats. ([source](https://github.com/pmndrs/reflections/blob/main/examples/probe-bench/src/main.ts))
+- [Screen-space reflections bench](/examples/ssr-bench/): This package's screen-space reflections against three.js r187's `SSRNode`: error, flicker and GPU time. ([source](https://github.com/pmndrs/reflections/blob/main/examples/ssr-bench/src/main.ts))
+- [Regressions](/examples/regressions/): GPU reproductions of bugs found in review, each seen failing before its fix. ([source](https://github.com/pmndrs/reflections/blob/main/examples/regressions/src/main.ts))
 - [Tuning bench](/examples/showcase/bench.html): Every setting on one panel, two methods side by side, measured against the path tracer. ([source](https://github.com/pmndrs/reflections/blob/main/examples/showcase/src/bench.ts))
 
 ## Not on the site
