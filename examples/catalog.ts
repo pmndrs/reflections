@@ -314,10 +314,20 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     slug: 'ssr/mirror-floor',
     path: 'features/ssr/mirror-floor/',
     title: 'Screen-space reflections',
-    summary: 'Screen-space reflections on a polished floor, over probes.',
-    description: 'Planned (E2).',
-    brief: { kind: 'feature', shows: 'Screen-space reflections: exact, contact-sharp reflections of what is on screen, over the probe.', tryThis: PLANNED_TRY, compare: 'Probes only' },
-    category: 'features', status: 'stable', tags: ['ssr'], docs: 'concepts/screen-space-reflections', source: 'examples/features/ssr/mirror-floor', planned: true,
+    summary: 'Screen-space reflections on a polished floor, over a probe: the objects stand on their reflections.',
+    description:
+      'A polished floor facing a patterned wall, with a sphere, a box and two posts. The box-projected probe gets the wall right (it is the probe\'s box) but leaves ' +
+      'out what stands inside the room. Screen-space reflections march each pixel\'s reflected ray through the depth buffer and take the colour of what it hits on ' +
+      'screen; where it finds nothing, the probe fills in. `Reflections.create(renderer, scene, { probes, denoiser })` wires the G-buffer, the tracer, the probe fill, ' +
+      'the denoiser (`denoiser/ffx`) and the composite; the loop calls `reflections.render(camera)`. The compare shows three\'s own lit image of the same frame ' +
+      '(`hybrid.composite().lit`): the probe alone.',
+    brief: {
+      kind: 'feature',
+      shows: 'What screen-space reflections add over a probe: exact, contact-sharp reflections of everything on screen, including the objects a probe leaves out.',
+      tryThis: ['Untick Screen-space reflections: the sphere and the box lose their reflections, the wall keeps its own', 'Raise Floor roughness: the reflection blurs with distance from the contact, and the denoiser keeps it steady', 'Pick At the sphere: the floor reflects its underside, which the camera cannot see (the probe fills it)'],
+      compare: 'Screen-space reflections off: the probe alone (three\'s lit image of the same frame)',
+    },
+    category: 'features', status: 'stable', tags: ['ssr', 'probes', 'denoiser', 'Reflections.create'], docs: 'concepts/screen-space-reflections', source: 'examples/features/ssr/mirror-floor/main.ts',
   },
   {
     slug: 'ssr/what-it-misses',
