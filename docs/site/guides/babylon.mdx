@@ -11,6 +11,7 @@ sourcecode: packages/babylon/src
 The adapter runs the core screen-space tracer and the probe set on Babylon's own device. It supports:
 
 - **Probes.** `BabylonProbeSet` captures them with Babylon cube renders, plus an environment slot.
+- **Bounce light from the probes.** `probeIrradiance(material, probes)` lights a PBR material's diffuse from the probes.
 - **Screen-space reflections.** `ScreenSpaceReflections`, on a G-buffer from Babylon's geometry renderer.
 - **A composite.** It adds the reflections to the lit image, with debug views.
 - **Frame-graph tasks.** `FrameGraphReflectionsTask` and `FrameGraphReflectionsCompositeTask`.
@@ -73,6 +74,20 @@ A probe can capture from a point other than its influence box's centre (`originO
 offset from it (`projectionOffset`), as three's `ReflectionProbe` does: that lets a room's influence box reach below the
 floor, so the floor gets the probe's full weight, while the capture point and the walls stay where the room is.
 
+For bounce light, give each PBR material the probes' irradiance. three's materials get it from
+`scene.environmentNode`; Babylon has no per-pixel environment hook, so a material plugin runs the probe lookup in the
+material's shader. It replaces the diffuse part of Babylon's image-based lighting, and Babylon still weights it as usual
+(albedo, specular energy, `scene.environmentIntensity`, ambient occlusion). It works with or without
+`scene.environmentTexture`.
+
+```ts
+for (const m of scene.materials) if (m instanceof PBRMaterial) probeIrradiance(m, probes);
+```
+
+Attach it before the first render. `bake()` captures with the probes switched off, so a capture never sees the probes'
+own light. Without the plugin, a scene with no environment texture gets direct light only: the rooms of
+`engines/babylon` read about 60 / 255 darker than three's.
+
 Without a denoiser in this adapter, a glossy surface shows the tracer's raw samples, and they move every frame. Set
 `ssr.settings.frameIndex` (for example to 0) to fix the noise pattern, so a still view stays still.
 
@@ -122,6 +137,7 @@ composite's `outputTexture` to your image-processing task. `examples/babylon/src
 | `FrameGraphReflectionsTask` | Runs the tracer inside a frame graph. |
 | `FrameGraphReflectionsCompositeTask` | Adds the reflections to the lit image, with debug views (`COMPOSITE_VIEWS`). |
 | `stripSpecularIBL(material)` | Takes the specular IBL term out of a PBR material, because the composite adds it back from the sources. |
+| `probeIrradiance(material, probes)` | Lights a PBR material's diffuse IBL from the probes, per pixel (bounce light). WGSL only. |
 
 ## Device limits
 
@@ -133,7 +149,9 @@ ray-traced pass here, so the storage-buffer count from the three.js adapter does
 
 - No ray-traced fallback, no denoiser, no presets and no hybrid resolve. Probes and screen space only.
 - No one-call setup like `Reflections.create`. You build the frame graph.
-- Materials need `stripSpecularIBL`, which works on PBR materials.
+- Materials need `stripSpecularIBL`, and `probeIrradiance` for bounce light. Both work on PBR materials.
+- The bounce light samples the probes along the normal at roughness 1, as three's does. It is not a cosine
+  convolution like Babylon's own spherical harmonics.
 - Experimental: names and options can change.
 
 ## Live example

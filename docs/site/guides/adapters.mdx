@@ -13,6 +13,7 @@ parts wired in. This page lists what each has.
 | Feature | three.js | React Three Fiber | Babylon.js | pixi.js |
 | --- | --- | --- | --- | --- |
 | Reflection probes | Yes | Yes | Yes | Yes |
+| Bounce light from the probes | Yes | Yes | Yes (`probeIrradiance`) | No |
 | Screen-space reflections | Yes | Yes | Yes | Yes |
 | Ray-traced fallback | Yes | Yes | No | No |
 | Denoiser seam | Yes | Yes | No | Yes |
@@ -27,6 +28,8 @@ example that calls `Reflections.create`.
 What the rows mean:
 
 - **Probes.** Baked, prefiltered captures of the scene, blended by influence volume. [Reflection probes](/concepts/reflection-probes).
+- **Bounce light from the probes.** Materials take their diffuse image-based lighting from the probes. three:
+  `scene.environmentNode`. Babylon: a material plugin per PBR material. pixi-3d lights from its own environment.
 - **Screen-space reflections.** The tracer that marches the depth buffer. [Screen-space reflections](/concepts/screen-space-reflections).
 - **Ray-traced fallback.** Rays through a BVH for what the screen misses, through `@pmndrs/raytracer`.
   [Ray-traced fallback](/concepts/ray-traced-fallback).

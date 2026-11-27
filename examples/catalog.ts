@@ -594,8 +594,9 @@ export const EXAMPLES: readonly ExampleEntry[] = [
       'x negated for Babylon\'s left-handed world so the image matches three\'s. `BabylonProbeSet` captures the same three probes with Babylon cube renders; ' +
       'a frame graph renders the G-buffer, then `FrameGraphReflectionsTask` (core\'s tracer, the probes as its fallback) and ' +
       '`FrameGraphReflectionsCompositeTask` (lit + split-sum weight x radiance), then ACES. **Missing against engines/three** (`guides/adapters`): ' +
-      'the ray-traced fallback, the denoiser (the glossy floor shows the tracer\'s raw samples), presets, the hybrid resolve; and Babylon\'s materials do not ' +
-      'sample the probes, so the rooms get no bounce light. The older mirror-wall page (lab: babylon) keeps the adapter\'s orientation and IBL checks.',
+      'the ray-traced fallback, the denoiser (the glossy floor shows the tracer\'s raw samples), presets, the hybrid resolve. Bounce light comes from the ' +
+      'probes (`probeIrradiance` on every PBR material), as three\'s does; the rooms still read darker than three\'s: without bounce light three\'s ' +
+      'image is about twice as bright as Babylon\'s (direct light, shadows or tone mapping; not yet traced). The older mirror-wall page (lab: babylon) keeps the adapter\'s orientation and IBL checks.',
     brief: {
       kind: 'feature',
       shows: 'The engine-agnostic core on Babylon.js: the same probes and tracer as engines/three, wired into Babylon\'s frame graph, on the same two rooms.',

@@ -208,8 +208,10 @@ export class BabylonProbeSet {
 
   /**
    * Captures every probe and the environment, prefilters them into the atlas and uploads the table.
-   * Needs `scene.activeCamera` (Babylon takes the capture's near / far planes from it). Babylon's
-   * materials don't sample this set, so a capture never sees the probes themselves.
+   * Needs `scene.activeCamera` (Babylon takes the capture's near / far planes from it). Materials
+   * that take their irradiance from this set (`probeIrradiance`, ./irradiance.ts) see it disabled
+   * while capturing (the environment slot only, core's `ProbeSet.enabled`), so a bake never sees the
+   * probes themselves and a re-bake gives what the first did.
    */
   async bake(): Promise<void> {
     const device = this.set.device;
@@ -217,12 +219,20 @@ export class BabylonProbeSet {
     const all = this.scene.meshes.filter((m) => m.isEnabled() && m.isVisible);
     const jobs: { slot: number; position: Vec3; meshes: AbstractMesh[] }[] = this.probes.map((p, slot) => ({ slot, position: captureOrigin(p), meshes: p.renderList ?? all }));
     if (this.environmentMeshes) jobs.push({ slot: this.set.environmentSlot, position: [0, 0, 0], meshes: this.environmentMeshes });
-    // one capture texture: each job is captured, prefiltered and submitted before the next
-    for (const job of jobs) {
-      const encoder = device.createCommandEncoder({ label: `babylon probe capture ${job.slot}` });
-      const cube = this.capturerFor(this.set.slotSize(job.slot)).capture(encoder, job.position, job.meshes);
-      this.set.capture(encoder, job.slot, cube);
-      device.queue.submit([encoder.finish()]);
+    const enabled = this.set.enabled;
+    this.set.enabled = false;
+    this.set.update();
+    try {
+      // one capture texture: each job is captured, prefiltered and submitted before the next
+      for (const job of jobs) {
+        const encoder = device.createCommandEncoder({ label: `babylon probe capture ${job.slot}` });
+        const cube = this.capturerFor(this.set.slotSize(job.slot)).capture(encoder, job.position, job.meshes);
+        this.set.capture(encoder, job.slot, cube);
+        device.queue.submit([encoder.finish()]);
+      }
+    } finally {
+      this.set.enabled = enabled;
+      this.set.update();
     }
     await device.queue.onSubmittedWorkDone();
   }
