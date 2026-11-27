@@ -392,10 +392,22 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     slug: 'hybrid/explained',
     path: 'features/hybrid/explained/',
     title: 'The hybrid, explained',
-    summary: 'Probe, screen space, rays and the composite side by side, with the per-pixel source map.',
-    description: 'Planned (E2): rebuilds the denoiser repo\'s reflections-hybrid page on our pipeline.',
-    brief: { kind: 'educational', shows: 'How the hybrid resolve picks a source per pixel: screen space where it hits, rays where it misses, the probe where neither reaches.', tryThis: PLANNED_TRY, compare: 'Each source alone' },
-    category: 'features', status: 'stable', tags: ['hybrid', 'source map'], docs: 'concepts/hybrid-resolve', source: 'examples/features/hybrid/explained', planned: true,
+    summary: 'Probe, screen space, rays and the hybrid in one room: where each is right, where it breaks, and which source each pixel took.',
+    description:
+      'The teaching page, rebuilt from the denoiser repo\'s reflections-hybrid page on this package\'s pipeline. One `Reflections.create(renderer, scene, ' +
+      '{ probes, rayTracing: true, denoiser })` over the `explainer` room; each method is a setting on it: **probe only** is three\'s lit image with the probe ' +
+      'as its environment, **screen space + probe** is `reflections.ssr.rayTracing = false`, **rays, every pixel** sends every pixel to the ray-traced pass, ' +
+      'and the **hybrid** is the default. Seven situations (a mirror, off the top of the screen, things that move, contact, rough surfaces, the source map, ' +
+      'explore) set the camera and name the two methods worth comparing. The source map is `HybridReflections.sourceIndex` of the composite. ' +
+      'The turning sculpture is refitted into the BVH each frame (`reflections.trace.refit()`).',
+    brief: {
+      kind: 'educational',
+      shows: 'How the hybrid picks a source per pixel: screen space where it hits, rays where it misses, the prefiltered probe for rough surfaces, and why each alone falls short.',
+      tryThis: ['Step through the situations and switch between the two methods under the image', 'Show "where reflections come from" and tilt the view down at the floor', 'Drag the roughness cutoff to 1 in "Rough surfaces"'],
+      compare: 'Each source alone: probe only, screen space + probe, rays for every pixel (the switch under the image, or "Reflections from")',
+    },
+    category: 'features', status: 'stable', tags: ['hybrid', 'source map', 'probes', 'ssr', 'ray tracing', 'denoiser'], docs: 'concepts/hybrid-resolve', source: 'examples/features/hybrid/explained/main.ts',
+    check: { wait: 3000 },
   },
   {
     slug: 'denoise/glossy',

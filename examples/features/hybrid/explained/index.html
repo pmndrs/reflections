@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/shell/favicon.svg" />
+    <title>The hybrid, explained · @pmndrs/reflections</title>
+    <style>
+      :root { color-scheme: dark; --bg: #0b0d11; --panel: #12151b; --inset: #0b0e14; --line: #ffffff1a; --fg: #e6e6e6; --muted: #9aa0a8; --accent: #7aa7ff; --good: #7ee787; --bad: #f28b82; --warn: #f0b866; }
+      body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, -apple-system, sans-serif; }
+      a { color: var(--accent); }
+      .page { max-width: 1020px; }
+      h1 { font-size: 1.5rem; margin: .2rem 0 .4rem; }
+      h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
+      h3 { font-size: 1rem; margin: 0 0 .35rem; }
+      code { background: #0006; padding: 0 .3em; border-radius: 4px; font-size: .92em; }
+      .lede { color: #cfd3d8; max-width: 960px; margin: 0 0 1rem; }
+      .label { font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 .35rem; }
+      .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--inset); }
+      .seg button { border: 0; border-radius: 6px; padding: .3rem .65rem; background: none; color: var(--muted); font: inherit; font-size: .85rem; cursor: pointer; }
+      .seg button[aria-pressed=true] { background: #7aa7ff26; color: var(--accent); }
+      .seg button:hover { color: var(--fg); }
+      .btn { border: 1px solid var(--line); border-radius: 6px; padding: .3rem .65rem; background: var(--inset); color: var(--fg); font: inherit; font-size: .85rem; cursor: pointer; }
+      #tour { margin-bottom: .75rem; }
+      #stage { position: relative; max-width: 960px; touch-action: none; }
+      canvas#view { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; border: 1px solid var(--line); border-radius: 8px 8px 0 0; display: block; }
+      #lab { position: absolute; top: .5rem; left: .5rem; padding: .15rem .5rem; border-radius: 5px; background: #0b0e14c0; font-size: .8rem; pointer-events: none; }
+      #legend { position: absolute; left: .5rem; bottom: .5rem; padding: .3rem .55rem; border-radius: 6px; background: #0b0e14d0; font-size: .78rem; pointer-events: none; display: flex; flex-wrap: wrap; gap: .15rem .9rem; max-width: calc(100% - 1rem); }
+      #legend[hidden] { display: none; }
+      .sw { display: inline-block; width: .7rem; height: .7rem; border-radius: 2px; margin-right: .3rem; vertical-align: -1px; }
+      .caption { max-width: 960px; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; padding: .45rem .7rem; background: var(--panel); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 8px 8px; font-size: .85rem; margin-bottom: 1rem; }
+      .caption .label { margin: 0; }
+      #scenario { max-width: 960px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: .8rem 1rem; margin-bottom: 1rem; font-size: .92rem; }
+      #scenario p { margin: .2rem 0 .5rem; }
+      #scenario p.why { color: var(--muted); margin-bottom: 0; }
+      ul.verdicts { list-style: none; padding: 0; margin: 0 0 .5rem; }
+      ul.verdicts li { margin: .3rem 0; }
+      .v { display: inline-block; font-size: .78rem; font-weight: 600; padding: .05rem .45rem; border-radius: 4px; margin-right: .3rem; border: 0; font-family: inherit; cursor: pointer; }
+      .v-good { background: #7ee78726; color: var(--good); } .v-bad { background: #f28b8226; color: var(--bad); } .v-part { background: #f0b86626; color: var(--warn); }
+      .c-ssr { color: #4fdc6a; } .c-rt { color: #6aa8ff; } .c-miss { color: #ff6a5c; } .c-probe { color: #ffae3d; }
+      .controls { max-width: 960px; box-sizing: border-box; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: .8rem 1.2rem; padding: .9rem 1rem; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+      .controls .row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+      .controls output { font-variant-numeric: tabular-nums; min-width: 2.5rem; }
+      .hint { color: var(--muted); font-size: .85rem; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 1rem; }
+      .box { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .9rem 1rem; font-size: .9rem; }
+      .box ul { margin: .3rem 0 0; padding-left: 1.1rem; } .box li { margin: .2rem 0; } .box p { margin: .3rem 0; }
+      .box svg { width: 100%; height: auto; display: block; margin: .2rem 0 .5rem; background: var(--inset); border-radius: 6px; }
+      .pc { display: grid; grid-template-columns: auto 1fr; gap: .15rem .6rem; margin-top: .4rem; }
+      .pc dt { font-weight: 600; font-size: .8rem; padding-top: .1rem; } .pc dd { margin: 0; }
+      .pc .plus { color: var(--good); } .pc .minus { color: var(--bad); } .pc .cost { color: var(--accent); }
+      .tbl-wrap { overflow-x: auto; }
+      table.cmp { border-collapse: collapse; font-size: .86rem; width: 100%; }
+      table.cmp th, table.cmp td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+      table.cmp th { font-size: .8rem; color: var(--muted); font-weight: 600; }
+      table.cmp td:first-child { font-weight: 600; white-space: nowrap; }
+      .y { color: var(--good); } .n { color: var(--bad); } .m { color: var(--warn); }
+      dl.gloss { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; font-size: .9rem; margin: 0; }
+      dl.gloss dt { font-weight: 600; } dl.gloss dd { margin: 0; color: var(--muted); }
+      @media (max-width: 640px) { dl.gloss { grid-template-columns: 1fr; } dl.gloss dd { margin-bottom: .4rem; } }
+      nav.links { font-size: .9rem; margin: 1.5rem 0 0; display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; }
+      #status { font-size: .8rem; white-space: pre-wrap; color: var(--muted); }
+      /* ?thumb (the card image): the canvas alone, full window */
+      body.thumb { padding: 0; overflow: hidden; }
+      body.thumb .page > :not(#stage) { display: none; }
+      body.thumb #stage, body.thumb canvas#view { position: fixed; inset: 0; width: 100vw; height: 100vh; max-width: none; border: 0; border-radius: 0; aspect-ratio: auto; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Reflections, explained: probe, screen space, ray tracing</h1>
+      <p class="lede">
+        A real-time renderer has three ways to answer "what does this shiny pixel reflect?", and engines mix them. This page puts all
+        of them in one room so you can see where each one is right and where it breaks, on this package's own pipeline:
+        <code>Reflections</code> with a baked probe, the screen-space tracer, the ray-traced fallback and the denoiser. Step through the
+        situations below: each one sets up the camera and names the two methods worth comparing. Switch between them under the
+        image; drag the view to look around.
+      </p>
+
+      <p class="label">Pick a situation</p>
+      <div class="seg" id="tour"></div>
+
+      <div id="stage">
+        <canvas id="view" width="960" height="540"></canvas>
+        <span id="lab"></span>
+        <div id="legend" hidden>
+          <span><i class="sw" style="background:#2fcc4a"></i>screen space found it</span>
+          <span><i class="sw" style="background:#3a86ff"></i>a traced ray found it</span>
+          <span><i class="sw" style="background:#ff3a2a"></i>nothing found it: probe guess</span>
+          <span><i class="sw" style="background:#ff9b0d"></i>rough: prefiltered probe, no ray</span>
+        </div>
+      </div>
+      <div class="caption">
+        <span class="label">Compare</span><div class="seg" id="ab"></div>
+        <span class="label">Show</span>
+        <div class="seg" id="seg-show"><button data-v="image" aria-pressed="true">the image</button><button data-v="source" aria-pressed="false">where reflections come from</button></div>
+      </div>
+
+      <div id="scenario"></div>
+
+      <section class="controls" aria-label="controls">
+        <div>
+          <p class="label">Reflections from</p>
+          <div class="seg" id="seg-mode">
+            <button data-v="probe" aria-pressed="false">probe only</button><button data-v="ssr" aria-pressed="false">screen space + probe</button><button data-v="rt" aria-pressed="false">rays, every pixel</button><button data-v="hybrid" aria-pressed="true">hybrid</button>
+          </div>
+        </div>
+        <div>
+          <p class="label">Reflection denoiser</p>
+          <div class="seg" id="seg-denoise"><button data-v="on" aria-pressed="true">FFX (denoiser/ffx)</button><button data-v="off" aria-pressed="false">raw, 1 sample</button></div>
+        </div>
+        <div>
+          <p class="label">Hybrid roughness cutoff</p>
+          <div class="row"><input id="cutoff" type="range" min="0.05" max="1" step="0.01" value="0.447" /><output id="cutoff-v"></output></div>
+          <span class="hint">rougher than this: probe only, no rays</span>
+        </div>
+        <div>
+          <p class="label">Floor gloss</p>
+          <div class="row"><input id="roughness" type="range" min="0.02" max="0.6" step="0.01" value="0.12" /><output id="roughness-v"></output></div>
+          <span class="hint">roughness of the floor and the table top</span>
+        </div>
+        <div>
+          <p class="label">Camera</p>
+          <div class="row"><div class="seg" id="seg-motion"><button data-v="on" aria-pressed="false">slow orbit</button><button data-v="off" aria-pressed="true">hold (drag to look)</button></div><button class="btn" id="cut">camera cut</button></div>
+        </div>
+        <div>
+          <p class="label">Sculpture</p>
+          <div class="row"><div class="seg" id="seg-spin"><button data-v="on" aria-pressed="true">turning</button><button data-v="off" aria-pressed="false">still</button></div><button class="btn" id="rebake">re-bake probe</button></div>
+        </div>
+      </section>
+
+      <h2>The question every method answers</h2>
+      <div class="box">
+        <p>
+          For each pixel, the renderer knows the surface: where it is, which way it faces, how rough it is. A <b>mirror</b> reflects one
+          exact direction. A <b>rough</b> surface reflects a spread of directions around it (the "lobe"), which is why rough reflections
+          are blurry. So the question is always: <i>what light comes from those directions?</i>
+        </p>
+        <p>
+          The noisy methods here answer it the way a path tracer would: pick <b>one</b> random direction in the lobe per pixel per frame,
+          find what is there, and let a denoiser (FFX's reflection denoiser, from <code>denoiser/ffx</code>) average neighbouring pixels and
+          previous frames into a clean image. Switch the denoiser to "raw" to see that one sample. Every mode below uses the same
+          random directions; they differ only in <b>how they find what is in that direction</b>.
+        </p>
+      </div>
+
+      <h2>How each method works</h2>
+      <div class="grid">
+        <div class="box">
+          <h3>Reflection probe</h3>
+          <svg viewBox="0 0 260 150" role="img" aria-label="A probe captures the room from one point; box projection assumes everything is on the walls">
+            <g stroke="#55627a" stroke-width="2" fill="none"><path d="M10 15 V130 H250" /></g>
+            <rect x="95" y="80" width="30" height="50" fill="#b88a5a" opacity=".85" /><text x="98" y="77" fill="#9aa7b8" font-size="9">chair</text>
+            <circle cx="240" cy="100" r="5" fill="#e6edf3" /><text x="222" y="117" fill="#9aa7b8" font-size="9">camera</text>
+            <path d="M240 100 L180 130" stroke="#e6edf3" stroke-width="1.5" />
+            <g stroke="#ff9b0d" stroke-width="1" stroke-dasharray="3 3" fill="none" opacity=".7"><path d="M60 70 L10 45" /><path d="M60 70 L10 100" /><path d="M60 70 L60 15" /><path d="M60 70 L10 20" /></g>
+            <circle cx="60" cy="70" r="5" fill="#ff9b0d" /><text x="40" y="88" fill="#ffae3d" font-size="9">probe</text>
+            <path d="M180 130 L10 45" stroke="#ff9b0d" stroke-width="1.5" stroke-dasharray="5 3" />
+            <path d="M118 96 l10 10 m0 -10 l-10 10" stroke="#ff3a2a" stroke-width="2.5" />
+            <circle cx="10" cy="45" r="3.5" fill="#ff9b0d" />
+            <text x="140" y="80" fill="#ff6a5c" font-size="9">chair ignored:</text><text x="140" y="91" fill="#ff6a5c" font-size="9">looks up the wall</text>
+          </svg>
+          <p>
+            Photograph the room once, in all six directions, from one point (a cubemap). Pre-blur copies of it for each roughness. At draw
+            time, look up the reflected direction. <b>Box projection</b> first works out where that ray would hit the room's walls, so walls
+            line up. Here: <code>ReflectionProbes</code>, baked once, every material sampling it through <code>reflectionProbes(probes)</code>.
+          </p>
+          <dl class="pc">
+            <dt class="plus">good</dt><dd>No noise, no rays, almost free per frame. Perfect for rough surfaces.</dd>
+            <dt class="minus">bad</dt><dd>A snapshot: moving things freeze. Everything is treated as if painted on the walls, so objects inside the room reflect in the wrong place, and light leaks where it should be dark.</dd>
+            <dt class="cost">cost</dt><dd>A bake: six renders and a prefilter per probe, on demand. Then a texture lookup per pixel.</dd>
+          </dl>
+        </div>
+        <div class="box">
+          <h3>Screen-space reflections</h3>
+          <svg viewBox="0 0 260 150" role="img" aria-label="Screen space marches the reflected ray through the depth buffer and fails when it leaves the screen">
+            <path d="M240 100 L10 40 L10 130 L240 100 Z" fill="#90cdf40f" />
+            <path d="M240 100 L10 40" stroke="#90cdf4" stroke-width="1" stroke-dasharray="2 3" /><text x="18" y="38" fill="#90cdf4" font-size="9">top of the screen</text>
+            <g stroke="#55627a" stroke-width="2" fill="none"><path d="M10 15 V130 H250" /></g>
+            <rect x="95" y="80" width="30" height="50" fill="#b88a5a" opacity=".85" />
+            <circle cx="152" cy="54" r="7" fill="#ff8a2a" /><text x="162" y="50" fill="#9aa7b8" font-size="9">lamp</text>
+            <circle cx="240" cy="100" r="5" fill="#e6edf3" />
+            <path d="M240 100 L180 130 M240 100 L215 130" stroke="#e6edf3" stroke-width="1.5" />
+            <g fill="#2fcc4a"><circle cx="170" cy="125" r="2" /><circle cx="160" cy="120" r="2" /><circle cx="150" cy="115" r="2" /><circle cx="140" cy="110" r="2" /><circle cx="130" cy="105" r="2" /></g>
+            <circle cx="125" cy="102" r="3.5" fill="#2fcc4a" />
+            <g fill="#ff3a2a"><circle cx="207" cy="120" r="2" /><circle cx="199" cy="110" r="2" /><circle cx="191" cy="100" r="2" /><circle cx="183" cy="91" r="2" /></g>
+            <path d="M178 84 L152 54" stroke="#ff3a2a" stroke-width="1" stroke-dasharray="2 3" />
+            <text x="186" y="76" fill="#ff6a5c" font-size="9">left the screen</text>
+          </svg>
+          <p>
+            The frame being rendered already has the colour and depth of every visible surface. Walk along the reflected ray in screen
+            space and stop where it passes behind a surface in the depth buffer: that pixel's colour is the reflection. This package's
+            tracer is a port of AMD's FidelityFX SSSR: it steps through a depth pyramid, so long rays take few steps.
+          </p>
+          <dl class="pc">
+            <dt class="plus">good</dt><dd>Exact and live for anything on screen, including moving objects. Cost doesn't depend on how big the scene is.</dd>
+            <dt class="minus">bad</dt><dd>Knows nothing that isn't on screen: off the edges, behind the camera, behind other objects, the back of things. Those need a fallback (here, the probe or a ray).</dd>
+            <dt class="cost">cost</dt><dd>A fixed amount per pixel (a few dozen depth reads), plus a denoiser.</dd>
+          </dl>
+        </div>
+        <div class="box">
+          <h3>Ray tracing</h3>
+          <svg viewBox="0 0 260 150" role="img" aria-label="A traced ray finds the real geometry through a BVH, on screen or not">
+            <g stroke="#55627a" stroke-width="2" fill="none"><path d="M10 15 V130 H250" /></g>
+            <g stroke="#3a86ff" stroke-width="1" stroke-dasharray="3 2" fill="none" opacity=".6"><rect x="88" y="40" width="74" height="94" /><rect x="91" y="76" width="38" height="56" /><rect x="142" y="44" width="18" height="18" /></g>
+            <text x="92" y="36" fill="#6aa8ff" font-size="9">BVH boxes</text>
+            <rect x="95" y="80" width="30" height="50" fill="#b88a5a" opacity=".85" />
+            <circle cx="152" cy="54" r="7" fill="#ff8a2a" />
+            <circle cx="240" cy="100" r="5" fill="#e6edf3" />
+            <path d="M240 100 L180 130 M240 100 L215 130" stroke="#e6edf3" stroke-width="1.5" />
+            <path d="M180 130 L125 102.5" stroke="#3a86ff" stroke-width="2" /><circle cx="125" cy="102.5" r="3.5" fill="#3a86ff" />
+            <path d="M215 130 L157.5 61" stroke="#3a86ff" stroke-width="2" /><circle cx="157" cy="60" r="3.5" fill="#3a86ff" />
+          </svg>
+          <p>
+            Shoot a real ray into the scene's triangles. A <b>BVH</b> (a tree of boxes around the geometry, built by <code>@pmndrs/bvh</code>
+            and walked by <code>@pmndrs/raytracer</code>) lets it skip everything the ray can't hit. At the hit, shade the surface cheaply: its
+            colour, roughness and metalness from a per-triangle table, lit by the probe at the hit.
+          </p>
+          <dl class="pc">
+            <dt class="plus">good</dt><dd>Right almost everywhere: off screen, behind the camera, hidden surfaces, moving objects.</dd>
+            <dt class="minus">bad</dt><dd>Noisy on rough surfaces. The BVH must be kept up to date when things move (<code>reflections.trace.refit()</code>). Shading at the hit is simplified (no textures, no second bounce).</dd>
+            <dt class="cost">cost</dt><dd>Grows with triangle count and how many rays you shoot. Small in this room; much more in a big game level.</dd>
+          </dl>
+        </div>
+        <div class="box">
+          <h3>Hybrid</h3>
+          <svg viewBox="0 0 260 150" role="img" aria-label="Hybrid: probe for rough surfaces, screen space where it can, a ray where screen space fails">
+            <path d="M240 100 L10 40" stroke="#90cdf4" stroke-width="1" stroke-dasharray="2 3" />
+            <g stroke="#55627a" stroke-width="2" fill="none"><path d="M10 15 V130 H250" /></g>
+            <path d="M25 130 H80" stroke="#56677a" stroke-width="5" /><text x="26" y="142" fill="#9aa7b8" font-size="9">rough rug</text>
+            <g stroke="#ff9b0d" stroke-width="1.3"><path d="M52 128 L30 98 M52 128 L42 94 M52 128 L54 93 M52 128 L66 95 M52 128 L76 100" /></g>
+            <text x="20" y="88" fill="#ffae3d" font-size="9">probe, no ray</text>
+            <rect x="95" y="80" width="30" height="50" fill="#b88a5a" opacity=".85" />
+            <circle cx="152" cy="54" r="7" fill="#ff8a2a" />
+            <circle cx="240" cy="100" r="5" fill="#e6edf3" />
+            <path d="M240 100 L180 130 M240 100 L215 130" stroke="#e6edf3" stroke-width="1.5" />
+            <path d="M180 130 L125 102.5" stroke="#2fcc4a" stroke-width="2" /><circle cx="125" cy="102.5" r="3.5" fill="#2fcc4a" /><text x="132" y="122" fill="#4fdc6a" font-size="9">SSR</text>
+            <path d="M215 130 L183 91" stroke="#2fcc4a" stroke-width="2" stroke-dasharray="2 2" />
+            <path d="M183 91 L157.5 61" stroke="#3a86ff" stroke-width="2" /><circle cx="157" cy="60" r="3.5" fill="#3a86ff" />
+            <text x="190" y="80" fill="#6aa8ff" font-size="9">SSR left the</text><text x="190" y="90" fill="#6aa8ff" font-size="9">screen: trace</text>
+          </svg>
+          <p>
+            Use each method where it's good. Rougher than a cutoff: the prefiltered probe, no ray. Glossy: try screen space first (cheap,
+            exact on screen). Where it finds nothing, trace a real ray. Where that ray leaves the room, use the probe. This is AMD's
+            FidelityFX "hybrid reflections" recipe, and roughly what Unreal's and Unity's high-end pipelines do. It is what
+            <code>Reflections.create(renderer, scene, &#123; rayTracing: true &#125;)</code> runs.
+          </p>
+          <dl class="pc">
+            <dt class="plus">good</dt><dd>Close to "ray traced" quality, while most pixels take the cheap path.</dd>
+            <dt class="minus">bad</dt><dd>Three systems to build and keep consistent (lighting has to match between them, or you see seams).</dd>
+            <dt class="cost">cost</dt><dd>Screen space everywhere glossy, rays only where it misses. On a GPU, rays in a few pixels of a group cost the whole group, so savings are smaller than the pixel count suggests.</dd>
+          </dl>
+        </div>
+      </div>
+
+      <h2>Which one should I use?</h2>
+      <div class="tbl-wrap">
+        <table class="cmp">
+          <thead><tr><th></th><th>probe</th><th>screen space + probe</th><th>ray traced</th><th>hybrid</th></tr></thead>
+          <tbody>
+            <tr><td>Reflects things off screen</td><td class="m">roughly, if they're on the walls</td><td class="n">no (probe guess)</td><td class="y">yes</td><td class="y">yes</td></tr>
+            <tr><td>Objects inside the room</td><td class="n">misplaced</td><td class="y">if on screen</td><td class="y">yes</td><td class="y">yes</td></tr>
+            <tr><td>Moving objects</td><td class="n">frozen until re-baked</td><td class="y">if on screen</td><td class="y">yes (refit the BVH)</td><td class="y">yes</td></tr>
+            <tr><td>Rough surfaces</td><td class="y">great</td><td class="m">noisy</td><td class="m">noisy</td><td class="y">uses the probe</td></tr>
+            <tr><td>Needs a denoiser</td><td class="y">no</td><td>yes</td><td>yes</td><td>yes</td></tr>
+            <tr><td>Cost grows with</td><td>nothing per frame (bake once)</td><td>screen pixels</td><td>pixels x scene complexity</td><td>pixels, plus rays where screen space misses</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">GPU cost per pass, on real models: the <a href="../../../showcase/">showcase</a> shows the GPU ms of each pass.</p>
+      <div class="grid" style="margin-top:1rem">
+        <div class="box">
+          <h3>Rules of thumb</h3>
+          <ul>
+            <li><b>Mostly rough or matte materials</b> (fabric, stone, painted walls), a static scene, phones, or a product viewer on an HDRI: <b>probes</b> (or just the environment map). Blurry reflections hide the probe's errors.</li>
+            <li><b>Glossy floors, roads or water seen at a low angle</b>, where what's reflected is usually on screen: <b>screen space with probes behind it</b>. The standard for most games.</li>
+            <li><b>Mirrors, windows, car paint, anything facing the camera</b>, or moving objects that must reflect correctly: <b>add rays</b>, as a <b>hybrid</b>.</li>
+            <li><b>A small scene on a fast GPU</b> and you want the simplest thing that's right: <b>ray trace</b>. But one ray on a rough surface is mostly noise, where the probe is smooth and free.</li>
+            <li><b>Huge scenes, skinned characters, low-end GPUs</b>: screen space + probes, with rays only on a few hero surfaces, if any.</li>
+          </ul>
+        </div>
+        <div class="box">
+          <h3>In practice you stack them</h3>
+          <p>
+            Nearly every shipping engine layers these rather than picking one: probes everywhere as the base, screen space on top for glossy
+            surfaces, and rays where the hardware allows. What differs is how far up the stack a given platform goes. The roughness cutoff is
+            the knob between "cheap and blurry" and "exact and noisy".
+          </p>
+          <p>
+            Where <b>denoising</b> fits: anything that takes one random sample per pixel (screen space, rays, the hybrid) is noisy and needs a
+            temporal denoiser. Probes come pre-blurred and don't.
+          </p>
+        </div>
+      </div>
+
+      <div class="grid" style="margin-top:1.5rem">
+        <div class="box">
+          <h3>How this demo is built</h3>
+          <ul>
+            <li>three.js <code>WebGPURenderer</code>; the room is <code>explainer</code> from <code>examples/shared</code>, lit by a shadowed spot light at the panel.</li>
+            <li><code>Reflections.create(renderer, scene, &#123; probes, rayTracing: true, denoiser &#125;)</code>: a G-buffer render, the screen-space tracer, rays for its misses, the probe for what neither reaches, FFX's denoiser, and the composite into three's lit image.</li>
+            <li>The modes are settings on that one pipeline: <code>reflections.ssr.rayTracing</code> off for "screen space + probe"; every pixel sent to the rays for "rays, every pixel"; three's lit image (the probe as its environment) for "probe only".</li>
+            <li>The source map is <code>HybridReflections.sourceIndex</code> of the composite: what answered each pixel's ray this frame.</li>
+            <li>The turning sculpture: <code>reflections.trace.refit()</code> each frame. The probe holds it as it was at the bake.</li>
+          </ul>
+        </div>
+        <div class="box">
+          <h3>Words used on this page</h3>
+          <dl class="gloss">
+            <dt>Roughness</dt><dd>0 is a mirror, 1 is matte. Sets how wide the reflection lobe is.</dd>
+            <dt>Cubemap / probe</dt><dd>Six square renders around one point: a photo of the surroundings in every direction.</dd>
+            <dt>Prefilter</dt><dd>Pre-blurred versions of a cubemap, one per roughness, so a rough reflection is one lookup.</dd>
+            <dt>Box projection</dt><dd>Correcting a probe lookup for the room's shape, so walls reflect in the right place.</dd>
+            <dt>Depth buffer</dt><dd>The distance to the visible surface at each pixel. All screen space knows about the scene.</dd>
+            <dt>BVH</dt><dd>A tree of boxes around the triangles, so a ray tests a few dozen boxes instead of every triangle.</dd>
+            <dt>Sample</dt><dd>One random direction tried for a pixel. 1 sample per pixel per frame is noisy; a denoiser fixes that.</dd>
+          </dl>
+        </div>
+      </div>
+
+      <nav class="links">
+        <a href="../../probes/box-projection/">Box-projected probe</a>
+        <a href="../../rt/fallback/">Ray-traced fallback</a>
+        <a href="../../rt/animated/">Ray tracing moving meshes</a>
+        <a href="https://github.com/pmndrs/reflections/tree/main/examples/features/hybrid/explained/main.ts">Source</a>
+      </nav>
+      <pre id="status">starting...</pre>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
