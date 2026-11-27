@@ -404,19 +404,38 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     slug: 'engines/three',
     path: 'engines/three/',
     title: 'three.js',
-    summary: 'three.js WebGPURenderer with every feature, on the shared two-room scene.',
-    description: 'Planned (E4).',
-    brief: { kind: 'feature', shows: 'The three.js adapter on the scene every engine page shares.', tryThis: PLANNED_TRY, compare: 'Reflections off' },
-    category: 'engines', status: 'stable', tags: ['three'], docs: 'guides/three', source: 'examples/engines/three', planned: true,
+    summary: 'three.js WebGPURenderer with every feature, on the two rooms every engine page shares.',
+    description:
+      'Ben Houston\'s two rooms (`examples/shared/rooms.ts`): a `ReflectionProbes` set with one probe per room and one in the doorway, baked once, then ' +
+      '`Reflections.create(renderer, scene, { probes, denoiser, rayTracing })` and `reflections.render(camera)` in the loop. The ray-traced switch rebuilds ' +
+      'it with a BVH (`@pmndrs/raytracer`) and refits it as the ball moves. This is the reference the other engine pages are measured against: ' +
+      'React Three Fiber has all of it, Babylon.js and raw WebGPU have probes and screen space (no rays; Babylon has no denoiser), ' +
+      'pixi.js needs the closed pixi-3d beta (`guides/adapters` has the table). Each feature on its own page: probes/box-projection, the ssr lab page, the showcase.',
+    brief: {
+      kind: 'feature',
+      shows: 'The three.js adapter with everything on: probes per room, screen-space reflections, the denoiser and, on a switch, the ray-traced fallback. The other engine pages draw this scene from the same views.',
+      tryThis: ['Turn Screen space off: the floor keeps the probes\' blurrier, box-projected reflections', 'Turn the Ray-traced fallback on, View: ball, and watch what the screen cannot see', 'Open engines/babylon or engines/core at the same View and compare'],
+      compare: 'Screen space off (probes only), the switch every engine page has; and the other engine pages at the same View',
+    },
+    category: 'engines', status: 'stable', tags: ['three', 'probes', 'ssr', 'ray tracing', 'denoiser'], docs: 'guides/three', source: 'examples/engines/three',
   },
   {
     slug: 'engines/r3f',
     path: 'engines/r3f/',
     title: 'React Three Fiber',
-    summary: 'Everything through the hook; the two rooms as JSX.',
-    description: 'Planned (E4).',
-    brief: { kind: 'feature', shows: 'The React Three Fiber hook on the scene every engine page shares.', tryThis: PLANNED_TRY, compare: 'Reflections off' },
-    category: 'engines', status: 'experimental', tags: ['react', 'r3f'], docs: 'guides/react-three-fiber', source: 'examples/engines/r3f', planned: true,
+    summary: 'The two rooms as JSX, with every feature of engines/three through the useReflections hook.',
+    description:
+      'React Three Fiber v10 (WebGPURenderer by default; the `renderer` prop calls `createReflectionsRenderer` for the device limits). The rooms of ' +
+      '`examples/shared/rooms.ts` are written as JSX, the probes too (`extend(ReflectionProbes)`, `extend(ReflectionProbe)`), baked in an effect once the ' +
+      'rooms are mounted; `useReflections` (examples/r3f) calls `Reflections.create` and draws each frame through it. Ray tracing is fixed at creation, ' +
+      'so its switch remounts the hook\'s component (a `key`). Nothing is missing against engines/three: R3F is the three.js adapter under a `<Canvas>`.',
+    brief: {
+      kind: 'feature',
+      shows: 'Everything engines/three has, in React: the rooms and their probes as JSX, reflections from one hook.',
+      tryThis: ['Turn Screen space off: probes only', 'Turn the Ray-traced fallback on (the hook\'s component remounts with a BVH)', 'Put engines/three next to it at the same View'],
+      compare: 'Screen space off (probes only); and engines/three, which should look the same',
+    },
+    category: 'engines', status: 'experimental', tags: ['react', 'r3f', 'probes', 'ssr', 'ray tracing', 'denoiser'], docs: 'guides/react-three-fiber', source: 'examples/engines/r3f',
   },
   {
     slug: 'engines/babylon',

@@ -6,6 +6,7 @@
 //                                    # page (e.g. the denoiser repo's three-temporal/reflection-probes.html)
 //   pnpm check -- --only scenes      # run one section (probes | bc6h | scenes | regressions | sssr-core | ssr | hybrid | ssr-rt | babylon | ssr-rt-builders (alias ssr-rt-bvh) | pixi3d | probe-core | probe-bench | ssr-bench | nrc | showcase | showcase-compare | quickstart | r3f | bench | probe-layouts)
 //   pnpm check -- --only catalog [--thumbs] [--pages a,b]   # W92: every page in examples/catalog.ts loads, renders, logs no error; --thumbs writes the card images
+//   pnpm check -- --only engines     # W96: engines/three, r3f, babylon and core side by side at the same views (ENGINE_VIEWS, ENGINE_PAGES, ENGINE_FRAMES)
 //   pnpm check -- --only flicker                 # W85 (T1): the X0 flicker metrics per scene x config (FLICKER_SCENES / FLICKER_CONFIGS / FLICKER_LABEL, scripts/flicker.mjs)
 //   pnpm check -- --only ssr-exp-metrics         # X0 (W70): the experiment metrics smoke (examples/shared/metrics); ssr-exp-baseline = the full baseline (scripts/ssr-exp.mjs)
 //   pnpm check -- --only halo-options            # W52: the halo options (visibility ray on screen, lobe filter where hits mix, re-shade occlusion)
@@ -3469,6 +3470,65 @@ async function catalogChecks() {
   }
 }
 
+/**
+ * W96 (E4): the engine pages side by side. engines/three, engines/babylon and engines/core draw the same two rooms; each is
+ * loaded at 1280 x 720 (shell hidden), its loop stopped, the rooms' animation at t = 0, and shot at the same camera views
+ * after `ENGINE_FRAMES` frames (the denoiser's history). Babylon and core are diffed against three per channel (mean / max
+ * out of 255) with probes + screen space, and again with screen space off (probes only); the bound is a stated one, not
+ * identity (three, Babylon and the core page's renderer light, shadow and tone-map differently). Also each page's rest
+ * stability: two consecutive shots of the stopped page.
+ *   ENGINE_VIEWS=default,table   the views (rooms.ts names)
+ */
+async function engineChecks() {
+  console.log('examples/engines (side by side):');
+  const views = (process.env.ENGINE_VIEWS ?? 'default,table').split(',');
+  const frames = Number(process.env.ENGINE_FRAMES ?? 40);
+  const engines = (process.env.ENGINE_PAGES ?? 'three,r3f,babylon,core').split(',');
+  /** [engine][mode][view] -> PNG data URL */
+  const shots = {};
+  for (const name of engines) {
+    const before = results.logs.length;
+    const p = await openPage(`http://127.0.0.1:${PORT}/engines/${name}/?thumb`);
+    try {
+      await p.cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false });
+      await sleep(1500);
+      await p.T('window.__p.stop()');
+      await p.T('window.__p.setTime(0)');
+      shots[name] = { on: {}, off: {} };
+      for (const mode of ['on', 'off']) {
+        await p.T(`window.__p.setCompare(${mode === 'off'})`);
+        for (const v of views) {
+          await p.T(`window.__p.setView(${JSON.stringify(v)})`);
+          const a = await p.T(`window.__p.shot(${frames})`);
+          shots[name][mode][v] = a;
+          savePng(`engines-${name}-${mode}-${v}.png`, a);
+          if (mode === 'on') {
+            const b = await p.T('window.__p.shot(1)');
+            const r = await p.cdp.evalJs(`(${IMAGE_STATS})(${JSON.stringify(a)}, ${JSON.stringify(b)})`);
+            console.log(`  ${name} ${v}: at rest, one frame to the next: mean ${r.mean.toFixed(3)} / 255, max ${r.max}`);
+          }
+        }
+      }
+      const errors = results.logs.slice(before).filter((l) => /^(error|exception|log\.error)/.test(l) || /invalid|validation|uncaptured/i.test(l));
+      check(`engines ${name}: loads, shoots every view, no errors`, errors.length === 0, errors.slice(0, 3).join(' | '));
+    } finally { p.close(); }
+  }
+  // per-channel difference to three (decoded in a scratch page)
+  const p = await openPage(`http://127.0.0.1:${PORT}/engines/three/?thumb`);
+  try {
+    await p.T('window.__p.stop()');
+    for (const name of engines.filter((e) => e !== 'three' && shots[e])) {
+      for (const mode of ['on', 'off']) for (const v of views) {
+        const d = await p.cdp.evalJs(`(${IMAGE_STATS})(${JSON.stringify(shots.three[mode][v])}, ${JSON.stringify(shots[name][mode][v])})`);
+        const lum = (await p.cdp.evalJs(`(${IMAGE_STATS})(${JSON.stringify(shots[name][mode][v])})`)).lum;
+        const bound = 24;
+        check(`engines ${name} vs three, ${mode === 'on' ? 'probes + screen space' : 'probes only'}, view ${v}: mean per channel < ${bound} / 255`, d.mean < bound,
+          `mean ${d.mean.toFixed(2)} / 255, max ${d.max}; mean luminance three ${d.lum.toFixed(1)}, ${name} ${lum.toFixed(1)}`);
+      }
+    }
+  } finally { p.close(); }
+}
+
 async function dropInChecks(pages, name, url, { frames = 30, maxFlicker = 0.5 } = {}) {
   console.log(`${name}:`);
   const slug = name.replace(/[^a-z0-9]+/gi, '-');
@@ -3881,6 +3941,7 @@ async function main() {
     if (runs('showcase')) await showcaseChecks(pages);
     if (runs('showcase-compare')) await showcaseCompareChecks(pages);
     if (runs('catalog')) await catalogChecks(); // W92 (E1): every page in examples/catalog.ts (--thumbs: card images)
+    if (runs('engines')) await engineChecks(); // W96 (E4): three, Babylon and core on the same two rooms, side by side
     if (runs('bench')) await benchChecks(pages); // W51: the tuning bench
     if (only === 'ssr-exp-metrics') await ssrExpMetricsSmoke({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)
     if (only === 'ssr-exp-baseline') await ssrExpBaseline({ openPage, check, PORT, OUT, results, savePng }, pages); // X0 (W70)
