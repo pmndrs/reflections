@@ -54,6 +54,25 @@ export function probeWeights(probes: ReflectionProbes | null, P: N): ProbeWeight
   return { dominant, count, sum: float(1).sub(remaining), volumes: vols.length };
 }
 
+/**
+ * W93: the blend itself as a colour: sum over the volumes of weight x the volume's palette colour, plus what is left (the
+ * environment) x dark grey. Walked like {@link probeWeights}, so a pixel two volumes share shows the mix of their colours.
+ */
+export function probeBlendColor(probes: ReflectionProbes | null, P: N): N {
+  const vols = probes ? reflectionProbeVolumes(probes) : [];
+  let remaining: N = float(1).toVar();
+  let c: N = vec3(0).toVar();
+  vols.forEach((v, k) => {
+    const lp: N = P.sub(vec3(...v.center));
+    const d: N = vec3(...v.halfSize).sub(lp.abs());
+    const w: N = d.x.min(d.y).min(d.z).div(Math.max(v.fade ?? 0.5, 1e-6)).clamp(0, 1).mul(remaining).toVar();
+    const p = probePaletteColor(k);
+    c = c.add(vec3(p.r, p.g, p.b).mul(w)).toVar();
+    remaining = remaining.sub(w).toVar();
+  });
+  return c.add(vec3(0.12).mul(remaining));
+}
+
 /** The palette colour of table index `i` (a float node; -1: none, dark grey). */
 export function probeColor(i: N, n: number): N {
   let c: N = vec3(0.12);

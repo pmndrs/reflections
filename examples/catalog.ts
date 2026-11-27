@@ -255,58 +255,98 @@ export const EXAMPLES: readonly ExampleEntry[] = [
     slug: 'probes/two-rooms',
     path: 'features/probes/two-rooms/',
     title: 'Two rooms',
-    summary: 'Several probes blended by influence box: walk through the doorway.',
-    description: 'Planned (E2): rebuilds the denoiser repo\'s reflections-rooms page on `Reflections`.',
-    brief: { kind: 'feature', shows: 'Several probes, each with its own influence box, blended across a doorway between two rooms.', tryThis: PLANNED_TRY, compare: 'One probe for both rooms; influence boxes and weights as overlays' },
-    category: 'features', status: 'experimental', tags: ['probes', 'blending'], docs: 'concepts/reflection-probes', source: 'examples/features/probes/two-rooms', planned: true,
+    summary: 'A probe per room and one in the doorway, blended by their influence boxes: each room reflects itself.',
+    description:
+      'Ben Houston\'s two rooms from three.js #35046: a warm-lit and a cool-lit room joined by a doorway. Each room has a `ReflectionProbe` whose ' +
+      'influence box is the room and whose projection box (`projectionSize`) is its walls; a small doorway probe takes priority where the boxes overlap ' +
+      '(the smallest box wins) and fades into the room probes over its `blendDistance`. All three are baked once into one set, and ' +
+      '`scene.environmentNode = reflectionProbes(probes)` makes every material look them up at its own position. The mirror ball is kept out of the captures ' +
+      '(`userData.reflectionProbeExclude`) because it moves. **Show blend weights** colours each surface by the probes it blends.',
+    brief: {
+      kind: 'feature',
+      shows: 'Why a level needs more than one probe: each room reflects its own walls and light, and the doorway probe blends one room into the other without a seam.',
+      tryThis: ['Untick One probe per room: the cool room\'s floor and the mirror ball now show the warm room', 'Show blend weights, then pick Across the doorway: the colours mix where the boxes overlap', 'Watch the mirror ball roll through the doorway: its reflection hands over from one room to the other'],
+      compare: 'One probe for both rooms: captured in the warm room, projected onto the whole building',
+    },
+    category: 'features', status: 'stable', tags: ['probes', 'blending', 'influence volumes', '#35046'], docs: 'concepts/reflection-probes', source: 'examples/features/probes/two-rooms/main.ts',
   },
   {
     slug: 'probes/live',
-    path: 'probes/',
+    path: 'features/probes/live/',
     title: 'Live probes',
-    summary: 'Reflection probes re-captured as the scene changes: a spinning torus knot and a colour-cycling light, in two rooms.',
+    summary: 'Probes re-captured while the scene runs, one per frame: a turning knot and two colour-cycling lights in two rooms.',
     description:
-      'A port of three.js #35046\'s example (Ben Houston\'s two rooms joined by a doorway, one probe per room and a doorway probe that wins where they overlap) on ' +
-      '`@pmndrs/reflections/three`, re-captured every frame. Also the probe storage options (a real cube array through the #35053 shim, or the 2D array with its seam handling). ' +
-      '`?static` freezes, `?grid` shows the test grid, `?refit` the LightProbeGrid re-fit. To be rebuilt to the example rules (docs/EXAMPLES.md, E2).',
+      'Ben Houston\'s two rooms with a probe per room and a doorway probe. Every frame `probes.bake(renderer, scene, { probes: [next], bounces: 1 })` ' +
+      're-captures one probe, round-robin (time-sliced): each probe is at most three frames old, at a third of the cost of capturing all of them. ' +
+      'One capture pass (`bounces: 1`) because a sliced bake covers only its slice. The moving mirror ball stays out of the captures ' +
+      '(`userData.reflectionProbeExclude`). The compare is a second set baked once at load. The lab page `probes/` has every storage and lookup option.',
     brief: {
       kind: 'feature',
-      shows: 'Probes that follow the scene: captured again as objects move and lights change, so reflections of them stay current.',
-      tryThis: ['Watch the torus knot and the cycling light in the floor and the mirror sphere', 'Add `?static` to the URL: probes baked once, the reflections freeze'],
-      compare: '`?static` (baked once)',
+      shows: 'Probes that follow the scene: captured again, one probe per frame, as the lights change colour and the knot turns, so the reflections stay current.',
+      tryThis: ['Untick Live capture: the floor and the mirror ball keep the light colours of the moment the page loaded', 'Set Probes per frame to all 3: the same image at three times the capture cost'],
+      compare: 'Live capture off: the same probes baked once at load',
     },
     category: 'features',
-    status: 'experimental',
-    tags: ['probes', 'live capture', '#35046'],
+    status: 'stable',
+    tags: ['probes', 'live capture', 'time-sliced'],
     docs: 'concepts/reflection-probes',
-    source: 'examples/probes/src/main.ts',
+    source: 'examples/features/probes/live/main.ts',
   },
   {
     slug: 'probes/exclude',
     path: 'features/probes/exclude/',
     title: 'Keep a mirror out of its own probe',
-    summary: 'bake({ exclude }): a moving mirror kept out of its own captures.',
-    description: 'Planned (E2).',
-    brief: { kind: 'feature', shows: 'A moving mirror kept out of the captures that it reflects, so it does not paint itself into the probe.', tryThis: PLANNED_TRY, compare: 'Without exclude (the mirror paints itself in)' },
-    category: 'features', status: 'stable', tags: ['probes', 'exclude'], docs: 'concepts/reflection-probes', source: 'examples/features/probes/exclude', planned: true,
+    summary: 'bake({ exclude }): a moving mirror kept out of the live probe it reflects, so it does not paint itself onto the room.',
+    description:
+      'A mirror floor facing a patterned wall, a polished gold knot sliding in front of it, and the room\'s probe re-captured every frame so the reflections ' +
+      'follow the scene. Box projection paints what the probe saw onto the room\'s box: right for the wall and the floor, wrong for anything standing inside. ' +
+      '`probes.bake(renderer, scene, { exclude: [knot] })` hides the knot for the capture only; `userData.reflectionProbeExclude = true` does the same for every bake. ' +
+      'Screen-space reflections and rays still see it (the ssr/* pages); the probe is the fallback for what they miss.',
+    brief: {
+      kind: 'feature',
+      shows: 'Why moving mirrors are kept out of the probes: captured, the knot is painted onto the wall and the floor, and the mirror floor shows a second, smeared knot where none is.',
+      tryThis: ['Untick Exclude the mirror knot: a ghost knot slides across the floor\'s reflection of the wall', 'Untick Move, tick Show the probe and orbit: the ghost is the knot as seen from the capture point (the mirror sphere), painted onto the wall'],
+      compare: 'Without exclude: the knot is captured into the probe and painted onto the room',
+    },
+    category: 'features', status: 'stable', tags: ['probes', 'exclude', 'live capture'], docs: 'concepts/reflection-probes', source: 'examples/features/probes/exclude/main.ts',
   },
   {
     slug: 'ssr/mirror-floor',
     path: 'features/ssr/mirror-floor/',
     title: 'Screen-space reflections',
-    summary: 'Screen-space reflections on a polished floor, over probes.',
-    description: 'Planned (E2).',
-    brief: { kind: 'feature', shows: 'Screen-space reflections: exact, contact-sharp reflections of what is on screen, over the probe.', tryThis: PLANNED_TRY, compare: 'Probes only' },
-    category: 'features', status: 'stable', tags: ['ssr'], docs: 'concepts/screen-space-reflections', source: 'examples/features/ssr/mirror-floor', planned: true,
+    summary: 'Screen-space reflections on a polished floor, over a probe: the objects stand on their reflections.',
+    description:
+      'A polished floor facing a patterned wall, with a sphere, a box and two posts. The box-projected probe gets the wall right (it is the probe\'s box) but leaves ' +
+      'out what stands inside the room. Screen-space reflections march each pixel\'s reflected ray through the depth buffer and take the colour of what it hits on ' +
+      'screen; where it finds nothing, the probe fills in. `Reflections.create(renderer, scene, { probes, denoiser })` wires the G-buffer, the tracer, the probe fill, ' +
+      'the denoiser (`denoiser/ffx`) and the composite; the loop calls `reflections.render(camera)`. The compare shows three\'s own lit image of the same frame ' +
+      '(`hybrid.composite().lit`): the probe alone.',
+    brief: {
+      kind: 'feature',
+      shows: 'What screen-space reflections add over a probe: exact, contact-sharp reflections of everything on screen, including the objects a probe leaves out.',
+      tryThis: ['Untick Screen-space reflections: the sphere and the box lose their reflections, the wall keeps its own', 'Raise Floor roughness: the reflection blurs with distance from the contact, and the denoiser keeps it steady', 'Pick At the sphere: the floor reflects its underside, which the camera cannot see (the probe fills it)'],
+      compare: 'Screen-space reflections off: the probe alone (three\'s lit image of the same frame)',
+    },
+    category: 'features', status: 'stable', tags: ['ssr', 'probes', 'denoiser', 'Reflections.create'], docs: 'concepts/screen-space-reflections', source: 'examples/features/ssr/mirror-floor/main.ts',
   },
   {
     slug: 'ssr/what-it-misses',
     path: 'features/ssr/what-it-misses/',
     title: 'What screen space misses',
-    summary: 'Off screen, behind, occluded: what screen-space reflections cannot see.',
-    description: 'Planned (E2).',
-    brief: { kind: 'educational', shows: 'Where screen-space reflections run out: things off screen, behind the camera or hidden behind other objects.', tryThis: PLANNED_TRY, compare: 'Probe fill vs black' },
-    category: 'features', status: 'stable', tags: ['ssr', 'misses'], docs: 'concepts/screen-space-reflections', source: 'examples/features/ssr/what-it-misses', planned: true,
+    summary: 'Off screen, behind the camera, hidden: what screen-space reflections cannot see, and the probes filling it in.',
+    description:
+      'A polished floor and a wall mirror. The floor reflects a glowing ring and a lamp bar above the top of the frame; the mirror reflects three bars on the wall ' +
+      'behind the camera. A screen-space ray can only find what is on screen, so all of them are misses, and so is anything hidden behind an object (its back, its ' +
+      'underside: ssr/mirror-floor, At the sphere). The composite fills every miss from the probes (box-projected cubes captured inside the room). The compare draws ' +
+      'screen space alone from the composite\'s terms (`lit + weight x (ssr - probeSpecular)`, raw tracer hits): black where a ray missed. ' +
+      'Rays fill the same misses with the real geometry: **rt/fallback**.',
+    brief: {
+      kind: 'educational',
+      shows: 'Where screen-space reflections run out: things off screen, behind the camera or hidden behind other objects. The probes fill those pixels so the image stays whole.',
+      tryThis: ['Untick Fill misses from the probes: the ring in the floor and the whole wall mirror go black', 'Tick Tint the misses: magenta marks how much of each smooth pixel the probes filled', 'Pick Behind the camera: the mirror shows the bars behind you only through the probe'],
+      compare: 'Screen space alone, without the probe fill: black where a ray found nothing on screen',
+    },
+    category: 'features', status: 'stable', tags: ['ssr', 'misses', 'probes'], docs: 'concepts/screen-space-reflections', source: 'examples/features/ssr/what-it-misses/main.ts',
   },
   {
     slug: 'rt/fallback',
@@ -475,6 +515,11 @@ export const EXAMPLES: readonly ExampleEntry[] = [
   lab('ssr', 'ssr/', 'Screen-space test scenes', 'Every kit scene with every switch: SSR, rays, probes, the denoiser and the debug views.',
     'The scene kit (examples/shared) with `ScreenSpaceReflectionsPass` and the hybrid composite. `?scene=mirrorWall|offscreen|contact|roughnessRamp|boxRoom|moving|explainer|rooms|facingMirrors`, `?rt=1`, `?probes=0`, `?denoise=0`.',
     ['ssr', 'ray tracing', 'debug views'], 'examples/ssr/src/main.ts', 'concepts/screen-space-reflections', { kind: 'debugging', status: 'experimental' }),
+  lab('probes', 'probes/', 'Probe parity page', 'Three.js #35046\'s example on our probes, live-captured: every storage, lookup and capture option, and the probe checks.',
+    'A port of #35046\'s webgpu_reflection_probes.html (the two rooms, a test grid, a mirror sphere) on `@pmndrs/reflections/three`, re-captured every frame. ' +
+    'Lookups `auto`, `cube-array` (the #35053 shim), the 2D array with `warp` / `none`, the legacy TSL node and a hardware-cube diagnostic; capture resolution, bounces, ' +
+    'the LightProbeGrid re-fit. `?static`, `?grid`, `?refit`, `?lookup=`. `pnpm check -- --only probes` runs its checks; `--compare` diffs it against the denoiser repo\'s page.',
+    ['probes', '#35046', 'parity'], 'examples/probes/src/main.ts', 'concepts/reflection-probes', { status: 'experimental' }),
   lab('scenes', 'scenes/', 'Scene kit and G-buffer', 'The test scenes and every frame-contract target: depth, normals, roughness, motion, scene colour.',
     '`FrameGBuffer` renders the scene once with MRT; a fullscreen pass shows one target or all of them in a grid. `?scene=…`.',
     ['g-buffer', 'frame contract'], 'examples/scenes/src/main.ts', 'concepts/frame-contract'),
