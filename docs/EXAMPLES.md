@@ -1,7 +1,8 @@
 # Examples plan
 
 The plan for the public example set: one page for each key feature or combination, one for each engine, and the
-showcase on top. Status: **proposed** (2026-11-27). Nothing below is built yet unless the table says "exists".
+showcase on top. Status: **approved** (maintainer, 2026-11-27): every page below; the existing procedural scenes to start with; **0.1.0
+ships with the examples** (all of them ready is part of the 0.1.0 gate in `docs/RELEASING.md`).
 
 ## What every example is
 
@@ -98,7 +99,7 @@ links here, so they exist once. `reflect-bench` stays there (it compares denoise
 
 | Wave | Work | Who | Gate |
 | --- | --- | --- | --- |
-| E1 | `catalog.ts`, the shared shell (info panel with brief, nav, source and docs links), the gallery from the catalog, Vite inputs and `pnpm check` from the catalog; move the existing pages in under their slugs (old URLs redirect) | Opus | `pnpm check` and `site:check` pass; every existing page in the gallery |
+| E1 (W92) | `catalog.ts`, the shared shell (info panel with brief, nav, source and docs links), the gallery from the catalog, Vite inputs and `pnpm check` from the catalog; existing pages listed where they are (their URLs do not change); `probes/box-projection` built as the reference page the others copy | Opus | `pnpm check` and `site:check` pass; every existing page in the gallery |
 | E2 | Features, batch 1: `probes/*`, `ssr/*`, `rt/*`, `hybrid/explained` | Opus | Each page: check passes, brief written, compare switch visible |
 | E3 | Features, batch 2: `denoise`, `materials`, `motion`, `perf/*`, `custom/tsl`, `setup/device-limits` | Opus, parallel to E2 | Same; `motion/animated` rest flicker within the quickstart bound |
 | E4 | Engines: `engines/*` on `rooms` | Opus | Each loads; Babylon and core match the three page's probe + screen-space look within a stated bound |
@@ -108,11 +109,11 @@ links here, so they exist once. `reflect-bench` stays there (it compares denoise
 E2 and E3 start once E1 is merged. Each wave logs in `docs/HANDOFF.md`; divergences from the denoiser's pages go in
 `docs/DIVERGES.md`.
 
-## Open
+## Decided
 
-- **Scope:** 16 feature pages may be more than needed. The minimum set that still covers every feature:
-  `probes/two-rooms`, `probes/live`, `ssr/what-it-misses`, `rt/fallback`, `rt/animated`, `hybrid/explained`,
-  `denoise/glossy`, `motion/animated`, `perf/presets`, plus the engines.
-- **Models on feature pages:** procedural scenes only (fast, no network), or a model on some.
-- **Before or after 0.1.0:** examples do not change the package, so they can ship after the release; the
-  `hybrid/explained` rebuild may find API gaps worth fixing first.
+- **Scope:** every page above (maintainer, 2026-11-27).
+- **Scenes:** the procedural scenes in `examples/shared` to start with; models stay in the showcase unless a page
+  needs one.
+- **Release:** 0.1.0 waits for the examples. All of them ready, checked and on the site is part of its gate.
+- **Paths:** existing pages keep their folders and URLs (`quickstart/`, `showcase/`, ...); the catalog's slug and
+  path are separate. New pages go in `examples/<category>/<name>/`.

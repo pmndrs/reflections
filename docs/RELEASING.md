@@ -82,6 +82,8 @@ from the Actions tab (dry run by default). The dist-tag follows the version: `x.
   `npm i @pmndrs/reflections@alpha three@0.187` (ray tracing: `@pmndrs/raytracer @pmndrs/bvh` too),
   import from `@pmndrs/reflections/three`, `npx tsc --noEmit`, `npx vite build`.
 - Create a GitHub release from the tag with the CHANGELOG entry (mark it "pre-release" for alpha / beta / rc).
+- **0.1.0 waits for the examples** (maintainer, 2026-11-27): every page in `docs/EXAMPLES.md` built, checked in
+  `pnpm check`, and on the site.
 - Moving `alpha` to `0.1.0` stable: bump to `0.1.0`, changelog, dry run, tag `v0.1.0`; it lands on
   `latest`. Old prerelease tags stay where they are unless you move them
   (`npm dist-tag add @pmndrs/reflections@0.1.0 alpha` if `alpha` should follow).
