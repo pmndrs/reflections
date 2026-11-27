@@ -236,8 +236,14 @@ interface RaytracerModule {
 
 /** Load @pmndrs/raytracer and @pmndrs/bvh and check that they read the same GPU layout this wrapper was written for. */
 export async function loadRaytracer(module?: unknown, bvhModule?: unknown): Promise<{ rt: RaytracerModule; bvh: BvhModule }> {
-  const rt = (module ?? (await import('@pmndrs/raytracer'))) as unknown as RaytracerModule;
-  const bvh = (bvhModule ?? (await import('@pmndrs/bvh'))) as unknown as BvhModule;
+  // Each import sits in its own try / catch: webpack (and so Next.js) then reports a missing optional peer as a warning
+  // and builds, instead of failing the app's build; at run time the import throws and the check below names the package.
+  let rtLoaded: unknown = module;
+  let bvhLoaded: unknown = bvhModule;
+  if (rtLoaded == null) { try { rtLoaded = await import('@pmndrs/raytracer'); } catch { rtLoaded = null; } }
+  if (bvhLoaded == null) { try { bvhLoaded = await import('@pmndrs/bvh'); } catch { bvhLoaded = null; } }
+  const rt = rtLoaded as RaytracerModule;
+  const bvh = bvhLoaded as BvhModule;
   // W91: a bundler can stand an empty module in for a missing optional peer (Vite does): name the package, not a layout
   const missing = [typeof rt?.rtModuleWgsl !== 'function' && '@pmndrs/raytracer', typeof bvh?.createMeshLayoutBuilder !== 'function' && '@pmndrs/bvh'].filter(Boolean);
   if (missing.length) {

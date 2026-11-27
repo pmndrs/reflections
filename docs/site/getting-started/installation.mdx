@@ -96,5 +96,7 @@ optional G-buffer targets off and falls back to estimates. It does not crash. Se
 
 ## Bundlers
 
-Vite, webpack 5 and esbuild need no special configuration. With Vite, if you link the package from outside your
+Vite, webpack 5 (and so Next.js) and esbuild need no special configuration. Without `@pmndrs/raytracer` and
+`@pmndrs/bvh` installed, webpack prints a "Module not found" warning for each and builds; ray tracing then stays off
+with one console warning. With Vite, if you link the package from outside your
 project, add its folder to `server.fs.allow`.

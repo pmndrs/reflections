@@ -14,6 +14,8 @@
   `cone` (0.05) reads textures slightly soft, which keeps the rest flicker where it was.
 - Babylon: `BabylonProbe` takes `originOffset` and `projectionOffset` (as three's `ReflectionProbe`), and
   `ScreenSpaceReflections` honours `settings.frameIndex` instead of overwriting it.
+- webpack 5 and Next.js build an app that does not install the optional `@pmndrs/raytracer` / `@pmndrs/bvh`
+  (a warning instead of a failed build). Tested: webpack 5 with and without them, Vite 6 and esbuild without them.
 - `Reflections.create` takes `gbufferOptions` (e.g. a render size below the canvas, for an upscaler after the
   composite) and `timestamps` (per-pass GPU ms through `reflections.ssr.readTimings()`), passed to the pass.
 - `applyReflectionsPreset(reflections, name)` takes a `Reflections` and rebuilds it when the preset changes the
