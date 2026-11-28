@@ -323,6 +323,15 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W52 (D3640): D3513\'s visibility ray along R for on-screen re-shaded traced hits too. Wheel 43 -> 41 vs PT 26 (carConcept); mirrors seen in mirrors go black where blocked (facingMirrors, D3542). Needs Hit shadow rays on.',
     cost: 'rt trace +0.30 ms (W52)',
   }),
+  num('t.hitLobeOcclusionRays', 'rt', 'Lobe occlusion rays (traced hits)', 0, 16, 1, 0, {
+    defaultNote: 'off', appliesTo: RT, api: 'traceSettings.hitLobeOcclusionRays',
+    tradeoff: 'W107 (T14, D5700): short any-hit rays over a traced hit\'s own specular lobe (a fixed pattern: no noise); the lobe\'s probe light is scaled by the share left open. Darkens closed spaces the probes don\'t resolve (floor under the car, inside the wheels). Where D3513\'s ray applies: off-screen hits, on-screen ones with the visibility ray on all. 0 = off.',
+    cost: 'rays per traced hit; see W107',
+  }),
+  num('t.hitLobeOcclusionLength', 'rt', 'Lobe occlusion length', 0, 2, 0.01, 0.3, {
+    appliesTo: RT, api: 'traceSettings.hitLobeOcclusionLength',
+    tradeoff: 'W107: the lobe rays\' length x the hit\'s camera distance; farther blockers count as open (the probes hold them).',
+  }),
   sel('t.tracedMissRate', 'rt', 'Traced miss rate (glossy)', [['full', 'full (every miss traced)'], ['half', 'half (every other quad + bilateral fill)']], 'full', {
     appliesTo: RT, api: 'traceSettings.tracedMissRate (or settings.tracedMissRate; traceSettings wins)',
     tradeoff: 'W74 (X4, D5060): \'half\' traces the glossy misses of every other 2x2 quad (a checkerboard flipping each frame); the others take their traced neighbours\' result through core bilateralFill (plane distance, normal power, roughness, same source), or the probe where none fits. Half the glossy BVH rays; mirrors and near-mirrors stay full rate.',

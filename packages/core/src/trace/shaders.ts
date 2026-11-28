@@ -77,7 +77,7 @@ struct RtParams {
   hitShadeOcclusion: u32,
   hitLobeFilterMixed: f32,
   glossyAlpha: f32,
-  _pad67: f32, // 67: was W71's hitLobeFilterGrazing (X1 #3; removed by W76, D5002)
+  hitLobeOcclusionLength: f32, // 67: W107 (T14, D5700) x the hit's camera distance (was W71's hitLobeFilterGrazing, removed by W76)
   fillPlaneTolerance: f32,      // 68 (W74, X4): the half-rate fill's BilateralWeights
   fillNormalPower: f32,         // 69
   fillRoughnessTolerance: f32,  // 70
@@ -89,7 +89,7 @@ struct RtParams {
   lobeFilterShare: f32,         // 76: W72 (X2 #6, D5021)
   coneAlphaScale: f32,          // 77: W72 (D5024): the cone at on-screen reused hits (hitColorConeScale x filter share; 0 = off)
   pxPerUnit: f32,               // 78: 0.5 x height x projection[1][1] (px per world unit at clip w 1)
-  pad79: u32,                   // 79: reserved, RT_PARAMS_SIZE 320
+  hitLobeOcclusionRays: u32,    // 79: W107 (T14, D5700): lobe rays per hit (0 = off)
 };
 @group(0) @binding(0) var<uniform> P: RtParams;
 `;
@@ -395,6 +395,10 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
   // D3550: the ray stands for its lobe; W72 (D5021): x the share the sample leaves to filters (1, or sqrt(mirrorBias) with mirrorBiasCompensate)
   let spread = P.hitLobeFilter * rtLobeMixScale(coords) * alpha * P.lobeFilterShare;
   hitLobeSpread = spread * spread;
+  // W107 (T14, D5700): lobe occlusion rays wherever the hit's lobe takes the BVH visibility ray
+  // (off-screen hits; on-screen re-shades with hitShadeVisibility 'all'), length x the hit's distance.
+  hitLobeOcclusionLength = P.hitLobeOcclusionLength * length(hitP - P.cameraPosition);
+  hitLobeOcclusionRays = select(0u, P.hitLobeOcclusionRays, P.hitShadows != 0u);
   if (P.reuseOnScreen != 0u && onScreenRadiance(hitP, hitN, &L, 2.0 * hit.t * tan(min(1.287 * alpha * P.coneAlphaScale, 1.4)))) {
     source = ${RT_SOURCE.onScreenHit}u;
     atomicAdd(&state[${RT_STATE.onScreen}], 1u);
@@ -404,6 +408,7 @@ fn main(@builtin(local_invocation_index) gi: u32, @builtin(workgroup_id) wg: vec
     // 'screen' (and 'offscreen') the depth-buffer march (D3642).
     if (P.reshadeOnScreen != 0u) {
       rtLobeVisibility = select(select(RT_VIS_NONE, RT_VIS_SCREEN, P.hitShadeOcclusion != 0u), RT_VIS_BVH, P.hitShadeVisibilityAll != 0u);
+      if (rtLobeVisibility != RT_VIS_BVH) { hitLobeOcclusionRays = 0u; }
       hsoPixel = coords;
       L = hitShadeSurface(hit, hitP, hitN, dir, vec3f(0.0), L);
       rtLobeVisibility = RT_VIS_BVH;

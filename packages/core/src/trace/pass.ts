@@ -14,7 +14,7 @@ import { dedupeWgslChunks } from '../probes/layouts';
 import { mat4Invert, mat4Mul } from '../sssr/math';
 import { PassTimer } from '../sssr/timer';
 import { checkStageLimits, countStageBindings } from '../limits';
-import { DEFAULT_HIT_LOBE_FILTER, DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, DEFAULT_SHADING_NORMAL_WGSL, DEFAULT_TRACE_ANY_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
+import { DEFAULT_HIT_LOBE_FILTER, DEFAULT_HIT_LOBE_OCCLUSION_LENGTH, DEFAULT_HIT_MATERIAL_WGSL, DEFAULT_HIT_SPECULAR_WGSL, DEFAULT_SHADING_NORMAL_WGSL, DEFAULT_TRACE_ANY_WGSL, fallbackHitShading, type HitShading, type TraceProvider } from './provider';
 import { RT_BEGIN_WGSL, RT_FILL_MARK_WGSL, RT_FILL_SCATTER_WGSL, RT_PARAMS_SIZE, RT_STATE, RT_STATE_HEADER, rtFillGatherWgsl, rtTraceWgsl } from './shaders';
 import { BILATERAL_FILL_WGSL, bilateralFillWeightWords, resolveBilateralFillWeights } from '../bilateral/fill';
 
@@ -102,6 +102,22 @@ export interface TracedReflectionsSettings {
    * `hitShadeVisibility` 'offscreen') marches 8 depth-buffer samples along R instead. Default 'off'.
    */
   hitShadeOcclusion?: 'off' | 'screen';
+  /**
+   * Lobe occlusion at traced hits (W107, T14, D5700): this many short any-hit rays over the hit's own
+   * GGX specular lobe (a fixed pattern, the same every pixel and frame: no noise), and the lobe's
+   * radiance (probe / environment along R) is scaled by the weighted share that leaves unblocked
+   * within `hitLobeOcclusionLength`. It only darkens (min with D3513's ray along R), and applies
+   * where that ray does: hits shaded from the BVH's material, and on-screen re-shades with
+   * `hitShadeVisibility` 'all'. For closed spaces the probes don't resolve: the floor under a car,
+   * the inside of a wheel. Needs `hitShadows`. 0 = off (default), at most 16.
+   */
+  hitLobeOcclusionRays?: number;
+  /**
+   * Length of those rays, x the hit's camera distance (scale-free, as `normalOffset`): a blocker
+   * farther than this counts as open (the probes hold what is far). Default
+   * {@link DEFAULT_HIT_LOBE_OCCLUSION_LENGTH}.
+   */
+  hitLobeOcclusionLength?: number;
   /**
    * The lobe filter where hits mix (W52, D3641), as the SSSR tracer's `hitLobeFilterMixed` (pass
    * the tracer's): a traced hit with a screen-space hit near it last frame (this pass's own `source`
@@ -414,7 +430,9 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     u[64] = (s.hitShadeOcclusion ?? 'off') === 'screen' ? 1 : 0;
     f[65] = Math.min(1, Math.max(0, s.hitLobeFilterMixed ?? 1));
     f[66] = (s.roughnessThreshold ?? 0.447) ** 2;
-    // 67: padding (was W71's hitLobeFilterGrazing, removed by W76)
+    // 67, 79: W107 (T14, D5700) lobe occlusion at hits (67 was W71's hitLobeFilterGrazing, removed by W76)
+    f[67] = Math.max(0, s.hitLobeOcclusionLength ?? DEFAULT_HIT_LOBE_OCCLUSION_LENGTH);
+    u[79] = Math.min(16, Math.max(0, Math.floor(s.hitLobeOcclusionRays ?? 0)));
     // 68-75: W74 (X4) the half-rate fill
     bilateralFillWeightWords(resolveBilateralFillWeights({
       planeTolerance: s.fillPlaneTolerance, normalPower: s.fillNormalPower, roughnessTolerance: s.fillRoughnessTolerance,

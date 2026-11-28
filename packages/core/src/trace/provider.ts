@@ -119,6 +119,9 @@ export interface TraceProvider {
  */
 export const DEFAULT_HIT_LOBE_FILTER = 1;
 
+/** W107 (T14, D5700): the lobe occlusion rays' length, x the hit's camera distance (`hitLobeOcclusionLength`). */
+export const DEFAULT_HIT_LOBE_OCCLUSION_LENGTH = 0.3;
+
 export const HIT_WGSL = /* wgsl */ `
 struct Hit {
   t: f32,
@@ -173,6 +176,12 @@ fn hitLayered(s: HitSpecular, diffuse: vec3f, envBase: vec3f, envCoat: vec3f, Nd
 // The mean is unchanged (a prefilter is a convolution); what goes is the rare very bright sample
 // (a softbox seen sharply through a mirror floor) that the denoiser clips as a firefly.
 var<private> hitLobeSpread: f32 = 0.0;
+// Lobe occlusion at a hit (W107, T14, D5700): a pass with a BVH sets these before it shades a hit
+// (the trace pass's hitLobeOcclusionRays / hitLobeOcclusionLength); hitShadeLobe then sends that
+// many short visibility rays over the hit's own GGX lobe, each at most hitLobeOcclusionLength (world)
+// long. 0 rays (every other pass): no lobe test, the shading is as before.
+var<private> hitLobeOcclusionRays: u32 = 0u;
+var<private> hitLobeOcclusionLength: f32 = 0.0;
 fn hitLookupRoughness(roughness: f32) -> f32 {
   let a = roughness * roughness;
   return min(1.0, sqrt(sqrt(a * a + hitLobeSpread)));
