@@ -2763,12 +2763,15 @@ async function probeParity(pages) {
  * pair and with each lookup walking on its own (`lookupExp=nopair`, as before W109) are the same pixels (views raw =
  * three's lit image and final), and the lit programs hold the pair and no single lookup.
  */
-const PAIR_SHOTS = `async (views) => {
-  const p = window.__p; const out = {};
+const PAIR_SHOTS = `async (views, diffSrc) => {
+  const p = window.__p; const out = {}, shots = {};
   for (const mode of ['nopair', '']) {
     p.setLookupExp(mode);
-    for (const v of views) { p.setView(v); p.ssr.settings.frameIndex = 0; await p.step(6); out[mode + ':' + v] = await p.shot(); }
+    for (const v of views) { p.setView(v); p.ssr.settings.frameIndex = 0; await p.step(6); shots[mode + ':' + v] = await p.shot(); }
   }
+  // diffed in the page: several MB of PNGs in one CDP reply never arrive (Sponza)
+  const diff = eval('(' + diffSrc + ')');
+  for (const v of views) out[v] = await diff(shots['nopair:' + v], shots[':' + v]);
   // fragment programs are keyed by their code (r187 Pipelines)
   const code = [...p.renderer._pipelines.programs.fragment.keys()].filter((c) => /probesLookupPair\\d+\\(/.test(c));
   // calls per program (not the fn line): one, or a pair is built twice
@@ -2778,17 +2781,19 @@ const PAIR_SHOTS = `async (views) => {
 }`;
 async function probePairChecks(pages) {
   const views = ['raw', 'final'];
-  // Sponza recompiles slowly: its shipped layout only with PAIR_CASES=all
-  const cases = process.env.PAIR_CASES === 'all' ? [['rooms', 'shipped'], ['showcaseSponza', 'oneSize128'], ['showcaseSponza', 'shipped']] : process.env.PAIR_CASES === 'rooms' ? [['rooms', 'shipped']] : [['rooms', 'shipped'], ['showcaseSponza', 'oneSize128']];
+  // PAIR_CASES=rooms: rooms only; =all: Sponza's shipped layout too. The shots are diffed in the page (Sponza's PNGs
+  // are too large for one CDP reply)
+  const sponza = process.env.PAIR_CASES !== 'rooms';
+  const cases = [['rooms', 'shipped'], ...(sponza ? [['showcaseSponza', 'oneSize128']] : []), ...(sponza && process.env.PAIR_CASES === 'all' ? [['showcaseSponza', 'shipped']] : [])];
   for (const [scene, layout] of cases) {
     const before = results.logs.length;
     const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&probeLayout=${layout}&texLimit=adapter&scene=${scene}`); pages.push(p);
     await p.T("(window.__p.setDenoise(false), window.__p.setHitColor('current'), true)");
     await p.T(CONE_READY);
-    const r = await p.T(`(${PAIR_SHOTS})(${JSON.stringify(views)})`);
+    const r = await p.T(`(${PAIR_SHOTS})(${JSON.stringify(views)}, ${JSON.stringify(PIXEL_DIFF)})`);
     check(`probe pair ${scene} ${layout}: lit programs hold the one-walk pair, called once, without a single lookup beside it`, r.programs.pair > 0 && r.programs.pairAndSingle === 0 && r.programs.maxCalls === 1, JSON.stringify(r.programs));
     for (const v of views) {
-      const d = await p.T(`(${PIXEL_DIFF})(${JSON.stringify(r['nopair:' + v])}, ${JSON.stringify(r[':' + v])})`);
+      const d = r[v];
       check(`probe pair ${scene} ${layout} ${v}: one walk = two walks, 0 differing pixels`, d.px === 0, `${d.px} of ${d.total} px differ, max ${d.max} / 255`);
     }
     const bad = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
