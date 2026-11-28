@@ -165,6 +165,10 @@ async function main() {
     const width = engine.getRenderWidth(), height = engine.getRenderHeight();
     ssr.configure(width, height);
     scene.frameGraph = null;
+    // FrameGraph.dispose() only resets its tasks. Dispose them too: the old present otherwise keeps the scene's
+    // image processing marked 'applied by a post process', so the new present never compiles its defines and
+    // draws linear colour with no exposure, ACES or sRGB encode (a resize made the page ~50/255 darker, W103).
+    for (const task of graph?.tasks ?? []) task.dispose();
     graph?.dispose();
     graph = new FrameGraph(scene);
     const size = { width, height };
