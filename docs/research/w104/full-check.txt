@@ -1,0 +1,868 @@
+
+> @pmndrs/reflections@0.1.0 check /Users/dex/Developer/reflections/.claude/worktrees/agent-aa10121dbd12d0838
+> node scripts/run-headless.mjs
+
+examples/probes:
+  [PASS] probes baked - {"revision":"187","probes":3,"lookup":"auto"}
+  [PASS] cube-array support installed and self-tested (W20 shim) - shim: three r187, self-test passed (2 cubes x 6 faces x 4 texels)
+  saved out/probes-warp.png
+  saved out/probes-none.png
+  saved out/probes-hw.png
+  saved out/probes-cube-array.png
+  saved out/probes-auto.png
+  [PASS] image is lit - mean luminance 33.7
+  [PASS] 'warp' lookup matches the hardware cube sampler - mean 0.051, max 3 / 255
+  [PASS] core lookup matches the pre-phase-2 TSL node ('warp') - mean 0.0000, max 0 / 255
+  [PASS] core lookup matches the pre-phase-2 TSL node ('none') - mean 0.0000, max 0 / 255
+  saved out/probes-grid-core.png
+  [PASS] core lookup matches the pre-phase-2 TSL node (grid + mirror sphere) - mean 0.0000, max 0 / 255
+  [PASS] 'cube-array' lookup matches the hardware cube sampler (closer than 'warp') - mean 0.0000, max 0 / 255 (warp: mean 0.0513, max 3)
+  [PASS] layout 'auto' bakes a cube array when the shim is active - bakedLayout cube-array, vs 'cube-array' max 0 / 255
+  [PASS] without the shim, 'auto' falls back to the 2D array ('warp' image) - bakedLayout cube2d, vs 'warp' max 0 / 255
+  [PASS] without the shim, layout 'cube-array' throws - ReflectionProbes: layout 'cube-array' needs a renderer that binds cube arrays: three with 
+  [PASS] shim is reversible and idempotent - patched methods 10 -> 0 -> 10, same promise true, re-install true, layout cube-array
+  [PASS] a failing self-test uninstalls the shim and reports false; auto falls back - self-test failed: pixel 0 reads 0,0,0,0, expected 10,60,60,255 (layer/face orientation); then auto cube2d, re-install true (cube-array)
+  [PASS] seam options default: distanceRoughness on, roughnessLerp off (W26, D53) - [true,false]
+  [PASS] lod mapping default: 'alpha' (W31, D101) - "alpha"
+  [PASS] probe feature checks run on the requested layout (cube-array) - cube-array
+  [PASS] bake restores shadow autoUpdate - {"lights":2,"autoUpdate":true}
+  [PASS] projectionOffset = moving the probe with the opposite originOffset - mean 0.0000, 0.000 % of pixels > 2/255
+  [PASS] projectionOffset changes the image - mean 0.446 without the offset
+  [PASS] coverage: alpha 0 outside every volume, 1 inside, fade between; rgb 0 outside - alpha [1,1,1,1,0,0,0,0.2], max err 1.9e-7
+  [PASS] coverage: rgb * alpha equals the vec3 form (black environment) - max rel err 3.4e-8
+  [PASS] lookup option normal: Lagarde's dominant direction (R at r 0, N at r 1) - max rel err 0.0e+0, 0.0e+0
+  [PASS] lookup option ao: Lagarde's specular occlusion - max rel err 9.1e-7
+  [PASS] lookup option frameIrradiance: re-fit by k / probe L1 irradiance, clamped - max rel err 9.0e-8 (ratios 0.332 0.839 4 0.568 1.326 4 ...), clamp 0.0e+0
+  [PASS] lookup option refit: false keeps a lookup with frameIrradiance plain (D803) - max rel err 0.0e+0
+  [PASS] lookup options distanceRoughness / roughnessLerp: Lagarde 2014 Listing 25 / App. F - max rel err dist 0.0e+0, lerp 0.0e+0, both 0.0e+0, geometry 0.0e+0; changes the lookup by up to 0.307 / 0.476
+  saved out/probes-refit-off.png
+  saved out/probes-refit-on.png
+  [PASS] re-fit with LightProbeGrid renders and changes the image - lum 33.1, mean diff 6.50 / 255
+  saved out/probes-bounces-2.png
+  [PASS] bake bounces: 2 adds the probes' interreflection; back to 1 restores the plain bake (D25) - bounce 2 vs 1: mean 4.37 / 255, lum 33.6 -> 38.0; back to 1: max 0 / 255
+  [PASS] probe sets of 3 layouts in one shader match their own lookups (D805) - cube-hw max 0 / 255 (float 0.0e+0, tone-mapped 0.0e+0 / 255, lum 0.13), cube2d-warp max 0 / 255 (float 1.5e-8, tone-mapped 2.9e-6 / 255, lum 0.18), cube2d-none max 0 / 255 (float 0.0e+0, tone-mapped 0.0e+0 / 255, lum 0.18)
+  [PASS] mixed probe resolutions (cube-array): each probe samples its own atlas at its own size (D4700) - {"resolutions":[128,64,256],"atlases":[0,2,1,2],"slots":[0,0,0,1],"environmentSlot":1,"layout":"cube-array","seamFix":"none","textures":3}; 128 px (atlas 0 slot 0): vs own size 0, re-fit 0, vs other sizes >= 1.1e-1, lum 0.98; 256 px (atlas 2 slot 0): vs own size 0, re-fit 0, vs other sizes >= 6.4e-2, lum 0.99; 64 px (atlas 1 slot 0): vs own size 0, re-fit 0, vs other sizes >= 1.1e-1, lum 1.01; 256 px (atlas 2 slot 1): vs own size 0, re-fit 0, vs other sizes >= 1.3e-1, lum 1.48
+  [PASS] mixed probe resolutions: a time-sliced re-bake of one probe moves only its lookups (D4700) - max change per probe 0.0e+0, 0.0e+0, 0.0e+0, 2.7e+0
+  [PASS] mixed probe resolutions (warp): each probe samples its own atlas at its own size (D4700) - {"resolutions":[128,64,256],"atlases":[0,2,1,2],"slots":[0,0,0,1],"environmentSlot":1,"layout":"cube2d","seamFix":"warp","textures":3}; 128 px (atlas 0 slot 0): vs own size 0, re-fit 0, vs other sizes >= 1.1e-1, lum 0.98; 256 px (atlas 2 slot 0): vs own size 0, re-fit 0, vs other sizes >= 5.6e-2, lum 0.99; 64 px (atlas 1 slot 0): vs own size 0, re-fit 0, vs other sizes >= 1.2e-1, lum 1.01; 256 px (atlas 2 slot 1): vs own size 0, re-fit 0, vs other sizes >= 1.4e-1, lum 1.48
+  [PASS] mixed probe resolutions (none): each probe samples its own atlas at its own size (D4700) - {"resolutions":[128,64,256],"atlases":[0,2,1,2],"slots":[0,0,0,1],"environmentSlot":1,"layout":"cube2d","seamFix":"none","textures":3}; 128 px (atlas 0 slot 0): vs own size 0, re-fit 0, vs other sizes >= 1.1e-1, lum 0.98; 256 px (atlas 2 slot 0): vs own size 0, re-fit 0, vs other sizes >= 6.4e-2, lum 0.99; 64 px (atlas 1 slot 0): vs own size 0, re-fit 0, vs other sizes >= 1.1e-1, lum 1.01; 256 px (atlas 2 slot 1): vs own size 0, re-fit 0, vs other sizes >= 1.3e-1, lum 1.48
+  [PASS] mixed probe resolutions (cube-array, 2 bounces): each probe samples its own atlas at its own size (D4700) - {"resolutions":[128,64,256],"atlases":[0,2,1,2],"slots":[0,0,0,1],"environmentSlot":1,"layout":"cube-array","seamFix":"none","textures":3}; 128 px (atlas 0 slot 0): vs own size 0, re-fit 0, vs other sizes >= 1.1e-1, lum 0.98; 256 px (atlas 2 slot 0): vs own size 0, re-fit 0, vs other sizes >= 6.4e-2, lum 0.99; 64 px (atlas 1 slot 0): vs own size 0, re-fit 0, vs other sizes >= 1.1e-1, lum 1.01; 256 px (atlas 2 slot 1): vs own size 0, re-fit 0, vs other sizes >= 1.3e-1, lum 1.48
+  [PASS] probe atlas bound only as its layout's view dimension (D2204) - cube-array: cube-array, cube-array
+  [PASS] bake irradiance through the cube-array view = the 2D-array path (D2204) - max |diff| 3.69e-5 of 1.747 (rel 2.11e-5)
+  [PASS] compatibility-mode renderer: the cube-array shim declines, 'auto' bakes the 2D array (D2204) - {"available":true,"compat":true,"installed":false,"supported":false,"storage":"cube2d"}
+  [PASS] two probe sets of equal size keep their own programs - left 255,0,0, right 0,0,255, keys differ true
+  [PASS] time-sliced bake over 3 calls = full bake - max 0 / 255, 0.000 % px
+  [PASS] one slice alone differs from the full bake - max 151 / 255
+  [PASS] bake slices between renders of one frame: the view keeps its own shadows - max per slice 0 0 0 / 255
+  [PASS] environment captured only when it changed - {"noEnvironment":3,"added":4,"unchanged":3,"versionBumped":4,"always":4,"slicedUnchanged":0,"removed":3}
+  [PASS] environment reaches the image, and removing it clears the slot - lit mean 45.342, removed max 0 / 255
+  [PASS] helper draws world-space influence and projection boxes - {"children":9,"boxes":6,"centreErr":4.440892098500626e-16}
+examples/bc6h:
+  [PASS] texture-compression-bc available
+  [PASS] bc6h 128px cube, fast decodes close to the source - log2 RMSE 0.1562, log2 max 8.546, PSNR 36.58 dB, per mip 0.116 0.110 0.344 0.711 0.206 0.790 0.355 0.009
+  [PASS] bc6h 128px cube, normal decodes close to the source - log2 RMSE 0.1414, log2 max 5.783, PSNR 40.13 dB, per mip 0.114 0.137 0.338 0.274 0.164 0.706 0.503 0.013
+  [PASS] bc6h 256px cube, fast decodes close to the source - log2 RMSE 0.0981, log2 max 8.546, PSNR 40.76 dB, per mip 0.069 0.116 0.110 0.344 0.711 0.206 0.790 0.355 0.009
+  [PASS] bc6h 256px cube, normal decodes close to the source - log2 RMSE 0.0931, log2 max 6.114, PSNR 43.92 dB, per mip 0.070 0.114 0.137 0.338 0.274 0.164 0.706 0.503 0.013
+  encode 1 x 128px cube, fast: GPU 0.051 ms, wall 0.465 ms
+  encode 1 x 128px cube, normal: GPU 0.784 ms, wall 1.035 ms
+  encode 1 x 256px cube, fast: GPU 0.059 ms, wall 0.360 ms
+  encode 1 x 256px cube, normal: GPU 1.331 ms, wall 1.640 ms
+  encode 16 x 128px cube, fast: GPU 0.269 ms, wall 2.900 ms
+  encode 16 x 128px cube, normal: GPU 5.000 ms, wall 7.850 ms
+  encode 16 x 256px cube, fast: GPU 0.578 ms, wall 3.700 ms
+  encode 16 x 256px cube, normal: GPU 7.934 ms, wall 11.000 ms
+  saved out/bc6h.png
+examples/regressions:
+  [PASS] ssr hitColor 'history': first frame with an app historySource reads no stale history - 0/3531 stale, 3527 current
+  [PASS] ssr hitColor 'history': resetHistory() with an app historySource reads no stale history - second frame (valid history) 3533/3533 stale, 0 current; after reset 0/3531 stale, 3527 current
+  [PASS] ssr hitColor 'history' -> 'current' -> 'history' reads no stale lit history - while stale 3529/3533 stale, 0 current; current 0/3531 stale, 3527 current; back to history 0/3538 stale, 3534 current
+  [PASS] ssrHistory: no WebGPU errors
+  [PASS] rt tile cap: budget 362 over 905 tiles is spread fairly over 4 frames - tiles traced in k of 4 frames [31,422,452,0,0]; never 31 (uniform 137.8 +- 10.8, bound 181.0), every frame 0 (uniform 18.0 +- 4.2, bound 34.7)
+  [PASS] rt tile cap: the frame budget holds and is used - traced per frame 356 362 342 348 (budget 362, floor 304), tile caps 1 1 1 1
+  [PASS] rtTiles: no WebGPU errors
+  [PASS] rt limits: 5-buffer provider + probe fallback throws a clear error (default 8 storage buffers) - threw "rt: the trace pipeline binds 9 storage buffers in the compute stage (pass 3, radiance fallback 1, provider 'fake-5b-0t' 5, hit shading 0); the device allows 8 ("
+  [PASS] rt limits: a storage texture in the provider throws a clear error (default 4 storage textures) - threw "rt: the trace pipeline binds 5 storage textures in the compute stage (pass 4, radiance fallback 0, provider 'fake-0b-1t' 1, hit shading 0); the device allows 4 "
+  [PASS] rt limits: 4-buffer provider + probe fallback (8) and a raised limit (9) build without errors - 4 + probes: built; raised: built
+  [PASS] sssr limits: a 4-size probe set as fallback + hit shading (18 sampled textures) throws a clear error at 16, builds without errors with reflectionsRequiredLimits (W62, D4900; W64, D4901) - default: threw "ssr: the intersect pipeline binds 18 sampled textures in the compute stage (pass 10, radiance fallback 4, hit shading 4); the device allows 16 (maxSampledTextur"; library limits (32): built
+  [PASS] gbuffer: the first frame's projection is the one three renders with (forward depth) - max diff 1.08e-8; [10], [14]: first frame -1.0010 -0.1001, rendered -1.0010 -0.1001
+  [PASS] gbuffer: the first frame's projection is the one three renders with (reversed depth) - max diff 1.08e-8; [10], [14]: first frame 0.0010 0.1001, rendered 0.0010 0.1001
+  [PASS] gbuffer: lit in a second pass (lit: 'pass') matches the G-buffer's lit attachment, other targets untouched - max |diff| 4.88e-4, mean 2.23e-8 over 67 % lit px; normals 0; 0 GPU errors 
+  [PASS] probes: dominant direction bends the environment sample too (inside, fade band, outside agree) - max |diff| vs the environment along the dominant direction: inside 0.00e+0, fade 0.00e+0, outside 0.00e+0; plain R vs dominant 2.37e-1
+  [PASS] probes: two computeIrradiance() calls in one encoder keep their own slots - slot 0 L00 3.5449 1.7724 0.8862 (expected 3.5449 1.7725 0.8862, rel err 1.11e-5); slot 1 0.8862 1.7724 7.0897 (expected 0.8862 1.7725 7.0898, rel err 1.11e-5)
+  [PASS] probes: a mirrored parent keeps a positive volume (scale -2, 1, 1) - coverage at the centre 1.000, 1.5 along x 1.000, 2.5 along x 0.000
+  [PASS] probes: a zero-scale parent gives a zero (disabled) volume - coverage at the centre 0.000, 0.3 off 0.000
+  [PASS] depth pyramid (forward Z, 1917x1079): same on 4 and 6 storage textures per stage; mip 0 a copy; mips = CPU fold incl. odd rows/columns - 7 mips: 0 texels differ between devices, copy 0, vs CPU fold 0; odd footprints change 342208 texels vs a plain 2x2
+  [PASS] depth pyramid (reverse Z, 1917x1079): same on 4 and 6 storage textures per stage; mip 0 a copy; mips = CPU fold incl. odd rows/columns - 7 mips: 0 texels differ between devices, copy 0, vs CPU fold 0; odd footprints change 343218 texels vs a plain 2x2
+  [PASS] probes: the documented minimum sourceSize (64) works; below it the error names the minimum - 64: ok; 32: "LayoutPrefilter: sourceSize must be a power of two >= 64, got 32."; 32: "LayoutPrefilter: sourceSize must be a power of two >= 64, got 32."; 64: ok
+  [PASS] probes: a bake that changes layout and environment lights its captures with the new environment - wall seen by probe a (rgb): env A 1.000 0.000 0.000; after env B + new probe 0.000 0.000 1.000; next bake 0.000 0.000 1.000
+  [PASS] rt on-screen reuse ignores inputs.history unless hitColor 'history' - current: 0/3569 on-screen hits from history; 'history': 3571/3571
+  [PASS] rt hitColor 'history' rejects a wrong-size or missing history like the tracer - wrong size: rt: history is 160x80, expected 320x160; missing: rt: hitColor 'history' needs inputs.history and inputs.motion
+  [PASS] rtHistory: no WebGPU errors
+  [PASS] rt: traced hits read their base colour texture (four quadrants of a canvas map, flipY, sRGB, x the material colour) - tl want 0.791,0.017,0.013 got 0.791,0.017,0.013; tr want 0.021,0.462,0.027 got 0.021,0.462,0.027; bl want 0.021,0.036,0.429 got 0.021,0.036,0.429; br want 0.956,0.765,0.574 got 0.956,0.765,0.574
+  [PASS] rtTextures: no WebGPU errors
+  [PASS] specular swap: confidence 0 gives lit exactly (every term) - max |final - lit| 0, mask mismatch 0 px
+  [PASS] specular swap: control halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.037/0.06/0.227 (lin 0.00012 of T 0.0245), full 0.035/0.067/0.389; material roughness: blend 0.142/3.293/9.635 (lin 0.00062 of T 0.0245), full 0.236/6.181/19.012; estimate: blend 0.502/13.079/24.795 (lin 0.00211 of T 0.0245), full 1.012/20.894/40.941
+  [PASS] specular swap: specularIntensity halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.039/0.056/0.079 (lin 0.00012 of T 0.00763), full 0.037/0.056/0.107; material roughness: blend 0.067/0.813/2.695 (lin 0.00025 of T 0.00763), full 0.096/1.551/5.331; estimate: blend 2.677/27.516/48.273 (lin 0.01112 of T 0.00763), full 7.404/41.367/53.73
+  [PASS] specular swap: specularColor halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.036/0.058/0.28 (lin 0.00012 of T 0.01929), full 0.036/0.061/0.502; material roughness: blend 0.129/2.202/6.24 (lin 0.00049 of T 0.01929), full 0.21/3.862/12.338; estimate: blend 1.565/12.339/23.327 (lin 0.00488 of T 0.01929), full 5.522/22.897/49.759
+  [PASS] specular swap: ior halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.037/0.064/0.308 (lin 0.00012 of T 0.03803), full 0.035/0.075/0.56; material roughness: blend 0.144/2.288/5.022 (lin 0.0006 of T 0.03803), full 0.23/4.102/9.834; estimate: blend 1.447/6.444/24.004 (lin 0.00647 of T 0.03803), full 5.341/18.343/40.51
+  [PASS] specular swap: envMapIntensity halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.035/0.059/0.079 (lin 0.0001 of T 0.01502), full 0.036/0.06/0.081; material roughness: blend 0.09/1.198/2.691 (lin 0.00028 of T 0.01502), full 0.128/1.876/4.889; estimate: blend 1.826/15.795/29.479 (lin 0.00616 of T 0.01502), full 2.357/24.633/50.657
+  [PASS] specular swap: aoMap halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.035/0.058/0.167 (lin 0.00009 of T 0.01674), full 0.035/0.062/0.292; material roughness: blend 0.083/1.046/2.449 (lin 0.00029 of T 0.01674), full 0.119/1.872/4.932; estimate: blend 2.446/38.171/77.566 (lin 0.00504 of T 0.01674), full 2.35/20.085/56.934
+  [PASS] specular swap: metal halo (c 0.5) mean < 0.15, p99 < 1 /255 - G-buffer: blend 0.029/0.108/0.609 (lin 0.00009 of T 0.26253), full 0.047/0.169/1.19; material roughness: blend 0.45/5.134/18.025 (lin 0.00159 of T 0.26253), full 0.473/8.02/23.626; estimate: blend 0.742/9.313/39.276 (lin 0.00206 of T 0.26253), full 1.158/15.516/35.248
+  [PASS] specularSwap: no WebGPU errors
+  [PASS] specular swap carConcept: confidence 0 gives lit exactly; in-scope halo (c 0.5) mean < 0.25 /255 - census {"meshes":110,"outOfScope":21,"specular":0,"ior":0,"aoMap":101,"envMapIntensity":0}; blend mean/p99/max: inScope 0.035/0.082/19.157 (83424 px) [estimate 0.663/25.66/255 (83424 px)]; specularOrIor 0/0/0 (0 px) [estimate 0/0/0 (0 px)]; aoMap 0.098/2.043/19.157 (3418 px) [estimate 14.972/59.638/255 (3418 px)]; outOfScope 0.173/3.443/32.818 (9971 px) [estimate 7.875/96.056/255 (9971 px)]; all 0.05/0.259/32.818 (93395 px) [estimate 1.433/33.15/255 (93395 px)]
+  [PASS] specular swap toyCar: confidence 0 gives lit exactly; in-scope halo (c 0.5) mean < 0.25 /255 - census {"meshes":4,"outOfScope":3,"specular":0,"ior":0,"aoMap":2,"envMapIntensity":0}; blend mean/p99/max: inScope 0.033/0.082/0.378 (82216 px) [estimate 0.048/0.102/0.42 (82216 px)]; specularOrIor 0/0/0 (0 px) [estimate 0/0/0 (0 px)]; aoMap 0/0/0 (0 px) [estimate 0/0/0 (0 px)]; outOfScope 1.129/6.875/31.58 (10182 px) [estimate 5.229/55.525/255 (10182 px)]; all 0.154/2.535/31.58 (92398 px) [estimate 0.619/10.043/255 (92398 px)]
+  [PASS] specular swap chess: confidence 0 gives lit exactly; in-scope halo (c 0.5) mean < 0.25 /255 - census {"meshes":50,"outOfScope":16,"specular":0,"ior":0,"aoMap":33,"envMapIntensity":0}; blend mean/p99/max: inScope 0.033/0.081/1.828 (93395 px) [estimate 0.669/12.035/247.976 (93395 px)]; specularOrIor 0/0/0 (0 px) [estimate 0/0/0 (0 px)]; aoMap 0.032/0.154/1.828 (8304 px) [estimate 7.028/96.437/247.976 (8304 px)]; outOfScope 0.041/0.077/0.08 (241 px) [estimate 11.163/147.429/207.921 (241 px)]; all 0.033/0.081/1.828 (93636 px) [estimate 0.696/12.788/247.976 (93636 px)]
+  [PASS] specularSwapAssets: no WebGPU errors
+  [PASS] rt readStats() reports the last dispatched frame while an earlier read is pending - on-screen hits: A (reuse on) 3569, B (reuse off, read while A's was pending) 0, C (reuse on) 3569
+  [PASS] rtStats: no WebGPU errors
+  textureLimit warning: ReflectionProbes: material "HeavyPhysical" (MeshPhysicalMaterial) on "heavySphere" binds 18 sampled textures in its fragment shader, 3 of the textures probe atlases (one per probe size: 64, 128, 256 px); this device allows 16 (maxSampledTexturesPerShaderStage), so WebGPU will reject its pipeline and it will not draw. Fix: create the renderer with new WebGPURenderer({ requiredLimits: reflectionsRequiredLimits(adapter) }) (asks for up to 32 sampled textures where the adapter has them), or use fewer probe sizes (or fewer maps on this material).
+  [PASS] probes: a material past the sampled-texture limit gets one warning naming it, with the count WebGPU reports (T24) - limit 16, 3 atlases; ours 18, WebGPU 18; 1 warning(s) (heavy 1, light 0); WebGPU: The number of sampled textures (18) in the Fragment stage exceeds the maximum per-stage limit (16). This adapter supports a higher maxSampledTexturesPerShaderSt
+  [PASS] probes: with reflectionsRequiredLimits the same materials draw, no warning, no WebGPU error (T24) - limit 32; 0 warning(s), 0 error(s) 
+  [PASS] gbuffer: static scene with instanced, skinned, batched meshes has no motion - max 0.00e+0, per column (plain, instanced, skinned, batched) 0.00e+0 0.00e+0 0.00e+0 0.00e+0
+  [PASS] gbuffer: moving one instance moves only it - 209 px inside, 0 outside (max 0.00e+0), next frame max 0.00e+0
+  [PASS] gbuffer: camera cut + resetHistory() gives no motion - max 0.00e+0, next frame 0.00e+0
+  [PASS] gbuffer: two render() calls in one frame = one per frame - {"maxDiff":0,"nonzero":5720,"cameraPrevIsLastRender":true}
+  [PASS] gbuffer: jittered frames with the unjittered projection have no motion - {"maxMotion":0,"projectionUnjitteredAndJitteredExposed":true}
+  [PASS] gbuffer: roughnessNode / metalnessNode reach the G-buffer - roughness 0.250, metalness 0.749
+  [PASS] gbuffer: MeshBasic env reflection stays out of scene colour - 0.0512 0.0512 0.0512 (diffuse 0.0513)
+  [PASS] gbuffer: glass refracts the metal behind it into lit as a plain render does (W42, D3520) - centre rgb lit 0.9995 0.9995 0.9995, plain 0.9995 0.9995 0.9995
+  [PASS] gbuffer: logarithmicDepthBuffer rejected - FrameGBuffer: logarithmicDepthBuffer is not supported (the contract has no log-depth convention; depth would not invert with the projection). Use reversedDepthBuffer for precision instead.
+  [PASS] gbuffer: no WebGPU errors
+  [PASS] bc6h procedural cube 256: no anchor index overflows its slot - two-subset 0 of 7313, one-subset 0; hardware log2 RMSE 0.0700, blocks off by > 1 stop 46 of 24576, non-finite 0
+  [PASS] bc6h two-subset random 512: no anchor index overflows its slot - two-subset 0 of 58173, one-subset 0; hardware log2 RMSE 0.0985, blocks off by > 1 stop 562 of 65536, non-finite 0
+  [PASS] bc6h: capped scratch gives the same bits - 0 of 542208 bytes differ
+  [PASS] bc6h: 144 MiB of blocks on default limits (binding 128 MiB) - ok; max rel err 0.0107
+examples/scenes:
+  saved out/scenes-mirrorWall.png
+  [PASS] scene mirrorWall: every target filled per the contract - geometry 75%, mirrors 37.9% (scene 0.0000 vs lit 0.195), camera motion 100%
+  saved out/scenes-offscreen.png
+  [PASS] scene offscreen: every target filled per the contract - geometry 100%, mirrors 62.6% (scene 0.0000 vs lit 0.174), camera motion 100%
+  saved out/scenes-contact.png
+  [PASS] scene contact: every target filled per the contract - geometry 97%, mirrors 44.8% (scene 0.0000 vs lit 0.166), camera motion 100%
+  saved out/scenes-roughnessRamp.png
+  [PASS] scene roughnessRamp: every target filled per the contract - geometry 94%, mirrors 0.8% (scene 0.0000 vs lit 0.166), camera motion 100%
+  saved out/scenes-boxRoom.png
+  [PASS] scene boxRoom: every target filled per the contract - geometry 96%, mirrors 1.7% (scene 0.0000 vs lit 0.058), camera motion 100%
+  saved out/scenes-moving.png
+  [PASS] scene moving: every target filled per the contract - geometry 75%, mirrors 37.0% (scene 0.0000 vs lit 0.194), camera motion 100%, object motion on 3.5%
+  saved out/scenes-explainer.png
+  [PASS] scene explainer: every target filled per the contract - geometry 100%, mirrors 10.2% (scene 0.0000 vs lit 0.096), camera motion 100%, object motion on 2.0%
+  saved out/scenes-rooms.png
+  [PASS] scene rooms: every target filled per the contract - geometry 100%, mirrors 1.3% (scene 0.0000 vs lit 0.025), camera motion 100%, object motion on 2.0%
+  saved out/scenes-facingMirrors.png
+  [PASS] scene facingMirrors: every target filled per the contract - geometry 73%, mirrors 28.0% (scene 0.0000 vs lit 0.148), camera motion 100%
+  saved out/scenes-sponza.png
+  [PASS] scene sponza: every target filled per the contract - geometry 99%, mirrors 0.0% (scene 0.0000 vs lit -), camera motion 99%
+  saved out/scenes-chess.png
+  [PASS] scene chess: every target filled per the contract - geometry 83%, mirrors 62.9% (scene 0.0000 vs lit 0.104), camera motion 83%
+  saved out/scenes-helmet.png
+  [PASS] scene helmet: every target filled per the contract - geometry 83%, mirrors 0.0% (scene 0.0000 vs lit -), camera motion 83%
+  saved out/scenes-metalRough.png
+  [PASS] scene metalRough: every target filled per the contract - geometry 83%, mirrors 0.3% (scene 0.0000 vs lit 0.900), camera motion 83%
+  saved out/scenes-envTest.png
+  [PASS] scene envTest: every target filled per the contract - geometry 85%, mirrors 0.1% (scene 0.0000 vs lit 0.428), camera motion 85%
+  saved out/scenes-toyCar.png
+  [PASS] scene toyCar: every target filled per the contract - geometry 83%, mirrors 71.7% (scene 0.0000 vs lit 0.101), camera motion 83%
+  saved out/scenes-carConcept.png
+  [PASS] scene carConcept: every target filled per the contract - geometry 84%, mirrors 69.2% (scene 0.0000 vs lit 0.101), camera motion 83%
+examples/sssr-core:
+  stats {"variant":"subgroups","size":[960,540],"mipCount":7,"rays":123689,"tiles":3017,"misses":3716,"missDropped":0,"mirrorPixels":101689,"mirrorHitFraction":0.8234420635466962,"rampPixels":102933,"rampTracedFraction":0.7960906609153527,"maxTracedRoughness":0.19637063145637512,"thresholdAlpha":0.19980900000000001,"minUntracedRampRoughness":0.19986160099506378}
+  [PASS] sssr: rays traced, denoiser tiles listed - 123689 rays, 3017 tiles, 3716 misses
+  [PASS] sssr: sane hit fraction on the mirror floor - 82.3% of 101689 px
+  [PASS] sssr: no ray above the roughness threshold (perceptual, squared at the pass) - max traced alpha 0.1964 < 0.1998 <= min untraced ramp alpha 0.1999
+  [PASS] sssr: roughness ramp partly traced - 79.6%
+  saved out/sssr-core-grid.png
+  [PASS] sssr parity (occupancy 0, 1 spq): ray, tile, miss lists and tile flags - rays 123689,123689, tiles 3017,3017, misses 3363,3363
+  [PASS] sssr parity (occupancy 0, 1 spq): radiance, hit distance, roughness, pyramid bit for bit - differing px: radiance 0, hit 0, roughness 0, pyramid 0
+  [PASS] sssr parity (occupancy 0, 2 spq): ray, tile, miss lists and tile flags - rays 143777,143777, tiles 3017,3017, misses 5981,5981
+  [PASS] sssr parity (occupancy 0, 2 spq): radiance, hit distance, roughness, pyramid bit for bit - differing px: radiance 0, hit 0, roughness 0, pyramid 0
+  [PASS] sssr parity (occupancy 0, 4 spq): ray, tile, miss lists and tile flags - rays 183831,183831, tiles 3017,3017, misses 11184,11184
+  [PASS] sssr parity (occupancy 0, 4 spq): radiance, hit distance, roughness, pyramid bit for bit - differing px: radiance 0, hit 0, roughness 0, pyramid 0
+  [PASS] sssr parity (occupancy 0, 1 spq, maxCandidates 4): ray, tile, miss lists and tile flags - rays 123689,123689, tiles 3017,3017, misses 2728,2728
+  [PASS] sssr parity (occupancy 0, 1 spq, maxCandidates 4): radiance, hit distance, roughness, pyramid bit for bit - differing px: radiance 0, hit 0, roughness 0, pyramid 0
+  [PASS] sssr parity (occupancy 0, 4 spq, maxCandidates 8): ray, tile, miss lists and tile flags - rays 183831,183831, tiles 3017,3017, misses 8633,8633
+  [PASS] sssr parity (occupancy 0, 4 spq, maxCandidates 8): radiance, hit distance, roughness, pyramid bit for bit - differing px: radiance 0, hit 0, roughness 0, pyramid 0
+  [PASS] sssr: miss count deterministic at occupancy 0 - 3363, 3363 then 3363, 3363
+  [PASS] sssr parity (occupancy 4): lists - rays 123689,123689
+  occupancy 4: radiance differs on 2691 px, misses 3622 vs 3505 (informational)
+  [PASS] sssr X1 quadBaseRotation: default "fixed" = absent, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr X1 thicknessDepthFactor: default 0 = absent, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr X1 thicknessDepthMode: default "add" = absent, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr X1 hitColorConeGrazing: default 0 = absent, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr X1 all of them: default {"quadBaseRotation":"fixed","thicknessDepthFactor":0,"thicknessDepthMode":"add","hitColorConeGrazing":0} = absent, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr X1 relative at k 0: default {"thicknessDepthMode":"relative","thicknessDepthFactor":0} = absent, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: absent = cone + compensate + bias 0.5, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: hitColorFilter 'off' = the pre-W76 explicit path, bit for bit - rays 123689 / 123689, misses 4210 / 4210, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: explicit mirrorBias 0.5 = cone + truncation (no compensation), bit for bit - rays 123689 / 123689, misses 2420 / 2420, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: explicit mirrorBias 0 + compensate = the cone alone, bit for bit - rays 123689 / 123689, misses 4210 / 4210, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: missesTraced: unset thickness = 'relative' 0.02, bit for bit - rays 123689 / 123689, misses 3381 / 3381, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: missesTraced + thicknessDepthMode 'add' = RT off's thickness, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: missesTraced + thicknessDepthFactor 0 = RT off's thickness, bit for bit - rays 123689 / 123689, misses 3363 / 3363, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults: missesTraced + explicit thicknessDepthFactor 0.01 keeps 'add' (review), bit for bit - rays 123689 / 123689, misses 3359 / 3359, differing px radiance 0, hit 0
+  [PASS] sssr W76 defaults act: RT on changes the thickness (more misses), the cone default changes the hits vs off - misses 3363 to 3381 with missesTraced; off vs default: 71623 px differ, misses 4210 / 3363
+  [PASS] sssr X1 thicknessDepthFactor and its relative mode change the hits (k 0.05 added: fewer misses; relative 0.001: more) - misses 3363 to 3339 at k 0.05, 3363 to 3393 relative 0.001
+  [PASS] sssr X1 quadBaseRotation: fixed = top-left, frame cycles the corner, pattern spreads all four per frame - copy-carrying rays per corner [tl, tr, bl, br]: fixed [20016,0,0,0], frame [20016,0,0,0] [0,0,0,20090] [0,19978,0,0] [0,0,20090,0], pattern f0 [5004,4993,5022,5024]
+  [PASS] sssr X1 parity (quadBaseRotation frame, frameIndex 5): lists and images - rays 123812,123812, misses 3674,3674, radiance 0 px
+  [PASS] sssr X1 parity (quadBaseRotation pattern, frameIndex 6): lists and images - rays 123749,123749, misses 3601,3601, radiance 0 px
+  [PASS] sssr X1 parity (quadBaseRotation pattern, frameIndex 6, samplesPerQuad 2): lists and images - rays 143777,143777, misses 6216,6216, radiance 0 px
+  [PASS] sssr X1 parity (quadBaseRotation pattern, frameIndex 3, quadCopy sameSurface): lists and images - rays 123799,123799, misses 3413,3413, radiance 0 px
+  [PASS] sssr reverse-Z: hit fraction matches forward Z - 82.3% vs 82.3%, rays 123689 vs 123689
+  [PASS] sssr reverse-Z parity: lists and images - radiance 0 px
+  [PASS] sssr cube-environment fallback: same rays and hits - rays 123689, hit 82.3%
+  saved out/sssr-core-env.png
+  [PASS] sssr W76 hitColorConeGrazing 1 (default 0) changes the cone hits only (cube environment: same lists) - radiance 48092 px differ, hit distance 0, lists same true
+  fallbackRoughness {"misses":12319,"partials":1895,"mirrors":103724,"mirrorsDiffer":0,"confident":65695,"confidentDiffer":0,"missMirror":{"mean":2.564,"p99":85.048,"max":116.827},"missSurface":{"mean":0,"p99":0,"max":0},"partialMirror":{"mean":0.018,"p99":0.068,"max":3.11},"partialSurface":{"mean":0.011,"p99":0.04,"max":0.043}}
+  [PASS] sssr fallbackRoughness 'surface': glossy misses at the probe lookup of their own roughness - misses 12319: |radiance - lookup(r)| mean / p99 (/255) mirror 2.564 / 85.048, surface 0 / 0; partial confidence 1895: mirror 0.018 / 0.068, surface 0.011 / 0.04
+  [PASS] sssr fallbackRoughness 'surface': mirrors and confidence-1 pixels unchanged - 0 of 103724 mirror px, 0 of 65695 confidence-1 px differ
+  [PASS] sssr 3840x2160 all-mirror: intersect runs past 65535 x 64 rays - 7560122 rays, 118310 tiles, mirror floor hit 82.6%
+  GPU ms 1920x1080 (subgroups, median of 30): {"depth downsample":0.1888,"classify":0.1625,"blue noise":0.0031,"indirect args":0.0027,"hit colour pyramid":0.2099,"intersect":0.6547,"miss args":0.003,"total":1.3386}
+examples/ssr:
+  [PASS] ssr mirrorWall (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 197902 rays, 9582 misses, mean confidence 0.335 on geometry, mirror floor 0.651
+  [PASS] ssr mirrorWall (subgroups): mirror floor shows the wall - 97187 floor px reflect a visible wall point; 99.2% with confidence >= 0.9; luminance correlation 0.998, mean abs rel diff 0.018; hit distance median rel err 0.0001
+  [PASS] ssr mirrorWall (subgroups): reflected sphere and cube not striped - cube hf 0.033 vs direct 0.0190 (ratio 1.7), 97.7% of 6007 px confident; sphere hf 0.029 vs direct 0.0036 (ratio 7.9), 92.5% of 4616 px confident
+  saved out/ssr-mirrorWall-grid.png
+  saved out/ssr-mirrorWall-final.png
+  saved out/ssr-mirrorWall-noSSR.png
+  [PASS] ssr offscreen (subgroups): renders, no validation errors, finite outputs - 3 probe(s), 103114 rays, 69055 misses, mean confidence 0.256 on geometry, mirror floor 0.430
+  [PASS] ssr offscreen (subgroups): low confidence where the reflection comes from behind the camera - wall mirror (38616 px, view 'mirror'): mean confidence 0.0314; floor reflecting above the frame (default view): 0.430
+  saved out/ssr-offscreen-mirror-grid.png
+  [PASS] ssr contact (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 69831 rays, 24201 misses, mean confidence 0.363 on geometry, mirror floor 0.705
+  saved out/ssr-contact-grid.png
+  [PASS] ssr roughnessRamp (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 19142 rays, 8547 misses, mean confidence 0.066 on geometry, mirror floor 0.075
+  saved out/ssr-roughnessRamp-grid.png
+  [PASS] ssr boxRoom (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 42860 rays, 11960 misses, mean confidence 0.262 on geometry, mirror floor 0.000
+  saved out/ssr-boxRoom-grid.png
+  [PASS] ssr moving (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 198000 rays, 33939 misses, mean confidence 0.294 on geometry, mirror floor 0.535
+  saved out/ssr-moving-grid.png
+  [PASS] ssr explainer (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 63518 rays, 39617 misses, mean confidence 0.205 on geometry, mirror floor 0.000
+  saved out/ssr-explainer-grid.png
+  [PASS] ssr rooms (subgroups): renders, no validation errors, finite outputs - 3 probe(s), 41476 rays, 14729 misses, mean confidence 0.204 on geometry, mirror floor 0.900
+  saved out/ssr-rooms-grid.png
+  [PASS] ssr facingMirrors (subgroups): renders, no validation errors, finite outputs - 1 probe(s), 147042 rays, 33091 misses, mean confidence 0.312 on geometry, mirror floor 0.000
+  saved out/ssr-facingMirrors-current.png
+  saved out/ssr-facingMirrors-lit.png
+  saved out/ssr-facingMirrors-final.png
+  saved out/ssr-facingMirrors-reshade.png
+  [PASS] ssr facingMirrors (subgroups): mirror seen in a mirror is not black with last frame's colour - 9938 left-mirror px reflect the right mirror (95.9% confident), hitShading 'off'; current: 99.6% black, mean lum 0.001; lit: 0.0% black, mean lum 0.171; final: 0.5% black, mean lum 0.173
+  [PASS] ssr facingMirrors (subgroups): mirror seen in a mirror is not black with the re-shade (this frame's colour) - hitShading 'reshade', hitColor 'current': reshade: 0.0% black, mean lum 0.242
+  saved out/ssr-facingMirrors-grid.png
+  [PASS] ssr mirrorWall (workgroup): renders, no validation errors, finite outputs - 1 probe(s), 197902 rays, 9606 misses, mean confidence 0.335 on geometry, mirror floor 0.651
+  [PASS] ssr mirrorWall (workgroup): mirror floor shows the wall - 97187 floor px reflect a visible wall point; 99.2% with confidence >= 0.9; luminance correlation 0.998, mean abs rel diff 0.018; hit distance median rel err 0.0001
+  [PASS] ssr mirrorWall (workgroup): reflected sphere and cube not striped - cube hf 0.033 vs direct 0.0190 (ratio 1.7), 97.7% of 6007 px confident; sphere hf 0.029 vs direct 0.0036 (ratio 7.9), 92.5% of 4616 px confident
+  [PASS] ssr offscreen (workgroup): renders, no validation errors, finite outputs - 3 probe(s), 103114 rays, 69074 misses, mean confidence 0.256 on geometry, mirror floor 0.430
+  [PASS] ssr offscreen (workgroup): low confidence where the reflection comes from behind the camera - wall mirror (38616 px, view 'mirror'): mean confidence 0.0314; floor reflecting above the frame (default view): 0.430
+  GPU ms 1920x1080 through the three adapter (subgroups, mirrorWall, median of 30): {"depth downsample":0.2569,"classify":0.231,"blue noise":0.0045,"indirect args":0.0029,"hit colour pyramid":0.2358,"intersect":1.0032,"miss args":0.0033,"total":1.8522}
+  [PASS] ssr mirrorBias (hitColorFilter 'off'): 0 is the default path, 0.5 changes the rays - {"0":"a0fdeeab","unset":"a0fdeeab","unset again":"a0fdeeab","0.5":"db87c2e4"}
+  [PASS] ssr mirrorBias 0.5 (hitColorFilter 'off', D49): less raw noise on the roughnessRamp strips (r 0.2-0.4) - r 0.2: std 10.01 -> 4.97 (15917 px); r 0.3: std 11.79 -> 8.76 (36891 px); r 0.4: std 9.51 -> 6.43 (49486 px)
+  [PASS] ssr mirrorBiasCompensate at f 0.3 vs 0.7 (cone): raw noise falls with f on the roughnessRamp strips (sample alpha sqrt(1 - f); a swapped split would raise it) - r 0.2: std 9.02 -> 6.73; r 0.3: std 9.86 -> 8.41; r 0.4: std 7.91 -> 7.12
+  [PASS] ssr rayReuse: 'copy' is the default path, 'ratio' copies until its pipelines are built, then changes the radiance - {"unset":"a0fdeeab","copy":"a0fdeeab","ratio (first frame)":"a0fdeeab","ratio":"1caa6e46","copy again":"a0fdeeab"}
+  [PASS] ssr rayReuse 'ratio': less raw noise on the roughnessRamp strips (r 0.2-0.4) - r 0.2: std 10.03 -> 7.58 (15917 px); r 0.3: std 11.80 -> 8.32 (36891 px); r 0.4: std 9.53 -> 7.51 (49486 px)
+  [PASS] ssr rayReuse 'ratio': mean luma within 1.5 / 255 of copy@4 on the same strips (no dimming, no bias) - r 0.2: copy -0.03, ratio 0.80 (copy@4 mean 90.7); r 0.3: copy 0.00, ratio 0.77 (copy@4 mean 115.3); r 0.4: copy 0.02, ratio 0.45 (copy@4 mean 122.5)
+  [PASS] ssr hitColorFilter / mirrorBiasCompensate (W72, W76 defaults): unset = cone + compensation 0.5 bit for bit, 'off' = the old path (compensation ignored), the cone changes the hits, means within 10 % of off, no GPU errors - {"unset":"1b43e64c","off":"a0fdeeab","off + compensate (ignored)":"a0fdeeab","off + bias 0.5":"db87c2e4","off + bias 0.5 + compensate (ignored)":"db87c2e4","cone":"1b43e64c","cone + compensate 0.5 (explicit)":"1b43e64c","cone alone":"538e56a8","unset again":"1b43e64c","ratio, off":"1caa6e46","ratio (default cone)":"59626121","ratio, cone alone":"058dd137"}; glossy mean cone alone / off 1.0028, default / off 1.1331; GPU errors 0
+  [PASS] ssr hitColorFilter 'cone' with rayReuse 'ratio' (W72 + W73): the ratio intersect variant reads the pyramid - ratio off 1caa6e46, ratio + default cone 59626121, ratio + cone alone 058dd137
+  [PASS] ssr hitColorFilter 'cone' with hitColor 'history' and hitShading 'off' (the pyramid of last frame's colour) - off b2424cf5 / cone 6c263550, mean ratio 1.0233; GPU errors 0
+  [PASS] ssr hitColorFilter 'cone' with ?rt=1 (traced pass after the tracer): unset = explicit cone + compensation 0.5, stable; off and the cone alone differ - {"unset":"8ce3e7fd","off":"de0c15cb","cone":"aba944f0","comp 0.5":"8ce3e7fd","unset again":"8ce3e7fd"}; GPU errors 0
+  [PASS] ssr hitColorFilter 'cone' on a 97x61 canvas (odd sizes, a short pyramid) - active true, GPU errors 0
+  [PASS] pixi3d arcade: the cone + compensation 0.5 is the default without settings, 'off' turns it off without a rebuild (W72, W76) - {"active":true,"off":true,"back":true,"ran":{"hitColorFilter":"cone","mirrorBias":0.5,"mirrorBiasCompensate":true},"errors":0}
+  [PASS] ssr denoiser gate follows the roughness threshold (D1402) - threshold 0.8: gate 0.8, denoised (output != input): glossy 93.4% of 111202 px, between 99.9% of 135175 px, above 0.0% of 99717 px; gate back to 0.447
+  [PASS] ssr specOcc (GTAO -> Lagarde, probe part): darkens the contact creases only, no GPU errors - 1.00% px darker > 4/255, 95% of them where AO < 0.95; mean |change| where AO > 0.97: 0.095; min AO 0.02, min factor 0.00; GPU errors 0
+examples/ssr (hybrid + denoise):
+  [PASS] hybrid: denoiser found - ffx-reflections
+  saved out/hybrid-rooms-final.png
+  saved out/hybrid-rooms-raw.png
+  saved out/hybrid-rooms-split.png
+  saved out/hybrid-rooms-source.png
+  saved out/hybrid-rooms-confidence.png
+  [PASS] hybrid rooms: denoised composite renders, no validation errors
+  saved out/hybrid-mirrorWall-final.png
+  saved out/hybrid-mirrorWall-raw.png
+  saved out/hybrid-mirrorWall-split.png
+  saved out/hybrid-mirrorWall-source.png
+  saved out/hybrid-mirrorWall-confidence.png
+  [PASS] hybrid mirrorWall: denoised composite renders, no validation errors
+  saved out/hybrid-explainer-final.png
+  saved out/hybrid-explainer-raw.png
+  saved out/hybrid-explainer-split.png
+  saved out/hybrid-explainer-source.png
+  saved out/hybrid-explainer-confidence.png
+  [PASS] hybrid explainer: denoised composite renders, no validation errors
+  saved out/hybrid-mirrorWall-low-final.png
+  [PASS] hybrid mirrorWall low: the probe fallback behind the sphere is not dark - 2179 fallback px around the sphere's reflection: mean 154.6 / 255 (probes-only 153.8), wall 195.6
+  saved out/hybrid-mirrorWall-lowSphere-final.png
+  [PASS] hybrid mirrorWall lowSphere: the probe does not show through the reflected sphere - 41464 px reflect the sphere: probe weight 0.005 (FFX blend 0.048); 17669 px reflect the wall behind it: hit weight 0.095 (FFX 0.009)
+  seam mirrorWall floor r 0.3: 2008 blocks, step off 27.24 (bias -25.00), dist 26.71 (bias -24.40) / 255 luma
+  [PASS] hybrid seam (D53): glossy mirrorWall floor, distance roughness (the default) narrows the SSR-to-probe step - step off 27.24 -> distanceRoughness 26.71 / 255 over 2013 blocks (run-to-run <= 0.15)
+  saved out/half-res-mirrorWall-final.png
+  [PASS] half-res mirrorWall: traced and denoised at half size, the upsampled residual carries the reflection and stays near full res - 132860 reflection px: full vs probe-only 50.98, this vs probe-only 50.88, this vs full 6.09 (max 183); tracer 480x270 of 960x540, 2590 traced rays
+  saved out/half-res-contact-final.png
+  [PASS] half-res contact: traced and denoised at half size, the upsampled residual carries the reflection and stays near full res - 203444 reflection px: full vs probe-only 50.02, this vs probe-only 49.75, this vs full 7.27 (max 184); tracer 480x270 of 960x540, 6697 traced rays
+  saved out/half-res-ratio-halfrate-contact.png
+  [PASS] half-res + rayReuse 'ratio' + tracedMissRate 'half' (contact, rt): all finite, the fill ran, no validation errors - non-finite 0; traced 5467, half-rate skipped 1230, filled 4880; residual non-zero 1075506 of 2073600
+  [PASS] half-res odd size 961x541 contact: tracer 481x271, reflection carried, near full - 203701 reflection px: full vs probe-only 50.12, this vs probe-only 49.82, this vs full 7.35 (max 182); tracer 481x271
+  [PASS] half-res runtime switch full -> half -> full ends identical to full, half-res targets released - final after the switch back vs before: mean 0.000, max 0/255; upsampled targets 961 px wide at half, 1 after
+  [PASS] W76 review 3: a rebuilt tracer runs the cone from its first frame (resize, full / half, hit-shading change): no frame on the 'off' path, no validation errors - [{"label":"full -> half","rebuilt":true,"size":[480,270],"cone":true},{"label":"half -> full","rebuilt":true,"size":[960,540],"cone":true},{"label":"hit shading probes -> environment","rebuilt":true,"size":[960,540],"cone":true},{"label":"environment -> probes","rebuilt":true,"size":[960,540],"cone":true}]
+  [PASS] preset 'performance' (?preset=): half-res trace, same frame as ?res=half, the denoiser's options untouched (no hit source) - preset: half 480/960 px, hit source own (false), FFX options false/false; by hand: half 480/960 px, hit source own (false), FFX options false/false; frame vs by hand mean 0.000, max 0/255
+  [PASS] preset 'performance' + explicit ?res=full: the explicit setting wins - full 960/960 px, hit source own (false), FFX options false/false
+  [PASS] an unknown ?preset= warns and renders as no preset - warned true; full 960/960 px, hit source own (false), FFX options false/false
+  [PASS] preset 'default' after 'performance': the tracer runs the package defaults from core's resolution (W76: cone + compensation at 0.5; 'relative' 0.02 with RT) - {"hitColorFilter":"cone","mirrorBias":0.5,"mirrorBiasCompensate":true,"thicknessDepthMode":"relative","thicknessDepthFactor":0.02}
+  [PASS] applyReflectionsPreset at runtime rebuilds from the page's own settings: performance + 'all' -> default returns to its half + 'hits'; a ?preset=performance page goes to the package default - own: half 480/960 px, hit source own (true), FFX options true/true; performance + all: half 480/960 px, hit source all (true), FFX options true/false; default: half 480/960 px, hit source own (true), FFX options true/true; ?preset=performance page -> default: full 960/960 px, hit source own (false), FFX options false/false
+  [PASS] a hit source a denoiser without setOptions cannot take: hybrid.hitSourceUnsupported is set and a warning logged - before false, after true, warned true
+examples/ssr (?rt=1):
+  [PASS] rt provider (@pmndrs/raytracer) agrees with THREE.Raycaster - 4096/4096 agree (0 both miss), gpu-only 0, cpu-only 0, p99 rel 3.4e-7, max rel 5.1e-7; BVH 13 meshes, 3760 tris, 24 ms
+  [PASS] rt @pmndrs/raytracer: traceAny agrees with traceFirstHit, camera rays - hit/miss 4096/4096 (4096 hits); nothing before 0.5 t 4096/4096, something before 1.5 t 4096/4096
+  [PASS] rt @pmndrs/raytracer: traceAny agrees with traceFirstHit, scene rays - hit/miss 4096/4096 (1768 hits); nothing before 0.5 t 1768/1768, something before 1.5 t 1768/1768
+  [PASS] rt offscreen: renders, no validation errors, finite outputs - 41759 misses -> {"misses":41759,"traced":41759,"capped":0,"hits":41470,"tracedMisses":289,"onScreenHits":2964,"tilesWithMisses":1035,"tileCap":64,"halfRateSkipped":0,"fillOverflow":0,"filled":0,"fillFallbacks":0,"frame":2}
+  [PASS] rt offscreen: the wall mirror shows the wall behind the camera with RT on, not off - confidence 0.031 -> 1.000 over 38616 px; traced hit distance vs analytic: median rel err 1.64e-3, 97.5% of 28992 px within 2%
+  [PASS] rt offscreen: the emissive bars behind the camera appear in the mirror - panel px with luminance > 1: 0.24% -> 4.10%; mean panel radiance 0.007 -> 0.131
+  saved out/ssr-rt-offscreen-mirror-grid.png
+  saved out/ssr-rt-offscreen-mirror-final.png
+  saved out/ssr-rt-offscreen-mirror-source.png
+  [PASS] rt cap: traced rays never exceed the per-tile cap or the frame budget - 41885 misses: 3000 traced (budget 3000), 38885 capped; tile cap 3 over 1154 tiles with misses, max traced in a tile 3, 1129 tiles traced
+  saved out/ssr-rt-offscreen-capped.png
+  [PASS] rt mirrorWall: renders, finite, no validation errors - 9606 misses -> {"misses":9606,"traced":9606,"capped":0,"hits":3020,"tracedMisses":6586,"onScreenHits":1904,"tilesWithMisses":538,"tileCap":64,"halfRateSkipped":0,"fillOverflow":0,"filled":0,"fillFallbacks":0,"frame":2}; wall: 100.0% confident, corr 0.997
+  rt mirrorWall: D901 at the package defaults (W76): probes: mean 0.185 vs 0.177 (ratio 1.046), mean abs rel 0.071
+  rt mirrorWall: hit shading vs on-screen colour over 1639 traced hits the camera sees: shadows off mean 0.328 vs 0.311 (ratio 1.055), mean abs rel 0.068; on mean 0.323 vs 0.311 (ratio 1.037), mean abs rel 0.051; > 1% darker with shadows 2.4% (off vs off 0.0%), brighter 0.00% (off vs off 0.00%)
+  [PASS] rt mirrorWall: shadow rays only darken shaded hits (D903) - 1217 shaded hits: 25.2% > 1% darker, 0.00% brighter (same rays twice without shadows: 0.00% / 0.00%); mean 0.365 -> 0.340
+  [PASS] rt mirrorWall: traced hits lit by the probes at the hit match the on-screen brightness (D901) - probes: mean 0.323 vs 0.311 (ratio 1.037), mean abs rel 0.051; environment mean: mean 0.218 vs 0.311 (ratio 0.700), mean abs rel 0.306
+  [PASS] rt contact: renders, finite, no validation errors - 26303 misses -> {"misses":26303,"traced":26303,"capped":0,"hits":17861,"tracedMisses":8442,"onScreenHits":8121,"tilesWithMisses":2207,"tileCap":64,"halfRateSkipped":0,"fillOverflow":0,"filled":0,"fillFallbacks":0,"frame":2}
+  rt contact: D901 at the package defaults (W76): probes: mean 0.218 vs 0.202 (ratio 1.077), mean abs rel 0.211
+  rt contact: hit shading vs on-screen colour over 25380 traced hits the camera sees: shadows off mean 0.272 vs 0.253 (ratio 1.074), mean abs rel 0.196; on mean 0.271 vs 0.253 (ratio 1.071), mean abs rel 0.194; > 1% darker with shadows 0.2% (off vs off 0.0%), brighter 0.00% (off vs off 0.00%)
+  [PASS] rt contact: shadow rays only darken shaded hits (D903) - 38469 shaded hits: 6.2% > 1% darker, 0.00% brighter (same rays twice without shadows: 0.00% / 0.00%); mean 0.277 -> 0.273
+  [PASS] rt contact: traced hits lit by the probes at the hit match the on-screen brightness (D901) - probes: mean 0.271 vs 0.253 (ratio 1.071), mean abs rel 0.194; environment mean: mean 0.215 vs 0.253 (ratio 0.851), mean abs rel 0.260
+  [PASS] rt @pmndrs/raytracer: shading normal = three's interpolated normal, contact, camera rays (D1700) - 3989/3989 hits within cos 0.999, mean 1.4e-6 deg (flat geometric normal: mean 0.513 deg)
+  [PASS] rt @pmndrs/raytracer: shading normal = three's interpolated normal, contact, scene rays (D1700) - 1623/1623 hits within cos 0.999, mean 2.6e-7 deg (flat geometric normal: mean 0.043 deg)
+  [PASS] rt moving: renders, finite, no validation errors - 35696 misses -> {"misses":35696,"traced":35696,"capped":0,"hits":27429,"tracedMisses":8267,"onScreenHits":11347,"tilesWithMisses":1329,"tileCap":64,"halfRateSkipped":0,"fillOverflow":0,"filled":0,"fillFallbacks":0,"frame":2}
+  rt moving: D901 at the package defaults (W76): probes: mean 0.268 vs 0.257 (ratio 1.044), mean abs rel 0.134
+  rt moving: hit shading vs on-screen colour over 10979 traced hits the camera sees: shadows off mean 0.373 vs 0.359 (ratio 1.041), mean abs rel 0.077; on mean 0.372 vs 0.359 (ratio 1.037), mean abs rel 0.074; > 1% darker with shadows 0.7% (off vs off 0.0%), brighter 0.00% (off vs off 0.00%)
+  [PASS] rt moving: shadow rays only darken shaded hits (D903) - 18900 shaded hits: 14.5% > 1% darker, 0.00% brighter (same rays twice without shadows: 0.00% / 0.00%); mean 0.356 -> 0.345
+  [PASS] rt moving: traced hits lit by the probes at the hit match the on-screen brightness (D901) - probes: mean 0.372 vs 0.359 (ratio 1.037), mean abs rel 0.074; environment mean: mean 0.259 vs 0.359 (ratio 0.722), mean abs rel 0.289
+  [PASS] rt tracedMissRate 'half': fewer traced rays, the skipped quads filled from their traced neighbours, no validation errors - traced 26394 -> 21796, 4616 quads on the fill list, 18202 px filled, 245 kept the probe, overflow 0
+  [PASS] rt tracedMissRate 'half': filled px match full-rate tracing on average (contact, still frame: radiance bias and 8x8 block means) - 9740 px changed (18165 filled, 306 kept the probe): bias -2.5 %, 8x8 block mean error 9.5 % over 490 blocks, confidence 0.800 vs 0.815
+  [PASS] rt @pmndrs/raytracer: each material of a multi-material mesh at its own triangles, camera rays (D1701) - of 2552 hits (2 multi-material meshes, 12 groups): green emissive 321/321 (first material's colour 251), red 215/215 (first material's colour 195), mirror floor (alone) 1982/1982, blue (one material) (alone) 34/34
+  [PASS] rt @pmndrs/raytracer: each material of a multi-material mesh at its own triangles, scene rays (D1701) - of 1766 hits (2 multi-material meshes, 12 groups): mirror floor (alone) 1617/1617, green emissive 71/71 (first material's colour 46), red 64/64 (first material's colour 43), blue (one material) (alone) 14/14
+  saved out/ssr-rt-multi-material-pmndrs-raytracer.png
+  [PASS] facingMirrors: the probe fallback in the SSR misses stays near the ray-traced fill (objects out of the captures, D4301) - mean abs diff / 255 vs rt=1 over the misses; default: 33097 miss px, all captured 14.57 -> kit 11.85; left: 131843 miss px, all captured 23.82 -> kit 21.77 (limits {"default":22.5,"left":27})
+  [PASS] offscreen: the ring shows in the RT-off fallback where ?rt=1 has it (emissives captured, floor probe lidded at the ring, D4400; floor + mirror probes 512 px, D4701) - kit (3 probes, atlases 256,512 px): warm px rt 1153, rt-off 1657, both 1150; floor ring rt 3249, rt-off 3646, both 3231; all 256 px: warm px rt 1161, rt-off 1980, both 1158; floor ring rt 3271, rt-off 3877, both 3256; one room probe: warm px rt 1118, rt-off 1724, both 486; floor ring rt 3104, rt-off 3226, both 524
+  [PASS] offscreen: per-probe sizes (floor and mirror at 512 px) fill the SSR misses closer to RT than all 256 px (D4701) - default 17.77 -> 17.26, mirror 13.26 -> 13.02; atlases 16.8 -> 41.9 MB (all 512: 67.1)
+  [PASS] offscreen: the probe fallback in the SSR misses stays near the ray-traced fill (D4400) - mean abs diff / 255 vs rt=1 over the misses (mirror: the wall mirror's upper part); default: 69097 miss px, one room probe 26.70 -> kit 17.26; mirror: 28363 miss px, one room probe 17.44 -> kit 13.02 (limits {"default":18.3,"mirror":14.2}, margins {"default":5,"mirror":2})
+  saved out/w47-rt-default-final.png
+  saved out/w47-rt-default-ssr.png
+  saved out/w47-rt-mirror-final.png
+  saved out/w47-rt-mirror-ssr.png
+  [PASS] rt: traced hits over a mixed-size probe set see the probes outside the primary atlas (offscreen, floor + mirror 512 px, D4702) - default: 166862 hit px, vs all 512: kit 0.0003 (rel 0.003), room only 0.0005 (rel 0.005), self 0.0e+0; kit != room on 4186 px (all 512 != room on 68185), there vs all 512: kit 0.0001, room 0.0061; mirror: 51901 hit px, vs all 512: kit 0.0003 (rel 0.003), room only 0.0012 (rel 0.010), self 0.0e+0; kit != room on 6711 px (all 512 != room on 10230), there vs all 512: kit 0.0001, room 0.0066; kit atlases 2 [256,512]
+  rt GPU ms at 1920x1080 (offscreen 'mirror', median of 20): threshold 0: 0 misses, trace 0.004 ms (all passes 0.776); threshold 0.3: 160991 misses, trace 0.288 ms (all passes 1.090); threshold 0.9: 166141 misses, trace 0.299 ms (all passes 1.103); threshold 1.01: 280847 misses, trace 0.421 ms (all passes 1.240)
+  [PASS] rt GPU ms scales with the miss count - 0: 0.004 ms, 160991: 0.288 ms, 166141: 0.299 ms, 280847: 0.421 ms
+examples/ssr ?probeLayout (W61):
+  rooms: page ready (14:44:42)
+  saved out/w61-rooms-shipped-final.png
+  saved out/w61-rooms-shipped-probeIndex.png
+  saved out/w61-rooms-shipped-probeCount.png
+  [PASS] probe layout rooms 'shipped': bakes and renders, the scene's own set, views' weights = the lookup's coverage - 3 probes (the scene's own 3 probes), 16.77 MB (plan 16.77, budget 34.59, -51.5 %), bake 79 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.05, max 2, env-only px 0; 3 probes dominant somewhere
+  saved out/w61-rooms-few-final.png
+  saved out/w61-rooms-few-probeIndex.png
+  saved out/w61-rooms-few-probeCount.png
+  [PASS] probe layout rooms 'few': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 2 probes (2 x 512 px, hand placed), 34.60 MB (plan 34.60, budget 34.59, 0.0 %), bake 45 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.04, max 2, env-only px 0; 2 probes dominant somewhere
+  saved out/w61-rooms-medium-final.png
+  saved out/w61-rooms-medium-probeIndex.png
+  saved out/w61-rooms-medium-probeCount.png
+  [PASS] probe layout rooms 'medium': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 8 probes (8 x 256 px grid), 34.59 MB (plan 34.59, budget 34.59, 0.0 %), bake 210 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.32, max 4, env-only px 0; 8 probes dominant somewhere
+  saved out/w61-rooms-many-final.png
+  saved out/w61-rooms-many-probeIndex.png
+  saved out/w61-rooms-many-probeCount.png
+  [PASS] probe layout rooms 'many': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 32 probes (32 x 128 px grid), 34.57 MB (plan 34.57, budget 34.59, -0.1 %), bake 77 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.48, max 4, env-only px 0; 30 probes dominant somewhere
+  saved out/w61-rooms-manyCell-final.png
+  saved out/w61-rooms-manyCell-probeIndex.png
+  saved out/w61-rooms-manyCell-probeCount.png
+  [PASS] probe layout rooms 'manyCell': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 32 probes (32 x 128 px grid, each projected onto its own cell), 34.57 MB (plan 34.57, budget 34.59, -0.1 %), bake 61 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.48, max 4, env-only px 0; 30 probes dominant somewhere
+  saved out/w61-rooms-mixed-final.png
+  saved out/w61-rooms-mixed-probeIndex.png
+  saved out/w61-rooms-mixed-probeCount.png
+  [PASS] probe layout rooms 'mixed': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 26 probes (a 256 px floor slab per room (r 0.12), 24 x 128 px grid), 34.58 MB (plan 34.58, budget 34.59, -0.1 %), bake 53 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.30, max 5, env-only px 0; 24 probes dominant somewhere
+  [PASS] probe sets at the array-layer limit: 41 + environment at one size bake, 42 throw a clear error; 42 in an atlas of their own bake, 43 throw (W61) - maxTextureArrayLayers 256; 41 x 128 (env 128): ok; 42 x 128 (env 128): "ReflectionProbes: 43 cubes of 128 px need 258 array layers (6 per probe + 6 for the environment), but this device allows 256. Create the renderer with a larger ", page kept its 41; 42 x 128 (env 256): ok; 43 x 128 (env 256): throws; shipped re-baked after: 3
+  [PASS] probe layouts rooms: no validation errors or exceptions
+  offscreen: page ready (14:45:19)
+  saved out/w61-offscreen-shipped-final.png
+  saved out/w61-offscreen-shipped-probeIndex.png
+  saved out/w61-offscreen-shipped-probeCount.png
+  [PASS] probe layout offscreen 'shipped': bakes and renders, the scene's own set, views' weights = the lookup's coverage - 3 probes (the scene's own 3 probes), 41.94 MB (plan 41.94, budget 34.59, 21.2 %), bake 248 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.07, max 3, env-only px 0; 3 probes dominant somewhere
+  saved out/w61-offscreen-few-final.png
+  saved out/w61-offscreen-few-probeIndex.png
+  saved out/w61-offscreen-few-probeCount.png
+  [PASS] probe layout offscreen 'few': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 2 probes (2 x 512 px, hand placed), 34.60 MB (plan 34.60, budget 34.59, 0.0 %), bake 33 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.05, max 2, env-only px 0; 2 probes dominant somewhere
+  saved out/w61-offscreen-medium-final.png
+  saved out/w61-offscreen-medium-probeIndex.png
+  saved out/w61-offscreen-medium-probeCount.png
+  [PASS] probe layout offscreen 'medium': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 8 probes (8 x 256 px grid), 34.59 MB (plan 34.59, budget 34.59, 0.0 %), bake 31 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.34, max 4, env-only px 0; 4 probes dominant somewhere
+  saved out/w61-offscreen-many-final.png
+  saved out/w61-offscreen-many-probeIndex.png
+  saved out/w61-offscreen-many-probeCount.png
+  [PASS] probe layout offscreen 'many': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 32 probes (32 x 128 px grid), 34.57 MB (plan 34.57, budget 34.59, -0.1 %), bake 59 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.44, max 4, env-only px 0; 14 probes dominant somewhere
+  saved out/w61-offscreen-manyCell-final.png
+  saved out/w61-offscreen-manyCell-probeIndex.png
+  saved out/w61-offscreen-manyCell-probeCount.png
+  [PASS] probe layout offscreen 'manyCell': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 32 probes (32 x 128 px grid, each projected onto its own cell), 34.57 MB (plan 34.57, budget 34.59, -0.1 %), bake 55 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.44, max 4, env-only px 0; 14 probes dominant somewhere
+  saved out/w61-offscreen-mixed-final.png
+  saved out/w61-offscreen-mixed-probeIndex.png
+  saved out/w61-offscreen-mixed-probeCount.png
+  [PASS] probe layout offscreen 'mixed': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 3 probes (the kit (room, lidded floor, wall mirror) with floor + mirror 512, room 128), 35.65 MB (plan 35.65, budget 34.59, 3.0 %), bake 42 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.07, max 3, env-only px 0; 3 probes dominant somewhere
+  [PASS] probe layouts offscreen: no validation errors or exceptions
+  showcaseSponza: page ready (14:45:54)
+  saved out/w61-showcaseSponza-shipped-final.png
+  saved out/w61-showcaseSponza-shipped-probeIndex.png
+  saved out/w61-showcaseSponza-shipped-probeCount.png
+  [PASS] probe layout showcaseSponza 'shipped': bakes and renders, the scene's own set, views' weights = the lookup's coverage - 7 probes (the scene's own 7 probes), 33.55 MB (plan 33.55, budget 34.59, -3.0 %), bake 56 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.00, max 1, env-only px 0; 7 probes dominant somewhere
+  saved out/w61-showcaseSponza-few-final.png
+  saved out/w61-showcaseSponza-few-probeIndex.png
+  saved out/w61-showcaseSponza-few-probeCount.png
+  [PASS] probe layout showcaseSponza 'few': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 2 probes (2 x 512 px, hand placed), 34.60 MB (plan 34.60, budget 34.59, 0.0 %), bake 60 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.87, max 2, env-only px 0; 2 probes dominant somewhere
+  saved out/w61-showcaseSponza-medium-final.png
+  saved out/w61-showcaseSponza-medium-probeIndex.png
+  saved out/w61-showcaseSponza-medium-probeCount.png
+  [PASS] probe layout showcaseSponza 'medium': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 8 probes (8 x 256 px grid), 34.59 MB (plan 34.59, budget 34.59, 0.0 %), bake 51 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.80, max 5, env-only px 0; 8 probes dominant somewhere
+  saved out/w61-showcaseSponza-many-final.png
+  saved out/w61-showcaseSponza-many-probeIndex.png
+  saved out/w61-showcaseSponza-many-probeCount.png
+  [PASS] probe layout showcaseSponza 'many': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 32 probes (32 x 128 px grid), 34.57 MB (plan 34.57, budget 34.59, -0.1 %), bake 123 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 2.24, max 6, env-only px 0; 25 probes dominant somewhere
+  saved out/w61-showcaseSponza-manyCell-final.png
+  saved out/w61-showcaseSponza-manyCell-probeIndex.png
+  saved out/w61-showcaseSponza-manyCell-probeCount.png
+  [PASS] probe layout showcaseSponza 'manyCell': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 32 probes (32 x 128 px grid, each projected onto its own cell), 34.57 MB (plan 34.57, budget 34.59, -0.1 %), bake 91 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 2.24, max 6, env-only px 0; 25 probes dominant somewhere
+  saved out/w61-showcaseSponza-mixed-final.png
+  saved out/w61-showcaseSponza-mixed-probeIndex.png
+  saved out/w61-showcaseSponza-mixed-probeCount.png
+  [PASS] probe layout showcaseSponza 'mixed': bakes and renders, atlases within 10 % of the budget, views' weights = the lookup's coverage - 11 probes (courtyard floor slab 512, aisle floor slabs 256, 8 x 128 px grid), 34.59 MB (plan 34.59, budget 34.59, -0.0 %), bake 40 ms; |sum - coverage| x 50 max 0 / 255; volumes per px mean 1.77, max 6, env-only px 0; 11 probes dominant somewhere
+  [PASS] probe layouts showcaseSponza: no validation errors or exceptions
+probe bindings (W62):
+  saved out/w62-sponza-mixed-default.png
+  saved out/w62-sponza-mixed-adapter.png
+  saved out/w62-sponza-mixed-adapter2.png
+  [PASS] Sponza's 3-size probe set (128 / 256 / 512 px) draws at WebGPU's default 16 sampled textures per stage, as at the adapter's 48 (shared atlas nodes, D4900) - errors 0; vs 48: mean 0.0000, max 0 / 255 (the page against itself: mean 0.0000, max 0), luminance 38.0
+  [PASS] examples/ssr without ?texLimit gets the library limits: up to 32 sampled textures per stage (reflectionsRequiredLimits) - device limit 32
+examples/babylon:
+  [PASS] babylon (subgroups): renders, no validation errors, finite outputs - 197895 rays, mean confidence 0.340 on geometry
+  [PASS] babylon (subgroups): mirror floor reflects the scene (confident SSR) - 196688 mirror px, 65.1% with confidence >= 0.9
+  [PASS] babylon: W76 defaults reach the adapter (cone + compensation at mirrorBias 0.5, active, no GPU errors) - {"active":true,"hitColorFilter":"cone","mirrorBias":0.5,"mirrorBiasCompensate":true,"gpuErrors":0}
+  [PASS] babylon: adapter cube captures (Y-mirror undone) sample as world directions - 24 directions
+  [PASS] babylon: velocity reprojects with motionVectorScale [-1, -1] - 40651 px; mean colour error [-1,-1] 0.0155, [1,1] 0.3474, [1,-1] 0.2569, [-1,1] 0.1543, [0,0] 0.2281
+  saved out/babylon-final.png
+  saved out/babylon-ssr-off.png
+  saved out/babylon-ssr-off-probes-off.png
+  saved out/babylon-probes-off.png
+  saved out/babylon-view-lit.png
+  saved out/babylon-view-reflection.png
+  saved out/babylon-view-radiance.png
+  saved out/babylon-view-confidence.png
+  saved out/babylon-view-normal.png
+  saved out/babylon-view-roughness.png
+  babylon tracer GPU ms (960x540, loop stopped): depth downsample 0.1263, classify 0.2876, blue noise 0.0096, indirect args 0.0086, hit colour pyramid 0.267, intersect 0.8363, total 1.5357
+  [PASS] babylon (workgroup): renders, no validation errors, finite outputs - 197895 rays, mean confidence 0.340 on geometry
+  [PASS] babylon (workgroup): mirror floor reflects the scene (confident SSR) - 196688 mirror px, 65.1% with confidence >= 0.9
+  babylon probeFace (floor on the volume face): {"missPixels":127241,"frames":24,"meanFrameDiff":0.0283,"meanLuma":66.392}
+  [PASS] babylon: probe lookup stable at a volume face (no GPU errors; frame diff small) - {"missPixels":127241,"frames":24,"meanFrameDiff":0.0283,"meanLuma":66.392}
+  babylon ibl (flat sky) vs Babylon's own specular IBL: geometry 290776 px: before mean 5.192 p99 51 -> after mean 0.109 p99 1 (/255); specular factor < 1 189060 px: before mean 7.43 p99 61 -> after mean 0.086 p99 1 (/255); energy compensation only 101716 px: before mean 1.033 p99 16 -> after mean 0.151 p99 1 (/255)
+  [PASS] babylon: composite matches Babylon's own specular IBL (AO, horizon occlusion, multi-scatter applied) - geometry mean 5.192 -> 0.109, p99 51 -> 1 (/255)
+  saved out/babylon-ibl-final.png
+  saved out/babylon-ibl-view-specularFactor.png
+  babylon ibl (gradient sky) vs Babylon's own specular IBL: geometry 290776 px: before mean 2.769 p99 28 -> after mean 0.472 p99 4 (/255); specular factor < 1 189060 px: before mean 3.578 p99 34 -> after mean 0.331 p99 3 (/255); energy compensation only 101716 px: before mean 1.265 p99 13 -> after mean 0.734 p99 6 (/255)
+examples/ssr (?rt=1, per builder):
+  [PASS] rt raytracerHitShading (rtShade, opt-in): renders, no validation errors, finite outputs, traced hits - 41762 misses -> {"misses":41762,"traced":41762,"capped":0,"hits":41355,"tracedMisses":407,"onScreenHits":3028,"tilesWithMisses":1037,"tileCap":64,"halfRateSkipped":0,"fillOverflow":0,"filled":0,"fillFallbacks":0,"frame":3}
+  (info) provider: @pmndrs/raytracer, scene copy packed
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) agrees with THREE.Raycaster, camera rays - 4096/4096 agree (0 both miss), gpu-only 0, cpu-only 0, p99 rel 3.4e-7; of 4096 hits: triangle 4096, normal 4096 (same line 4096), frontFace 4096, instance 4096, material 4096; BVH 13 meshes, 3760 tris, 20 ms
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) agrees with THREE.Raycaster, scene rays - 4096/4096 agree (2328 both miss), gpu-only 0, cpu-only 0, p99 rel 1.3e-6; of 1768 hits: triangle 1765, normal 1765 (same line 1768), frontFace 1765, instance 1765, material 1765; BVH 13 meshes, 3760 tris, 20 ms
+  [PASS] rt @pmndrs/raytracer (gpu-hploc): traceAny agrees with traceFirstHit, camera rays - hit/miss 4096/4096 (4096 hits); nothing before 0.5 t 4096/4096, something before 1.5 t 4096/4096
+  [PASS] rt @pmndrs/raytracer (gpu-hploc): traceAny agrees with traceFirstHit, scene rays - hit/miss 4096/4096 (1768 hits); nothing before 0.5 t 1768/1768, something before 1.5 t 1768/1768
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) offscreen: renders, no validation errors, finite outputs - 41759 misses -> {"misses":41759,"traced":41759,"capped":0,"hits":41470,"tracedMisses":289,"onScreenHits":2964,"tilesWithMisses":1035,"tileCap":64,"halfRateSkipped":0,"fillOverflow":0,"filled":0,"fillFallbacks":0,"frame":2}
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) offscreen: the wall mirror shows the wall behind the camera - confidence 0.031 -> 1.000; hit distance median rel err 1.64e-3, 97.5% within 2%; bright 4.10%
+  saved out/ssr-rt-builders-offscreen-mirror-final.png
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, offscreen, camera rays (hit, t, normal) - 4096/4096 agree (0 both miss), gpu-only 0, cpu-only 0, p99 rel 3.4e-7; of 4096 hits: triangle 4096, normal 4096 (same line 4096), frontFace 4096, instance 4096, material 4096
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, offscreen, scene rays (hit, t, normal) - 4096/4096 agree (2328 both miss), gpu-only 0, cpu-only 0, p99 rel 1.3e-6; of 1768 hits: triangle 1765, normal 1765 (same line 1768), frontFace 1765, instance 1765, material 1765
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, mirrorWall, camera rays (hit, t, normal) - 4096/4096 agree (989 both miss), gpu-only 0, cpu-only 0, p99 rel 2.2e-7; of 3107 hits: triangle 3107, normal 3107 (same line 3107), frontFace 3107, instance 3107, material 3107
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, mirrorWall, scene rays (hit, t, normal) - 4096/4096 agree (2505 both miss), gpu-only 0, cpu-only 0, p99 rel 1.4e-6; of 1591 hits: triangle 1591, normal 1591 (same line 1591), frontFace 1591, instance 1591, material 1591
+  rt mirrorWall (@pmndrs/raytracer (gpu-hploc)): D901 at the package defaults (W76): probes: mean 0.185 vs 0.177 (ratio 1.046), mean abs rel 0.071
+  rt mirrorWall (@pmndrs/raytracer (gpu-hploc)): hit shading vs on-screen colour over 1639 traced hits the camera sees: shadows off mean 0.328 vs 0.311 (ratio 1.055), mean abs rel 0.068; on mean 0.323 vs 0.311 (ratio 1.037), mean abs rel 0.051; > 1% darker with shadows 2.4% (off vs off 0.0%), brighter 0.00% (off vs off 0.00%)
+  [PASS] rt mirrorWall (@pmndrs/raytracer (gpu-hploc)): shadow rays only darken shaded hits (D903) - 1217 shaded hits: 25.2% > 1% darker, 0.00% brighter (same rays twice without shadows: 0.00% / 0.00%); mean 0.365 -> 0.340
+  [PASS] rt mirrorWall (@pmndrs/raytracer (gpu-hploc)): traced hits lit by the probes at the hit match the on-screen brightness (D901) - probes: mean 0.323 vs 0.311 (ratio 1.037), mean abs rel 0.051; environment mean: mean 0.218 vs 0.311 (ratio 0.700), mean abs rel 0.306
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, contact, camera rays (hit, t, normal) - 4096/4096 agree (107 both miss), gpu-only 0, cpu-only 0, p99 rel 4.6e-7; of 3989 hits: triangle 3989, normal 3989 (same line 3989), frontFace 3989, instance 3989, material 3989
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, contact, scene rays (hit, t, normal) - 4096/4096 agree (2473 both miss), gpu-only 0, cpu-only 0, p99 rel 2.1e-6; of 1623 hits: triangle 1623, normal 1623 (same line 1623), frontFace 1623, instance 1623, material 1623
+  rt contact (@pmndrs/raytracer (gpu-hploc)): D901 at the package defaults (W76): probes: mean 0.218 vs 0.202 (ratio 1.077), mean abs rel 0.211
+  rt contact (@pmndrs/raytracer (gpu-hploc)): hit shading vs on-screen colour over 25380 traced hits the camera sees: shadows off mean 0.272 vs 0.253 (ratio 1.074), mean abs rel 0.196; on mean 0.271 vs 0.253 (ratio 1.071), mean abs rel 0.194; > 1% darker with shadows 0.2% (off vs off 0.0%), brighter 0.00% (off vs off 0.00%)
+  [PASS] rt contact (@pmndrs/raytracer (gpu-hploc)): shadow rays only darken shaded hits (D903) - 38469 shaded hits: 6.2% > 1% darker, 0.00% brighter (same rays twice without shadows: 0.00% / 0.00%); mean 0.277 -> 0.273
+  [PASS] rt contact (@pmndrs/raytracer (gpu-hploc)): traced hits lit by the probes at the hit match the on-screen brightness (D901) - probes: mean 0.271 vs 0.253 (ratio 1.071), mean abs rel 0.194; environment mean: mean 0.215 vs 0.253 (ratio 0.851), mean abs rel 0.260
+  [PASS] rt @pmndrs/raytracer (gpu-hploc): shading normal = three's interpolated normal, contact, camera rays (D1700) - 3989/3989 hits within cos 0.999, mean 1.4e-6 deg (flat geometric normal: mean 0.513 deg)
+  [PASS] rt @pmndrs/raytracer (gpu-hploc): shading normal = three's interpolated normal, contact, scene rays (D1700) - 1623/1623 hits within cos 0.999, mean 2.6e-7 deg (flat geometric normal: mean 0.043 deg)
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, boxRoom, camera rays (hit, t, normal) - 4096/4096 agree (161 both miss), gpu-only 0, cpu-only 0, p99 rel 2.4e-7; of 3935 hits: triangle 3935, normal 3935 (same line 3935), frontFace 3935, instance 3935, material 3935
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, boxRoom, scene rays (hit, t, normal) - 4096/4096 agree (2217 both miss), gpu-only 0, cpu-only 0, p99 rel 4.9e-6; of 1879 hits: triangle 1878, normal 1878 (same line 1879), frontFace 1878, instance 1878, material 1878
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, moving, camera rays (hit, t, normal) - 4096/4096 agree (989 both miss), gpu-only 0, cpu-only 0, p99 rel 2.3e-7; of 3107 hits: triangle 3107, normal 3107 (same line 3107), frontFace 3107, instance 3107, material 3107
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, moving, scene rays (hit, t, normal) - 4096/4096 agree (2501 both miss), gpu-only 0, cpu-only 0, p99 rel 1.9e-6; of 1595 hits: triangle 1595, normal 1595 (same line 1595), frontFace 1595, instance 1595, material 1595
+  rt moving (@pmndrs/raytracer (gpu-hploc)): D901 at the package defaults (W76): probes: mean 0.268 vs 0.257 (ratio 1.044), mean abs rel 0.134
+  rt moving (@pmndrs/raytracer (gpu-hploc)): hit shading vs on-screen colour over 10979 traced hits the camera sees: shadows off mean 0.373 vs 0.359 (ratio 1.041), mean abs rel 0.077; on mean 0.372 vs 0.359 (ratio 1.037), mean abs rel 0.074; > 1% darker with shadows 0.7% (off vs off 0.0%), brighter 0.00% (off vs off 0.00%)
+  [PASS] rt moving (@pmndrs/raytracer (gpu-hploc)): shadow rays only darken shaded hits (D903) - 18900 shaded hits: 14.5% > 1% darker, 0.00% brighter (same rays twice without shadows: 0.00% / 0.00%); mean 0.356 -> 0.345
+  [PASS] rt moving (@pmndrs/raytracer (gpu-hploc)): traced hits lit by the probes at the hit match the on-screen brightness (D901) - probes: mean 0.372 vs 0.359 (ratio 1.037), mean abs rel 0.074; environment mean: mean 0.259 vs 0.359 (ratio 0.722), mean abs rel 0.289
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, facingMirrors, camera rays (hit, t, normal) - 4096/4096 agree (1088 both miss), gpu-only 0, cpu-only 0, p99 rel 2.0e-7; of 3008 hits: triangle 3008, normal 3008 (same line 3008), frontFace 3008, instance 3008, material 3008
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, facingMirrors, scene rays (hit, t, normal) - 4096/4096 agree (2406 both miss), gpu-only 0, cpu-only 0, p99 rel 3.0e-6; of 1690 hits: triangle 1690, normal 1690 (same line 1690), frontFace 1690, instance 1690, material 1690
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, rooms, camera rays (hit, t, normal) - 4096/4096 agree (0 both miss), gpu-only 0, cpu-only 0, p99 rel 1.9e-7; of 4096 hits: triangle 4087, normal 4096 (same line 4096), frontFace 4096, instance 4056, material 4056
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, rooms, scene rays (hit, t, normal) - 4096/4096 agree (0 both miss), gpu-only 0, cpu-only 0, p99 rel 3.5e-6; of 4096 hits: triangle 4092, normal 4095 (same line 4096), frontFace 4095, instance 4087, material 4094
+  [PASS] rt @pmndrs/raytracer (gpu-hploc) vs THREE.Raycaster, sponza, camera rays (hit, t, normal) - 1024/1024 agree (8 both miss), gpu-only 0, cpu-only 0, p99 rel 2.6e-7; of 1016 hits: triangle 1016, normal 1016 (same line 1016), frontFace 1016, instance 1016, material 1016
+  [PASS] rt @pmndrs/raytracer (gpu-hploc): each material of a multi-material mesh at its own triangles, camera rays (D1701) - of 2552 hits (2 multi-material meshes, 12 groups): green emissive 321/321 (first material's colour 251), red 215/215 (first material's colour 195), mirror floor (alone) 1982/1982, blue (one material) (alone) 34/34
+  [PASS] rt @pmndrs/raytracer (gpu-hploc): each material of a multi-material mesh at its own triangles, scene rays (D1701) - of 1766 hits (2 multi-material meshes, 12 groups): mirror floor (alone) 1617/1617, green emissive 71/71 (first material's colour 46), red 64/64 (first material's colour 43), blue (one material) (alone) 14/14
+  [PASS] rt @pmndrs/raytracer (gpu-hploc): multiMaterial vs THREE.Raycaster, camera rays (triangle, instance, material ids) - 4096/4096 agree; of 2552 hits: triangle 2552, instance 2552, material 2552
+  saved out/ssr-rt-multi-material-pmndrs-raytracer-gpu-hploc.png
+  (info) provider: @pmndrs/raytracer, scene copy packed
+  [PASS] rt @pmndrs/raytracer (tinybvh) agrees with THREE.Raycaster, camera rays - 4096/4096 agree (0 both miss), gpu-only 0, cpu-only 0, p99 rel 3.4e-7; of 4096 hits: triangle 4096, normal 4096 (same line 4096), frontFace 4096, instance 4096, material 4096; BVH 13 meshes, 3760 tris, 16 ms (the CPU builder was asked for)
+  [PASS] rt @pmndrs/raytracer (tinybvh) agrees with THREE.Raycaster, scene rays - 4096/4096 agree (2328 both miss), gpu-only 0, cpu-only 0, p99 rel 1.3e-6; of 1768 hits: triangle 1765, normal 1765 (same line 1768), frontFace 1765, instance 1765, material 1765; BVH 13 meshes, 3760 tris, 16 ms (the CPU builder was asked for)
+  [PASS] rt @pmndrs/raytracer (tinybvh): each material of a multi-material mesh at its own triangles, camera rays (D1701) - of 2552 hits (2 multi-material meshes, 12 groups): green emissive 321/321 (first material's colour 251), red 215/215 (first material's colour 195), mirror floor (alone) 1982/1982, blue (one material) (alone) 34/34
+  [PASS] rt @pmndrs/raytracer (tinybvh): each material of a multi-material mesh at its own triangles, scene rays (D1701) - of 1766 hits (2 multi-material meshes, 12 groups): mirror floor (alone) 1617/1617, green emissive 71/71 (first material's colour 46), red 64/64 (first material's colour 43), blue (one material) (alone) 14/14
+  [PASS] rt @pmndrs/raytracer (tinybvh): multiMaterial vs THREE.Raycaster, camera rays (triangle, instance, material ids) - 4096/4096 agree; of 2552 hits: triangle 2552, instance 2552, material 2552
+  saved out/ssr-rt-multi-material-pmndrs-raytracer-tinybvh.png
+examples/pixi3d/arcade:
+  [PASS] pixi3d (subgroups): renders, no validation errors, finite outputs - 80496 rays, 436609 geometry px, mean confidence 0.284
+  [PASS] pixi3d (subgroups): glossy floor reflects the signs (confident SSR) - 209117 glossy floor px, 46.9% with confidence >= 0.9
+  [PASS] pixi3d: the G-buffer carries the material values (mirror sphere, gold torus) - 8920 mirror px, 4156 gold px
+  [PASS] pixi3d: the contract's camera lands on pixi-3d's pixels; G-buffer normals agree with the depth - 8570 px, mean reprojection error 0.0011 px; 8498 px, mean N·N(depth) 0.9976
+  [PASS] pixi3d: the scene-colour bit takes the environment's specular out - green under a white sky: 0.0019 with the bit, 1.0000 without
+  [PASS] pixi3d: probe captures (six pixi-3d cameras) sample as world directions - 24 directions
+  [PASS] pixi3d: probe faces draw the view's sky, equal to the environment slot's - 24576 texels, max |faces - captureHemisphere| 0.00e+0 (mean 0.00e+0, sky up to 0.048)
+  [PASS] pixi3d: the arcade probe sees the sky (no black-sky texels) - 44302 sky texels (45.1% of 98304); black texels 44307 (45.1%) without the sky -> 5 (0.0%) with it; black sky texels 44302 -> 0
+  pixi3d probe sky, composite SSR on (179217 glossy px, 0-255): black sky -> sky mean 2.67 / p99 55 / max 97; 53506 px change >= 2 (mean 8.16, p99 64); A/A mean 0.938 / p99 10 / max 57
+  pixi3d probe sky, composite SSR off (179217 glossy px, 0-255): black sky -> sky mean 1.58 / p99 55 / max 65; 13083 px change >= 2 (mean 20.62, p99 64); A/A mean 0.000 / p99 0 / max 0
+  [PASS] pixi3d: motion reprojects with motionVectorScale [1, 1] - 46967 px; mean colour error [1,1] 0.0643, [-1,-1] 0.4148, [1,-1] 0.2858, [-1,1] 0.3431, [0,0] 0.3824
+  saved out/pixi3d-final.png
+  denoiser: ffx-reflections
+  saved out/pixi3d-raw.png
+  saved out/pixi3d-ssr-off.png
+  saved out/pixi3d-ssr-off-probes-off.png
+  saved out/pixi3d-probes-off.png
+  saved out/pixi3d-view-lit.png
+  saved out/pixi3d-view-reflection.png
+  saved out/pixi3d-view-radiance.png
+  saved out/pixi3d-view-confidence.png
+  saved out/pixi3d-view-normal.png
+  saved out/pixi3d-view-roughness.png
+  saved out/pixi3d-view-metalness.png
+  saved out/pixi3d-view-albedo.png
+  saved out/pixi3d-view-motion.png
+  saved out/pixi3d-view-weight.png
+  pixi3d tracer GPU ms (960x540, loop stopped): depth downsample 0.0394, classify 0.05, blue noise 0.0034, indirect args 0.0029, hit colour pyramid 0.0557, intersect 0.2227, total 0.3887
+  [PASS] pixi3d (workgroup): renders, no validation errors, finite outputs - 80496 rays, 436609 geometry px, mean confidence 0.284
+  [PASS] pixi3d (workgroup): glossy floor reflects the signs (confident SSR) - 209117 glossy floor px, 46.9% with confidence >= 0.9
+examples/ssr-bench (smoke):
+  [PASS] ssr-bench reference: renders, finite, no GPU errors - mean tone 0.209, 0 non-finite
+  [PASS] ssr-bench ours: renders, finite, no GPU errors - mean tone 0.207, 0 non-finite
+  [PASS] ssr-bench ours-accum: renders, finite, no GPU errors - mean tone 0.207, 0 non-finite
+  [PASS] ssr-bench ours-denoise: renders, finite, no GPU errors - mean tone 0.208, 0 non-finite
+  [PASS] ssr-bench three-blur: renders, finite, no GPU errors - mean tone 0.227, 0 non-finite
+  [PASS] ssr-bench three-stoch: renders, finite, no GPU errors - mean tone 0.192, 0 non-finite
+  [PASS] ssr-bench three-denoise: renders, finite, no GPU errors - mean tone 0.191, 0 non-finite
+examples/quickstart:
+  saved out/examples-quickstart-on.png
+  saved out/examples-quickstart-off.png
+  [PASS] examples/quickstart: renders a non-black frame, no GPU errors - mean 108/255, range 0-255; {"denoiser":true,"probes":true,"rt":false,"baked":1,"storageBuffersPerStage":10,"traced":false,"traceError":null,"colorBytesPerSample":64,"litPass":false,"exactSpecular":true}
+  [PASS] examples/quickstart: reflections are present (floor region differs, on vs off) - mean |on - off| 7.88 / 255, 16.5 % of px over 12
+  [PASS] examples/quickstart: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.270 % of px
+examples/quickstart probes only:
+  saved out/examples-quickstart-probes-only-on.png
+  saved out/examples-quickstart-probes-only-off.png
+  [PASS] examples/quickstart probes only: renders a non-black frame, no GPU errors - mean 98/255, range 7-255; {"baked":1,"layout":"cube-array"}
+  [PASS] examples/quickstart probes only: reflections are present (floor region differs, on vs off) - mean |on - off| 26.88 / 255, 52.8 % of px over 12
+  [PASS] examples/quickstart probes only: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.000 % of px
+examples/quickstart rt + preset performance:
+  saved out/examples-quickstart-rt-preset-performance-on.png
+  saved out/examples-quickstart-rt-preset-performance-off.png
+  [PASS] examples/quickstart rt + preset performance: renders a non-black frame, no GPU errors - mean 106/255, range 0-255; {"denoiser":true,"probes":true,"rt":true,"baked":1,"storageBuffersPerStage":10,"traced":true,"traceError":null,"colorBytesPerSample":64,"litPass":false,"exactSpecular":true}
+  [PASS] examples/quickstart rt + preset performance: reflections are present (floor region differs, on vs off) - mean |on - off| 10.60 / 255, 19.8 % of px over 12
+  [PASS] examples/quickstart rt + preset performance: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.673 % of px
+examples/quickstart, default device limits (plain WebGPURenderer):
+  saved out/examples-quickstart-default-device-limits-plain-WebGPURenderer--on.png
+  saved out/examples-quickstart-default-device-limits-plain-WebGPURenderer--off.png
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): renders a non-black frame, no GPU errors - mean 108/255, range 0-255; {"denoiser":true,"probes":true,"rt":false,"baked":1,"storageBuffersPerStage":8,"traced":false,"traceError":null,"colorBytesPerSample":32,"litPass":true,"exactSpecular":false}
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): reflections are present (floor region differs, on vs off) - mean |on - off| 8.09 / 255, 16.5 % of px over 12
+  [PASS] examples/quickstart, default device limits (plain WebGPURenderer): still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.258 % of px
+  [PASS] examples/quickstart, default device limits: 32 colour bytes per sample, lit in a second pass, one console warning naming the limit and createReflectionsRenderer - {"denoiser":true,"probes":true,"rt":false,"baked":1,"storageBuffersPerStage":8,"traced":false,"traceError":null,"colorBytesPerSample":32,"litPass":true,"exactSpecular":false}; 1 warning(s): warning: Reflections: maxColorAttachmentBytesPerSample is 32 (WebGPU's default is 32, all a plain new WebGPURenderer() asks for); the G-buffer with three's lit image needs 36. Build the renderer with createReflectionsRenderer() (or new WebGPURenderer({ requiredLimits: reflectionsRequiredLimits(adapter) })) t
+examples/quickstart rt, default device limits:
+  saved out/examples-quickstart-rt-default-device-limits-on.png
+  saved out/examples-quickstart-rt-default-device-limits-off.png
+  [PASS] examples/quickstart rt, default device limits: renders a non-black frame, no GPU errors - mean 106/255, range 0-255; {"denoiser":true,"probes":true,"rt":true,"baked":1,"storageBuffersPerStage":8,"traced":true,"traceError":null,"colorBytesPerSample":32,"litPass":true,"exactSpecular":false}
+  [PASS] examples/quickstart rt, default device limits: reflections are present (floor region differs, on vs off) - mean |on - off| 9.91 / 255, 18.8 % of px over 12
+  [PASS] examples/quickstart rt, default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.368 % of px
+  [PASS] examples/quickstart rt, default device limits: the traced pass runs (8 storage buffers per stage, packed scene copy; lit in a second pass) - {"denoiser":true,"probes":true,"rt":true,"baked":1,"storageBuffersPerStage":8,"traced":true,"traceError":null,"colorBytesPerSample":32,"litPass":true,"exactSpecular":false}
+examples/quickstart rt (split scene copy), default device limits:
+  saved out/examples-quickstart-rt-split-scene-copy-default-device-limits-on.png
+  saved out/examples-quickstart-rt-split-scene-copy-default-device-limits-off.png
+  [PASS] examples/quickstart rt (split scene copy), default device limits: renders a non-black frame, no GPU errors - mean 107/255, range 0-255; {"denoiser":true,"probes":true,"rt":true,"baked":1,"storageBuffersPerStage":8,"traced":false,"traceError":"rt: the trace pipeline binds 9 storage buffers in the compute stage (pass 3, radiance fallback 0, provider '@pmndrs/raytracer' 5, hit shading 1); the device allows 8 (maxStorageBuffersPerShaderStage). Request more at requestDevice ({ requiredLimits: reflectionsRequiredLimits(adapter) } asks for up to what the adapter has, or { maxStorageBuffersPerShaderStage: adapter.limits.maxStorageBuffersPerShaderStage }; three: new WebGPURenderer({ requiredLimits: { maxStorageBuffersPerShaderStage: 9 } })), or use a provider / fallback that binds fewer.","colorBytesPerSample":32,"litPass":true,"exactSpecular":false}
+  [PASS] examples/quickstart rt (split scene copy), default device limits: reflections are present (floor region differs, on vs off) - mean |on - off| 8.12 / 255, 16.6 % of px over 12
+  [PASS] examples/quickstart rt (split scene copy), default device limits: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.240 % of px
+  [PASS] examples/quickstart rt (split), default device limits: ray tracing degrades to SSR + probes with one console warning - {"denoiser":true,"probes":true,"rt":true,"baked":1,"storageBuffersPerStage":8,"traced":false,"traceError":"rt: the trace pipeline binds 9 storage buffers in the compute stage (pass 3, radiance fallback 0, provider '@pmndrs/raytracer' 5, hit shading 1); the device allows 8 (maxStorageBuffersPerShaderStage). Request more at requestDevice ({ requiredLimits: reflectionsRequiredLimits(adapter) } asks for up to what the adapter has, or { maxStorageBuffersPerShaderStage: adapter.limits.maxStorageBuffersPerShaderStage }; three: new WebGPURenderer({ requiredLimits: { maxStorageBuffersPerShaderStage: 9 
+examples/r3f:
+  saved out/examples-r3f-on.png
+  saved out/examples-r3f-off.png
+  [PASS] examples/r3f: renders a non-black frame, no GPU errors - mean 101/255, range 0-255; {"ready":true,"denoiser":true,"probes":true,"rt":false}
+  [PASS] examples/r3f: reflections are present (floor region differs, on vs off) - mean |on - off| 7.99 / 255, 18.1 % of px over 12
+  [PASS] examples/r3f: still camera does not flicker (< 0.5 % of px move more than 1/255 between frames) - 0.227 % of px
+examples/r3f rt + preset performance:
+  saved out/examples-r3f-rt-preset-performance-on.png
+  saved out/examples-r3f-rt-preset-performance-off.png
+  [PASS] examples/r3f rt + preset performance: renders a non-black frame, no GPU errors - mean 97/255, range 0-255; {"ready":true,"denoiser":true,"probes":true,"rt":true}
+  [PASS] examples/r3f rt + preset performance: reflections are present (floor region differs, on vs off) - mean |on - off| 14.51 / 255, 22.6 % of px over 12
+  [PASS] examples/r3f rt + preset performance: still camera does not flicker (< 1.5 % of px move more than 1/255 between frames) - 0.872 % of px
+examples/showcase:
+  saved out/showcase-carConcept-on.png
+  saved out/showcase-carConcept-off.png
+  saved out/showcase-carConcept-rt.png
+  [PASS] showcase carConcept: renders on / off / rt, no GPU errors - 1 probes (cube-array, 290 ms), denoiser ffx-reflections, mean 151/255, BVH 463377 tris; reflections 1.54 ms
+  saved out/showcase-toyCar-on.png
+  saved out/showcase-toyCar-off.png
+  saved out/showcase-toyCar-rt.png
+  [PASS] showcase toyCar: renders on / off / rt, no GPU errors - 1 probes (cube-array, 60 ms), denoiser ffx-reflections, mean 156/255, BVH 109032 tris; reflections 0.66 ms
+  saved out/showcase-chess-on.png
+  saved out/showcase-chess-off.png
+  saved out/showcase-chess-rt.png
+  [PASS] showcase chess: renders on / off / rt, no GPU errors - 1 probes (cube-array, 240 ms), denoiser ffx-reflections, mean 161/255, BVH 1534496 tris; reflections 1.07 ms
+  saved out/showcase-sponza-on.png
+  saved out/showcase-sponza-off.png
+  saved out/showcase-sponza-rt.png
+  [PASS] showcase sponza: renders on / off / rt, no GPU errors - 7 probes (cube-array, 447 ms), denoiser ffx-reflections, mean 61/255, BVH 262267 tris; reflections 0.75 ms
+  [PASS] showcase carConcept: still camera, reflections settle under anti-aliasing (upscaler; < 0.3% of pixels flicker > 1/255) - upscaler 0.00%, W40 TAA 0.00%, off 0.61% of pixels with mean |frame - previous| > 1/255
+  saved out/showcase-carConcept-upscale-performance.png
+  [PASS] showcase carConcept: ?upscale=performance renders (G-buffer at half size, upscaled) - render 640x360 -> 1280x720, mean 152/255
+  [PASS] showcase carConcept: roughness from normal variance (specAA) reaches the G-buffer and turns off cleanly - door G-buffer roughness off 0.250, on 0.350, off again 0.250
+examples/showcase/compare.html:
+  saved out/showcase-compare-split.png
+  saved out/showcase-compare-pathtraced.png
+  saved out/showcase-compare-pathtraced-raw.png
+  [PASS] showcase compare: split and path tracer render, no GPU errors - split mean 147/255, path traced mean 142/255
+  [PASS] showcase compare: path tracer stops at max samples (no more dispatches at rest) - 8 / 8 spp in 6.4 s (trace 5298 ms); 12 frames later 8 spp, dispatches 8 -> 8
+  [PASS] showcase compare: reference is OIDN-denoised once at the cap - OIDN (wgsl), albedo + normal aux, 63 ms; 3x3 luma variance raw 75.7 -> denoised 24.3
+examples/catalog (38 pages):
+  saved out/catalog-gallery.png
+  [PASS] catalog: the gallery shows a linked card for every built page and the committed card images - 38 cards for 38 pages, 36 / 36 images 
+  saved out/catalog-showcase.png
+  [PASS] catalog showcase: loads, renders, no console errors or validation errors - 1280x720, luminance 94.4 +- 68.1
+  saved out/catalog-showcase-compare.png
+  [PASS] catalog showcase/compare: loads, renders, no console errors or validation errors - 1280x720, luminance 75.4 +- 73.1
+  saved out/catalog-start-hello.png
+  [PASS] catalog start/hello: loads, renders, no console errors or validation errors - 1280x720, luminance 60.9 +- 56.9
+  saved out/catalog-start-probes-only.png
+  [PASS] catalog start/probes-only: loads, renders, no console errors or validation errors - 1280x720, luminance 57.2 +- 54.0
+  saved out/catalog-start-r3f.png
+  [PASS] catalog start/r3f: loads, renders, no console errors or validation errors - 1280x720, luminance 93.5 +- 53.9
+  saved out/catalog-probes-box-projection.png
+  [PASS] catalog probes/box-projection: loads, renders, no console errors or validation errors - 1280x720, luminance 109.6 +- 64.8
+  [PASS] catalog probes/box-projection: the compare switch changes the image, and switching back restores it - on vs compare mean 10.097 / 255 (max 209); on vs back mean 0.0000
+  saved out/catalog-probes-two-rooms.png
+  [PASS] catalog probes/two-rooms: loads, renders, no console errors or validation errors - 1280x720, luminance 65.2 +- 44.8
+  [PASS] catalog probes/two-rooms: the compare switch changes the image, and switching back restores it - on vs compare mean 13.477 / 255 (max 230); on vs back mean 0.0000
+  saved out/catalog-probes-live.png
+  [PASS] catalog probes/live: loads, renders, no console errors or validation errors - 1280x720, luminance 67.3 +- 43.5
+  [PASS] catalog probes/live: the compare switch changes the image, and switching back restores it - on vs compare mean 7.132 / 255 (max 239); on vs back mean 0.0000
+  saved out/catalog-probes-exclude.png
+  [PASS] catalog probes/exclude: loads, renders, no console errors or validation errors - 1280x720, luminance 110.4 +- 64.7
+  [PASS] catalog probes/exclude: the compare switch changes the image, and switching back restores it - on vs compare mean 3.160 / 255 (max 255); on vs back mean 0.0000
+  saved out/catalog-ssr-mirror-floor.png
+  [PASS] catalog ssr/mirror-floor: loads, renders, no console errors or validation errors - 1280x720, luminance 116.1 +- 70.3
+  [PASS] catalog ssr/mirror-floor: the compare switch changes the image, and switching back restores it - on vs compare mean 10.508 / 255 (max 225); on vs back mean 0.0032
+  saved out/catalog-ssr-what-it-misses.png
+  [PASS] catalog ssr/what-it-misses: loads, renders, no console errors or validation errors - 1280x720, luminance 44.9 +- 41.6
+  [PASS] catalog ssr/what-it-misses: the compare switch changes the image, and switching back restores it - on vs compare mean 22.828 / 255 (max 255); on vs back mean 0.0004
+  saved out/catalog-rt-fallback.png
+  [PASS] catalog rt/fallback: loads, renders, no console errors or validation errors - 1280x720, luminance 42.6 +- 40.2
+  [PASS] catalog rt/fallback: the compare switch changes the image, and switching back restores it - on vs compare mean 3.733 / 255 (max 227); on vs back mean 0.0235
+  saved out/catalog-rt-animated.png
+  [PASS] catalog rt/animated: loads, renders, no console errors or validation errors - 1280x720, luminance 109.9 +- 70.1
+  [PASS] catalog rt/animated: the compare switch changes the image, and switching back restores it - on vs compare mean 1.172 / 255 (max 209); on vs back mean 0.0280
+  saved out/catalog-hybrid-explained.png
+  [PASS] catalog hybrid/explained: loads, renders, no console errors or validation errors - 1280x720, luminance 65.4 +- 80.7
+  [PASS] catalog hybrid/explained: the compare switch changes the image, and switching back restores it - on vs compare mean 7.338 / 255 (max 245); on vs back mean 0.0373
+  saved out/catalog-denoise-glossy.png
+  [PASS] catalog denoise/glossy: loads, renders, no console errors or validation errors - 1280x720, luminance 84.2 +- 67.4
+  [PASS] catalog denoise/glossy: the compare switch changes the image, and switching back restores it - on vs compare mean 0.596 / 255 (max 173); on vs back mean 0.0294
+  saved out/catalog-materials-roughness.png
+  [PASS] catalog materials/roughness: loads, renders, no console errors or validation errors - 1280x720, luminance 96.1 +- 68.0
+  [PASS] catalog materials/roughness: the compare switch changes the image, and switching back restores it - on vs compare mean 5.428 / 255 (max 254); on vs back mean 0.0259
+  saved out/catalog-motion-animated.png
+  [PASS] catalog motion/animated: loads, renders, no console errors or validation errors - 1280x720, luminance 66.1 +- 41.0
+  [PASS] catalog motion/animated: the compare switch changes the image, and switching back restores it - on vs compare mean 0.266 / 255 (max 87); on vs back mean 0.0001
+  [PASS] catalog motion/animated: at rest, < 0.5 % of px change by more than 1/255 between frames - 0.001 % of px
+  saved out/catalog-perf-presets.png
+  [PASS] catalog perf/presets: loads, renders, no console errors or validation errors - 1280x720, luminance 64.8 +- 43.6
+  [PASS] catalog perf/presets: the compare switch changes the image, and switching back restores it - on vs compare mean 0.378 / 255 (max 233); on vs back mean 0.0178
+  saved out/catalog-perf-upscaler.png
+  [PASS] catalog perf/upscaler: loads, renders, no console errors or validation errors - 1280x720, luminance 65.2 +- 44.1
+  [PASS] catalog perf/upscaler: the compare switch changes the image, and switching back restores it - on vs compare mean 1.058 / 255 (max 140); on vs back mean 0.0000
+  saved out/catalog-custom-tsl.png
+  [PASS] catalog custom/tsl: loads, renders, no console errors or validation errors - 1280x720, luminance 64.0 +- 55.2
+  [PASS] catalog custom/tsl: the compare switch changes the image, and switching back restores it - on vs compare mean 1.796 / 255 (max 121); on vs back mean 0.0000
+  saved out/catalog-setup-device-limits.png
+  [PASS] catalog setup/device-limits: loads, renders, no console errors or validation errors - 1280x720, luminance 116.0 +- 70.6
+  (catalog setup/device-limits: compare not image-checked, check.compare false: the brief says why)
+  saved out/catalog-engines-three.png
+  [PASS] catalog engines/three: loads, renders, no console errors or validation errors - 1280x720, luminance 65.1 +- 45.1
+  [PASS] catalog engines/three: the compare switch changes the image, and switching back restores it - on vs compare mean 1.988 / 255 (max 168); on vs back mean 0.0280
+  saved out/catalog-engines-r3f.png
+  [PASS] catalog engines/r3f: loads, renders, no console errors or validation errors - 1280x720, luminance 65.7 +- 44.5
+  [PASS] catalog engines/r3f: the compare switch changes the image, and switching back restores it - on vs compare mean 2.105 / 255 (max 212); on vs back mean 0.0260
+  saved out/catalog-engines-babylon.png
+  [PASS] catalog engines/babylon: loads, renders, no console errors or validation errors - 1280x720, luminance 32.5 +- 36.7
+  [PASS] catalog engines/babylon: the compare switch changes the image, and switching back restores it - on vs compare mean 0.808 / 255 (max 253); on vs back mean 0.0000
+  saved out/catalog-engines-pixi.png
+  [PASS] catalog engines/pixi: loads, renders, no console errors or validation errors - 1280x720, luminance 36.0 +- 54.9
+  saved out/catalog-engines-core.png
+  [PASS] catalog engines/core: loads, renders, no console errors or validation errors - 1280x720, luminance 72.2 +- 47.7
+  [FAIL] catalog engines/core: the compare switch changes the image, and switching back restores it - on vs compare mean 2.222 / 255 (max 186); on vs back mean 0.1565
+  saved out/catalog-ssr.png
+  [PASS] catalog ssr: loads, renders, no console errors or validation errors - 1280x720, luminance 95.0 +- 74.3
+  saved out/catalog-probes.png
+  [PASS] catalog probes: loads, renders, no console errors or validation errors - 1280x720, luminance 33.7 +- 47.5
+  saved out/catalog-scenes.png
+  [PASS] catalog scenes: loads, renders, no console errors or validation errors - 1280x720, luminance 71.1 +- 76.0
+  saved out/catalog-babylon.png
+  [PASS] catalog babylon: loads, renders, no console errors or validation errors - 1280x720, luminance 67.6 +- 53.6
+  saved out/catalog-sssr-core.png
+  [PASS] catalog sssr-core: loads, renders, no console errors or validation errors - 1280x720, luminance 93.2 +- 69.8
+  saved out/catalog-probe-core.png
+  [PASS] catalog probe-core: loads, renders, no console errors or validation errors - 1280x720, luminance 7.1 +- 24.9
+  saved out/catalog-bc6h.png
+  [PASS] catalog bc6h: loads, renders, no console errors or validation errors - 1280x720, luminance 44.7 +- 54.6
+  saved out/catalog-probe-bench.png
+  [PASS] catalog probe-bench: loads, no console errors or validation errors - 1280x720, luminance 37.0 +- 46.5
+  saved out/catalog-ssr-bench.png
+  [PASS] catalog ssr-bench: loads, renders, no console errors or validation errors - 1280x720, luminance 91.5 +- 71.9
+  saved out/catalog-regressions.png
+  [PASS] catalog regressions: loads, no console errors or validation errors - 1280x720, luminance 18.4 +- 19.3
+  saved out/catalog-nrc.png
+  [PASS] catalog nrc: loads, no console errors or validation errors - 1280x720, luminance 21.4 +- 26.6
+  saved out/catalog-showcase-bench.png
+  [PASS] catalog showcase/bench: loads, renders, no console errors or validation errors - 1280x720, luminance 86.2 +- 73.0
+examples/engines (side by side):
+  saved out/engines-three-on-default.png
+  three default: at rest, one frame to the next: mean 0.008 / 255, max 14
+  saved out/engines-three-on-table.png
+  three table: at rest, one frame to the next: mean 0.008 / 255, max 3
+  saved out/engines-three-off-default.png
+  saved out/engines-three-off-table.png
+  [PASS] engines three: loads, shoots every view, no errors
+  saved out/engines-r3f-on-default.png
+  r3f default: at rest, one frame to the next: mean 0.007 / 255, max 3
+  saved out/engines-r3f-on-table.png
+  r3f table: at rest, one frame to the next: mean 0.007 / 255, max 8
+  saved out/engines-r3f-off-default.png
+  saved out/engines-r3f-off-table.png
+  [PASS] engines r3f: loads, shoots every view, no errors
+  saved out/engines-babylon-on-default.png
+  babylon default: at rest, one frame to the next: mean 0.000 / 255, max 0
+  saved out/engines-babylon-on-table.png
+  babylon table: at rest, one frame to the next: mean 0.000 / 255, max 0
+  saved out/engines-babylon-off-default.png
+  saved out/engines-babylon-off-table.png
+  [PASS] engines babylon: loads, shoots every view, no errors
+  saved out/engines-core-on-default.png
+  core default: at rest, one frame to the next: mean 0.010 / 255, max 5
+  saved out/engines-core-on-table.png
+  core table: at rest, one frame to the next: mean 0.037 / 255, max 19
+  saved out/engines-core-off-default.png
+  saved out/engines-core-off-table.png
+  [PASS] engines core: loads, shoots every view, no errors
+  [PASS] engines r3f vs three, probes + screen space, view default: mean per channel < 1 / 255 - mean 0.02 / 255, max 8; mean luminance three 84.1, r3f 84.1
+  [PASS] engines r3f vs three, probes only, view default: mean per channel < 1 / 255 - mean 0.00 / 255, max 0; mean luminance three 83.9, r3f 83.9
+  [PASS] engines r3f vs three, what screen space adds (on - off), view default: mean per channel < 0.5 / 255 - mean 0.02 / 255 (three adds 2.07, r3f 2.07)
+  [PASS] engines r3f vs three, probes + screen space, view table: mean per channel < 1 / 255 - mean 0.02 / 255, max 9; mean luminance three 68.4, r3f 68.4
+  [PASS] engines r3f vs three, probes only, view table: mean per channel < 1 / 255 - mean 0.00 / 255, max 0; mean luminance three 68.2, r3f 68.2
+  [PASS] engines r3f vs three, what screen space adds (on - off), view table: mean per channel < 0.5 / 255 - mean 0.02 / 255 (three adds 2.40, r3f 2.39)
+  [PASS] engines babylon vs three, probes + screen space, view default: mean per channel < 54 / 255 - mean 50.25 / 255, max 238; mean luminance three 84.1, babylon 34.6
+  [PASS] engines babylon vs three, probes only, view default: mean per channel < 54 / 255 - mean 50.36 / 255, max 223; mean luminance three 83.9, babylon 34.3
+  [PASS] engines babylon vs three, what screen space adds (on - off), view default: mean per channel < 2 / 255 - mean 1.50 / 255 (three adds 2.07, babylon 0.77)
+  [PASS] engines babylon vs three, probes + screen space, view table: mean per channel < 54 / 255 - mean 45.10 / 255, max 189; mean luminance three 68.4, babylon 23.4
+  [PASS] engines babylon vs three, probes only, view table: mean per channel < 54 / 255 - mean 45.51 / 255, max 189; mean luminance three 68.2, babylon 22.9
+  [PASS] engines babylon vs three, what screen space adds (on - off), view table: mean per channel < 2 / 255 - mean 1.65 / 255 (three adds 2.40, babylon 1.08)
+  [PASS] engines core vs three, probes + screen space, view default: mean per channel < 16 / 255 - mean 11.81 / 255, max 175; mean luminance three 84.1, core 95.8
+  [PASS] engines core vs three, probes only, view default: mean per channel < 16 / 255 - mean 12.43 / 255, max 134; mean luminance three 83.9, core 96.2
+  [PASS] engines core vs three, what screen space adds (on - off), view default: mean per channel < 2 / 255 - mean 1.02 / 255 (three adds 2.07, core 2.33)
+  [PASS] engines core vs three, probes + screen space, view table: mean per channel < 16 / 255 - mean 11.74 / 255, max 73; mean luminance three 68.4, core 80.0
+  [PASS] engines core vs three, probes only, view table: mean per channel < 16 / 255 - mean 12.63 / 255, max 76; mean luminance three 68.2, core 80.8
+  [PASS] engines core vs three, what screen space adds (on - off), view table: mean per channel < 2 / 255 - mean 1.22 / 255 (three adds 2.40, core 2.99)
+examples/showcase/bench.html:
+  [PASS] bench: every live control moved and reset through the DOM, no GPU errors or exceptions - 113 live, 38 creation-time left set, planned: none
+  saved out/bench-rebuilt.png
+  [PASS] bench: one Rebuild with every creation-time setting moved, then three SSR + FFX, PT, probes, ours denoised built with them - pending ours-rt, three-denoise; means 129 / 135 / 150/255
+  [PASS] bench: the scene control switches and comes back - toyCar -> carConcept
+  saved out/bench-split.png
+  saved out/bench-side.png
+  saved out/bench-diff.png
+  [PASS] bench: view modes render (split, side by side, |A - B| heat map with its stats) - means split 149, side 150, heat 71/255; |A - B| mean 18.62, p99 146
+  [PASS] bench: both sides follow the shared camera (pose hero -> w50 changes A and B, AA on) - mean |hero - w50| A 44.5, B 44.2/255
+  saved out/bench-snapshot-lobefilter.png
+  [PASS] bench: snapshot A as B, flip hitLobeFilter 1 -> 0, heat map shows the change - |live A - snapshot| mean 0.053 right after the snapshot, 1.538 with lobeFilter 0
+  [PASS] bench: Measure on carConcept (pose w50) vs the path tracer over frame, glossy, W50's regions and a dragged one - 16 spp; frame 518400 px MAD 9.8 (luma 150.5, PT 149.7); glossy 458630 px MAD 10.6 (luma 150.7, PT 150.0); lip 1440 px MAD 26.3 (luma 93.4, PT 104.8); band 5653 px MAD 40.0 (luma 43.7, PT 3.9); wheel 9900 px MAD 31.6 (luma 44.5, PT 23.8); door 8437 px MAD 18.7 (luma 110.7, PT 127.2); car 85400 px MAD 17.5 (luma 107.9, PT 106.2); underside 12480 px MAD 30.0 (luma 60.6, PT 49.5)
+  [PASS] bench: copy as code, URL state and presets - query 'scene=carConcept&pose=w50&lobeFilter=0', preset round trip ok, code 30 lines
+examples/probe-core:
+  [PASS] probe core: coverage matches the CPU volume weights - max err 4.86e-7; 1307 inside, 833 in a fade, 1956 outside
+  [PASS] probe core: cube-hw rgb9e5ufloat agrees with cube-hw rgba16float - mean 0.059, p99 0.15, max 0.2 / 255
+  [PASS] probe core: cube2d-warp rgba16float agrees with cube-hw rgba16float - mean 0.218, p99 1.27, max 5.1 / 255
+  [PASS] probe core: cube2d-none rgba16float agrees with cube-hw rgba16float - mean 0.062, p99 1.06, max 4.5 / 255
+  [PASS] probe core: octa@160 rgba16float agrees with cube-hw rgba16float - mean 0.272, p99 3.18, max 12.8 / 255
+  [PASS] probe core: cube-hw rgba16float lod r187 agrees with cube-hw rgba16float - mean 0.297, p99 8.95, max 27.1 / 255
+  [PASS] probe core: a constant capture looks up as that constant - max rel err 0.00e+0
+  [PASS] probe core: re-fit by 2x the probe L1 irradiance doubles the lookup - max rel err 9.55e-4
+  [PASS] probe core: Lagarde's specular occlusion - max err 1.00e-7
+  [PASS] probe core: a frame irradiance provider turns the re-fit on; refit: false keeps it off (D803) - auto x2 max rel err 2.41e-5, off x1 0.00e+0
+  [PASS] probe core: sets of three layouts in one module match their own modules (D805) - cube2d-warp max 0, cube-hw max 0, octa max 0
+  [PASS] probe core: slot sizes 64/256/128/64 in 3 atlases (cube-hw) = one-size sets at each size, plain and re-fit (D4700) - slot 0 @64 0 / 0, slot 1 @256 0 / 0, slot 2 @128 0 / 0, environment @64 0 / 0
+  [PASS] probe core: slot sizes 64/256/128/64 in 3 atlases (cube2d-warp) = one-size sets at each size, plain and re-fit (D4700) - slot 0 @64 0 / 0, slot 1 @256 0 / 0, slot 2 @128 0 / 0, environment @64 0 / 0
+  [PASS] capture transform: mirrorX is an alias of captureTransform CAPTURE_MIRROR_X; both at once throws - max 0; probe capture: pass either mirrorX (an alias of CAPTURE_MIRR
+  [PASS] capture transform: babylon faces = the plain set - max 0
+  [PASS] capture transform: pixi-3d camera faces = the plain set - max 0
+  [PASS] capture transform: three axes looks up the plain set's world - float max 0.0e+0; full mean 0.000, p99 0.00, max 0.0 / 255, SH 1.1e-6
+  [PASS] capture transform: babylon axes looks up the plain set's world - float max 3.9e-3; full mean 0.000, p99 0.00, max 0.0 / 255, SH 1.1e-6
+  [PASS] compat mode: the device enforces the binding view dimension and has no cube-array views - {"cubeArrayAsCubeArray":"create: The textureBindingViewDimension (TextureViewDimension::CubeArray) is not compatible with the dimension (TextureDimension","cubeArrayAs2dArray":"create: The textureBind
+  [PASS] compat mode: ProbeSet defaults to cube2d-warp there (D2204) - {"asked":"default","layout":"cube2d-warp","vsCore":0}
+  [PASS] compat mode: the prefilter path for it (GGX levels from a cube-only source copy) = the default path (D4100) - 0 of 141312 half values differ
+  compat mode, open (D4100): default: ok, vs core max 0 | cube2d-none: ok, vs core max 0 | cube-hw: The dimension (TextureViewDimension::CubeArray) of the texture view is not compatible with the dimension (Text
+  [PASS] sssr probe fallback: constant probes = constant fallback (to one f16 step) - 0 px differ
+  [PASS] sssr probe fallback: structured probes reach the fallback pixels - 118054 of 129600 px
+  [PASS] rt probe fallback (misses + hit shading): constant probes = constant fallback - 0 px differ; 171 hits, 951 traced misses, trace changed 465 px
+  [PASS] rt probe fallback: structured probes reach the traced frame - 117894 of 129600 px
+  [PASS] sssr probe fallback + hit shading on one set (1 atlas): builds, = the fallback seam alone (to one f16 step), the hit shading's copy live, + the traced pass (D4901) - 0 px differ from the fallback alone; intensity 0 changes 37497, the hit shading alone over the constant fallback 37493 of 129600 px; traced 171 hits
+  [PASS] sssr probe fallback + hit shading on one set (4 atlases): builds, = the fallback seam alone (to one f16 step), the hit shading's copy live, + the traced pass (D4901) - 0 px differ from the fallback alone; intensity 0 changes 37495, the hit shading alone over the constant fallback 37493 of 129600 px; traced 171 hits
+  [PASS] rt probe hit shading: slot sizes 64/256 in 2 atlases = a one-size set at the wall probe's size, and its probe reaches the hits (D4702) - 0 px differ from the one-size set; the wall probe's capture changes 225 of 129600 px (171 traced hits)
+examples/probe-bench (smoke):
+  [PASS] probe bench ran every layout - 80 error rows, 6 lookup rows
+  [PASS] layout prefilter is bit-identical to ProbePrefilter (cube2d) - cube2d-warp@64: 0, cube2d-none@64: 0
+  [PASS] probe bench errors are finite
+  [PASS] octa atlas (side 2x, 512 / 256 / 128 px in one 2048x1024 texture): every tile reads as its own probe at every lod, no bleed (W62, D4902) - max 0.33 / 255 over 36 tile x lod lookups (bleed would read ~254)
+  [PASS] no WebGPU validation errors or exceptions
+console warnings/errors:
+  warning: Reflections: maxColorAttachmentBytesPerSample is 32 (WebGPU's default is 32, all a plain new WebGPURenderer() asks for); the G-buffer with three's lit image needs 36. Build the renderer with createReflectionsRenderer() (or new WebGPURenderer({ requiredLimits: reflectionsRequiredLimits(adapter) })) t
+  warning: ScreenSpaceReflectionsPass: unknown preset 'fast' (default, performance); ignored
+  warning: HybridReflections: unknown preset 'fast' (default, performance); ignored
+  warning: applyReflectionsPreset('default'): reflectionResolution is now full; rebuild your composites (hybrid.composite()) or reflections are wrong
+  warning: HybridReflections: hit source 'hits' needs a denoiser that takes it (FFX: setOptions, or pass denoiserHitSourceOptions('hits') to its constructor); this one has no setOptions
+  warning: ScreenSpaceReflectionsPass: ray tracing is off on this device; screen-space reflections and probes continue. rt: the trace pipeline binds 9 storage buffers in the compute stage (pass 3, radiance fallback 0, provider '@pmndrs/raytracer' 5, hit shading 1); the device allows 8 (maxStorageBuffersPerShad
+  log.error: Failed to load resource: net::ERR_CONNECTION_TIMED_OUT
+  log.error: WebSocket connection to 'ws://127.0.0.1:5426/?token=yn33mk-njicU' failed: Error in connection establishment: net::ERR_CONNECTION_TIMED_OUT
+  warning: THREE.TempNode: This module has been deprecated. Extend Node instead.
+  log.warning: Compilation log for [ShaderModule "enc_conv0"]:
+
+24 warning(s) generated while compiling the shader:
+:62:16 warning: use of deprecated builtin
+      let r0 = subgroupMatrixLoad<subgroup_matrix_right<f32, 8, 8>>(&w, wb + (0u * 9u) * 64u, false, 8u);
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  log.warning: Compilation log for [ShaderModule "enc_conv1"]:
+
+24 warning(s) generated while compiling the shader:
+:62:16 warning: use of deprecated builtin
+      let r0 = subgroupMatrixLoad<subgroup_matrix_right<f32, 8, 8>>(&w, wb + (0u * 36u) * 64u, false, 8u);
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  log.warning: Compilation log for [ShaderModule "enc_conv2"]:
+
+24 warning(s) generated while compiling the shader:
+:62:16 warning: use of deprecated builtin
+      let r0 = subgroupMatrixLoad<subgroup_matrix_right<f32, 8, 8>>(&w, wb + (0u * 36u) * 64u, false, 8u);
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+sections (s): setup 2, probes 21, bc6h 9, regressions 16, scenes 25, sssr-core 35, ssr 81, hybrid 137, ssr-rt 92, probe-layouts 84, probe-bindings 115, babylon 74, ssr-rt-builders 42, pixi3d 25, ssr-bench 24, quickstart 47, r3f 72, showcase 161, showcase-compare 36, catalog 588, engines 52, bench 117, probe-core 16, probe-bench 25; total 1896 s
+
+1 check(s) FAILED
+ ELIFECYCLE  Command failed with exit code 1.
+real 1897.47
+user 1751.62
+sys 993.72
+exit 1
+end Sun Nov 29 00:09:14 JST 2026
