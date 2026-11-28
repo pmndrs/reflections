@@ -987,7 +987,67 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     return { volumes: vols.length, branchIn: med(t.in), branchOut: med(t.out), all: t };
   }
 
-  Object.assign(window, { __p: { run, compat, device, orientCost } });
+  /**
+   * W109 (T41): 1920 x 1080 lookups pairs (along R at a random roughness and along N at roughness 1, at one P), as two
+   * lookups of their own vs one walk (probeLookupPairFunctionWgsl). Wall ms per dispatch, median of `rounds` alternating.
+   * `n` volumes (0: the three rooms); `count` compiles the walk for a known count (three's unrolled path up to 4).
+   */
+  async function pairCost(rounds = 15, n = 0, count = false) {
+    const M = 1920 * 1080;
+    const vols: ProbeVolume[] = n === 0 ? volumes : Array.from({ length: n }, (_, i) => ({ slot: i, center: [((i % 4) - 1.5) * 5, 2.5, (Math.floor(i / 4) - n / 8) * 5], halfSize: [3, 2.7, 3], projectionSize: [6, 5, 6], fade: 0.5 }));
+    const lo = [-12, -1, -6], span = [24, 7, 12];
+    const P = new Float32Array(M * 12);
+    let sd = 99; const r = () => ((sd = (sd * 1103515245 + 12345) >>> 0) / 4294967296);
+    const unit = () => { const d = [r() * 2 - 1, r() * 2 - 1, r() * 2 - 1]; const l = Math.hypot(...d) || 1; return d.map((x) => x / l); };
+    for (let i = 0; i < M; i++) P.set([lo[0] + r() * span[0], lo[1] + r() * span[1], lo[2] + r() * span[2], r(), ...unit(), 0, ...unit(), 0], i * 12);
+    const inBuf = device.createBuffer({ size: P.byteLength, usage: U.STORAGE | U.COPY_DST });
+    device.queue.writeBuffer(inBuf, 0, P);
+    const outB = device.createBuffer({ size: M * 32, usage: U.STORAGE });
+    const bgl = device.createBindGroupLayout({ entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+    ] });
+    const bg = device.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: { buffer: inBuf } }, { binding: 1, resource: { buffer: outB } }] });
+    const set = new ProbeSet(device, { capacity: Math.max(3, vols.length), sourceSize: SOURCE });
+    const enc0 = device.createCommandEncoder();
+    for (let s2 = 0; s2 < vols.length; s2++) set.capture(enc0, s2, cubes[s2 % 4]);
+    set.captureEnvironment(enc0, cubes[0]);
+    device.queue.submit([enc0.finish()]);
+    set.setVolumes(vols); set.update();
+    const o = { ...set.lookupOptions({ group: 1 }), ...(count ? { count: vols.length } : {}) };
+    const head = `${set.wgsl({ group: 1 })}\n${probeLookupFunctionWgsl(o, 'w109Single')}\n${probeLookupPairFunctionWgsl(o, 'w109Pair')}
+@group(0) @binding(0) var<storage, read> pin: array<vec4f>;
+@group(0) @binding(1) var<storage, read_write> pout: array<vec4f>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let i = id.x; if (i >= arrayLength(&pout) / 2u) { return; }
+  let P = pin[3u * i].xyz; let rough = pin[3u * i].w; let R = pin[3u * i + 1u].xyz; let N = pin[3u * i + 2u].xyz;
+`;
+    const two = `${head}  pout[2u * i] = w109Single(pr_atlas, pr_sampler, &pr_table, P, R, R, rough, PR_IDENTITY, vec3f(-1.0), true);
+  pout[2u * i + 1u] = w109Single(pr_atlas, pr_sampler, &pr_table, P, N, N, 1.0, PR_IDENTITY, vec3f(-1.0), true);
+}`;
+    const one = `${head}  let m = w109Pair(pr_atlas, pr_sampler, &pr_table, P, R, R, rough, N, N, 1.0, PR_IDENTITY, vec3f(-1.0), true);
+  pout[2u * i] = m[0]; pout[2u * i + 1u] = m[1];
+}`;
+    const pipe = (code: string) => device.createComputePipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bgl, set.bindGroupLayout] }), compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+    const variants = { two: pipe(two), one: pipe(one) };
+    const time = async (p: GPUComputePipeline) => {
+      const t0 = performance.now();
+      const enc = device.createCommandEncoder();
+      for (let k = 0; k < 10; k++) { const pass = enc.beginComputePass(); pass.setPipeline(p); pass.setBindGroup(0, bg); pass.setBindGroup(1, set.bindGroup); pass.dispatchWorkgroups(Math.ceil(M / 64)); pass.end(); }
+      device.queue.submit([enc.finish()]);
+      await device.queue.onSubmittedWorkDone();
+      return (performance.now() - t0) / 10;
+    };
+    for (let w = 0; w < 3; w++) { await time(variants.two); await time(variants.one); }
+    const t: Record<string, number[]> = { two: [], one: [] };
+    for (let k = 0; k < rounds; k++) { t.two.push(await time(variants.two)); t.one.push(await time(variants.one)); }
+    const med = (a: number[]) => [...a].sort((x, y) => x - y)[a.length >> 1];
+    set.dispose(); inBuf.destroy(); outB.destroy();
+    return { volumes: vols.length, count, two: med(t.two), one: med(t.one), all: t };
+  }
+
+  Object.assign(window, { __p: { run, compat, device, orientCost, pairCost } });
 }
 
 function mul(a: Float32Array, b: Float32Array) {

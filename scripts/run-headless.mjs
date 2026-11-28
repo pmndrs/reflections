@@ -2497,8 +2497,9 @@ const LOOKUP_AB = `async (counts, variants, pose, rounds, stat) => {
   const t = async () => { await p.step(4); const r = await p.renderTime(30); return stat === 'p10' ? r.p10 : r.ms; };
   const rows = [];
   for (const n of counts) {
-    const vols = n === 'shipped' ? null : p.probeGrid(n);
-    await p.setProbeVolumes(vols, vols ? { resolution: 128 } : {});
+    // W109: 'layout:<name>' bakes a W61 layout (Sponza's showcase default: layout:oneSize128)
+    if (typeof n === 'string' && n.startsWith('layout:')) await p.setProbeLayout(n.slice(7));
+    else { const vols = n === 'shipped' ? null : p.probeGrid(n); await p.setProbeVolumes(vols, vols ? { resolution: 128 } : {}); }
     const free = [], all = {}, comp = {};
     for (let r = 0; r < rounds; r++) {
       p.setProbeParts(false, false); free.push(await t());
@@ -2519,7 +2520,7 @@ async function probeLookupAB(pages) {
   const all = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
   const scenes = process.env.W63_SCENES?.split(',') ?? ['rooms', 'showcaseSponza'];
   const variants = process.env.W63_VARIANTS?.split('|') ?? ['', 'loop,skip', 'grid,skip'];
-  const counts = process.env.W63_COUNTS?.split(',').map((c) => (c === 'shipped' ? c : Number(c))) ?? [4, 8, 16, 32];
+  const counts = process.env.W63_COUNTS?.split(',').map((c) => (c === 'shipped' || c.startsWith('layout:') ? c : Number(c))) ?? [4, 8, 16, 32];
   const rounds = Number(process.env.W63_ROUNDS ?? 3);
   const poses = { rooms: 'default', offscreen: 'default', showcaseSponza: 'courtyard' };
   for (const scene of scenes) {
@@ -4220,6 +4221,29 @@ async function main() {
       for (const n of [0, 8, 32]) {
         const r = await p.T(`window.__p.orientCost(${Number(process.env.ORIENT_ROUNDS ?? 15)}, ${n})`);
         console.log(`  ${r.volumes} volumes: branch in ${r.branchIn.toFixed(3)} ms, out ${r.branchOut.toFixed(3)} ms per 1080p of lookups (median of ${r.all.in.length})`);
+      }
+    }
+    if (only === 'probe-table-cost') {
+      // W109 (T43): the probe table per frame on examples/ssr (RT off, loop stopped): checks, packs and bytes uploaded per frame
+      // with the version check vs packing on every check (as before T43), and the CPU cost of one check / pack / upload
+      for (const [scene, layout] of [['rooms', 'shipped'], ['showcaseSponza', 'oneSize128']]) {
+        const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&w=1920&h=1080&probeLayout=${layout}&texLimit=adapter&scene=${scene}`); pages.push(p);
+        const r = await p.T(`(async () => { const P = window.__p, S = P.tableStats; P.setDenoise(false); P.setRT(false); await P.step(4);
+          const per = async (always) => { S.always = always; await P.step(2); const a = { ...S }; await P.step(30); return { checks: (S.checks - a.checks) / 30, packs: (S.packs - a.packs) / 30, bytes: (S.bytes - a.bytes) / 30 }; };
+          const versioned = await per(false), always = await per(true); S.always = false;
+          return { versioned, always, cost: P.tableCost(200, 9) }; })()`);
+        const c = r.cost, us = (ms) => (ms * 1000).toFixed(1);
+        console.log(`  ${scene} ${layout} (${c.probes} probes, table ${c.bytes} B): per frame, version check: ${r.versioned.checks} checks, ${r.versioned.packs} packs, ${r.versioned.bytes} B; packing on every check: ${r.always.checks} checks, ${r.always.packs} packs, ${r.always.bytes} B`);
+        console.log(`    CPU per call: check ${us(c.check)} us, pack ${us(c.pack)} us, upload (writeBuffer) ${us(c.upload)} us -> per frame ${us(r.versioned.checks * c.check)} us (version check) vs ${us(r.always.checks * (c.pack + c.upload))} us (pack + upload per check, before T43)`);
+        p.close(); pages.splice(pages.indexOf(p), 1);
+      }
+    }
+    if (only === 'probe-pair-cost') {
+      // W109 (T41): core lookup pairs (R at the surface's roughness, N at 1) at one P, two walks vs one, 1920 x 1080 per dispatch
+      const p = await openPage(`http://127.0.0.1:${PORT}/probe-core/`); pages.push(p);
+      for (const [n, count] of [[0, true], [0, false], [8, false], [32, false]]) {
+        const r = await p.T(`window.__p.pairCost(${Number(process.env.PAIR_ROUNDS ?? 15)}, ${n}, ${count})`);
+        console.log(`  ${r.volumes} volumes${count ? ' (unrolled)' : ' (grid)'}: two walks ${r.two.toFixed(3)} ms, one walk ${r.one.toFixed(3)} ms per 1080p of lookup pairs (median of ${r.all.two.length})`);
       }
     }
     if (only === 'probe-lookup-cost') await probeLookupCost(pages); // W63: the lookup's cost per variant and volume count, JSON to out/w63-probe-lookup-cost.json
