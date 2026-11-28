@@ -1,0 +1,378 @@
+{
+ "date": "2026-11-28T16:32:17.111Z",
+ "label": "w110-ab1",
+ "results": [
+  {
+   "config": "base",
+   "scene": "ssr:moving",
+   "regions": {
+    "reflection": {
+     "px": 220117,
+     "drift": 0.3856,
+     "pct8": 0.0645,
+     "rest": 0.0108,
+     "orbitStd": 0.5352,
+     "d2": 1.0017,
+     "quad": 0.0612,
+     "quadRaw": 0.3166,
+     "speckle": 0.04,
+     "drift2": 0.3846,
+     "orbitStd2": 0.5358
+    },
+    "_pan": 9.0471
+   }
+  },
+  {
+   "config": "base",
+   "scene": "ssr:contact",
+   "regions": {
+    "reflection": {
+     "px": 279484,
+     "drift": 0.3674,
+     "pct8": 0.0004,
+     "rest": 0.0062,
+     "orbitStd": 0.4928,
+     "d2": 0.5696,
+     "quad": 0.3945,
+     "quadRaw": 0.7537,
+     "speckle": 0.0189,
+     "drift2": 0.3805,
+     "orbitStd2": 0.4757
+    },
+    "_pan": 3.8146
+   }
+  },
+  {
+   "config": "base",
+   "scene": "bench:fenceFloor@down/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 518400,
+     "drift": 0.1149,
+     "pct8": 0,
+     "rest": 0.0047,
+     "orbitStd": 0.1037,
+     "d2": 0.1899,
+     "quad": 0.0744,
+     "quadRaw": 0.9757,
+     "speckle": 0.0013,
+     "drift2": 0.115,
+     "orbitStd2": 0.1035
+    },
+    "_pan": 0.5653
+   }
+  },
+  {
+   "config": "base",
+   "scene": "bench:sponza@low/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 224132,
+     "drift": 0.258,
+     "pct8": 0.0054,
+     "rest": 0.0083,
+     "orbitStd": 0.4843,
+     "d2": 7.3256,
+     "quad": 0.0422,
+     "quadRaw": 0.4495,
+     "speckle": 0.1092,
+     "drift2": 0.2577,
+     "orbitStd2": 0.48
+    },
+    "_pan": 5.4095
+   }
+  },
+  {
+   "config": "base",
+   "scene": "bench:sponza@hero/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 119966,
+     "drift": 0.2813,
+     "pct8": 0.0008,
+     "rest": 0.0106,
+     "orbitStd": 0.546,
+     "d2": 4.7531,
+     "quad": -0.0055,
+     "quadRaw": 0.4212,
+     "speckle": 0.179,
+     "drift2": 0.2821,
+     "orbitStd2": 0.5482
+    },
+    "_pan": 6.7363
+   }
+  },
+  {
+   "config": "base",
+   "scene": "bench:toyCar@hero/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 334950,
+     "drift": 0.1579,
+     "pct8": 0.0224,
+     "rest": 0.005,
+     "orbitStd": 0.2308,
+     "d2": 0.319,
+     "quad": 0.1035,
+     "quadRaw": 0.2488,
+     "speckle": 0.0134,
+     "drift2": 0.1577,
+     "orbitStd2": 0.2319
+    },
+    "_pan": 0.5571
+   }
+  },
+  {
+   "config": "base",
+   "scene": "bench:carConcept@w50/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 458630,
+     "drift": 0.3043,
+     "pct8": 0.0087,
+     "rest": 0.0074,
+     "orbitStd": 0.3612,
+     "d2": 0.2955,
+     "quad": 0.0704,
+     "quadRaw": 0.9326,
+     "speckle": 0.0527,
+     "drift2": 0.3045,
+     "orbitStd2": 0.3629
+    },
+    "wheel": {
+     "px": 9900,
+     "drift": 0.6774,
+     "pct8": 0,
+     "rest": 0.0151,
+     "orbitStd": 1.0313,
+     "d2": 0.7529,
+     "quad": 0.6071,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 0.6318,
+     "orbitStd2": 1.0552
+    },
+    "car": {
+     "px": 85400,
+     "drift": 0.5095,
+     "pct8": 0,
+     "rest": 0.01,
+     "orbitStd": 0.5556,
+     "d2": 0.4718,
+     "quad": 0.2474,
+     "quadRaw": 0.9878,
+     "speckle": 0.0095,
+     "drift2": 0.5015,
+     "orbitStd2": 0.5623
+    },
+    "_pan": 0.6003
+   }
+  },
+  {
+   "config": "base",
+   "scene": "bench:chess@hero/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 373043,
+     "drift": 0.1665,
+     "pct8": 0.0166,
+     "rest": 0.0035,
+     "orbitStd": 0.2339,
+     "d2": 0.3165,
+     "quad": 0.0378,
+     "quadRaw": 0.0235,
+     "speckle": 0.0432,
+     "drift2": 0.1673,
+     "orbitStd2": 0.2349
+    },
+    "_pan": 0.5548
+   }
+  },
+  {
+   "config": "on",
+   "scene": "ssr:moving",
+   "regions": {
+    "reflection": {
+     "px": 219771,
+     "drift": 0.3833,
+     "pct8": 0.0737,
+     "rest": 0.0108,
+     "orbitStd": 0.5388,
+     "d2": 1.0042,
+     "quad": 0.0682,
+     "quadRaw": 0.3088,
+     "speckle": 0.0391,
+     "drift2": 0.3828,
+     "orbitStd2": 0.5413
+    },
+    "_pan": 9.0867
+   }
+  },
+  {
+   "config": "on",
+   "scene": "ssr:contact",
+   "regions": {
+    "reflection": {
+     "px": 279596,
+     "drift": 0.4117,
+     "pct8": 0.0004,
+     "rest": 0.0063,
+     "orbitStd": 0.4791,
+     "d2": 0.5697,
+     "quad": 0.4197,
+     "quadRaw": 0.7503,
+     "speckle": 0.0182,
+     "drift2": 0.4049,
+     "orbitStd2": 0.4805
+    },
+    "_pan": 3.8172
+   }
+  },
+  {
+   "config": "on",
+   "scene": "bench:fenceFloor@down/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 518400,
+     "drift": 0.1235,
+     "pct8": 0,
+     "rest": 0.0047,
+     "orbitStd": 0.1152,
+     "d2": 0.2058,
+     "quad": 0.0793,
+     "quadRaw": 0.9745,
+     "speckle": 0.0013,
+     "drift2": 0.1236,
+     "orbitStd2": 0.1145
+    },
+    "_pan": 0.6121
+   }
+  },
+  {
+   "config": "on",
+   "scene": "bench:sponza@low/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 224132,
+     "drift": 0.2583,
+     "pct8": 0.0054,
+     "rest": 0.0082,
+     "orbitStd": 0.4826,
+     "d2": 7.3043,
+     "quad": 0.0423,
+     "quadRaw": 0.4549,
+     "speckle": 0.1117,
+     "drift2": 0.2586,
+     "orbitStd2": 0.4784
+    },
+    "_pan": 5.4046
+   }
+  },
+  {
+   "config": "on",
+   "scene": "bench:sponza@hero/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 119966,
+     "drift": 0.2816,
+     "pct8": 0.0008,
+     "rest": 0.0106,
+     "orbitStd": 0.5458,
+     "d2": 4.7515,
+     "quad": -0.0055,
+     "quadRaw": 0.4288,
+     "speckle": 0.1811,
+     "drift2": 0.2824,
+     "orbitStd2": 0.5485
+    },
+    "_pan": 6.7297
+   }
+  },
+  {
+   "config": "on",
+   "scene": "bench:toyCar@hero/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 334950,
+     "drift": 0.1567,
+     "pct8": 0.0227,
+     "rest": 0.0046,
+     "orbitStd": 0.2309,
+     "d2": 0.3174,
+     "quad": 0.1091,
+     "quadRaw": 0.2492,
+     "speckle": 0.0141,
+     "drift2": 0.1576,
+     "orbitStd2": 0.2322
+    },
+    "_pan": 0.5568
+   }
+  },
+  {
+   "config": "on",
+   "scene": "bench:carConcept@w50/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 458630,
+     "drift": 0.3066,
+     "pct8": 0.0109,
+     "rest": 0.0075,
+     "orbitStd": 0.3658,
+     "d2": 0.298,
+     "quad": 0.0716,
+     "quadRaw": 0.9325,
+     "speckle": 0.052,
+     "drift2": 0.3062,
+     "orbitStd2": 0.3651
+    },
+    "wheel": {
+     "px": 9900,
+     "drift": 0.6919,
+     "pct8": 0.0303,
+     "rest": 0.0161,
+     "orbitStd": 1.1646,
+     "d2": 0.8197,
+     "quad": 0.586,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 0.6243,
+     "orbitStd2": 1.181
+    },
+    "car": {
+     "px": 85400,
+     "drift": 0.5118,
+     "pct8": 0.0035,
+     "rest": 0.0101,
+     "orbitStd": 0.5749,
+     "d2": 0.4824,
+     "quad": 0.2431,
+     "quadRaw": 0.9878,
+     "speckle": 0.0092,
+     "drift2": 0.5022,
+     "orbitStd2": 0.5801
+    },
+    "_pan": 0.5959
+   }
+  },
+  {
+   "config": "on",
+   "scene": "bench:chess@hero/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 373043,
+     "drift": 0.1666,
+     "pct8": 0.0166,
+     "rest": 0.0035,
+     "orbitStd": 0.2342,
+     "d2": 0.3166,
+     "quad": 0.0389,
+     "quadRaw": 0.0236,
+     "speckle": 0.0431,
+     "drift2": 0.168,
+     "orbitStd2": 0.2352
+    },
+    "_pan": 0.5548
+   }
+  }
+ ]
+}
