@@ -24,8 +24,9 @@
 // term, D403) and the probe bake read `roughness`; the G-buffer's `normalRoughness.w` (the tracer's and
 // the denoiser's roughness) takes the filtered value through {@link specularAARoughness} (without the
 // 0.045 floor, as it has none today). A non-node material is converted to its node class by copying its
-// enumerable properties (NodeLibrary.fromMaterial), so the own method carries over. The cache key
-// carries the mode, so an adjusted material never shares a pipeline with an unadjusted one.
+// enumerable properties (NodeLibrary.fromMaterial), so the own method carries over. An own string
+// property (`reflectionsSpecularAA`) is in three's material cache key, so an adjusted material never shares
+// a pipeline with an unadjusted one; `customProgramCacheKey` stays the app's.
 import type * as THREE from 'three/webgpu';
 import {
   alphaT, anisotropy, clearcoatRoughness, float, materialClearcoatRoughness, materialRoughness, normalViewGeometry, property, roughness, uniform,
@@ -102,7 +103,6 @@ export function specularAATracesFiltered(material: THREE.Material | null | undef
 }
 
 const applies = (m: THREE.Material) => (m as N).isMeshStandardMaterial === true || (m as N).isMeshStandardNodeMaterial === true;
-const baseCacheKey = (m: THREE.Material) => Object.getPrototypeOf(m).customProgramCacheKey.call(m) as string;
 
 function install(m: THREE.Material, traceRoughness: string) {
   const mm = m as N;
@@ -117,12 +117,15 @@ function install(m: THREE.Material, traceRoughness: string) {
       clearcoatRoughness.assign(cc.max(0.045));
     }
   };
-  m.customProgramCacheKey = function (this: THREE.Material) { return `${baseCacheKey(this)}|specularAA:variance:${traceRoughness}`; };
+  // three keys a material's pipeline by its own enumerable properties (RenderObject.getMaterialCacheKey: a string
+  // value as is, a function by its source), so this marker separates the variants without owning
+  // `customProgramCacheKey` (the examples' normal-map option keys by its map id there, D3572)
+  mm.reflectionsSpecularAA = `variance:${traceRoughness}`;
 }
 
 function uninstall(m: THREE.Material) {
   delete (m as N).setupVariants;
-  delete (m as Partial<THREE.Material>).customProgramCacheKey;
+  delete (m as N).reflectionsSpecularAA;
 }
 
 /**
@@ -131,9 +134,9 @@ function uninstall(m: THREE.Material) {
  * form; `'off'` restores three's own. Materials added later need another call. `variance` / `threshold`,
  * when given, set the shared uniforms. Returns the number of materials changed (each rebuilds once).
  *
- * The hook is an own `setupVariants` / `customProgramCacheKey` on the material; a material that already
- * has its own `setupVariants` from elsewhere is replaced while the option is on and loses it when it
- * turns off.
+ * The hook is an own `setupVariants` (and a marker property, `reflectionsSpecularAA`) on the material; a
+ * material that already has its own `setupVariants` from elsewhere is replaced while the option is on and
+ * loses it when it turns off.
  */
 export function applySpecularAA(root: THREE.Object3D | THREE.Material, options: SpecularAAMode | SpecularAAOptions = 'variance'): number {
   const o: SpecularAAOptions = typeof options === 'string' ? { mode: options } : options;

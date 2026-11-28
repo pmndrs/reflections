@@ -635,6 +635,12 @@ async function main() {
       setSpecOcc: (on: boolean) => setSpecOcc(on),
       /** W46: roughness from normal variance, 0 = off, else its strength (1 = the formula); re-bakes. */
       setSpecAA(strength: number) { setSpecAA(strength); specAABox.checked = strength > 0; },
+      /** W105: the package's geometric specular AA ('off' | 'variance' | options); re-bakes, as setSpecAA. Returns the materials changed. */
+      setSpecularAA(options: Parameters<typeof applySpecularAA>[1]) {
+        const n = kit ? applySpecularAA(kit.scene, options) : 0;
+        if (kit) { bake(); ssr.gbuffer.resetHistory(); ssr.resetHistory(); hybrid.resetHistory(); aa.reset(); }
+        return n;
+      },
       aa,
       /** W36: 'upscaler' (default) | 'taa' (W40's resolve) | 'off'. */
       setAA: (m: AAMode) => setAA(m),
