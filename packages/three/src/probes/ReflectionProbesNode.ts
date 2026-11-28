@@ -45,6 +45,7 @@ import {
   probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLodMapping, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
 } from '@pmndrs/reflections-core';
 import { probeOrigin, probeWorldScale, type ReflectionProbes } from './ReflectionProbes';
+import { watchTextureLimits } from './stageLimits';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any; // TSL's node typings are too strict for hand-written shader maths
@@ -431,6 +432,8 @@ export class ReflectionProbesNode extends THREE.Node {
     const seam = this.seamOptions();
     this.table = tableFor(probes);
     this.updateBefore();
+    // the material's own maps + these atlases against the device's per-stage limits, once three has the bindings (T24, D5640)
+    watchTextureLimits(builder, probes);
 
     // missing inputs come from the material: its fragment, reflection vector and roughness
     const { context } = builder;

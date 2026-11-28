@@ -1363,6 +1363,20 @@ function f2Checks(r) {
       `on-screen hits: A (reuse on) ${rs.a.onScreenHits}, B (reuse off, read while A's was pending) ${rs.b.onScreenHits}, C (reuse on) ${rs.c.onScreenHits}`);
     check('rtStats: no WebGPU errors', rs.gpuErrors.length === 0, rs.gpuErrors.slice(0, 2).join(' | '));
   }
+  // W104 (T24, D5640): a material past the sampled-texture limit (its maps + 3 probe atlases) gets our warning, once,
+  // with WebGPU's own count; a light material on the same set none; reflectionsRequiredLimits draws it without either
+  const tl = section('textureLimit');
+  if (tl) {
+    const a = tl.atDefault, b = tl.raised;
+    console.log(`  textureLimit warning: ${a.warnings[0] ?? '(none)'}`);
+    check('probes: a material past the sampled-texture limit gets one warning naming it, with the count WebGPU reports (T24)',
+      a.maxSampledTextures === 16 && a.atlases === 3 && a.heavyWarned === 1 && a.lightWarned === 0 && a.warnings.length === 1 && a.oursCount !== null && a.oursCount === a.webgpuCount
+        && /reflectionsRequiredLimits/.test(a.warnings[0]) && /probe sizes/.test(a.warnings[0]),
+      `limit ${a.maxSampledTextures}, ${a.atlases} atlases; ours ${a.oursCount}, WebGPU ${a.webgpuCount}; ${a.warnings.length} warning(s) (heavy ${a.heavyWarned}, light ${a.lightWarned}); WebGPU: ${(a.gpuErrors[0] ?? a.threeErrors[0] ?? 'no error').slice(0, 160)}`);
+    check('probes: with reflectionsRequiredLimits the same materials draw, no warning, no WebGPU error (T24)',
+      b.maxSampledTextures > a.oursCount ? b.warnings.length === 0 && b.gpuErrors.length === 0 && b.threeErrors.length === 0 : b.warnings.length === 1,
+      `limit ${b.maxSampledTextures}; ${b.warnings.length} warning(s), ${b.gpuErrors.length + b.threeErrors.length} error(s) ${(b.gpuErrors[0] ?? b.threeErrors[0] ?? '').slice(0, 120)}`);
+  }
 }
 
 /** examples/regressions: GPU repros of review bugs (stream F1). Each check failed before its fix. */

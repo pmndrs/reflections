@@ -46,9 +46,29 @@ The default WebGPU limits are small, and the library needs more. Three fixes, in
 
 ### Sampled textures
 
-Probe sets of several sizes use one texture binding per size. At the default 16 sampled textures per stage, a
-four-size set still fits three's composite, but a material with many maps may not. `reflectionsRequiredLimits` asks
-for up to 32. If your adapter cannot give 32, use fewer probe sizes (one or two sizes cover most scenes).
+Probe sets of several sizes use one texture binding per size. Every material that samples the probes binds them next
+to its own maps and shadow maps. At the default 16 sampled textures per stage, a four-size set still fits three's
+composite, but a material with many maps may not. WebGPU then rejects that material's pipeline and the mesh does not
+draw.
+
+When three builds such a material, the library counts its bindings and warns once for that material, before
+WebGPU's own error:
+
+```text
+ReflectionProbes: material "Floor" (MeshPhysicalMaterial) on "floor" binds 18 sampled textures in its fragment shader,
+3 of the textures probe atlases (one per probe size: 256, 512, 128 px); this device allows 16
+(maxSampledTexturesPerShaderStage), so WebGPU will reject its pipeline and it will not draw. Fix: ...
+```
+
+The warning comes at the material's first build: during a bake if `scene.environmentNode` already holds the probes,
+otherwise at the first render. Two fixes:
+
+1. **Raise the limit.** `new WebGPURenderer({ requiredLimits: reflectionsRequiredLimits(adapter) })` asks for up to
+   32 sampled textures where the adapter has them.
+2. **Bind fewer textures.** Use fewer probe sizes (one or two sizes cover most scenes), or fewer maps on that material.
+
+If the warning names samplers (`maxSamplersPerShaderStage`), only the second fix works: three gives each texture its
+own sampler, and most adapters allow 16 samplers per stage.
 
 ### Colour attachment bytes
 
