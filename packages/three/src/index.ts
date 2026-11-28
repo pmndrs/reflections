@@ -29,6 +29,11 @@ export { AccumulateNode, clampSample, ggxLobeSample, pixelSeed } from './samplin
 export { reflectionsRequiredLimits } from '@pmndrs/reflections-core';
 export { FrameGBuffer, getDevice, getGPUTexture, type FrameGBufferOptions, type FrameTargetName } from './frame/FrameGBuffer';
 export { sceneColorNoSpecular, gbufferRoughness, gbufferMetalness } from './frame/nodes';
+// Geometric specular AA in variance form (W105): replaces three's geometry roughness on standard / physical materials, G-buffer included.
+export {
+  applySpecularAA, specularAAModeOf, varianceSpecularAA, specularAAUniforms, SPECULAR_AA_VARIANCE, SPECULAR_AA_THRESHOLD,
+  type SpecularAAMode, type SpecularAAOptions,
+} from './frame/specularAA';
 
 // Screen-space reflections: G-buffer + core tracer on the renderer's device, outputs as three
 // textures; first-cut hybrid composite (SSR -> probes by coverage -> environment) in TSL.

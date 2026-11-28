@@ -1,0 +1,20 @@
+W105 run 1: carConcept chrome star, bench pose w50, 1280x1280, ours-rt (bench defaults, carProbes none), 48 frames; PT 48 steps.
+stats.py masks (8-bit display luma / MAD vs PT). specularAA variance = sigma^2 (default 1/(2 pi) = 0.159), kappa 0.18.
+noG = traceRoughness 'material' (G-buffer normalRoughness.w left authored; three's lit term + shadingRoughness filtered).
+Machine load average ~140 (other worktrees on the GPU): image metrics only, no timings from this run.
+
+                                 star (3100)    starCore (775)   starEdge (2325)   hubRect (17360)floorWheel (72000)   frame (1638400)
+off (three's geometry roughness) 96.4 /  54.8      62.0 /  31.7     107.8 /  62.4      45.0 /  27.8      50.5 /  29.4     127.3 /  13.1
+variance (0.159, filtered)     123.9 /  75.6      90.7 /  59.1     134.9 /  81.2      54.6 /  33.5      53.1 /  31.1     128.0 /  13.2
+varianceHalf (0.0796)          117.7 /  70.6      83.8 /  52.3     129.0 /  76.7      53.0 /  32.4      53.0 /  30.9     127.9 /  13.2
+variance-noG (0.159)            99.0 /  56.2      65.9 /  35.5     110.1 /  63.1      45.7 /  28.1      50.5 /  29.4     127.5 /  13.0
+v04-noG (0.04)                  91.2 /  51.0      59.6 /  29.5     101.7 /  58.2      44.0 /  27.0      50.5 /  29.4     127.4 /  13.0
+v04 (0.04, filtered)           111.3 /  65.5      77.9 /  46.5     122.4 /  71.9      51.2 /  31.2      52.8 /  30.8     127.8 /  13.2
+v01 (0.01, filtered)            94.0 /  53.1      64.8 /  34.0     103.7 /  59.5      46.0 /  28.0      52.3 /  30.4     127.6 /  13.1
+v0025 (0.0025, filtered)        83.2 /  46.2      58.4 /  28.1      91.4 /  52.2      42.3 /  26.1      51.6 /  29.9     127.4 /  13.1
+geoOff (W56 examples option)    73.7 /  41.6      53.0 /  23.6      80.6 /  47.6      40.2 /  25.1      50.3 /  29.3     127.2 /  13.0
+pathtraced                      52.5 /   0.0      31.3 /   0.0      59.6 /   0.0      26.1 /   0.0      29.8 /   0.0     126.2 /   0.0
+
+Verdict run 1: at the paper's constants the variance form is BLURRIER than three's term on the star (123.9 vs 96.4).
+Two reasons: (1) it now reaches the tracer / denoiser (normalRoughness.w): -25 of the +27; (2) in alpha^2 a small
+normal derivative d adds ~sqrt(0.8 d) of perceptual roughness on a near-mirror, more than three's linear +d.

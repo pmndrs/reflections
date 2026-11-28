@@ -20,6 +20,7 @@ import { ScreenSpaceReflectionsPass, type ScreenSpaceReflectionsPassSettings } f
 import type { FrameGBufferOptions } from './frame/FrameGBuffer';
 import { HybridReflections } from './sssr/HybridReflections';
 import { createRaytracerTraceProviderFromObjects } from './trace/RaytracerTraceProvider';
+import { applySpecularAA, type SpecularAAMode, type SpecularAAOptions } from './frame/specularAA';
 
 /** The perceptual roughness above which a pixel skips the trace (the denoiser gates at the same value). */
 export interface ReflectionsDenoiserInfo { roughnessThreshold: number }
@@ -61,6 +62,13 @@ export interface ReflectionsOptions {
   gbufferOptions?: FrameGBufferOptions;
   /** Per-pass GPU timestamps, read with `reflections.ssr.readTimings()`; needs the 'timestamp-query' feature. Default false. */
   timestamps?: boolean;
+  /**
+   * Geometric specular anti-aliasing on the scene's standard / physical materials (`applySpecularAA`):
+   * 'off' (default) leaves three's own geometry roughness; 'variance' replaces it with the variance form
+   * (Tokuyoshi & Kaplanyan), in three's lit term and the G-buffer alike. Applied at `create()` to the
+   * meshes present then; call `reflections.setSpecularAA()` again after adding meshes.
+   */
+  specularAA?: SpecularAAMode | SpecularAAOptions;
 }
 
 /**
@@ -113,6 +121,7 @@ export class Reflections {
    */
   static async create(renderer: THREE.WebGPURenderer, scene: THREE.Scene, options: ReflectionsOptions = {}): Promise<Reflections> {
     const preset = options.preset ?? 'default';
+    if (options.specularAA !== undefined && options.specularAA !== 'off') applySpecularAA(scene, options.specularAA);
     if (!(renderer as { hasInitialized?(): boolean }).hasInitialized?.()) await renderer.init();
     const wantProbes = options.probes ?? true;
     if (wantProbes && options.cubeArrays !== false) await installCubeArraySupport(renderer);
@@ -184,6 +193,14 @@ export class Reflections {
     this.scene.environmentNode = reflectionProbes(this.probes) as never;
     this.scene.traverse((o) => { const m = (o as THREE.Mesh).material; if (m) for (const x of ([] as THREE.Material[]).concat(m)) x.needsUpdate = true; });
     this.rebuild();
+  }
+
+  /**
+   * Geometric specular AA on every standard / physical material under the scene ('off' restores three's
+   * own term). Materials rebuild once; re-bake probes you own afterwards if the change should reach them.
+   */
+  setSpecularAA(options: SpecularAAMode | SpecularAAOptions) {
+    return applySpecularAA(this.scene, options);
   }
 
   /** Rebuild the composite after changing `ssr.settings` between 'full' / 'half' resolution, the environment or the probes. */

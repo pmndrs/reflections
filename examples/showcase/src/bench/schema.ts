@@ -431,6 +431,19 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W56 (D3720): three r187 adds the screen-space derivative of the view normal to every standard material\'s roughness (getRoughness); off / scaled re-assigns three\'s roughness after its setupVariants. Reaches three\'s lit term, the G-buffer\'s shading roughness (the composite\'s probe term) and the bake; never the path tracer. Any other scale by URL (?geometryRoughness=0.75).',
   }),
 
+  sel('specularAA', 'materials', 'Geometric specular AA', [['off', 'off (three\'s geometry roughness)'], ['variance', 'variance (Tokuyoshi & Kaplanyan)']], 'off', {
+    apply: 'rebuild', appliesTo: RASTER, api: 'applySpecularAA / Reflections specularAA (W105)',
+    tradeoff: 'W105 (T30, D5660): replaces three\'s geometry roughness (+ the max normal derivative on perceptual roughness) with a clamped variance on alpha^2, alpha\'^2 = alpha^2 + min(2 sigma^2 (|dn/dx|^2 + |dn/dy|^2), kappa) (Tokuyoshi & Kaplanyan 2019 / 2021), in three\'s lit term, the G-buffer (normalRoughness.w and shadingRoughness) and the bake alike. Package option; wins over Geometry roughness (three). Never the path tracer.',
+  }),
+  num('specularAAVariance', 'materials', 'Specular AA kernel variance', 0, 1, 0.01, 0.159, {
+    apply: 'rebuild', appliesTo: RASTER, api: 'applySpecularAA({ variance })',
+    tradeoff: 'sigma^2 of the variance specular AA: 1 / (2 pi) is the papers\' conservative kernel, half of it their less conservative one (sharper, more sparkle). Only with Geometric specular AA = variance.',
+  }),
+  sel('specularAATrace', 'materials', 'Specular AA in the traced roughness', [['filtered', 'filtered (as three shades)'], ['material', 'material (authored)']], 'filtered', {
+    apply: 'rebuild', appliesTo: OURS, api: 'applySpecularAA({ traceRoughness })',
+    tradeoff: 'W105: whether the G-buffer\'s normalRoughness.w (what the tracer samples and the denoiser filters at) takes the filtered roughness. material keeps it authored, as three\'s own term never reached it. Only with Geometric specular AA = variance.',
+  }),
+
   // ---- three's SSR ---------------------------------------------------------------------------------------------
   num('mirrorBias', 'three', 'SSR mirror bias', 0, 1, 0.01, 0, { pageDefault: 0.5, appliesTo: THREE, api: 'SSRNode.mirrorBias', tradeoff: 'three\'s lobe truncation (the example\'s 0.5): less noise, sharper.' }),
   num('ssrMaxDistance', 'three', 'SSR max distance', 0, 50, 0.1, 1, { defaultNote: 'example: scene far / 4 (D2301)', appliesTo: THREE, api: 'SSRNode.maxDistance', tradeoff: 'March length in world units; the example\'s 0.4 is for its 0.1-scaled dungeon.' }),

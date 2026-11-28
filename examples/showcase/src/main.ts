@@ -27,7 +27,7 @@
 //
 // W51: ?lobeFilter=<k> (`settings.hitLobeFilter`, D3550; default the package's 1; also a slider), and every other knob on
 // ./bench.html (the tuning bench; docs/SETTINGS.md).
-// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=0|1|<k> ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?shadeVis=all ?lobeMix=<0..1> ?shadeOcc=screen ?lobeFilter=<k> (W52) ?hitSource=hits|all ?hitDistW=<k> (W53: the denoiser keeps hit sources apart / weights by hit distance) ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
+// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=0|1|<k> ?specularAA=variance ?specularAAVariance=<sigma^2> (W105) ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?shadeVis=all ?lobeMix=<0..1> ?shadeOcc=screen ?lobeFilter=<k> (W52) ?hitSource=hits|all ?hitDistW=<k> (W53: the denoiser keeps hit sources apart / weights by hit distance) ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
 import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';
@@ -37,6 +37,7 @@ import {
   HybridReflections, ReflectionProbe, ReflectionProbes, ReflectionProbesHelper, ScreenSpaceReflectionsPass, bvhTraceSceneFromObjects,
   createRaytracerTraceProviderFromObjects, installCubeArraySupport, reflectionProbes, sampleReflectionProbes,
   applyReflectionsPreset, denoiserHitSourceModeOf, isReflectionsPresetName, reflectionsPreset, type ReflectionsPresetName,
+  applySpecularAA, SPECULAR_AA_VARIANCE,
 } from '@pmndrs/reflections/three';
 import { availableAssets, probeAtlasBytes } from '../../shared';
 import { brdfFromQuery, createReflectionDenoiser, denoiserAvailable, hitSourceDenoiserOptions, hitSourceFromQuery, setDenoiserHitSource, syncDenoiserBrdf, type DenoiserBrdf, type DenoiserHitSourceSettings } from '../../shared/denoiser';
@@ -347,6 +348,7 @@ async function main() {
     state.exposure = kit.exposure;
     if (state.specAA > 0) { specAAStrength.value = state.specAA; setSpecularAA(kit.scene, true); }
     setGeometryRoughness(kit.scene, geometryRoughnessFromQuery(q)); // W56: ?geometryRoughness=three|off|<scale> (URL only)
+    if (q.get('specularAA') === 'variance') applySpecularAA(kit.scene, { mode: 'variance', variance: Number(q.get('specularAAVariance') ?? SPECULAR_AA_VARIANCE), traceRoughness: q.get('specularAATrace') === 'material' ? 'material' : 'filtered' }); // W105 (URL only)
     delete ssr.settings.depthBufferThickness; delete ssr.settings.thicknessRoughnessFactor;
     if (kit.thickness) Object.assign(ssr.settings, kit.thickness);
     renderer.toneMappingExposure = state.exposure;
