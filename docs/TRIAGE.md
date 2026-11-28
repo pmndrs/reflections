@@ -43,7 +43,7 @@ Status values:
 7. **T22: Sponza on oneSize128.** Accepted (decision 12), S. +3.5 dB vs the PT at a third of the memory (W62). First step: confirm that "fine" meant switch (DECISIONS asks this), then flip the layout.
 8. **T30: specular AA as a package option.** Curved glossy edges still alias (W46). A variance-form term would replace three's geometry roughness without its sparkle cost (W56), so it serves both flicker and the star. First step: a Tokuyoshi 2019 term next to specAA, measured with T1.
 9. **T3: cone-footprint hit colour + mirrorBias compensation (X2).** It goes after raw fireflies at the source and makes `mirrorBias` honest (D49, D3550). First step: `hitColorFilter: 'cone'` on a downsampler pyramid, gated on line spread.
-10. **T14: lobe occlusion for traced hits.** Accepted (decision 20). It is the one fix for the hub, the floor under the car (24 vs PT 8) and the reflected wheels (D3681, W56). First step: build it as an option, off by default, and tune it on T53's scenes before the car.
+10. **T14: lobe occlusion for traced hits.** Built by W107 as an option, off (D5700): the floor under the car 22.3 -> 7.3 (PT 3.4) with 2 rays, +0.54 ms; wheel flicker +5 %. Now a `decide`: default or not.
 
 Next in line: T4 (X3 ratio reuse: the biggest noise win on paper, but L, and it replaces the quad copy that T2 and T10 work on) T12 and T16 (X1, S each).
 
@@ -54,7 +54,7 @@ Row ids per cell. Out-of-scope rows are left out.
 | impact \ effort | S | M | L |
 |---|---|---|---|
 | **high** |  | T30 |  |
-| **med** | T17, T29 | T4, T6, T11, T14, T15, T23, T25, T26, T27, T37, T41, T54, T72 | T7, T18, T35, T48, T52, T59, T74 |
+| **med** | T14, T17, T29 | T4, T6, T11, T15, T23, T25, T26, T27, T37, T41, T54, T72 | T7, T18, T35, T48, T52, T59, T74 |
 | **low** | T2, T8, T9, T12, T13, T19, T32, T33, T40, T42, T43, T45, T47, T49, T55, T56, T57, T60, T61, T62, T63, T64, T75, T76 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
 
 ## The full table
@@ -85,7 +85,7 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T14 | Lobe occlusion for traced hits' specular (hub, floor under the car, reflected wheels). Today: one visibility ray along R (D3513), `hitShadeVisibility` (D3640), `hitShadeOcclusion: 'screen'` (D3642); no lobe-wide test | med | M | accepted | decision 20, D3681, D3513, D3510, D3540, D3542, D3640, D3642, W44, W52, W54, W55, W56 | A few BVH rays or a cone over the hit lobe (option, off); tune on T53's scenes first, then the floor under the car (24 vs PT 8). |
+| T14 | Lobe occlusion for traced hits' specular: built by W107 as `traceSettings.hitLobeOcclusionRays` (off). 2 rays: floor under the car 22.3 -> 7.3 (PT 3.4), floorWheel 47.5 -> 42.1 (30.1), frame MAD 13.2 -> 12.5, +0.54 ms at 1080p; wheel orbit std +5 % (the darkening's contrast: `t.hitSpecular=0` raises it as much) | med | S | decide | D5700, D3681, decision 20, W107 | Lead / maintainer: accept the +5 % wheel flicker for PT-like darkening (2 rays at 0.3, examples or library default), or keep it an option. Left: the hub's screen-space half (no BVH; wheel probes cover it), shade the blocker (D3513). |
 | T15 | Mirror-in-mirror under the re-shade shows the probe, not the other mirror's reflection | med | M | experiment | D3544, D4500, W44 | Blend last frame's specular where the camera's R and the ray's R agree; measure on facingMirrors. |
 | T17 | Hit weight ignores AO and envMapIntensity: dark-AO or env-0 materials still show SSR / traced hits at full Fresnel | med | S | decide | D2800, D4511 | Put it on the Decisions page: one multiply behind a setting, default today's output. |
 | T18 | Traced hits: base-colour textures done (W97, D5540). Still averaged: emissive, roughness, metalness, normal maps; also normal side, alpha-tested foliage, undrawn triangles | med | L | ready | D902, D2901, D3571, D3600, D3602, W11, W97, D5540 | Alpha-tested foliage on Sponza first (visible holes), then roughness/metalness maps. |
@@ -184,6 +184,7 @@ Findings and calls a new worker might otherwise redo. Each has a pointer.
 - **The chrome star** comes from three's geometry roughness plus the denoiser's spatial spread; the lobe filter adds to it only through the star's neighbours. Normals, probe resolution and the re-shade are not the cause, and the floor-under-car lead is ruled out for the star (0.1 % of its rays). W56; D3720, D3721.
 - **The thin line in `view=off`** is three's clear-coat env reflection on the grazing bevel. It doesn't seed the halo. W58, D3741.
 - **The floor under the car is too bright** because the specular of the underside hit is unoccluded. That is T14, not a shadow problem: the floor is a metal mirror. W56, D3681.
+- **Lobe occlusion's flicker rise is the darkening, not its rays.** 2, 4 and 8 lobe rays raise the car's wheel orbit std alike (+5-6 %), and `t.hitSpecular=0` (the same regions darker by dropping the lobe) raises it +6 % and other metrics more. A fixed ray pattern adds no noise; more rays don't lower it. 2 rays = 4 within 0.7 on every region. W107, D5700.
 - **Wheel interiors and the cabin** are base three's IBL, not our reflections. The glass reflection matches the PT (121.9 vs 121.7). W54. See T65-T67.
 - **Sponza's gap to the PT** is raster lighting without GI. Judge reflections there on reflection-heavy pixels or against reflections off. Decision 4, W46.
 - **carConcept's paint vs the PT** was three's mipmapped flake normal map. It is fixed in the examples by specAA (on by default). D3552, D3570, decision 3.

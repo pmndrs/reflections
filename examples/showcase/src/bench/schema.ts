@@ -325,8 +325,8 @@ export const SETTINGS: Setting[] = [
   }),
   num('t.hitLobeOcclusionRays', 'rt', 'Lobe occlusion rays (traced hits)', 0, 16, 1, 0, {
     defaultNote: 'off', appliesTo: RT, api: 'traceSettings.hitLobeOcclusionRays',
-    tradeoff: 'W107 (T14, D5700): short any-hit rays over a traced hit\'s own specular lobe (a fixed pattern: no noise); the lobe\'s probe light is scaled by the share left open. Darkens closed spaces the probes don\'t resolve (floor under the car, inside the wheels). Where D3513\'s ray applies: off-screen hits, on-screen ones with the visibility ray on all. 0 = off.',
-    cost: 'rays per traced hit; see W107',
+    tradeoff: 'W107 (T14, D5700): short any-hit rays over a traced hit\'s own specular lobe (a fixed pattern: no noise); the lobe\'s probe light is scaled by the share left open. Where D3513\'s ray applies: off-screen hits, on-screen ones with the visibility ray on all. carConcept w50 (PT): floor under the car 22.3 -> 7.3 (3.4), floorWheel 47.5 -> 42.1 (30.1), hub 41.5 -> 39.6 (27.1), frame MAD 13.2 -> 12.5 with 2 rays; 4 = 8 within 0.5. Raises the car\'s wheel orbit flicker ~5 % (as any darkening there does), so off by default. 0 = off; 1 runs as 2.',
+    cost: 'rt trace at 1080p: 2 rays +0.54 ms, 4 rays +0.86 (carConcept); 2 rays +0.32 (Sponza); with the visibility ray on all, 2 rays +1.32 (W107)',
   }),
   num('t.hitLobeOcclusionLength', 'rt', 'Lobe occlusion length', 0, 2, 0.01, 0.3, {
     appliesTo: RT, api: 'traceSettings.hitLobeOcclusionLength',
