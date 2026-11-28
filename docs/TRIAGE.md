@@ -32,7 +32,7 @@ Status values:
 
 ## Top 10, in order
 
-**Status 2026-11-27 (0.1.0 published).** The Top 10 below is from 2026-11-13. Since then T1 and T53 are done (W85: `--only flicker`, the T53 scenes, baseline), T10 is settled: quadCopy stays off (2026-11-28, see the Settled list), and T58 is done (0.1.0 on npm as `latest`). 2026-11-28: the maintainer said to go with the lead's recommendations. Wave W102-W106 is running: T21 + T22 + T29, the Babylon brightness gap, T24 + T55, T30 and T3. Next: T14 and T23.
+**Status 2026-11-27 (0.1.0 published).** The Top 10 below is from 2026-11-13. Since then T1 and T53 are done (W85: `--only flicker`, the T53 scenes, baseline), T10 is settled: quadCopy stays off (2026-11-28, see the Settled list), and T58 is done (0.1.0 on npm as `latest`). 2026-11-28: the maintainer said to go with the lead's recommendations. Wave W102-W106 is running: T21 + T22 + T29, the Babylon brightness gap, T24 + T55, T30. W106 found T3 already built (W72) and the default (W76); row closed, the leftover is T76. Next: T14 and T23.
 
 1. **T1: flicker and firefly metrics.** Flicker is the #1 pain point, and none of the flicker experiments (T2-T7) can be judged without numbers per region (D3622, X0). First step: build X0's rest drift, orbit flicker, 2x2 energy, edge pan and raw speckle count as bench Measure columns, then baseline every scene.
 2. **T53: simple test scenes.** The maintainer asked for these so the bevels stop deciding the tuning. T10 and T14 are queued behind them (decisions 20, 21). First step: as bench scenes with the PT reference, add a cube or slab on the mirror, sharp edges above it, and a thin plate over the floor. Build T1 and T53 in one worktree (they are X0).
@@ -53,9 +53,9 @@ Row ids per cell. Out-of-scope rows are left out.
 
 | impact \ effort | S | M | L |
 |---|---|---|---|
-| **high** | T2 | T3, T30 | T4 |
+| **high** | T2 | T30 | T4 |
 | **med** | T5, T12, T16, T17, T21, T22, T29, T69 | T6, T11, T14, T15, T23, T25, T26, T27, T40, T41, T54, T70 | T7, T18, T35, T36, T37, T38, T42, T48, T52, T59 |
-| **low** | T8, T9, T13, T19, T32, T33, T43, T45, T47, T49, T55, T56, T57, T60, T61, T62, T63, T64, T71 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
+| **low** | T8, T9, T76, T13, T19, T32, T33, T43, T45, T47, T49, T55, T56, T57, T60, T61, T62, T63, T64, T71 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
 
 ## The full table
 
@@ -66,8 +66,8 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
 | T2 | Rotate the quad's traced pixel (X1 #1): W85 found no consistent gain (orbit +3-9 % on 3 scenes, -16 % offscreen only); option kept, default fixed | low | S | experiment | X1 #1, W39, D3663, W85 | Revisit only with T4 (ratio reuse). |
-| T3 | Cone-footprint hit colour + mirrorBias compensation (X2): fewer raw fireflies, honest mirrorBias, the D3550 double blur `flicker` | high | M | experiment | X2 #5 #6, D49, D3550, W32, W39, W40 | Build hitColorFilter 'cone' on a downsampler pyramid; gate on line spread (±10 % of PT); count raw speckles with T1. |
 | T4 | Ratio-estimator ray reuse (X3): 1 ray + reuse ≈ 4 rays of noise; replaces FFX's quad copy `flicker` | high | L | experiment | X3, decision 13, D50, D3550, D3663 | Phase A in core: rayReuse 'copy' \| 'ratio'; target denoised std at spq 1 ≈ copy at spq 4 on glossy floors. |
+| T76 | The cone hit colour (default since W76) loses a thin bright light's reflection with no denoiser and AA off: a strip at r 0.3 reads 2 % of the PT's peak vs 107 % with `hitColorFilter: 'off'`. The default output is unaffected (the upscaler + denoiser lose it either way) | low | S | experiment | D5680, W106, D5101 | Try: a ray that misses near on-screen geometry reads the pyramid at its end point; or a smaller cone scale (0.25 keeps 66 %). Check carConcept paint outliers (D5101) in the same run. |
 | T5 | History hit colour: confidence at screen edges (X1 #4), pops in pans `flicker` | med | S | experiment | X1 #4, D1002 | Add historyEdgeConfidence (default off); measure edge pan and the traced-ray count with ?rt=1. |
 | T6 | Raw-signal fireflies with the denoiser off: r 0.35 sphere, car paint, offscreen floor at 512 px, pixi arcade `flicker` | med | M | experiment | W12, W17, W60, W18, W19, D50 | Track with T1's speckle count; re-measure after T3 / T4. W60's case is the SSR / probe blend against a sharper probe. |
 | T7 | Reflection-aware motion for the upscaler and denoiser: reflected detail smears in motion; reactive mask; glass flag `flicker` | med | L | experiment | D4202, D3500, W36, decision 14 | Prototype the hit's reprojection (FFX reflection reprojection) as an upscaler input on facingMirrors; compare with a reactive mask. |
