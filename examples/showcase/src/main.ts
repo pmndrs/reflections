@@ -27,6 +27,10 @@
 //
 // W51: ?lobeFilter=<k> (`settings.hitLobeFilter`, D3550; default the package's 1; also a slider), and every other knob on
 // ./bench.html (the tuning bench; docs/SETTINGS.md).
+//
+// Probes (W102): carConcept can add a probe in each wheel well at 64 px (T21, off by default for flicker, ./carProbes.ts; ?carProbes=off|wheels|cabin|both,
+// ?carProbeRes=<px>); Sponza bakes W62's oneSize128 layout (T22: floor slabs + an 8-cell grid, 11 volumes at 128 px;
+// ?probeLayout=shipped the seven hand-placed boxes, or any layout of ../../shared/probeLayouts.ts).
 // URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=0|1|<k> ?specularAA=variance ?specularAAVariance=<sigma^2> (W105) ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?shadeVis=all ?lobeMix=<0..1> ?shadeOcc=screen ?lobeFilter=<k> (W52) ?hitSource=hits|all ?hitDistW=<k> (W53: the denoiser keeps hit sources apart / weights by hit distance) ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
@@ -45,6 +49,8 @@ import { AA_MODES, DisplayAA, aaFromQuery, reflectionReactive, renderSize, type 
 import { ScreenSpaceAO } from '../../shared/ao';
 import { LINEAR_VIEWS, VIEWS, VIEW_IDS, VIEW_LEGENDS, buildDebugViews, type View } from './debugViews';
 import { SHOWCASE, type FloorKind, type ShowcaseEntry, type ShowcaseScene } from './scenes';
+import { carInteriorProbes, carProbesFromQuery } from './carProbes';
+import { probeLayout, type ProbeLayout, type ProbeLayoutName } from '../../shared/probeLayouts';
 import { geometryRoughnessFromQuery, setGeometryRoughness } from './geometryRoughness';
 import { SPEC_AA_DEFAULT, setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } from './specAA';
 import { ssrSettingsFromQuery } from '../../shared/ssrQuery';
@@ -289,6 +295,8 @@ async function main() {
   // ---- probes ----------------------------------------------------------------------------------------
   /** `?bounces=` (default the package's 2, D4300; 1 halves the bake where no mirror or glossy surface faces another). */
   let bounces: number | undefined = q.has('bounces') ? Number(q.get('bounces')) : undefined;
+  /** W102 (T22): the set's face size when a layout names one (oneSize128: 128, the environment slot too). */
+  let layoutResolution: number | undefined;
   function bake() {
     if (!probes || !kit) return;
     const t0 = performance.now();
@@ -297,7 +305,7 @@ async function main() {
     // the probes would make the floor near the model darker than the floor outside the probe box)
     const sc = kit.scene, keep = [sc.backgroundIntensity, sc.backgroundBlurriness] as const;
     if (sc.background === sc.environment) { sc.backgroundIntensity = sc.environmentIntensity; sc.backgroundBlurriness = 0; }
-    probes.bake(renderer, kit.scene, { ...(q.has('probeRes') ? { resolution: Number(q.get('probeRes')) } : {}), ...(bounces !== undefined ? { bounces } : {}), near: kit.bake.near, far: kit.bake.far });
+    probes.bake(renderer, kit.scene, { ...(q.has('probeRes') ? { resolution: Number(q.get('probeRes')) } : {}), ...(layoutResolution !== undefined ? { resolution: layoutResolution } : {}), ...(bounces !== undefined ? { bounces } : {}), near: kit.bake.near, far: kit.bake.far });
     [sc.backgroundIntensity, sc.backgroundBlurriness] = keep;
     nextNodeFrame();
     if (helper) helper.visible = state.helpers;
@@ -313,10 +321,11 @@ async function main() {
     if (helper) helper.visible = on;
   }
 
-  function makeProbes(volumes: ShowcaseScene['probes']) {
+  function makeProbes(volumes: (ShowcaseScene['probes'][number] & { name?: string })[]) {
     const set = new ReflectionProbes();
     for (const v of volumes) {
       const p = new ReflectionProbe(...v.influenceSize);
+      if (v.name) p.name = v.name;
       p.position.set(...v.position);
       if (v.projectionSize) p.projectionSize = new THREE.Vector3(...v.projectionSize);
       if (v.originOffset) p.originOffset.set(...v.originOffset);
@@ -326,6 +335,20 @@ async function main() {
       set.add(p);
     }
     return set;
+  }
+  /**
+   * W102: the scene's default probe volumes: its layout (`?probeLayout=`, else the scene's own default: Sponza
+   * oneSize128) or its hand-placed set, plus carConcept's wheel-well probes (`?carProbes=`, default off; wheels at 64 px).
+   */
+  let layout: ProbeLayout | null = null;
+  function sceneVolumes(k: ShowcaseScene) {
+    const name = (q.get('probeLayout') ?? k.probeLayout ?? null) as ProbeLayoutName | null;
+    layout = name ? probeLayout(k.id, name, k.probes) : null;
+    layoutResolution = layout && layout.name !== 'shipped' ? layout.resolution : undefined;
+    const car = carProbesFromQuery(q);
+    const carVolumes = carInteriorProbes(k, car.mode, car.resolution)
+      .map((v) => ({ name: v.name, position: v.position, influenceSize: v.influenceSize, originOffset: v.originOffset, blendDistance: v.blendDistance, resolution: v.resolution ?? undefined }));
+    return [...(layout?.volumes ?? k.probes), ...carVolumes];
   }
   /** W38: bytes of the probe atlases (rgba16float, 6 faces per slot incl. the environment slot, every mip; every atlas, W60). */
   const probeBytes = () => probeAtlasBytes(probes as N);
@@ -352,8 +375,8 @@ async function main() {
     delete ssr.settings.depthBufferThickness; delete ssr.settings.thicknessRoughnessFactor;
     if (kit.thickness) Object.assign(ssr.settings, kit.thickness);
     renderer.toneMappingExposure = state.exposure;
-    // probes: one box per region, as the scene suggests
-    probes = makeProbes(kit.probes);
+    // probes: one box per region, as the scene suggests (W102: its default layout, carConcept's wheel wells)
+    probes = makeProbes(sceneVolumes(kit));
     kit.scene.add(probes);
     bake();
     if (state.helpers) setHelpers(true);
@@ -366,7 +389,7 @@ async function main() {
     aa.reset();
     refreshUI();
     const u = new URL(location.href); u.searchParams.set('scene', id); history.replaceState(null, '', u);
-    return { id, probes: probes.bakedProbes.length, bakeMs, layout: probes.bakedLayout };
+    return { id, probes: probes.bakedProbes.length, bakeMs, layout: probes.bakedLayout, probeLayout: layout?.name ?? null, atlases: probes.bakedResolutions, bytes: probeBytes() };
   }
   function setPose(name: string) {
     const v = kit!.views[name];
@@ -566,7 +589,7 @@ async function main() {
     timingsEl.textContent = lines.join('\n');
     if (building) return;
     status.textContent = [
-      `${kit.title} | ${W}x${H} | three r${THREE.REVISION} | ${ssr.variant ?? ''} | ${probes?.bakedProbes.length ?? 0} probes (${probes?.bakedLayout ?? '-'}) baked in ${bakeMs.toFixed(0)} ms` +
+      `${kit.title} | ${W}x${H} | three r${THREE.REVISION} | ${ssr.variant ?? ''} | ${probes?.bakedProbes.length ?? 0} probes (${layout && layout.name !== 'shipped' ? layout.name + ', ' : ''}${probes?.bakedLayout ?? '-'}) baked in ${bakeMs.toFixed(0)} ms` +
         (bvhInfo ? ` | BVH (${bvhInfo.kind}) ${bvhInfo.triangles.toLocaleString()} triangles, ${bvhInfo.ms.toFixed(0)} ms` : ''),
       kit.credit,
       gpuErrors.length ? `GPU errors: ${gpuErrors.length} (${gpuErrors[0].slice(0, 120)})` : '',
@@ -671,7 +694,9 @@ async function main() {
         const old = probes;
         if (old) kit.scene.remove(old);
         if (helper) { kit.scene.remove(helper); helper = null; }
-        const next = probes = makeProbes(volumes ?? kit.probes);
+        // null: the scene's defaults (W102: layout + wheel probes); explicit volumes bake at the set's default size
+        if (volumes) layoutResolution = undefined;
+        const next = probes = makeProbes(volumes ?? sceneVolumes(kit));
         kit.scene.add(next);
         // bake as on a fresh load: the previous set left on the scene would light the first pass's captures
         kit.scene.environmentNode = null;

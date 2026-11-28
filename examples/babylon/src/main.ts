@@ -43,6 +43,7 @@ import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder.js';
 import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder.js';
 import { CreatePlane } from '@babylonjs/core/Meshes/Builders/planeBuilder.js';
 import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder.js';
+import { ThinImageProcessingPostProcess } from '@babylonjs/core/PostProcesses/thinImageProcessingPostProcess.js';
 import { Scene } from '@babylonjs/core/scene.js';
 // Deep imports skip Babylon's side-effect registrations: the WebGPU engine extensions (render
 // targets, multi-render targets for the geometry renderer) load here.
@@ -412,7 +413,10 @@ async function build() {
   composite.hitDistanceTexture = trace.hitDistanceTexture;
   graph.addTask(composite);
 
-  const present = new FrameGraphImageProcessingTask('present', graph);
+  // The scene's image processing passed explicitly: the present then compiles its defines when built, also when the
+  // graph is rebuilt (without it, a rebuilt present presents linear colour, no ACES or sRGB encode: W103).
+  const present = new FrameGraphImageProcessingTask('present', graph,
+    new ThinImageProcessingPostProcess('present', engine, { imageProcessingConfiguration: scene.imageProcessingConfiguration }));
   present.sourceTexture = composite.outputTexture;
   present.targetTexture = backbufferColorTextureHandle;
   const ip = present.postProcess;

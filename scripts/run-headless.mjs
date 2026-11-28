@@ -2265,7 +2265,7 @@ async function probeLayoutMeasure(pages) {
         await p.T('window.__p.freeze(true)');
         const rows = [];
         for (const [name, blend] of PROBE_LAYOUT_VARIANTS.slice(0, 6)) {
-          await p.T(`(window.__p.setParam('probeLayout', ${JSON.stringify(name === 'shipped' ? null : name)}), window.__p.setParam('probeBlend', ${JSON.stringify(String(blend ?? 0.25))}), window.__p.drop('probes'), window.__p.drop('ours-denoised'), true)`);
+          await p.T(`(window.__p.setParam('probeLayout', ${JSON.stringify(name)}), window.__p.setParam('probeBlend', ${JSON.stringify(String(blend ?? 0.25))}), window.__p.drop('probes'), window.__p.drop('ours-denoised'), true)`);
           const m = await p.T("window.__p.measure({ samples: 64, warmup: 24, frames: 8, methods: ['probes', 'ours-denoised'], orbitFrames: 0 })");
           rows.push({ layout: name, glossyPixels: m.glossyPixels, referenceSamples: m.referenceSamples, rows: m.rows.map(({ method, mad, bias, stdMean, info }) => ({ method, mad, bias, stdMean, probes: info?.probes, probeLayout: info?.probeLayout })) });
           console.log(`  sponza vs path traced ${pose} ${name}: ${m.glossyPixels} glossy px, ${m.rows.map((x) => `${x.method} MAD ${x.mad.toFixed(2)} bias ${x.bias.toFixed(2)} (${x.info?.probes} probes)`).join(', ')}`);
@@ -2351,7 +2351,7 @@ async function probeBindingMeasure(pages) {
       await p.T('window.__p.freeze(true)');
       const rows = all.pt[pose] ?? [];
       for (const name of variants) {
-        await p.T(`(window.__p.setParam('probeLayout', ${JSON.stringify(name === 'shipped' ? null : name)}), window.__p.drop('probes'), window.__p.drop('ours-denoised'), true)`);
+        await p.T(`(window.__p.setParam('probeLayout', ${JSON.stringify(name)}), window.__p.drop('probes'), window.__p.drop('ours-denoised'), true)`);
         const m = await p.T("window.__p.measure({ samples: 64, warmup: 24, frames: 8, methods: ['probes', 'ours-denoised'], orbitFrames: 0 })");
         const row = { layout: name, glossyPixels: m.glossyPixels, referenceSamples: m.referenceSamples, rows: m.rows.map(({ method, mad, psnr, bias, stdMean, info }) => ({ method, mad, psnr, bias, stdMean, probes: info?.probes, probeLayout: info?.probeLayout })) };
         const k = rows.findIndex((r) => r.layout === name);
@@ -3557,12 +3557,12 @@ async function engineChecks() {
     } finally { p.close(); }
   }
   // per-channel difference to three (decoded in a scratch page). Whole image: the stated bound per engine (r3f is three;
-  // core's renderer lights a little brighter; Babylon's direct light is about half of three's, W99: three without its diffuse
-  // IBL reads luminance 49.6 / 39.2, Babylon without bounce 24.2 / 14.2; bounce light from the probes is in since W99,
-  // 60.5 -> 50.2 / 255). Screen space alone: what turning it on adds, (on - off), against three's (on - off): the reflections'
-  // own difference.
+  // core's renderer lights a little brighter; Babylon: bounce light from the probes since W99, 60.5 -> 50.2 / 255, and W103
+  // found the rest was the page's present losing ACES and the sRGB encode on a rebuild, 50.2 -> 6.9 / 255; what is left is
+  // cube shadows vs three's PCF, no denoiser on the floor, Babylon's gamma 2.2). Screen space alone: what turning it on
+  // adds, (on - off), against three's (on - off): the reflections' own difference.
   if (!shots.three) return;
-  const BOUND = { r3f: 1, core: 16, babylon: 54 };
+  const BOUND = { r3f: 1, core: 16, babylon: 10 };
   const SSR_BOUND = { r3f: 0.5, core: 2, babylon: 2 };
   const DELTA = `async (a0, a1, b0, b1) => {
     const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });

@@ -1,0 +1,6 @@
+{"name":"off AA off","settings":{"aa":"off","s.hitColorFilter":"off"},"rows":[{"r":0.3,"pt":33.7115,"ptPeak":0.0042,"m":{"ours-raw":{"w":39.7053,"ratio":1.1778,"pass":false,"lost":false,"peak":1.0705}}}],"s":12}
+{"name":"default AA off","settings":{"aa":"off"},"rows":[{"r":0.3,"pt":33.7115,"ptPeak":0.0042,"m":{"ours-raw":{"w":null,"ratio":null,"pass":false,"lost":true,"peak":0.0181}}}],"s":6}
+{"name":"cone no comp AA off","settings":{"aa":"off","s.mirrorBiasCompensate":false},"rows":[{"r":0.3,"pt":33.7115,"ptPeak":0.0042,"m":{"ours-raw":{"w":null,"ratio":null,"pass":false,"lost":true,"peak":0.009}}}],"s":5}
+{"name":"default scale 0.5 AA off","settings":{"aa":"off","s.hitColorConeScale":0.5},"rows":[{"r":0.3,"pt":33.7115,"ptPeak":0.0042,"m":{"ours-raw":{"w":26.0814,"ratio":0.7737,"pass":false,"lost":false,"peak":0.1532}}}],"s":6}
+{"name":"default scale 0.25 AA off","settings":{"aa":"off","s.hitColorConeScale":0.25},"rows":[{"r":0.3,"pt":33.7115,"ptPeak":0.0042,"m":{"ours-raw":{"w":27.8306,"ratio":0.8256,"pass":false,"lost":false,"peak":0.6621}}}],"s":5}
+{"name":"trunc 0.5 AA off","settings":{"aa":"off","s.hitColorFilter":"off","s.mirrorBias":0.5},"rows":[{"r":0.3,"pt":33.7115,"ptPeak":0.0042,"m":{"ours-raw":{"w":32.5137,"ratio":0.9645,"pass":true,"lost":false,"peak":1.7059}}}],"s":5}

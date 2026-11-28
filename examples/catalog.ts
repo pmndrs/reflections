@@ -126,7 +126,9 @@ export const EXAMPLES: readonly ExampleEntry[] = [
       'Each scene bakes its reflection probes, then traces screen-space reflections using last frame\'s image for the colour of what a ray hits. Where a ray finds ' +
       'nothing on screen, the composite takes the ray-traced fallback (`@pmndrs/raytracer`, set up on first use) and the probes. The denoiser smooths the result. ' +
       'The panel switches each source, the denoiser and the anti-aliasing, shows debug views, and reports the GPU time of each pass. ' +
-      'URL options: `?scene=carConcept|toyCar|chess|sponza`, `?rt=1` (ray-traced fallback on), `?denoise=0`, `?off` (reflections off).',
+      'Sponza uses eleven 128 px probes (floor slabs and a grid). ' +
+      'URL options: `?scene=carConcept|toyCar|chess|sponza`, `?rt=1` (ray-traced fallback on), `?denoise=0`, `?off` (reflections off), ' +
+      '`?carProbes=wheels` (a small probe in each car wheel well: closer to the path tracer, a little more flicker), `?probeLayout=shipped` (Sponza\'s seven hand-placed probes).',
     brief: {
       kind: 'showcase',
       shows: 'The full package on real models: probes, screen-space reflections, the ray-traced fallback and the denoiser, combined per pixel, with the GPU time of each pass.',
