@@ -1379,6 +1379,25 @@ function f2Checks(r) {
     check('rt: traced hits read their base colour texture (four quadrants of a canvas map, flipY, sRGB, x the material colour)',
       q.length === 4 && q.every((x) => x.t > 2.9 && x.t < 3.1 && x.err < 0.02),
       q.map((x) => `${x.quadrant} want ${x.want.join(',')} got ${x.got.join(',')}`).join('; '));
+    // W110 (T18): alpha-tested, roughness / metalness and emissive maps at traced hits (rtTextures.ts `materialMapChecks`)
+    const mm = tx.maps;
+    if (mm) {
+      const cutDesc = (r) => r.hits.map((h) => `t ${h.t}${h.blocked ? ' blocks' : ''}`).join(', ');
+      // quadrants tl, tr, bl, br: the left ones (0, 2) are cut out
+      const cutOk = (r) => [0, 2].every((i) => Math.abs(r.hits[i].t - 4) < 0.05 && !r.hits[i].blocked) && [1, 3].every((i) => Math.abs(r.hits[i].t - 3) < 0.05 && r.hits[i].blocked);
+      check('rt alpha test: closest and any-hit rays pass the cut-out half of an alphaTest map, stop on the rest (W110)', cutOk(mm.alpha) && mm.alpha.alphaTestTriangles === 2,
+        `${cutDesc(mm.alpha)}; ${mm.alpha.alphaTestRuns} runs, ${mm.alpha.alphaTestTriangles} flagged triangles`);
+      check("rt alpha test: three's alphaMap (green) cuts out too (W110)", cutOk(mm.alphaMap), cutDesc(mm.alphaMap));
+      check('rt alpha test off (textures.alphaTest false): the card is solid, as before W110', mm.alphaOff.hits.every((h) => Math.abs(h.t - 3) < 0.05 && h.blocked) && mm.alphaOff.alphaTestTriangles === 0, cutDesc(mm.alphaOff));
+      const roughOk = (r) => r.hits.every((h, i) => Math.abs(h.roughness - mm.wantRough[i]) < 0.01 && h.f0.every((c, j) => Math.abs(c - mm.wantF0[i][j]) < 0.01));
+      const roughDesc = (r) => r.hits.map((h, i) => `r ${h.roughness} (want ${mm.wantRough[i]}) F0 ${h.f0.join(',')} (${mm.wantF0[i].join(',')})`).join('; ');
+      check('rt: traced hits read roughness (g) and metalness (b) maps per quadrant, glTF one texture (W110)', roughOk(mm.rough), roughDesc(mm.rough));
+      check("rt: three's separate roughness and metalness maps combine into one (W110)", roughOk(mm.rough2), roughDesc(mm.rough2));
+      check('rt: textures.roughnessMetalness false gives every quadrant the map means (W110)', mm.roughOff.hits.every((h) => Math.abs(h.roughness - mm.roughOff.hits[0].roughness) < 1e-3), roughDesc(mm.roughOff));
+      check('rt: traced hits read the emissive map per quadrant x emissive x intensity (W110)',
+        mm.emissive.hits.every((h, i) => h.emissive.every((c, j) => Math.abs(c - mm.wantEm[i][j]) < 0.02 * Math.max(1, mm.wantEm[i][j]))),
+        mm.emissive.hits.map((h, i) => `${h.emissive.join(',')} (want ${mm.wantEm[i].join(',')})`).join('; '));
+    }
     check('rtTextures: no WebGPU errors', tx.gpuErrors.length === 0, tx.gpuErrors.slice(0, 2).join(' | '));
   }
   // W27 (D603): the composite's specular swap vs three's own term (examples/regressions/src/swap.ts)

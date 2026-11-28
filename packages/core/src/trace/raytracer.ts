@@ -24,7 +24,10 @@
 //   traceHitShadingNormal    rtSurface(RT_SURF_SHADING_NORMAL) (the geometric normal where a mesh has no normals)
 //   traceHitMaterial/Specular  from rtMaterial: albedo = base x baseWeight x (1 - metalness) x (1 - transmission),
 //                            F0 = mix(F0(ior) x specularWeight x specularColor, base, metalness); W97: with scene textures, the
-//                            material's base colour texture at the hit's uv (rtApplyMaterialTextures, a fixed-spread ray cone)
+//                            material's base colour texture at the hit's uv (rtApplyMaterialTextures, a fixed-spread ray cone);
+//                            W110: also its metallic-roughness and emissive textures
+//   alpha test (W110)        alpha-tested materials' triangles are flagged in the trees; @pmndrs/bvh's walk asks our
+//                            `bvhTrianglePasses` about them (closest and any hit), which reads the base colour alpha
 //   traceHitShade            (capability `hitShade`, new) rtShade FULL: emission + one light sample with its shadow ray,
 //                            over the lights of the scene copy (emissive triangles, `lights.sun`, `lights.environment`)
 import type { BindingSlot, ModuleBindingEntry, TraceProvider } from './provider';
@@ -107,9 +110,26 @@ export interface BvhTraceMaterial {
   readonly transmission?: number;
   /**
    * W97: index into the scene's `textures` of a base colour texture (sRGB; its rgb multiplies `baseColor` at traced hits, read
-   * at the mesh's `uvs`). `baseColor` is then the factor alone, without the texture's mean.
+   * at the mesh's `uvs`). `baseColor` is then the factor alone, without the texture's mean. Its alpha is the coverage
+   * `alphaCutoff` tests.
    */
   readonly baseColorTexture?: number;
+  /**
+   * W110: index into `textures` of a linear metallic-roughness texture (glTF: g = roughness, b = metalness), multiplying
+   * `roughness` and `metalness` at traced hits; those are then the factors alone. `textures.roughnessMetalness: false` folds its
+   * mean into them instead.
+   */
+  readonly roughnessMetalnessTexture?: number;
+  /** W110: index into `textures` of an sRGB emissive texture multiplying `emissive` (then the factor alone). */
+  readonly emissiveTexture?: number;
+  /**
+   * W110: alpha test (three's `alphaTest`, glTF MASK). Traces pass through the material's surface where `opacity` x the base
+   * colour texture's alpha is below this, as the raster discards it: closest hits, hit shadow rays and every other ray of
+   * the walk. 0 / absent: opaque. Needs `uvs` on the meshes it is drawn on and `textures` on (`textures.alphaTest`).
+   */
+  readonly alphaCutoff?: number;
+  /** W110: the material's opacity (three's `opacity`), multiplied with the texture's alpha for `alphaCutoff`. Default 1. */
+  readonly opacity?: number;
   /** @pmndrs/raytracer `RtMaterialInput` fields, applied over the ones derived here. */
   readonly openpbr?: Readonly<Record<string, unknown>>;
 }
@@ -173,9 +193,19 @@ export interface RaytracerTraceProviderOptions {
    * at most `maxBuckets` texture arrays (default 4; each binds one sampled texture and one sampler in the trace pass). `cone`:
    * the level-of-detail ray cone's spread in radians; the footprint at a hit is `t x cone`. Default 0.05 (maintainer, 2026-11-27:
    * blur over flicker): textures at traced hits read softer, and the rest flicker on a textured traced wall stays where it was
-   * (0.0108 %); 0.012 is sharper and reads 0.0110 %. `false`: no textures, the materials' `baseColor` alone.
+   * (0.0108 %); 0.012 is sharper and reads 0.0110 %. `false`: no textures; each material takes its textures' means.
+   *
+   * W110, which textures are read per hit (each `false` folds that texture's mean into the factor, as before W110):
+   * - `alphaTest` (default true): `alphaCutoff` materials let rays through where the base colour alpha is below the cutoff
+   *   (@pmndrs/bvh's triangle filter on their triangles only); `alphaCone` its level-of-detail cone (default 0.005 rad: a
+   *   coarse mip averages the leaves' alpha toward the cutoff and cards turn solid or vanish whole);
+   * - `roughnessMetalness` (default true): `roughnessMetalnessTexture`;
+   * - `emissive` (default true): `emissiveTexture`.
    */
-  textures?: false | { maxSize?: number; maxBuckets?: number; cone?: number };
+  textures?: false | {
+    maxSize?: number; maxBuckets?: number; cone?: number;
+    alphaTest?: boolean; alphaCone?: number; roughnessMetalness?: boolean; emissive?: boolean;
+  };
 }
 
 // ---- the parts of @pmndrs/bvh and @pmndrs/raytracer this file uses ------------------------------------------------
@@ -196,7 +226,7 @@ interface BvhModule {
   createMeshLayoutBuilder(device: GPUDevice | null, options?: { prefer?: 'gpu-hploc' | 'gpu-lbvh' | 'tinybvh'; label?: string }): Promise<{
     readonly kind: string;
     readonly fallbackReason: string | null;
-    buildLayouts(geometries: readonly BvhMeshGeometry[]): Promise<{ layout: BvhMeshLayout; builtBy: string; fallbackReason: string | null }[]>;
+    buildLayouts(geometries: readonly (BvhMeshGeometry & { triangleFlags?: Uint32Array | null })[]): Promise<{ layout: BvhMeshLayout; builtBy: string; fallbackReason: string | null }[]>;
   }>;
   assembleTraceScene(meshes: readonly BvhMeshLayout[], instances: readonly { meshIndex: number; instanceIndex: number; objectToWorld: ArrayLike<number>; material?: number }[]): BvhSceneData;
   uploadTraceScene(device: GPUDevice, scene: BvhSceneData, label?: string): TraceSceneBuffers;
@@ -315,7 +345,143 @@ fn rtpHitMaterial(hit: Hit) -> RtMaterial {
 
 const textureOptions = (o: RaytracerTraceProviderOptions) => {
   const t = o.textures || {};
-  return { maxSize: t.maxSize ?? 1024, maxBuckets: t.maxBuckets ?? 4, cone: t.cone ?? 0.05 };
+  const on = o.textures !== false;
+  return {
+    maxSize: t.maxSize ?? 1024, maxBuckets: t.maxBuckets ?? 4, cone: t.cone ?? 0.05, alphaCone: t.alphaCone ?? 0.005,
+    baseColor: on, alphaTest: on && t.alphaTest !== false, roughnessMetalness: on && t.roughnessMetalness !== false, emissive: on && t.emissive !== false,
+  };
+};
+
+/**
+ * W110: the alpha-tested surfaces, for @pmndrs/bvh's triangle filter. The filter's candidate names the instance and the
+ * triangle, not the material, so this lists which material is alpha-tested where: runs of instances (in `scene.instances`
+ * order, `Hit.instance`) whose triangles in `[t0, t1)` take alpha-tested material `material`. Consecutive instances of
+ * one mesh and material share a run (an InstancedMesh is one). `flags`: per mesh, @pmndrs/bvh's `triangleFlags` (bit 0 on
+ * every triangle some instance draws alpha-tested; only those reach the filter), or null.
+ */
+export interface AlphaTestPlan {
+  readonly runs: readonly { readonly instances: readonly [number, number]; readonly triangles: readonly [number, number]; readonly material: number }[];
+  readonly flags: readonly (Uint32Array | null)[];
+  /** Flagged triangles over all mesh trees. */
+  readonly flaggedTriangles: number;
+}
+
+/** Most runs the filter's table holds (WGSL text: ~30 bytes each); past it the rest stay solid (warned). */
+export const ALPHA_TEST_MAX_RUNS = 1024;
+
+/** W110: {@link AlphaTestPlan} of a scene; `alphaTested(material, meshHasUvs)` says which materials cut out. */
+export function alphaTestPlan(scene: BvhTraceScene, alphaTested: (material: number, meshHasUvs: boolean) => boolean): AlphaTestPlan {
+  const triangleCount = (m: BvhMeshGeometry) => (m.indices ? Math.floor(m.indices.length / 3) : Math.floor(m.positions.length / 9));
+  const flags: (Uint32Array | null)[] = scene.meshes.map(() => null);
+  const runs: { instances: [number, number]; triangles: [number, number]; material: number }[] = [];
+  const perKey = new Map<string, [number, number, number][]>();
+  let lastKey = '', lastRuns: typeof runs = [];
+  scene.instances.forEach((instance, i) => {
+    const mesh = scene.meshes[instance.mesh];
+    const key = `${instance.mesh}:${instance.material ?? -1}`;
+    let local = perKey.get(key);
+    if (!local) {
+      local = [];
+      const T = triangleCount(mesh), tm = mesh.triangleMaterials, uvs = !!mesh.uvs;
+      const at = (t: number) => {
+        const id = tm && tm[t] !== BVH_TRIANGLE_MATERIAL_NONE ? tm[t] : instance.material;
+        return id !== undefined && alphaTested(id, uvs) ? id : -1;
+      };
+      if (!tm) { const id = at(0); if (id >= 0 && T > 0) local.push([0, T, id]); } else {
+        for (let t = 0; t < T;) {
+          const id = at(t);
+          let e = t + 1;
+          while (e < T && at(e) === id) e++;
+          if (id >= 0) local.push([t, e, id]);
+          t = e;
+        }
+      }
+      perKey.set(key, local);
+      if (local.length) {
+        const f = flags[instance.mesh] ?? (flags[instance.mesh] = new Uint32Array(T));
+        for (const [t0, t1] of local) f.fill(1, t0, t1);
+      }
+    }
+    if (!local.length) { lastKey = ''; return; }
+    if (key === lastKey && lastRuns.every((r) => r.instances[1] === i)) { for (const r of lastRuns) r.instances[1] = i + 1; return; }
+    lastKey = key;
+    lastRuns = local.map(([t0, t1, material]) => ({ instances: [i, i + 1] as [number, number], triangles: [t0, t1] as [number, number], material }));
+    runs.push(...lastRuns);
+  });
+  const flaggedTriangles = flags.reduce((n, f) => n + (f ? f.reduce((a, b) => a + b, 0) : 0), 0);
+  return { runs, flags, flaggedTriangles };
+}
+
+/**
+ * W110: the scene's textures the trace reads (enabled kinds, matching colour space, some mesh with uvs), as their index in the
+ * scene copy; fixed at creation (the WGSL and layout depend on it). The others fold their mean into the material's factors.
+ */
+function planTextureSlots(scene: BvhTraceScene, options: RaytracerTraceProviderOptions): Map<number, number> | null {
+  const o = textureOptions(options);
+  const src = scene.textures ?? [];
+  if (!o.baseColor || !src.length || !scene.meshes.some((m) => m.uvs)) return null;
+  const slots = new Map<number, number>();
+  for (const m of scene.materials ?? []) {
+    for (const kind of ['baseColor', 'roughnessMetalness', 'emissive'] as const) {
+      const id = m[KIND_FIELD[kind]];
+      if (id !== undefined && o[kind] && src[id]?.colorSpace === KIND_SPACE[kind] && !slots.has(id)) slots.set(id, slots.size);
+    }
+  }
+  return slots.size ? slots : null;
+}
+
+/** W110: whether material `id` cuts out: an alpha cutoff over a base colour texture the trace reads (on a mesh with uvs), or a uniform opacity below it. */
+function alphaTestedOf(scene: BvhTraceScene, options: RaytracerTraceProviderOptions, slots: Map<number, number> | null) {
+  return (id: number, meshHasUvs: boolean) => {
+    const m = scene.materials?.[id];
+    const cutoff = m?.alphaCutoff ?? 0;
+    if (!m || !textureOptions(options).alphaTest || !(cutoff > 0)) return false;
+    const textured = m.baseColorTexture !== undefined && !!slots?.has(m.baseColorTexture) && scene.textures?.[m.baseColorTexture]?.colorSpace === 'srgb';
+    return textured ? meshHasUvs : (m.opacity ?? 1) < cutoff;
+  };
+}
+
+/**
+ * W110: @pmndrs/bvh's triangle filter (`bvhTrianglePasses`, its DXR-style any-hit hook, called for flagged triangles only, by
+ * closest and any-hit walks alike): a candidate on an alpha-tested material passes when opacity x the base colour texture's
+ * alpha at its uv is below the material's cutoff. The material comes from the plan's runs (binary search over the
+ * instance runs); the level of detail from a fixed ray cone over the candidate's distance, like the base colour's.
+ */
+const alphaFilterWgsl = (plan: AlphaTestPlan, cone: number) => {
+  const runs = plan.runs.slice(0, ALPHA_TEST_MAX_RUNS);
+  const k = runs.length;
+  return /* wgsl */ `
+const RTP_ALPHA_RUNS = array<vec4u, ${k}>(${runs.map((r) => `vec4u(${r.instances[0]}u,${r.instances[1]}u,${r.triangles[0]}u,${r.triangles[1]}u)`).join(',')});
+const RTP_ALPHA_MATERIALS = array<u32, ${k}>(${runs.map((r) => `${r.material}u`).join(',')});
+fn rtpAlphaMaterial(instance: u32, triangle: u32) -> u32 {
+  var lo = 0u;
+  var hi = ${k}u;
+  while (lo < hi) {
+    let mid = (lo + hi) >> 1u;
+    if (RTP_ALPHA_RUNS[mid].y <= instance) { lo = mid + 1u; } else { hi = mid; }
+  }
+  for (var i = lo; i < ${k}u; i++) {
+    let r = RTP_ALPHA_RUNS[i];
+    if (r.x > instance) { break; }
+    if (triangle >= r.z && triangle < r.w) { return RTP_ALPHA_MATERIALS[i]; }
+  }
+  return 0xffffffffu;
+}
+fn bvhTrianglePasses(candidate: BvhCandidate) -> bool {
+  let id = rtpAlphaMaterial(candidate.instance, candidate.triangle);
+  if (id == 0xffffffffu) { return false; }
+  let m = rtMaterial(id);
+  if (m.alphaMode != 1u) { return false; }
+  var a = m.opacity;
+  if (m.baseColorTexture != RT_TEXTURE_NONE) {
+    let h = RtHit(candidate.t, candidate.instance, candidate.triangle, candidate.frontFace, candidate.barycentrics, id, vec3f(0.0, 0.0, 1.0), 0.0);
+    let s = rtSurface(h, RtRay(vec3f(0.0), 0.0, vec3f(0.0, 0.0, 1.0), candidate.t), RT_SURF_UV | RT_SURF_TEXFRAME);
+    let r = rtTexRecord(m.baseColorTexture);
+    a = a * rtTexSampleRecord(r, s.uv, rtTexLodOf(r, s.uvDensity * max(candidate.t, 0.0) * ${cone.toFixed(6)})).a;
+  }
+  return a < m.alphaCutoff;
+}
+`;
 };
 
 const seamWgsl = /* wgsl */ `
@@ -373,7 +539,30 @@ export interface RaytracerBuildInfo {
   sceneCopyBytes: number;
   /** Wall time of the mesh trees + scene assembly + scene copy + upload. */
   buildMs: number;
+  /** W110: textures read per hit (after the options), and the bytes of their texture arrays with mips (GPU memory). */
+  textures: number;
+  textureBytes: number;
+  /** W110: the alpha test's instance runs (the filter's table) and the triangles flagged for it. */
+  alphaTestRuns: number;
+  alphaTestTriangles: number;
 }
+
+const SRGB_LUT = Array.from({ length: 256 }, (_, i) => { const c = i / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+
+/** W110: a texture's mean (rgb linear: sRGB decoded per texel), over at most ~64k texels. */
+export function traceTextureMean(t: BvhTraceTexture): [number, number, number] {
+  const n = t.width * t.height;
+  const step = Math.max(1, Math.floor(n / 65536));
+  const lut = t.colorSpace === 'srgb' ? SRGB_LUT : null;
+  const acc = [0, 0, 0];
+  let count = 0;
+  for (let i = 0; i < n; i += step, count++) for (let c = 0; c < 3; c++) { const v = t.data[i * 4 + c]; acc[c] += lut ? lut[v] : v / 255; }
+  return count ? [acc[0] / count, acc[1] / count, acc[2] / count] : [1, 1, 1];
+}
+
+type TextureKind = 'baseColor' | 'roughnessMetalness' | 'emissive';
+const KIND_FIELD = { baseColor: 'baseColorTexture', roughnessMetalness: 'roughnessMetalnessTexture', emissive: 'emissiveTexture' } as const;
+const KIND_SPACE = { baseColor: 'srgb', roughnessMetalness: 'linear', emissive: 'srgb' } as const;
 
 /**
  * @pmndrs/raytracer behind core's trace seam. Create it with {@link createRaytracerTraceProvider}.
@@ -408,6 +597,9 @@ export class RaytracerTraceProvider implements TraceProvider {
     private scene: BvhTraceScene,
     readonly info: RaytracerBuildInfo,
     private readonly options: RaytracerTraceProviderOptions,
+    /** W110: the textures the trace reads (scene index -> scene copy index), and the alpha test's plan. */
+    private readonly textureSlots: Map<number, number> | null = planTextureSlots(scene, options),
+    private readonly alphaPlan: AlphaTestPlan | null = null,
   ) {
     this.format = rt.sceneFormatOf(traceBuffers);
     // No optional features: the module goes into the pass's shader, which can't take `enable` lines mid-file, and the
@@ -425,6 +617,10 @@ export class RaytracerTraceProvider implements TraceProvider {
     info.packing = this.packing;
     info.lights = this.copy.lights.length;
     info.sceneCopyBytes = this.copy.byteLength;
+    info.textures = this.copy.textures?.slots.length ?? 0;
+    info.textureBytes = (this.copy.textures?.buckets ?? []).reduce((n, b) => n + b.mips.reduce((k, mip) => k + mip.byteLength, 0), 0);
+    info.alphaTestRuns = Math.min(alphaPlan?.runs.length ?? 0, ALPHA_TEST_MAX_RUNS);
+    info.alphaTestTriangles = alphaPlan?.flaggedTriangles ?? 0;
   }
 
   get version() { return this._version; }
@@ -436,14 +632,55 @@ export class RaytracerTraceProvider implements TraceProvider {
   /** What the scene copy's textures are built from (W97): the caller's at first, then the stored ones (see `buildCopy`). */
   private textureInputs: readonly BvhTraceTexture[] | null = null;
 
+  private readonly textureMeans = new Map<number, [number, number, number]>();
+
+  private textureMean(id: number) {
+    let mean = this.textureMeans.get(id);
+    if (!mean) {
+      const t = this.scene.textures?.[id];
+      this.textureMeans.set(id, mean = t ? traceTextureMean(t) : [1, 1, 1]);
+    }
+    return mean;
+  }
+
+  /** A seam material as the scene copy's record: textures the trace reads as slots, the others' means folded in (W110). */
+  private materialInput(m: BvhTraceMaterial): Record<string, unknown> {
+    const o = textureOptions(this.options);
+    const folded: { -readonly [K in keyof BvhTraceMaterial]: BvhTraceMaterial[K] } = { ...m };
+    const slots: Record<string, number> = {};
+    const scale = (c: readonly number[] | undefined, k: readonly number[]) => c && (c.map((x, i) => x * k[i]) as unknown as [number, number, number]);
+    for (const kind of ['baseColor', 'roughnessMetalness', 'emissive'] as const) {
+      const id = m[KIND_FIELD[kind]];
+      delete folded[KIND_FIELD[kind]];
+      if (id === undefined) continue;
+      const slot = o[kind] && this.scene.textures?.[id]?.colorSpace === KIND_SPACE[kind] ? this.textureSlots?.get(id) : undefined;
+      if (slot !== undefined) { slots[kind === 'roughnessMetalness' ? 'roughnessMetalTexture' : kind === 'emissive' ? 'emissionTexture' : 'baseColorTexture'] = slot; continue; }
+      const mean = this.textureMean(id);
+      if (kind === 'baseColor') { if (m.baseColor) folded.baseColor = scale(m.baseColor, mean); else folded.albedo = scale(m.albedo, mean)!; }
+      if (kind === 'roughnessMetalness') {
+        folded.roughness = (m.roughness ?? 1) * mean[1];
+        if (m.metalness !== undefined) folded.metalness = m.metalness * mean[2];
+      }
+      if (kind === 'emissive') folded.emissive = scale(m.emissive ?? [0, 0, 0], mean);
+    }
+    const out = { ...raytracerMaterialOf(folded), ...slots };
+    const cutoff = m.alphaCutoff ?? 0;
+    if (o.alphaTest && cutoff > 0 && (slots.baseColorTexture !== undefined || (m.opacity ?? 1) < cutoff)) {
+      Object.assign(out, { alphaMode: 1, alphaCutoff: Math.min(1, cutoff), opacity: Math.min(1, Math.max(0, m.opacity ?? 1)) });
+    }
+    return out;
+  }
+
   private buildCopy(): SceneCopy {
     const s = this.scene;
-    const textures = this.options.textures === false ? null : (this.textureInputs ?? (s.textures?.length ? s.textures : null));
+    const slots = this.textureSlots;
+    const src = s.textures ?? [];
+    const textures = slots ? (this.textureInputs ?? [...slots.keys()].map((id) => src[id])) : null;
     const { maxSize, maxBuckets } = textureOptions(this.options);
     const copy = this.rt.buildSceneCopy({
       meshes: s.meshes,
       instances: s.instances.map((instance, i) => ({ instanceIndex: i, meshIndex: instance.mesh, objectToWorld: instance.matrixWorld, material: instance.material })),
-      materials: (s.materials ?? []).map((m) => (textures && m.baseColorTexture !== undefined ? { ...raytracerMaterialOf(m), baseColorTexture: m.baseColorTexture } : raytracerMaterialOf(m))),
+      materials: (s.materials ?? []).map((m) => this.materialInput(m)),
       sun: s.lights?.sun ?? null,
       environment: s.lights?.environment ?? null,
       ...(textures ? { textures, options: { textures: { maxSize, maxBuckets } } } : {}),
@@ -463,6 +700,8 @@ export class RaytracerTraceProvider implements TraceProvider {
   code(slot: BindingSlot) {
     const walk = this.rt.rtWalkEntries(this.format).length;
     const textures = this.copy.textureLayout;
+    // W110: alpha-tested triangles are flagged in the trees; the walk asks our filter about them (else bvh's default: all block)
+    const alpha = !!textures && !!this.alphaPlan?.runs.length;
     const module = this.rt.rtModuleWgsl(this.caps, {
       ...this.format,
       traceSlot: slot,
@@ -470,8 +709,10 @@ export class RaytracerTraceProvider implements TraceProvider {
       scene: { slot: { group: slot.group, firstBinding: slot.firstBinding + walk }, layout: this.copy.layout, packing: this.packing, ...(textures ? { textures } : {}) },
       shade: this.options.shade ?? {},
       minify: this.options.minify ?? true,
+      ...(alpha ? { triangleFilter: null } : {}),
     });
-    return module + (textures ? texturedMaterialWgsl(textureOptions(this.options).cone) : materialWgsl) + seamWgsl;
+    const o = textureOptions(this.options);
+    return module + (textures ? texturedMaterialWgsl(o.cone) : materialWgsl) + (alpha ? alphaFilterWgsl(this.alphaPlan!, o.alphaCone) : '') + seamWgsl;
   }
 
   resources(): readonly GPUBindingResource[] {
@@ -545,19 +786,29 @@ export async function createRaytracerTraceProvider(
   const { rt, bvh } = await loadRaytracer(options.module, options.bvhModule);
   const t0 = performance.now();
   const prefer = options.builder && options.builder !== 'auto' ? options.builder : undefined;
-  const builder = await bvh.createMeshLayoutBuilder(device, { prefer, label: 'reflections' });
-  const built = await builder.buildLayouts(scene.meshes);
-  const layouts = built.map((b) => b.layout);
   const materials = scene.materials ?? [];
   if (materials.length > BVH_MAX_MATERIAL + 1) throw new RangeError(`@pmndrs/bvh holds material indices up to ${BVH_MAX_MATERIAL}; the scene has ${materials.length} materials`);
   for (const instance of scene.instances) {
-    if (!(instance.mesh >= 0 && instance.mesh < layouts.length)) throw new RangeError(`instance uses mesh ${instance.mesh}; there are ${layouts.length}`);
+    if (!(instance.mesh >= 0 && instance.mesh < scene.meshes.length)) throw new RangeError(`instance uses mesh ${instance.mesh}; there are ${scene.meshes.length}`);
     if (instance.material !== undefined && !(instance.material < materials.length)) throw new RangeError(`instance uses material ${instance.material}; there are ${materials.length}`);
   }
   const textureCount = scene.textures?.length ?? 0;
   materials.forEach((m, i) => {
-    if (m.baseColorTexture !== undefined && !(m.baseColorTexture >= 0 && m.baseColorTexture < textureCount)) throw new RangeError(`material ${i} uses texture ${m.baseColorTexture}; there are ${textureCount}`);
+    for (const field of ['baseColorTexture', 'roughnessMetalnessTexture', 'emissiveTexture'] as const) {
+      const id = m[field];
+      if (id !== undefined && !(id >= 0 && id < textureCount)) throw new RangeError(`material ${i} ${field} uses texture ${id}; there are ${textureCount}`);
+    }
   });
+  // W110: the alpha test flags its triangles in the trees (only flagged ones reach the filter)
+  const textureSlots = planTextureSlots(scene, options);
+  const alphaPlan = textureSlots ? alphaTestPlan(scene, alphaTestedOf(scene, options, textureSlots)) : null;
+  if (alphaPlan && alphaPlan.runs.length > ALPHA_TEST_MAX_RUNS) {
+    console.warn(`RaytracerTraceProvider: ${alphaPlan.runs.length} alpha-tested instance runs; the first ${ALPHA_TEST_MAX_RUNS} cut out, the rest trace solid`);
+  }
+  const geometries = alphaPlan?.runs.length ? scene.meshes.map((m, i) => (alphaPlan.flags[i] ? { ...m, triangleFlags: alphaPlan.flags[i] } : m)) : scene.meshes;
+  const builder = await bvh.createMeshLayoutBuilder(device, { prefer, label: 'reflections' });
+  const built = await builder.buildLayouts(geometries);
+  const layouts = built.map((b) => b.layout);
   scene.meshes.forEach((mesh, i) => {
     const tm = mesh.triangleMaterials;
     if (!tm) return;
@@ -582,8 +833,12 @@ export async function createRaytracerTraceProvider(
     packing: 'packed',
     sceneCopyBytes: 0,
     buildMs: 0,
+    textures: 0,
+    textureBytes: 0,
+    alphaTestRuns: 0,
+    alphaTestTriangles: 0,
   };
-  const provider = new RaytracerTraceProvider(device, rt, bvh, layouts, data, buffers, scene, info, options);
+  const provider = new RaytracerTraceProvider(device, rt, bvh, layouts, data, buffers, scene, info, options, textureSlots, alphaPlan);
   info.buildMs = performance.now() - t0;
   return provider;
 }

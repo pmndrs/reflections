@@ -15,7 +15,7 @@ export { RT_SOURCE, RT_STATE, RT_STATE_HEADER } from './shaders';
 // The core provider (P1.5; the only one since W89): @pmndrs/raytracer's trace core over @pmndrs/bvh trees (optional peers,
 // imported on demand) over engine-free geometry.
 export {
-  createRaytracerTraceProvider, loadRaytracer, raytracerMaterialOf, RaytracerTraceProvider, RAYTRACER_BVH_LAYOUT_VERSION, BVH_MAX_MATERIAL, BVH_TRIANGLE_MATERIAL_NONE,
+  createRaytracerTraceProvider, loadRaytracer, raytracerMaterialOf, alphaTestPlan, traceTextureMean, ALPHA_TEST_MAX_RUNS, type AlphaTestPlan, RaytracerTraceProvider, RAYTRACER_BVH_LAYOUT_VERSION, BVH_MAX_MATERIAL, BVH_TRIANGLE_MATERIAL_NONE,
   type BvhMeshGeometry, type BvhTraceInstance, type BvhTraceMaterial, type BvhTraceTexture, type BvhTraceScene, type BvhTraceScene as RaytracerTraceScene, type BvhBuilderPreference,
   type RaytracerTraceProviderOptions, type RaytracerBuildInfo, type RaytracerSun, type RaytracerEnvironment,
 } from './raytracer';

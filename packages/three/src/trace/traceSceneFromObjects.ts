@@ -89,30 +89,79 @@ export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3
   const sources: ThreeBvhTraceScene['sources'] = [];
   const m = new THREE.Matrix4();
   // One entry per three material, unless a custom material function makes it per mesh and material.
-  // W97: base colour maps, decoded once per texture; the materials that use one, and the mesh trees that then need uvs
+  // W97: base colour maps, decoded once per texture; the materials that use one, and the mesh trees that then need uvs.
+  // W110: also roughness / metalness (one glTF texture, or two combined into g / b), emissive, and a base colour + alphaMap
+  // combination for the alpha test. A map that can't be decoded keeps its mean (D902).
   const textures: BvhTraceTexture[] = [];
-  const textureIds = new Map<THREE.Texture, number>();
+  const textureIds = new Map<unknown, number>();
   const texturedMaterials = new Set<number>();
-  const textureOf = (t: THREE.Texture) => {
-    let id = textureIds.get(t);
+  const wrapOf = (t: THREE.Texture) => (t.wrapS === THREE.ClampToEdgeWrapping ? 'clamp' : t.wrapS === THREE.MirroredRepeatWrapping ? 'mirror' : 'repeat');
+  const addTexture = (key: unknown, make: () => BvhTraceTexture | null) => {
+    let id = textureIds.get(key);
     if (id === undefined) {
-      const texels = textureTexels(t);
-      if (!texels) return undefined;
-      const wrap = t.wrapS === THREE.ClampToEdgeWrapping ? 'clamp' : t.wrapS === THREE.MirroredRepeatWrapping ? 'mirror' : 'repeat';
+      const t = make();
+      if (!t) return undefined;
       id = textures.length;
-      textures.push({ ...texels, colorSpace: t.colorSpace === THREE.SRGBColorSpace ? 'srgb' : 'linear', wrap, label: t.name || undefined });
-      textureIds.set(t, id);
+      textures.push(t);
+      textureIds.set(key, id);
     }
     return id;
   };
+  const textureOf = (t: THREE.Texture) => addTexture(t, () => {
+    const texels = textureTexels(t);
+    return texels && { ...texels, colorSpace: t.colorSpace === THREE.SRGBColorSpace ? 'srgb' : 'linear', wrap: wrapOf(t), label: t.name || undefined };
+  });
+  /** `a` and `b` decoded at `a`'s size (`b` nearest), combined texel by texel (`b` may be absent). */
+  const combine = (a: THREE.Texture, b: THREE.Texture | undefined, colorSpace: 'srgb' | 'linear', f: (out: Uint8ClampedArray, o: number, ta: Uint8ClampedArray, tb: Uint8ClampedArray | null, ob: number) => void) => {
+    const da = textureTexels(a), db = b ? textureTexels(b) : null;
+    if (!da || (b && !db)) return null;
+    const { width, height } = da;
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const o = (y * width + x) * 4;
+      const ob = db ? (Math.floor((y * db.height) / height) * db.width + Math.floor((x * db.width) / width)) * 4 : 0;
+      f(data, o, da.data, db?.data ?? null, ob);
+    }
+    return { width, height, data, colorSpace, wrap: wrapOf(a), label: a.name || undefined } as BvhTraceTexture;
+  };
+  // base colour (sRGB) with three's alphaMap (green) multiplied into its alpha, or white with that alpha when there's no map
+  const alphaMapped = (map: THREE.Texture | undefined, alphaMap: THREE.Texture) => addTexture(`${map?.uuid ?? '-'}+${alphaMap.uuid}:alpha`, () => (map
+    ? combine(map, alphaMap, 'srgb', (out, o, ta, tb, ob) => { out[o] = ta[o]; out[o + 1] = ta[o + 1]; out[o + 2] = ta[o + 2]; out[o + 3] = (ta[o + 3] * tb![ob + 1]) / 255; })
+    : combine(alphaMap, undefined, 'srgb', (out, o, ta) => { out[o] = out[o + 1] = out[o + 2] = 255; out[o + 3] = ta[o + 1]; })));
+  // glTF metallic-roughness: g roughness, b metalness; three's two maps (or one) combined when they differ
+  const roughMetal = (rough: THREE.Texture | undefined, metal: THREE.Texture | undefined) => {
+    if (rough && metal && rough === metal) return rough.colorSpace === THREE.SRGBColorSpace ? undefined : textureOf(rough);
+    const a = (rough ?? metal)!, b = rough && metal ? metal : undefined;
+    return addTexture(`${rough?.uuid ?? '-'}+${metal?.uuid ?? '-'}:rm`, () => combine(a, b, 'linear', (out, o, ta, tb, ob) => {
+      out[o] = 0; out[o + 3] = 255;
+      out[o + 1] = rough ? ta[o + 1] : 255;
+      out[o + 2] = metal ? (tb ? tb[ob + 2] : ta[o + 2]) : 255;
+    }));
+  };
+  const scaled = (c: readonly number[] | undefined, k: readonly number[]) => c?.map((x, i) => x * k[i]) as [number, number, number] | undefined;
   const traceMaterial = (hm: HitMaterial): BvhTraceMaterial => {
-    const { map, ...m } = hm;
-    if (!map) return m;
-    const id = textureOf(map);
-    if (id !== undefined && map.colorSpace === THREE.SRGBColorSpace) return { ...m, baseColorTexture: id };
-    // not decodable (or a linear colour map, which the scene copy refuses for base colour): its mean, as before W97
-    const mean = textureMeanColor(map) ?? [1, 1, 1];
-    return { ...m, baseColor: m.baseColor?.map((c, i) => c * mean[i]) as [number, number, number] | undefined };
+    const { map, roughnessMap, metalnessMap, emissiveMap, alphaTest, opacity, alphaMap, ...m } = hm;
+    const out: { -readonly [K in keyof BvhTraceMaterial]: BvhTraceMaterial[K] } = { ...m };
+    // a linear colour map can't be base colour in the scene copy: its mean, as a map that can't be decoded
+    const colorMap = map && map.colorSpace === THREE.SRGBColorSpace ? map : undefined;
+    const base = alphaMap ? alphaMapped(colorMap, alphaMap) : colorMap && textureOf(colorMap);
+    if (base !== undefined) out.baseColorTexture = base;
+    if (map && (base === undefined || !colorMap)) out.baseColor = scaled(m.baseColor, textureMeanColor(map) ?? [1, 1, 1]);
+    if (alphaTest) { out.alphaCutoff = alphaTest; out.opacity = opacity ?? 1; }
+    if (roughnessMap || metalnessMap) {
+      const id = roughMetal(roughnessMap, metalnessMap);
+      if (id !== undefined) out.roughnessMetalnessTexture = id;
+      else {
+        if (roughnessMap) out.roughness = (m.roughness ?? 1) * (textureMeanColor(roughnessMap)?.[1] ?? 1);
+        if (metalnessMap) out.metalness = (m.metalness ?? 0) * (textureMeanColor(metalnessMap)?.[2] ?? 1);
+      }
+    }
+    if (emissiveMap) {
+      const id = textureOf(emissiveMap);
+      if (id !== undefined) out.emissiveTexture = id;
+      else out.emissive = scaled(m.emissive, textureMeanColor(emissiveMap) ?? [1, 1, 1]);
+    }
+    return out;
   };
   const entry = (mesh: THREE.Mesh, source: HitMaterialSource) => {
     const key = options.material ? `${mesh.id}:${source.materialIndex}` : source.material ?? mesh;
@@ -120,7 +169,7 @@ export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3
     if (id === undefined) {
       id = materials.length;
       const m = traceMaterial(materialOf(mesh, source));
-      if (m.baseColorTexture !== undefined) texturedMaterials.add(id);
+      if (m.baseColorTexture !== undefined || m.roughnessMetalnessTexture !== undefined || m.emissiveTexture !== undefined) texturedMaterials.add(id);
       materials.push(m); materialSources.push({ mesh, ...source }); materialIds.set(key, id);
     }
     return id;
@@ -181,15 +230,7 @@ export function bvhTraceSceneFromObjects(objects: THREE.Object3D | THREE.Object3
     for (let i = 0; i < uv.count; i++) { uvs[i * 2] = uv.getX(i); uvs[i * 2 + 1] = uv.getY(i); }
     meshes[mi] = { ...meshes[mi], uvs };
   }
-  // no textured mesh has uvs: the scene copy can't take textures; the maps' means instead
-  if (textures.length && !meshes.some((m) => m.uvs)) {
-    for (const id of texturedMaterials) {
-      const { baseColorTexture, ...m } = materials[id];
-      const mean = textureMeanColor([...textureIds].find(([, i]) => i === baseColorTexture)![0]) ?? [1, 1, 1];
-      materials[id] = { ...m, baseColor: m.baseColor?.map((c, i) => c * mean[i]) as [number, number, number] | undefined };
-    }
-    textures.length = 0;
-  }
+  // (no textured mesh has uvs: core's provider folds the textures' means into the materials, W110)
   const materialIdOf = (mesh: THREE.Mesh, materialIndex = 0) => {
     const e = meshMaterials.get(mesh);
     return e && (e.groups?.get(materialIndex) ?? e.instance);
