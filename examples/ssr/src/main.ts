@@ -38,7 +38,7 @@ import { PROBE_LOOKUP_EXPERIMENT } from '@pmndrs/reflections-core/probes/lookup'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   HybridReflections, ReflectionProbe, applyReflectionsPreset, defaultHitMaterial, type DenoiserHitSourceMode, type ReflectionsPresetName, ReflectionProbes, type BakeOptions, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
-  type ThreeRaytracerTraceProvider, createRaytracerTraceProviderFromObjects,
+  type ThreeRaytracerTraceProvider, createRaytracerTraceProviderFromObjects, applySpecularAA, SPECULAR_AA_VARIANCE,
 } from '@pmndrs/reflections/three';
 import { DEFAULT_SHADING_NORMAL_WGSL, HIT_WGSL, type TraceProvider, type BvhBuilderPreference } from '@pmndrs/reflections/core';
 import {
@@ -589,6 +589,8 @@ async function main() {
     if (overlay) { overlay.removeFromParent(); overlay.dispose(); overlay = null; }
     status.textContent = `loading ${id}...`;
     kit = await factory({ aspect: W / H });
+    // W105: ?specularAA=variance (&specularAAVariance=<sigma^2>): the package's variance-form geometric specular AA
+    if (q.get('specularAA') === 'variance') applySpecularAA(kit.scene, { mode: 'variance', variance: Number(q.get('specularAAVariance') ?? SPECULAR_AA_VARIANCE), traceRoughness: q.get('specularAATrace') === 'material' ? 'material' : 'filtered' });
     controls.object = kit.camera;
     controls.target.copy(kit.target);
     controls.update();

@@ -4,6 +4,7 @@ import {
   DFGLUT, F_Schlick, Fn, ambientOcclusion, clearcoat, clearcoatNormalView, clearcoatRoughness, emissive, float, materialEnvIntensity, materialMetalness, materialRoughness, normalView, output,
   positionViewDirection, property, roughness, specularColorBlended, specularF90, vec2, vec3, vec4,
 } from 'three/tsl';
+import { specularAATracesFiltered, specularAARoughness } from './specularAA';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any; // TSL's node typings are too strict for builder-time branching
@@ -40,9 +41,14 @@ const has = (m: N, key: string) => m != null && typeof m[key] === 'number';
 // A node material's roughnessNode / metalnessNode replaces the scalar and map (as in
 // MeshStandardNodeMaterial.setupVariants), before three's geometry-roughness adjustment (D403).
 
-/** Perceptual roughness: the material's `roughnessNode`, else its scalar × map, else 1. */
+/**
+ * Perceptual roughness: the material's `roughnessNode`, else its scalar × map, else 1. With variance specular
+ * AA on the material (`applySpecularAA`, W105, `traceRoughness: 'filtered'`), that value filtered by the normal's
+ * screen-space variance, as three's lit term shades it (without three's 0.045 floor).
+ */
 export const gbufferRoughness = /*@__PURE__*/ (Fn((builder: Builder) => {
   const m = builder.material;
+  if (specularAATracesFiltered(m) && m.fragmentNode == null) return specularAARoughness;
   if (m?.roughnessNode != null) return float(m.roughnessNode);
   return has(m, 'roughness') ? materialRoughness : float(1);
 }) as N)();

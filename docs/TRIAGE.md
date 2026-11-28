@@ -32,7 +32,7 @@ Status values:
 
 ## Top 10, in order
 
-**Status 2026-11-27 (0.1.0 published).** The Top 10 below is from 2026-11-13. Since then T1 and T53 are done (W85: `--only flicker`, the T53 scenes, baseline), T10 is settled: quadCopy stays off (2026-11-28, see the Settled list), and T58 is done (0.1.0 on npm as `latest`). 2026-11-28: the maintainer said to go with the lead's recommendations. Wave W102-W106: W102 (T22 done, T21 default off for flicker, T29 held), W103 (Babylon gap 50 -> 7/255, an example bug), W104 (T24 done, T55 mostly), W106 (T3 already built) merged 2026-11-29; W105 (T30) running. W106 found T3 already built (W72) and the default (W76); row closed, the leftover is T76. W107 (T14) and W108 (T23) running since 2026-11-29. Audit 2026-11-29: every row checked against main; T5 and T16 deleted (removed in W76), built-but-not-promoted options (T4, T12, T40, T42) are now `decide`, partly built rows trimmed (T7, T9, T11, T14, T18, T37), raytracer-era wording (T20, T45, T57).
+**Status 2026-11-27 (0.1.0 published).** The Top 10 below is from 2026-11-13. Since then T1 and T53 are done (W85: `--only flicker`, the T53 scenes, baseline), T10 is settled: quadCopy stays off (2026-11-28, see the Settled list), and T58 is done (0.1.0 on npm as `latest`). 2026-11-28: the maintainer said to go with the lead's recommendations. Wave W102-W106: W102 (T22 done, T21 default off for flicker, T29 held), W103 (Babylon gap 50 -> 7/255, an example bug), W104 (T24 done, T55 mostly), W106 (T3 already built) merged 2026-11-29; W105 (T30) merged: option, off. W106 found T3 already built (W72) and the default (W76); row closed, the leftover is T76. W107 (T14) and W108 (T23) running since 2026-11-29. Audit 2026-11-29: every row checked against main; T5 and T16 deleted (removed in W76), built-but-not-promoted options (T4, T12, T40, T42) are now `decide`, partly built rows trimmed (T7, T9, T11, T14, T18, T37), raytracer-era wording (T20, T45, T57).
 
 1. **T1: flicker and firefly metrics.** Flicker is the #1 pain point, and none of the flicker experiments (T2-T7) can be judged without numbers per region (D3622, X0). First step: build X0's rest drift, orbit flicker, 2x2 energy, edge pan and raw speckle count as bench Measure columns, then baseline every scene.
 2. **T53: simple test scenes.** The maintainer asked for these so the bevels stop deciding the tuning. T10 and T14 are queued behind them (decisions 20, 21). First step: as bench scenes with the PT reference, add a cube or slab on the mirror, sharp edges above it, and a thin plate over the floor. Build T1 and T53 in one worktree (they are X0).
@@ -53,7 +53,7 @@ Row ids per cell. Out-of-scope rows are left out.
 
 | impact \ effort | S | M | L |
 |---|---|---|---|
-| **high** |  | T30 |  |
+| **high** |  |  |  |
 | **med** | T17, T29 | T4, T6, T11, T14, T15, T23, T25, T26, T27, T37, T41, T54, T72 | T7, T18, T35, T48, T52, T59, T74 |
 | **low** | T2, T8, T9, T12, T13, T19, T32, T33, T40, T42, T43, T45, T47, T49, T55, T56, T57, T60, T61, T62, T63, T64, T75, T76 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
 
@@ -107,7 +107,6 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
 | T29 | Examples drop three's geometry roughness when the AA is on `flicker` | med | S | decide | decision 19, D3720, W56, W102 | W102: gate failed. Off under the upscaler raises flicker (orbit std +2-3 % on carConcept and Sponza, speckle +11-62 %); 0.25 too (speckle +7-21 %). Three's term stays. Revisit with T30 (a variance-form specular AA replacing three's term). |
-| T30 | Specular AA as a package option: normal variance (specAA) + a geometric term, replacing three's geometry roughness `flicker` | high | M | experiment | D3570, D3552, D3571, D3720, W46, W56, decision 3 | Variance-form AA (Tokuyoshi 2019) next to specAA; measure curved-edge sparkle with T1 and the chrome star. Needs a node-material hook. |
 | T31 | Clear coat: subtract the coat's IBL in the composite (grazing edge line), then SSR / RT for the coat layer | low | L | experiment | D3512, D3741, D3541, D603, W41, W44, W58, W11 | Start with the coat env term (F_Schlick(0.04) x DFG at the coat roughness, coat normal) on carConcept's skirt line. |
 | T32 | Specular occlusion darkens near-mirror misses beside lit objects with RT off | low | S | ready | D4513, D3551, W39, W45, decision 7 | Fade SO toward 1 below the tracer's threshold, or weight it by hit distance / confidence. |
 | T33 | Transmissive glass casts shadow-map shadows in the examples | low | S | ready | D3682, W54 | Skip castShadow for materials with transmission > 0 in examples/shared/gltf.ts. |
@@ -197,6 +196,7 @@ Findings and calls a new worker might otherwise redo. Each has a pointer.
 - **The denoiser is on by default**, with an opt-out. D50.
 - **carConcept's wheel-well probes stay off by default (was T21).** W102 built them at 64 px (`?carProbes=wheels`): hub 41.5 -> 25.2 (PT 27.1), but the wheel region's flicker rose 8-12 % (orbit, drift, d2, still). Flicker beats accuracy, so the lead set the default back to off on 2026-11-29. D5600.
 - **Sponza's showcase layout is oneSize128 (was T22, W102).** Display flicker fell on all five metrics (drift -8 %, d2 -11 %); speckle +10 %. D5601.
+- **Variance-form specular AA is an option, off by default (was T30, W105).** `specularAA: 'variance'` (Tokuyoshi & Kaplanyan) calms carConcept's reflection (rest -22 %, speckle -25 %) and Sponza, but raises the displayed quad grid +55 %, car raw speckle +139 % and wheel drift +4 %, and moves the chrome star away from the PT (+43.9 -> +71.3). It does not replace three's geometry roughness at no flicker cost, so T29 stays open. D5660-D5662.
 - **quadCopy stays 'off' by default (was T10).** W85: 'sameSurface' leaves display flicker flat on 8 scenes but raises raw speckle +32 % (contact) / +47 % (carConcept). Under the flicker rule a rise is a no. The option stays. Lead's call, 2026-11-28, under the maintainer's 'use your recommendations'.
 - **Sponza's 18 sampled textures** came from three's composite binding every atlas twice. Fixed; four sizes fit the default 16. W62, D4804.
 - **Probe lookup cost per volume** is fixed by W63's grid (32 volumes: 9.6 -> 0.85 ms at 1080p). D4950.
