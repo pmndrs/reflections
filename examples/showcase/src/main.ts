@@ -154,6 +154,8 @@ async function main() {
     specAA: specAAFromQuery(q, SPEC_AA_DEFAULT),
   };
   let ssao: ScreenSpaceAO | null = null;
+  /** W112 (T77): the display graph holds GTAO (specOcc on or the `ao` view shown); setView rebuilds when that changes. */
+  let aoBuilt = false;
   let kit: ShowcaseScene | null = null;
   let entry: ShowcaseEntry | null = null;
   let probes: ReflectionProbes | null = null;
@@ -184,16 +186,19 @@ async function main() {
     aa.setTone(tone);
     // tone-mapped views: linear while the upscaler runs, which tone-maps after it
     const T = (x: N): N => aa.linear.equal(1).select(x, tone(x));
+    // W112 (T77): GTAO renders every frame once any graph the frame draws references it, whatever uView
+    // selects, so it is built only when specOcc or the `ao` view reads it
     ssao?.dispose();
-    const ao = ssao = new ScreenSpaceAO(ssr.gbuffer, kit!.camera);
+    aoBuilt = state.specOcc || state.view === 'ao';
+    const ao = ssao = aoBuilt ? new ScreenSpaceAO(ssr.gbuffer, kit!.camera) : null;
     Object.assign(hybrid.options, {
       probes: state.probes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity,
-      ao: state.specOcc ? (u: N) => ao.sample(u) : null,
+      ao: state.specOcc && ao ? (u: N) => ao.sample(u) : null,
     });
     hybrid.rebuild();
     const c = composite = hybrid.composite();
     c.amount.value = state.ssr || state.rt ? 1 : 0;
-    const views = buildDebugViews({ c, ssr, tone, T, roughnessThreshold: hybrid.roughnessThreshold, probesOn: uProbes, ao: (u: N) => ao.sample(u) });
+    const views = buildDebugViews({ c, ssr, tone, T, roughnessThreshold: hybrid.roughnessThreshold, probesOn: uProbes, ao: ao ? (u: N) => ao.sample(u) : null });
     let out: N = vec3(0);
     VIEW_IDS.forEach((v, i) => { out = uView.equal(i).select(views[v], out); });
     pipeline.outputNode = vec4(out, 1);
@@ -565,6 +570,7 @@ async function main() {
     onBtn.classList.toggle('on', v !== 'off');
     offBtn.classList.toggle('on', v === 'off');
     for (const [k, l] of Object.entries(legends)) l!.style.display = k === v ? '' : 'none';
+    if ((state.specOcc || v === 'ao') !== aoBuilt && composite) buildDisplay();
   }
   function refreshUI() {
     if (!kit) return;
@@ -663,6 +669,8 @@ async function main() {
       setReshade: (m: HitShadingMode) => { setReshade(m); reshadeSel.value = m; },
       /** W39: Lagarde's specular occlusion from GTAO on the composite's probe part (D66, D4510). */
       setSpecOcc: (on: boolean) => setSpecOcc(on),
+      /** W112: the GTAO source while the display graph reads it (specOcc or the `ao` view), else null. */
+      get ssao() { return ssao; },
       /** W46: roughness from normal variance, 0 = off, else its strength (1 = the formula); re-bakes. */
       setSpecAA(strength: number) { setSpecAA(strength); specAABox.checked = strength > 0; },
       /** W105: the package's geometric specular AA ('off' | 'variance' | options); re-bakes, as setSpecAA. Returns the materials changed. */
