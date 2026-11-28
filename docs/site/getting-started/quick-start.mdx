@@ -51,6 +51,7 @@ A complete page with a scene is [`examples/quickstart`](https://github.com/pmndr
 | `rayTracing` | `false` | `true` traces every visible mesh for the rays neither the screen nor the probe can answer (needs `@pmndrs/raytracer` and `@pmndrs/bvh`, see [Ray-traced fallback](/concepts/ray-traced-fallback)). An array limits it to those objects. |
 | `denoiser` | none | A `TemporalDenoiser`, or a function `(device, { roughnessThreshold }) => denoiser`. FFX compares alpha, so square the threshold. |
 | `settings` | none | Overrides over the preset (see the settings guide). |
+| `specularAA` | `'off'` | Geometric specular anti-aliasing on the scene's standard and physical materials. `'off'` keeps three's own geometry roughness. `'variance'` replaces it with a variance-form filter, in three's shading and in the roughness the reflections are traced at alike (see [Flicker and stability](/guides/flicker-and-stability#geometric-specular-anti-aliasing)). |
 
 Without a denoiser, glossy reflections are one noisy sample per 2x2 pixel quad. Use one.
 

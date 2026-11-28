@@ -8,6 +8,7 @@ import type { ShowcaseEntry, ShowcaseScene } from '../scenes';
 import type { CameraView } from '../../../shared';
 import { SPEC_AA_DEFAULT, setSpecularAA, specAAFromQuery, specAAStrength } from '../specAA';
 import { geometryRoughnessFromQuery, setGeometryRoughness } from '../geometryRoughness';
+import { applySpecularAA, SPECULAR_AA_VARIANCE } from '@pmndrs/reflections/three';
 
 export type MethodId = 'ours-raw' | 'ours-denoised' | 'ours-rt' | 'probes' | 'three-raw' | 'three-denoise' | 'three-ffx' | 'pathtraced';
 
@@ -216,6 +217,20 @@ export function applySceneParams(kit: ShowcaseScene, params: URLSearchParams) {
 export function applyGeometryRoughness(kit: ShowcaseScene, params: URLSearchParams) {
   const mode = geometryRoughnessFromQuery(params);
   return { mode, materials: setGeometryRoughness(kit.scene, mode) };
+}
+
+/**
+ * W105 (T30): the package's geometric specular AA (`applySpecularAA`) for a raster method's scene: `?specularAA=off|variance`
+ * (default off: three's geometry roughness), `?specularAAVariance=<sigma^2>` (default 1 / 2 pi),
+ * `?specularAATrace=filtered|material` (the G-buffer's normalRoughness.w). After specAA and
+ * geometryRoughness (it replaces the latter's term), before the bake. The path tracer never calls this.
+ */
+export function applySpecularAAOption(kit: ShowcaseScene, params: URLSearchParams) {
+  const mode = params.get('specularAA') === 'variance' ? 'variance' : 'off';
+  const variance = params.has('specularAAVariance') ? Number(params.get('specularAAVariance')) : SPECULAR_AA_VARIANCE;
+  const traceRoughness = params.get('specularAATrace') === 'material' ? 'material' as const : 'filtered' as const;
+  if (mode === 'off') return { mode, materials: 0 };
+  return { mode, variance, traceRoughness, materials: applySpecularAA(kit.scene, { mode, variance, traceRoughness }) };
 }
 
 export function applySpecAA(kit: ShowcaseScene, params: URLSearchParams) {

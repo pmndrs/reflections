@@ -104,6 +104,7 @@ reflections. The [examples page](/getting-started/examples) lists them all.
 | `FrameGBuffer` | The multi-render-target pass inside the SSR pass. Use it alone to read depth, normals and roughness. |
 | `createRaytracerTraceProviderFromObjects()` | Builds the ray-traced provider (`@pmndrs/raytracer`) from three meshes. |
 | `applyReflectionsPreset()` | Applies a named bundle of settings at run time. |
+| `applySpecularAA()` | Geometric specular anti-aliasing on standard and physical materials (off by default; see [Flicker and stability](/guides/flicker-and-stability#geometric-specular-anti-aliasing)). |
 | `reflectionsRequiredLimits()` | The device limits to request. |
 
 ## The render loop

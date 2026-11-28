@@ -3083,6 +3083,29 @@ async function showcaseChecks(pages) {
     const aaErrs = results.logs.slice(beforeAA).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
     check('showcase carConcept: roughness from normal variance (specAA) reaches the G-buffer and turns off cleanly', aa.errors === 0 && aaErrs.length === 0 && Math.abs(aa.off - 0.25) < 0.01 && aa.on > 0.3 && Math.abs(aa.back - aa.off) < 1e-3,
       `door G-buffer roughness off ${aa.off.toFixed(3)}, on ${aa.on.toFixed(3)}, off again ${aa.back.toFixed(3)}${aaErrs.length ? '; ' + aaErrs[0] : ''}`);
+    // W105 (T30): the package's variance-form geometric specular AA (applySpecularAA) reaches the G-buffer's traced
+    // roughness (normalRoughness.w, mean over the car's px at hero) with traceRoughness 'filtered', leaves it with
+    // 'material', and 'off' restores three's own materials exactly
+    const beforeG = results.logs.length;
+    const ga = await p.T(`(async () => {
+      const P = window.__p; P.setPose('hero'); P.stop();
+      const rt = P.ssr.gbuffer.renderTarget, i = rt.textures.indexOf(P.ssr.gbuffer.textures.normalRoughness);
+      const mean = async () => {
+        await P.step(2);
+        const d = await P.renderer.readRenderTargetPixelsAsync(rt, 0, 0, rt.width, rt.height, i);
+        const f = (v) => (d instanceof Uint16Array ? P.THREE.DataUtils.fromHalfFloat(v) : v);
+        let s = 0, n = 0; for (let k = 3; k < d.length; k += 4) { const v = f(d[k]); if (v > 0 && v < 0.9) { s += v; n++; } }
+        return s / n;
+      };
+      const off = await mean();
+      const changed = P.setSpecularAA('variance'); const on = await mean();
+      P.setSpecularAA({ mode: 'variance', traceRoughness: 'material' }); const material = await mean();
+      P.setSpecularAA('off'); const back = await mean();
+      return { off, on, material, back, changed, errors: P.gpuErrors.length };
+    })()`);
+    const gaErrs = results.logs.slice(beforeG).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    check('showcase carConcept: variance specular AA (applySpecularAA) raises the traced G-buffer roughness, \'material\' leaves it, \'off\' restores it', ga.errors === 0 && gaErrs.length === 0 && ga.changed > 0 && ga.on > ga.off + 2e-3 && Math.abs(ga.material - ga.off) < 5e-4 && Math.abs(ga.back - ga.off) < 5e-4, // first run: off 0.0784, variance 0.0814, material / off again 0.0783 (TAA jitter moves the mean ~1e-4)
+      `${ga.changed} materials; mean normalRoughness.w off ${ga.off.toFixed(4)}, variance ${ga.on.toFixed(4)}, traceRoughness material ${ga.material.toFixed(4)}, off again ${ga.back.toFixed(4)}${gaErrs.length ? '; ' + gaErrs[0] : ''}`);
   }
 }
 

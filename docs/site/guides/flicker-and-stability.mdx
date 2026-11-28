@@ -45,6 +45,38 @@ These are the ones to know about, because they make the picture steadier by maki
 - **`reflectionResolution: 'half'`** is steady but loses fine detail.
 - **A higher `roughnessThreshold`** traces more pixels. They are noisier, so the denoiser has more to do.
 
+## Geometric specular anti-aliasing
+
+A small curved glossy part, such as a bevel or a rim, turns its normal fast across a pixel. Its highlight and its
+reflection can then jump from one pixel to the next as the camera moves. three's standard material already adds some
+roughness there: it adds the screen-space change of the normal to the roughness. The library offers a second form
+of that filter as an option:
+
+```ts
+import { applySpecularAA } from '@pmndrs/reflections/three';
+
+applySpecularAA(scene, 'variance'); // or Reflections.create(renderer, scene, { specularAA: 'variance' })
+applySpecularAA(scene, 'off');      // back to three's own term
+```
+
+`'variance'` is the filter from Tokuyoshi and Kaplanyan's specular anti-aliasing papers. It adds the normal's
+screen-space variance to the squared GGX roughness, clamped. It replaces three's term in three's own shading, in the
+roughness the reflections are traced and denoised at, and in the probe bake, so the three stay one model. It applies
+to the materials under `scene` when you call it. Call it again for meshes you add later.
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `mode` | `'variance'` when you pass options | `'off'` leaves three's materials alone. |
+| `variance` | `1 / (2 pi)` | The filter's width (sigma squared). Half of it is the papers' less conservative variant. Smaller is sharper and sparkles more. |
+| `threshold` | `0.18` | The cap on the added roughness. |
+| `traceRoughness` | `'filtered'` | `'material'` traces and denoises at the material's own roughness, as with three's term. |
+
+It is off by default. On the test car, the displayed reflection was calmer with it (orbit flicker -6.6 %, flicker
+at rest -22 %), and so was the Sponza floor (-5 % and -16 %). But it raised the raw speckle on the car's paint and
+the visible 2x2 grid there. It also blurred small mirror parts more than three's term: the car's chrome hub star
+moved further from the path-traced reference. Try it on scenes with many curved glossy parts and few small mirrors,
+and judge it on a slow orbit. Measurements: `docs/research/w105/` in the repository.
+
 ## A working recipe
 
 1. Run the denoiser. Match its roughness gate to the tracer's threshold.
