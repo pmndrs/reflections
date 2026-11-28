@@ -17,6 +17,8 @@
 //   pnpm check -- --only probe-bindings          # W62: Sponza's three-size probe set at the default 16 sampled textures
 //   pnpm check -- --only probe-bindings-measure  # W62: Sponza with fewer probe sizes vs the path tracer (MAD, PSNR), lookup ms; out/w62-probe-bindings.json
 //   pnpm check -- --only probe-layouts-measure   # W61: probe layouts at equal memory, error vs RT / path tracer, seams, timing (minutes); out/w61-probe-layouts.json
+//   pnpm check -- --only probe-pair             # W109 (T41): one volume walk for a lit material's two probe lookups = two walks (0 px); PAIR_CASES=rooms|all
+//   pnpm check -- --only probe-pair-cost        # W109: core lookup pairs, two walks vs one, ms per 1080p; probe-table-cost: T43's per-frame table CPU / bytes
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p: core on the 2D array (warp), core on the cube array, the pre-phase-2 TSL node
 //   pnpm check -- --only mirror-bias --mirror-bias   # W32 / D49: mirrorBias noise / bias sweep (minutes), JSON to out/mirror-bias.json
 //   pnpm check -- --only ray-reuse                    # W73 / D5040: rayReuse 'copy' is the default path, 'ratio' runs and lowers raw noise

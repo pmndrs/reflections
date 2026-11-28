@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- three: lit materials lit by `reflectionProbes()` walk the probe volumes once per pixel for both their reflection and
+  their diffuse probe light (same pixels; core's new `probeLookupPairFunctionWgsl`), and the probe table is re-packed
+  and uploaded only when a probe or the set changed (`ReflectionProbes.version` / `updateVersion()`): about 0.12 ms of
+  CPU and 130 KB of uploads less per frame.
 - Core and three (the traced pass; Babylon and pixi have no traced pass): `traceSettings.hitLobeOcclusionRays` (default 0, off) and
   `hitLobeOcclusionLength` (default 0.3 x the hit's camera distance): short visibility rays over a traced hit's own
   specular lobe, on a fixed pattern (no noise), darken the lobe's probe light where nearby geometry blocks it (the floor
