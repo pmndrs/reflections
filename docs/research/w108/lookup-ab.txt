@@ -1,0 +1,19 @@
+
+> @pmndrs/reflections@0.1.0 check /Users/dex/Developer/reflections/.claude/worktrees/agent-abd6e4de70bcf0ea8
+> node scripts/run-headless.mjs -- --only probe-lookup-ab
+
+  rooms n shipped (3), free 5.83/5.19/5.25/5.28/6.28: [base] 0.33 (mat 0.18 + comp 0.16), [orient] 0.36 (mat 0.18 + comp 0.18)
+  rooms n 4 (4), free 5.23/5.14/5.65/5.33/5.49: [base] 0.47 (mat 0.28 + comp 0.19), [orient] 0.71 (mat 0.41 + comp 0.30)
+  rooms n 8 (8), free 5.35/5.35/5.45/6.01/5.45: [base] 0.56 (mat 0.22 + comp 0.34), [orient] 0.94 (mat 0.50 + comp 0.44)
+  rooms n 16 (16), free 5.82/5.49/5.47/5.30/6.71: [base] 0.73 (mat 0.39 + comp 0.34), [orient] 0.62 (mat 0.19 + comp 0.43)
+  rooms n 32 (32), free 6.71/5.48/5.62/5.42/5.71: [base] 0.80 (mat 0.41 + comp 0.40), [orient] 0.78 (mat 0.42 + comp 0.36)
+  showcaseSponza n shipped (7), free 8.62/9.05/8.58/8.78/8.53: [base] 0.57 (mat 0.35 + comp 0.22), [orient] 0.70 (mat 0.39 + comp 0.31)
+  showcaseSponza n 4 (5), free 8.48/9.26/9.07/9.11/8.96: [base] 0.75 (mat 0.32 + comp 0.43), [orient] 0.98 (mat 0.59 + comp 0.39)
+  showcaseSponza n 8 (8), free 9.18/8.90/9.66/10.45/9.23: [base] 0.68 (mat 0.29 + comp 0.39), [orient] 0.80 (mat 0.44 + comp 0.36)
+  showcaseSponza n 16 (16), free 8.64/10.78/10.95/9.41/9.68: [base] 0.83 (mat 0.51 + comp 0.31), [orient] 0.76 (mat 0.08 + comp 0.68)
+  showcaseSponza n 32 (32), free 9.52/10.66/10.68/9.90/10.07: [base] 1.17 (mat 0.54 + comp 0.63), [orient] 1.15 (mat 0.65 + comp 0.50)
+  [PASS] no WebGPU validation errors or exceptions
+
+sections (s): setup 96; total 96 s
+
+all checks passed

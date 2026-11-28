@@ -32,7 +32,7 @@ Status values:
 
 ## Top 10, in order
 
-**Status 2026-11-27 (0.1.0 published).** The Top 10 below is from 2026-11-13. Since then T1 and T53 are done (W85: `--only flicker`, the T53 scenes, baseline), T10 is settled: quadCopy stays off (2026-11-28, see the Settled list), and T58 is done (0.1.0 on npm as `latest`). 2026-11-28: the maintainer said to go with the lead's recommendations. Wave W102-W106 is running: T21 + T22 + T29, the Babylon brightness gap, T24 + T55, T30. W106 found T3 already built (W72) and the default (W76); row closed, the leftover is T76. Next: T14 and T23. Audit 2026-11-29: every row checked against main; T5 and T16 deleted (removed in W76), built-but-not-promoted options (T4, T12, T40, T42) are now `decide`, partly built rows trimmed (T7, T9, T11, T14, T18, T37), raytracer-era wording (T20, T45, T57).
+**Status 2026-11-27 (0.1.0 published).** The Top 10 below is from 2026-11-13. Since then T1 and T53 are done (W85: `--only flicker`, the T53 scenes, baseline), T10 is settled: quadCopy stays off (2026-11-28, see the Settled list), and T58 is done (0.1.0 on npm as `latest`). 2026-11-28: the maintainer said to go with the lead's recommendations. Wave W102-W106 is running: T21 + T22 + T29, the Babylon brightness gap, T24 + T55, T30. W106 found T3 already built (W72) and the default (W76); row closed, the leftover is T76. Next: T14 and T23. 2026-11-29: T23 done (W108: oriented probe boxes; D5720-D5722). Audit 2026-11-29: every row checked against main; T5 and T16 deleted (removed in W76), built-but-not-promoted options (T4, T12, T40, T42) are now `decide`, partly built rows trimmed (T7, T9, T11, T14, T18, T37), raytracer-era wording (T20, T45, T57).
 
 1. **T1: flicker and firefly metrics.** Flicker is the #1 pain point, and none of the flicker experiments (T2-T7) can be judged without numbers per region (D3622, X0). First step: build X0's rest drift, orbit flicker, 2x2 energy, edge pan and raw speckle count as bench Measure columns, then baseline every scene.
 2. **T53: simple test scenes.** The maintainer asked for these so the bevels stop deciding the tuning. T10 and T14 are queued behind them (decisions 20, 21). First step: as bench scenes with the PT reference, add a cube or slab on the mirror, sharp edges above it, and a thin plate over the floor. Build T1 and T53 in one worktree (they are X0).
@@ -54,7 +54,7 @@ Row ids per cell. Out-of-scope rows are left out.
 | impact \ effort | S | M | L |
 |---|---|---|---|
 | **high** |  | T30 |  |
-| **med** | T17, T29 | T4, T6, T11, T14, T15, T23, T25, T26, T27, T37, T41, T54, T72 | T7, T18, T35, T48, T52, T59, T74 |
+| **med** | T17, T29 | T4, T6, T11, T14, T15, T25, T26, T27, T37, T41, T54, T72 | T7, T18, T35, T48, T52, T59, T74 |
 | **low** | T2, T8, T9, T12, T13, T19, T32, T33, T40, T42, T43, T45, T47, T49, T55, T56, T57, T60, T61, T62, T63, T64, T75, T76 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
 
 ## The full table
@@ -96,7 +96,6 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T23 | Oriented probe boxes: a rotation per volume in core, three and the W63 grid | med | M | accepted | decision 18, D3701, D4950, W55 | Add 3 rotation rows per volume; box test and parallax in the local frame; check the front-tyre step goes. |
 | T25 | Near-mirror floors show the HDRI blurred: misses take the probe, the PT and three's SSR show it sharp | med | M | experiment | W21, W30, D1806 | Try a full-resolution environment past the probes for misses below the mirror threshold (three's path, not core). |
 | T26 | SSR-to-probe step on glossy floors is radiance, not blur; our env-slot captures read ~8/255 darker than PMREM ones | med | M | experiment | W26, D3201, D903, D25 | Compare the two roughness-1 irradiances of mirrorWall's sky (env slot vs PMREM), then re-run --only seam. |
 | T27 | Blended seams between neighbouring probes (hero in the RT-off floor, floor-quadrant probes) | med | M | decide | D4401, D4800, W38, W61 | Parked by the maintainer (2026-11-12); put it on the Decisions page after T21 / T23 land. |

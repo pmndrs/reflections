@@ -181,11 +181,13 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   // W55: ?carProbes=off|wheels|cabin|both carConcept's interior probes (wheel wells, cabin; boxes from the car's
   // geometry, ../carProbes.ts) at ?carProbeRes= px (the stage probe keeps its size); W102 (T21): wheels at 64 px; default off (flicker)
   const carQ = carProbesFromQuery(params);
-  const carVolumes = carInteriorProbes(kit, carQ.mode, carQ.resolution);
+  const carVolumes = carInteriorProbes(kit, carQ.mode, carQ.resolution, carQ.orient);
   for (const v of carVolumes) {
     const p = new ReflectionProbe(...v.influenceSize);
     p.name = v.name;
     p.position.set(...v.position);
+    // W108 (T23): ?carProbeOrient=oriented boxes turn with the wheel (the cabin with the car)
+    if (v.rotation) { p.oriented = true; p.quaternion.fromArray(v.rotation); }
     p.originOffset.set(...v.originOffset);
     p.blendDistance = v.blendDistance;
     p.resolution = v.resolution;
@@ -434,7 +436,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   }
   /** Keys read only at creation (a Rebuild applies them). */
   const REBUILD = new Set(['bvhBuilder', 'rtShade', 'rtShadingNormals', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
-    'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity', 'envLight', 'background', 'timestamps', 'shim',
+    'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeOrient', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'geometryRoughness', 'bgBlur', 'bgIntensity', 'envLight', 'background', 'timestamps', 'shim',
     's.reflectionResolution', 'preset']);
 
   return {

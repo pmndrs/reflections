@@ -320,7 +320,7 @@ async function main() {
     if (helper) helper.visible = on;
   }
 
-  function makeProbes(volumes: (ShowcaseScene['probes'][number] & { name?: string })[]) {
+  function makeProbes(volumes: (ShowcaseScene['probes'][number] & { name?: string; rotation?: [number, number, number, number] })[]) {
     const set = new ReflectionProbes();
     for (const v of volumes) {
       const p = new ReflectionProbe(...v.influenceSize);
@@ -331,6 +331,8 @@ async function main() {
       if (v.projectionOffset) p.projectionOffset.set(...v.projectionOffset);
       if (v.blendDistance !== undefined) p.blendDistance = v.blendDistance;
       if (v.resolution !== undefined) p.resolution = v.resolution;
+      // W108 (T23): an oriented box (carConcept's ?carProbeOrient=oriented)
+      if (v.rotation) { p.oriented = true; p.quaternion.fromArray(v.rotation); }
       set.add(p);
     }
     return set;
@@ -345,8 +347,8 @@ async function main() {
     layout = name ? probeLayout(k.id, name, k.probes) : null;
     layoutResolution = layout && layout.name !== 'shipped' ? layout.resolution : undefined;
     const car = carProbesFromQuery(q);
-    const carVolumes = carInteriorProbes(k, car.mode, car.resolution)
-      .map((v) => ({ name: v.name, position: v.position, influenceSize: v.influenceSize, originOffset: v.originOffset, blendDistance: v.blendDistance, resolution: v.resolution ?? undefined }));
+    const carVolumes = carInteriorProbes(k, car.mode, car.resolution, car.orient)
+      .map((v) => ({ name: v.name, position: v.position, influenceSize: v.influenceSize, originOffset: v.originOffset, blendDistance: v.blendDistance, resolution: v.resolution ?? undefined, rotation: v.rotation }));
     return [...(layout?.volumes ?? k.probes), ...carVolumes];
   }
   /** W38: bytes of the probe atlases (rgba16float, 6 faces per slot incl. the environment slot, every mip; every atlas, W60). */

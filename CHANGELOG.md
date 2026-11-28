@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Probes: oriented boxes. three: `ReflectionProbe.oriented` (default false) turns a probe's influence and projection
+  boxes, its blend and both offsets with the probe's world rotation, so a probe fits a turned room or a part of a
+  turned car; the captures stay world-aligned, and `ReflectionProbesHelper` draws the turned boxes. Babylon:
+  `BabylonProbe.rotation` (a quaternion). Core: `ProbeVolume.rotation`; the volume table takes 6 rows per volume (was 5;
+  `PROBE_ROWS_PER_VOLUME`), row 5 the rotation. Axis-aligned probes render as before, bit for bit, at the same cost.
+
 - three: a material that samples the probes and binds more textures (or samplers) per stage than the device allows now
   gets one console warning naming it, the count, how many are probe atlases, the limit and the fix
   (`reflectionsRequiredLimits(adapter)`, or fewer probe sizes), when three builds it and before WebGPU rejects its
