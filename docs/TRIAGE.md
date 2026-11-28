@@ -32,7 +32,7 @@ Status values:
 
 ## Top 10, in order
 
-**Status 2026-11-27 (0.1.0 published).** The Top 10 below is from 2026-11-13. Since then T1 and T53 are done (W85: `--only flicker`, the T53 scenes, baseline), T10 moved to `decide` (W85), and T58 is done (0.1.0 on npm as `latest`). No workstream is running and none is queued. Every row left in the table is open backlog that nobody has started.
+**Status 2026-11-27 (0.1.0 published).** The Top 10 below is from 2026-11-13. Since then T1 and T53 are done (W85: `--only flicker`, the T53 scenes, baseline), T10 is settled: quadCopy stays off (2026-11-28, see the Settled list), and T58 is done (0.1.0 on npm as `latest`). 2026-11-28: the maintainer said to go with the lead's recommendations. Wave W102-W106 is running: T21 + T22 + T29, the Babylon brightness gap, T24 + T55, T30 and T3. Next: T14 and T23.
 
 1. **T1: flicker and firefly metrics.** Flicker is the #1 pain point, and none of the flicker experiments (T2-T7) can be judged without numbers per region (D3622, X0). First step: build X0's rest drift, orbit flicker, 2x2 energy, edge pan and raw speckle count as bench Measure columns, then baseline every scene.
 2. **T53: simple test scenes.** The maintainer asked for these so the bevels stop deciding the tuning. T10 and T14 are queued behind them (decisions 20, 21). First step: as bench scenes with the PT reference, add a cube or slab on the mirror, sharp edges above it, and a thin plate over the floor. Build T1 and T53 in one worktree (they are X0).
@@ -53,7 +53,7 @@ Row ids per cell. Out-of-scope rows are left out.
 
 | impact \ effort | S | M | L |
 |---|---|---|---|
-| **high** | T2 | T3, T10, T30 | T4 |
+| **high** | T2 | T3, T30 | T4 |
 | **med** | T5, T12, T16, T17, T21, T22, T24, T29, T69 | T6, T11, T14, T15, T23, T25, T26, T27, T40, T41, T54, T70 | T7, T18, T35, T36, T37, T38, T42, T48, T52, T59 |
 | **low** | T8, T9, T13, T19, T32, T33, T43, T45, T47, T49, T55, T56, T57, T60, T61, T62, T63, T64, T71 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
 
@@ -78,7 +78,6 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T10 | 2x2 quad copy at edges: quadCopy 'sameSurface' (W85: display flicker flat on 8 scenes, raw speckle +32 % contact / +47 % carConcept, so not flipped); edge-aware upsample of the per-quad result | med | M | decide | decision 21, D3740, D3663, D3661, D3610, W58, W53, W85 | Maintainer: is raw (pre-denoiser) speckle worth trading for flat display flicker? Upsample after. |
 | T11 | Back-face depth layer (RT off): sphere fringe, dark band under the sill, white gap under the car, contact crescent | med | M | experiment | D2402, D4303, W41, W44, W21, W22 | One back-face depth target + thickness test; measure fringe px (W44's metric) and the sill band with RT off. |
 | T12 | Depth-scaled SSR thickness (X1 #2): one k for every scene scale; stripes and streaks behind objects | med | S | experiment | X1 #2, D1001, D1000, W9, W12, W17 | Add thicknessDepthFactor (default 0); sweep k on toyCar, rooms, carConcept, Sponza; streak % and stripe ratio. |
 | T13 | hitLobeFilterMixed reads last frame's hit source without reprojection (one frame late in motion) | low | S | ready | D3641, W52 | Reproject the hit-source signal through motion before the lobe filter reads it. |
@@ -99,8 +98,8 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T21 | Wheel-well probes at 64 px as carConcept's default | med | S | accepted | decision 18, D3700, W55 | Make carProbes=wheels&carProbeRes=64 the showcase and bench default; re-run the bench Measure. |
-| T22 | Showcase Sponza: switch to oneSize128 (11 volumes at 128 px, +3.5 dB vs PT at a third of the memory) | med | S | accepted | decision 12, W61, W62, W63 | Confirm 'fine' meant switch (DECISIONS asks), then flip the showcase layout and re-run --only showcase. |
+| T21 | Wheel-well probes at 64 px as carConcept's default | med | S | accepted | decision 18, D3700, W55 | Make carProbes=wheels&carProbeRes=64 the showcase and bench default; re-run the bench Measure. W102. |
+| T22 | Showcase Sponza: switch to oneSize128 (11 volumes at 128 px, +3.5 dB vs PT at a third of the memory) | med | S | accepted | decision 12, W61, W62, W63 | Switch (lead's call under the maintainer's 2026-11-28 'use your recommendations'): flip the showcase layout and re-run --only showcase. W102. |
 | T23 | Oriented probe boxes: a rotation per volume in core, three and the W63 grid | med | M | accepted | decision 18, D3701, D4950, W55 | Add 3 rotation rows per volume; box test and parallax in the local frame; check the front-tyre step goes. |
 | T24 | Material-side texture-limit warning: a three material past maxSampledTexturesPerShaderStage fails with no message of ours | med | S | ready | W62, decision 16, D4900 | At bake / reflectionProbes() time, count each lit material's sampled textures plus the atlases; warn with the fix. |
 | T25 | Near-mirror floors show the HDRI blurred: misses take the probe, the PT and three's SSR show it sharp | med | M | experiment | W21, W30, D1806 | Try a full-resolution environment past the probes for misses below the mirror threshold (three's path, not core). |
@@ -112,7 +111,7 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T29 | Examples drop three's geometry roughness when the AA is on `flicker` | med | S | accepted | decision 19, D3720, W56 | Set geometryRoughness off under the upscaler / AA; record paint flicker with T1 (W56: +1.3 % with AA). |
+| T29 | Examples drop three's geometry roughness when the AA is on `flicker` | med | S | accepted | decision 19, D3720, W56 | W102: set geometryRoughness off under the upscaler / AA, but flip only if `--only flicker` shows no rise above noise (flicker rule; W56 measured +1.3 % paint flicker with AA). Otherwise keep it and log the numbers. |
 | T30 | Specular AA as a package option: normal variance (specAA) + a geometric term, replacing three's geometry roughness `flicker` | high | M | experiment | D3570, D3552, D3571, D3720, W46, W56, decision 3 | Variance-form AA (Tokuyoshi 2019) next to specAA; measure curved-edge sparkle with T1 and the chrome star. Needs a node-material hook. |
 | T31 | Clear coat: subtract the coat's IBL in the composite (grazing edge line), then SSR / RT for the coat layer | low | L | experiment | D3512, D3741, D3541, D603, W41, W44, W58, W11 | Start with the coat env term (F_Schlick(0.04) x DFG at the coat roughness, coat normal) on carConcept's skirt line. |
 | T32 | Specular occlusion darkens near-mirror misses beside lit objects with RT off | low | S | ready | D4513, D3551, W39, W45, decision 7 | Fade SO toward 1 below the tracer's threshold, or weight it by hit distance / confidence. |
@@ -201,6 +200,7 @@ Findings and calls a new worker might otherwise redo. Each has a pointer.
 - **Sphere fringe:** RT already removes it (50 -> 0 px). The idea of a thinner test when RT is on was dropped. Only the RT-off back-face layer is left (T11). W44, D4303.
 - **Basic, Lambert and Phong materials** get no reflections, by design. It's documented in the README. Decision 15, D2802.
 - **The denoiser is on by default**, with an opt-out. D50.
+- **quadCopy stays 'off' by default (was T10).** W85: 'sameSurface' leaves display flicker flat on 8 scenes but raises raw speckle +32 % (contact) / +47 % (carConcept). Under the flicker rule a rise is a no. The option stays. Lead's call, 2026-11-28, under the maintainer's 'use your recommendations'.
 - **Sponza's 18 sampled textures** came from three's composite binding every atlas twice. Fixed; four sizes fit the default 16. W62, D4804.
 - **Probe lookup cost per volume** is fixed by W63's grid (32 volumes: 9.6 -> 0.85 ms at 1080p). D4950.
 - **Probe placement matters more than probe size** at equal memory. W61, W62, SPEC "Choosing probe sizes".
