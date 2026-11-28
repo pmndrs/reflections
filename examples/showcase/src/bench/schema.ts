@@ -122,7 +122,7 @@ export const SETTINGS: Setting[] = [
   bool('aa.detectShadingChanges', 'aa', 'Detect shading changes', true, { appliesTo: RASTER, api: '@pmndrs/upscaler settings.detectShadingChanges', tradeoff: 'Ages the history where shading really changed (a light, a bake) so it re-converges instead of ghosting.' }),
 
   // ---- scene -----------------------------------------------------------------------------------------------
-  sel('scene', 'scene', 'Scene', [['carConcept', 'Car concept'], ['toyCar', 'Toy car'], ['chess', 'Chess set'], ['sponza', 'Sponza'], ['lineSpread', 'Line spread (X0: emissive strip over a glossy floor)'], ['lineSpreadThin', 'Line spread, thin strip (X0: SSR thickness case)'], ['grazing', 'Grazing sweep (X0: checker wall over a glossy floor)'], ['cubeFloor', 'Cube and slab on a glossy floor (T53)'], ['edgesFloor', 'Sharp-edged panel above a glossy floor (T53)'], ['plateFloor', 'Thin plate over a glossy floor (T53)']], null, {
+  sel('scene', 'scene', 'Scene', [['carConcept', 'Car concept'], ['toyCar', 'Toy car'], ['chess', 'Chess set'], ['sponza', 'Sponza'], ['lineSpread', 'Line spread (X0: emissive strip over a glossy floor)'], ['lineSpreadThin', 'Line spread, thin strip (X0: SSR thickness case)'], ['grazing', 'Grazing sweep (X0: checker wall over a glossy floor)'], ['cubeFloor', 'Cube and slab on a glossy floor (T53)'], ['edgesFloor', 'Sharp-edged panel above a glossy floor (T53)'], ['plateFloor', 'Thin plate over a glossy floor (T53)'], ['fenceFloor', 'Alpha-tested slats above a glossy floor (W110)']], null, {
     pageDefault: 'carConcept', apply: 'rebuild', appliesTo: 'page', tradeoff: 'Reloads every method on the new scene (downloaded assets; X0\'s lineSpread / grazing are procedural, W70).',
   }),
   sel('pose', 'scene', 'Camera', [['hero', 'hero'], ['low', 'low'], ['front', 'front'], ['close', 'close'], ['top', 'top'], ['w50', 'w50 (carConcept: W50\'s view, the Measure regions)'], ['e5', 'e5 (X0 scenes: 5 deg elevation)'], ['e15', 'e15 (X0: 15 deg, the line-spread gate)'], ['e30', 'e30 (X0: 30 deg)'], ['e60', 'e60 (X0: 60 deg)']], null, {
@@ -301,6 +301,27 @@ export const SETTINGS: Setting[] = [
     cost: 'one light sample and its shadow ray per traced hit; not measured separately',
   }),
   bool('rtShadingNormals', 'rt', 'Interpolated hit normals', true, { apply: 'rebuild', appliesTo: RT, api: 'provider option shadingNormals', tradeoff: 'D1700: traced hits shade with the vertex normals (smooth, as three shades on screen) instead of the face normal (faceted).', cost: 'up to +0.07 ms at 1080p (D1700, measured on a former provider)' }),
+  bool('rtAlpha', 'rt', 'Alpha test at traced hits', true, {
+    apply: 'rebuild', appliesTo: RT, api: 'createRaytracerTraceProviderFromObjects({ textures: { alphaTest } })',
+    tradeoff: 'W110 (T18, D5760): alphaTest materials (Sponza\'s plants and chains) let traced rays and hit shadow rays through where three discards the texel (base colour alpha x alphaMap below the cutoff), through @pmndrs/bvh\'s triangle filter on their triangles only. Off: the cards trace solid, as before W110.',
+    cost: 'only rays that reach a flagged triangle pay (a table lookup and one texture read); see D5760',
+  }),
+  num('rtAlphaCone', 'rt', 'Alpha test texture cone (rad)', 0, 0.1, 0.001, 0, {
+    apply: 'rebuild', appliesTo: RT, api: 'createRaytracerTraceProviderFromObjects({ textures: { alphaCone } })',
+    tradeoff: 'W110 (D5760): the level-of-detail cone the alpha test reads the base colour alpha with (footprint t x cone). 0 (default) = the finest mip from the uv alone (Sponza +0.44 ms at 1080p for the alpha test; 0.005 adds the texture frame, +0.03 ms, same pixels at the bench views); larger averages the leaves\' alpha toward the cutoff, so cards turn solid or vanish whole.',
+  }),
+  num('rtCone', 'rt', 'Hit texture cone (rad)', 0, 0.1, 0.001, 0.05, {
+    apply: 'rebuild', appliesTo: RT, api: 'createRaytracerTraceProviderFromObjects({ textures: { cone } })',
+    tradeoff: 'W97 (D5540): the level-of-detail cone traced hits read their colour, roughness / metalness and emissive textures with. Maintainer (2026-11-27): 0.05, blur over flicker; 0.012 is sharper (rest flicker 0.0108 -> 0.0110 %).',
+  }),
+  bool('rtRoughMetal', 'rt', 'Roughness / metalness maps at traced hits', true, {
+    apply: 'rebuild', appliesTo: RT, api: 'createRaytracerTraceProviderFromObjects({ textures: { roughnessMetalness } })',
+    tradeoff: 'W110 (T18, D5761): traced hits read the metallic-roughness map at their uv (same buckets and cone as the base colour) instead of the map\'s mean per mesh.',
+  }),
+  bool('rtEmissiveMap', 'rt', 'Emissive maps at traced hits (opt-in)', false, {
+    apply: 'rebuild', appliesTo: RT, api: 'createRaytracerTraceProviderFromObjects({ textures: { emissive: true } })',
+    tradeoff: 'W110 (T18, D5761): traced hits read the emissive map at their uv instead of its mean. carConcept w50 vs the PT: the changed px 39.3 -> 27.4 MAD, the wheel region 31.2 -> 24.0; but the wheel region\'s orbit flicker +13 % (d2 +9 %), so off by default (the maintainer\'s flicker rule).',
+  }),
   num('s.missRoughnessThreshold', 'rt', 'Glossy threshold (traced)', 0, 1, 0.01, 1, {
     appliesTo: RT, api: 'settings.missRoughnessThreshold',
     tradeoff: 'Only misses at perceptual roughness <= this go to the ray tracer (FFX hybrid sample: 0.469). Lower = fewer traced rays (cheaper); rougher misses keep the probe.',

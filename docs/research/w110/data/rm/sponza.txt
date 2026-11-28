@@ -1,0 +1,15 @@
+saved low-pt.png
+saved low-rmOff.png
+{"pose":"low","name":"rmOff","rows":{"frame":[43.4,52.6,16.11],"glossy":[57.2,62.8,12.35]}}
+saved low-on.png
+{"pose":"low","name":"on","rows":{"frame":[43.4,52.6,16.12],"glossy":[57.2,62.8,12.36]}}
+saved low-emOff.png
+{"pose":"low","name":"emOff","rows":{"frame":[43.4,52.6,16.11],"glossy":[57.2,62.8,12.36]}}
+saved courtyard-pt.png
+saved courtyard-rmOff.png
+{"pose":"courtyard","name":"rmOff","rows":{"frame":[40.8,50.9,17.45],"glossy":[70.7,72.6,11.99]}}
+saved courtyard-on.png
+{"pose":"courtyard","name":"on","rows":{"frame":[40.8,50.9,17.45],"glossy":[70.7,72.5,11.98]}}
+saved courtyard-emOff.png
+{"pose":"courtyard","name":"emOff","rows":{"frame":[40.8,50.9,17.45],"glossy":[70.7,72.5,11.98]}}
+result {"errors":[]}

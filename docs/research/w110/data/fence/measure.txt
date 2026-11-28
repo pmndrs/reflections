@@ -1,0 +1,15 @@
+saved down-pt.png
+saved down-off.png
+{"pose":"down","name":"off","rows":{"frame":[123.3,131.2,19.64],"glossy":[123.3,131.2,19.64]}}
+saved down-on.png
+{"pose":"down","name":"on","rows":{"frame":[123.3,131.5,19.04],"glossy":[123.3,131.5,19.04]}}
+saved down-cone05.png
+{"pose":"down","name":"cone05","rows":{"frame":[123.3,131.5,19.04],"glossy":[123.3,131.5,19.04]}}
+saved hero-pt.png
+saved hero-off.png
+{"pose":"hero","name":"off","rows":{"frame":[176.8,158.6,24.63],"glossy":[181.6,153.5,34.87]}}
+saved hero-on.png
+{"pose":"hero","name":"on","rows":{"frame":[176.8,158.7,24.31],"glossy":[181.6,153.6,34.4]}}
+saved hero-cone05.png
+{"pose":"hero","name":"cone05","rows":{"frame":[176.8,158.7,24.31],"glossy":[181.6,153.6,34.4]}}
+result {"errors":[]}

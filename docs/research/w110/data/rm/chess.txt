@@ -1,0 +1,8 @@
+saved hero-pt.png
+saved hero-rmOff.png
+{"pose":"hero","name":"rmOff","rows":{"frame":[147.9,151.6,7.2],"glossy":[151.1,156.1,9.86]}}
+saved hero-on.png
+{"pose":"hero","name":"on","rows":{"frame":[147.9,151.5,7.2],"glossy":[151.1,156.1,9.86]}}
+saved hero-emOff.png
+{"pose":"hero","name":"emOff","rows":{"frame":[147.9,151.5,7.2],"glossy":[151.1,156.1,9.86]}}
+result {"errors":[]}

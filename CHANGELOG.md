@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Ray tracing (core provider, three): traced hits now read more of their material per hit. Alpha-tested materials
+  (three's `alphaTest`, with `map` alpha and `alphaMap`) let traced reflections and hit shadow rays through where three
+  cuts them out, so leaves and cards no longer block like solid planes; roughness / metalness maps are read at the hit's
+  uv instead of each map's average. Emissive maps can be too (`textures: { emissive: true }`, off by default: more
+  flicker). Each has a switch in the provider's `textures` option (`alphaTest`, `alphaCone`, `roughnessMetalness`,
+  `emissive`); `BvhTraceMaterial` gains `alphaCutoff`, `opacity`,
+  `roughnessMetalnessTexture` and `emissiveTexture`. `textures: false` now gives each material its textures' averages
+  (before, the base colour factor alone).
 - Babylon and pixi: the probe sets now use distance-based roughness by default, as three's `ReflectionProbes` does.
   A glossy probe lookup on a box-projected volume sharpens where the reflected surface is close.
   `BabylonProbeSetOptions` / `PixiProbeSetOptions` take `distanceRoughness` (default true) and `roughnessLerp` (default

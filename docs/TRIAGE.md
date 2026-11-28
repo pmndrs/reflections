@@ -54,7 +54,7 @@ Row ids per cell. Out-of-scope rows are left out.
 | impact \ effort | S | M | L |
 |---|---|---|---|
 | **high** |  |  |  |
-| **med** | T14, T17, T29, T77 | T4, T6, T11, T15, T25, T26, T27, T37, T41, T54, T72 | T7, T18, T35, T48, T52, T59, T74 |
+| **med** | T14, T17, T29, T77 | T4, T6, T11, T15, T18, T25, T26, T27, T37, T41, T54, T72 | T7, T35, T48, T52, T59, T74 |
 | **low** | T2, T9, T12, T13, T19, T32, T40, T42, T43, T45, T47, T55, T56, T57, T60, T61, T62, T63, T64, T75, T76 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
 
 ## The full table
@@ -88,7 +88,7 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | T14 | Lobe occlusion for traced hits' specular: built by W107 as `traceSettings.hitLobeOcclusionRays` (off). 2 rays: floor under the car 22.3 -> 7.3 (PT 3.4), floorWheel 47.5 -> 42.1 (30.1), frame MAD 13.2 -> 12.5, +0.54 ms at 1080p; wheel orbit std +5 % (the darkening's contrast: `t.hitSpecular=0` raises it as much) | med | S | decide | D5700, D3681, decision 20, W107 | Lead / maintainer: accept the +5 % wheel flicker for PT-like darkening (2 rays at 0.3, examples or library default), or keep it an option. Left: the hub's screen-space half (no BVH; wheel probes cover it), shade the blocker (D3513). |
 | T15 | Mirror-in-mirror under the re-shade shows the probe, not the other mirror's reflection | med | M | experiment | D3544, D4500, W44 | Blend last frame's specular where the camera's R and the ray's R agree; measure on facingMirrors. |
 | T17 | Hit weight ignores AO and envMapIntensity: dark-AO or env-0 materials still show SSR / traced hits at full Fresnel | med | S | decide | D2800, D4511 | Put it on the Decisions page: one multiply behind a setting, default today's output. |
-| T18 | Traced hits: base-colour textures done (W97, D5540). Still averaged: emissive, roughness, metalness, normal maps; also normal side, alpha-tested foliage, undrawn triangles | med | L | ready | D902, D2901, D3571, D3600, D3602, W11, W97, D5540 | Alpha-tested foliage on Sponza first (visible holes), then roughness/metalness maps. |
+| T18 | Traced hits: base colour (W97), alpha test and roughness / metalness maps (W110, D5760-D5762) done and on; emissive maps built, opt-in (`textures.emissive`: carConcept wheel flicker +13 % for its biggest accuracy gain: **decide**). Left: normal maps (D2901; +1 texture per material), a smaller cap for data textures (Sponza +80 MB at 1024), blend transparency, normal side, undrawn triangles (D3600); bvh's `BvhCandidate` without a material (the run table) | med | M | decide / ready | D902, D2901, D3600, D5540, D5760, D5761, W97, W110 | Maintainer: emissive maps on? Then normal maps if wanted. |
 | T19 | Traced hits read 1.10x on-screen brightness at 256 px probes; ssr-rt checks pin probeRes=128 | low | S | experiment | W31, HANDOFF quality experiments | Compare the hits' roughness-1 lookup at 128 vs 256 px on contact; unpin the checks once explained. |
 | T20 | RT scene coverage on @pmndrs/raytracer: skinned / morph meshes (`refit()` is top-level only, D5202), hit shadow casters ignore castShadow (`rayMasks` off by default) | low | M | ready | D5202, D5452, D2600, D3591, D2601 | Wire per-instance masks and a skinned-mesh rebuild path when a scene needs them. No kit scene does today. |
 

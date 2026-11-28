@@ -1,0 +1,5 @@
+W110 final checks after merging main (edfe612), port 5432, machine load average ~250-300 (other agents):
+typecheck: pass; build: pass; docs:check: pass
+test: 145 tests; presets (W98) and probe-grid (W63) time out at 5 s under the load, pass with --testTimeout=120000 (5.5 s, 26.4 s); not W110 code
+pnpm check --only ssr-rt: 30 PASS; regressions: 67 PASS (rtTextures 11); showcase: 9 PASS; hybrid: 20 PASS; catalog: 60 PASS
+pnpm check --only flicker (defaults, default scenes): PASS, out/flicker-w110-final.json

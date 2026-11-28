@@ -26,6 +26,21 @@ export interface HitMaterial {
    * then the factor alone (three's `color`), while `albedo` / `specular` keep the map's mean.
    */
   map?: THREE.Texture;
+  /**
+   * W110: roughness (g) and metalness (b) maps the trace reads at the hit's uv (glTF: one texture for both); with either set,
+   * `roughness` / `metalness` are the factors alone (three's `roughness` / `metalness`), while `specular` / `albedo` keep the means.
+   */
+  roughnessMap?: THREE.Texture;
+  metalnessMap?: THREE.Texture;
+  /** W110: an emissive map read at the hit's uv; `emissive` is then the factor alone (`emissive x emissiveIntensity`). */
+  emissiveMap?: THREE.Texture;
+  /**
+   * W110: three's `alphaTest`: traces pass through where `opacity` x the map's alpha (x `alphaMap`'s green, as three) is below
+   * it. 0 / absent: opaque, as before.
+   */
+  alphaTest?: number;
+  opacity?: number;
+  alphaMap?: THREE.Texture;
 }
 
 /**
@@ -164,12 +179,30 @@ export function defaultHitMaterial(mesh: THREE.Mesh, source: HitMaterialSource =
       out.roughness = m.roughness * (m.roughnessMap ? textureMeanColor(m.roughnessMap)?.[1] ?? 1 : 1);
       out.clearcoat = (m.clearcoat ?? 0) * (m.clearcoatMap ? textureMeanColor(m.clearcoatMap)?.[0] ?? 1 : 1);
       out.clearcoatRoughness = m.clearcoatRoughness ?? 0;
+      // W110: roughness / metalness maps read per hit (both readable or absent, so the factors replace both means)
+      const rm = [m.roughnessMap, m.metalnessMap].filter(Boolean) as THREE.Texture[];
+      if (rm.length && rm.every(traceableMap)) {
+        if (m.roughnessMap) out.roughnessMap = m.roughnessMap;
+        if (m.metalnessMap) out.metalnessMap = m.metalnessMap;
+        out.roughness = m.roughness;
+        out.metalness = m.metalness;
+      }
     }
   }
   if (m?.emissive) {
     const k = m.emissiveIntensity ?? 1;
     const t = m.emissiveMap ? textureMeanColor(m.emissiveMap) ?? [1, 1, 1] : [1, 1, 1];
     emissive[0] = m.emissive.r * t[0] * k; emissive[1] = m.emissive.g * t[1] * k; emissive[2] = m.emissive.b * t[2] * k;
+    if (m.emissiveMap && traceableMap(m.emissiveMap) && m.emissiveMap.colorSpace === THREE.SRGBColorSpace) {
+      out.emissiveMap = m.emissiveMap;
+      emissive[0] = m.emissive.r * k; emissive[1] = m.emissive.g * k; emissive[2] = m.emissive.b * k;
+    }
+  }
+  // W110: alpha-tested (cut-out) materials: the trace skips their surface where three discards it
+  if (m && m.alphaTest > 0) {
+    out.alphaTest = m.alphaTest;
+    out.opacity = m.opacity ?? 1;
+    if (m.alphaMap && traceableMap(m.alphaMap)) out.alphaMap = m.alphaMap;
   }
   return out;
 }

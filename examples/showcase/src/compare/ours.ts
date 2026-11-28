@@ -233,7 +233,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
 
   // the ray-traced fallback: core's @pmndrs/raytracer provider
   let provider: { destroy(): void } | null = null;
-  let providerInfo: { kind: string; triangles: number; builder?: string } | null = null;
+  let providerInfo: { kind: string; triangles: number; builder?: string; textures?: number; textureBytes?: number; alphaTestRuns?: number; alphaTestTriangles?: number } | null = null;
   let updateHitMaterials: () => void = () => {};
   const traceMeshes: THREE.Mesh[] = [];
   if (id === 'ours-rt') {
@@ -244,9 +244,12 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     const shadingNormals = params.get('rtShadingNormals') !== '0';
     // W82 (T70): ?rtShade=1 shades traced hits with the raytracer's rtShade instead of the probes
     const builder = (params.get('bvhBuilder') ?? 'auto') as N;
-    const built = await createRaytracerTraceProviderFromObjects(device, traceMeshes, { ...(material ? { material } : {}), shadingNormals, ...(builder !== 'auto' ? { builder } : {}) });
+    // W110 (T18): ?rtAlpha=0 / ?rtRoughMetal=0 read those textures' means instead; ?rtEmissiveMap=1 reads emissive maps (default off: flicker)
+    const textures = { alphaTest: params.get('rtAlpha') !== '0', roughnessMetalness: params.get('rtRoughMetal') !== '0', emissive: params.get('rtEmissiveMap') === '1', ...(params.has('rtAlphaCone') ? { alphaCone: Number(params.get('rtAlphaCone')) } : {}), ...(params.has('rtCone') ? { cone: Number(params.get('rtCone')) } : {}) };
+    const built = await createRaytracerTraceProviderFromObjects(device, traceMeshes, { ...(material ? { material } : {}), shadingNormals, textures, ...(builder !== 'auto' ? { builder } : {}) });
     provider = built.provider;
-    providerInfo = { kind: '@pmndrs/raytracer', triangles: built.provider.info.triangles, builder: built.provider.info.builder };
+    const pi = built.provider.info;
+    providerInfo = { kind: '@pmndrs/raytracer', triangles: pi.triangles, builder: pi.builder, textures: pi.textures, textureBytes: pi.textureBytes, alphaTestRuns: pi.alphaTestRuns, alphaTestTriangles: pi.alphaTestTriangles };
     ssr.setTraceProvider(built.provider);
     if (params.get('rtShade') === '1') ssr.setRaytracerHitShading(true);
     updateHitMaterials = () => { const s = bvhTraceSceneFromObjects(traceMeshes, { ...(material ? { material } : {}), shadingNormals }); if (s.scene.materials) built.provider.setMaterials(s.scene.materials); };
@@ -437,7 +440,7 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     live[`aa.${f}`] = () => { if (aa) Object.assign(aa.upscaler.settings, upscalerSettings()); };
   }
   /** Keys read only at creation (a Rebuild applies them). */
-  const REBUILD = new Set(['bvhBuilder', 'rtShade', 'rtShadingNormals', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
+  const REBUILD = new Set(['bvhBuilder', 'rtShade', 'rtShadingNormals', 'rtAlpha', 'rtAlphaCone', 'rtCone', 'rtRoughMetal', 'rtEmissiveMap', 'specAAHits', 'h.denoiserMotion', 'h.denoiserRoughness', 'probes', 'probeRes', 'bounces', 'probeStorage',
     'probeLayout', 'probeBlend', 'carProbes', 'carProbeRes', 'carProbeOrient', 'carProbeCapture', 'specOcc', 'seam', 'pr.distanceRoughness', 'pr.roughnessLerp', 'pr.lodMapping', 'pr.boxProjection', 'upscale', 'tone', 'keyLight', 'paintRoughness', 'geometryRoughness', 'specularAA', 'specularAAVariance', 'specularAATrace', 'bgBlur', 'bgIntensity', 'envLight', 'background', 'timestamps', 'shim',
     's.reflectionResolution', 'preset']);
 
