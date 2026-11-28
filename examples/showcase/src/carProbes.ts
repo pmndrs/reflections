@@ -1,4 +1,4 @@
-// W55: small reflection probes inside carConcept (bench setting `carProbes`, default off): one per wheel well
+// W55: small reflection probes inside carConcept (bench setting `carProbes`, default `wheels` at 64 px since W102): one per wheel well
 // and one for the cabin, beside the stage probe. W54 (D3680, D3681) found the wheel interiors, the chrome hub
 // and the cabin too bright against the path tracer because the car's only probe captures the open studio from
 // above the car, so three's base IBL and our hit shading treat the enclosed spaces as open.
@@ -20,6 +20,21 @@ import type { ShowcaseScene } from './scenes';
 
 export type CarProbesMode = 'off' | 'wheels' | 'cabin' | 'both' | 'cabinGlass';
 export const CAR_PROBES_MODES: CarProbesMode[] = ['off', 'wheels', 'cabin', 'both', 'cabinGlass'];
+
+/**
+ * W102 (T21, decision 18): the showcase's and the bench's default, the four wheel-well probes at 64 px (W55: hub
+ * 44 -> 27 vs the PT's 28; 64 = 128 = 256 there). `?carProbes=off` turns them off. Only carConcept has them.
+ */
+export const CAR_PROBES_DEFAULT: { mode: CarProbesMode; resolution: number } = { mode: 'wheels', resolution: 64 };
+
+/** `?carProbes=` / `?carProbeRes=` over {@link CAR_PROBES_DEFAULT}. */
+export function carProbesFromQuery(q: URLSearchParams): { mode: CarProbesMode; resolution: number } {
+  const m = q.get('carProbes') as CarProbesMode | null;
+  return {
+    mode: m && CAR_PROBES_MODES.includes(m) ? m : CAR_PROBES_DEFAULT.mode,
+    resolution: q.has('carProbeRes') ? Number(q.get('carProbeRes')) : CAR_PROBES_DEFAULT.resolution,
+  };
+}
 
 export interface CarProbeVolume {
   name: string;
