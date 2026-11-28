@@ -862,7 +862,63 @@ fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
   }
 
   say('ready: window.__p.run()');
-  Object.assign(window, { __p: { run, compat, device } });
+  /**
+   * W108 (T23): what the oriented branch costs a core ProbeSet lookup on axis-aligned volumes (not part of run()).
+   * The rooms (3 volumes, grid walk) or `n` grid volumes, one probeRadianceWithEnvironment per thread over 1920 x 1080
+   * random points in and around them, branch compiled in (default) vs out (orientedVolumes: false); wall ms per
+   * dispatch (10 dispatches per submit-wait), variants interleaved, median of `rounds`.
+   */
+  async function orientCost(rounds = 15, n = 0) {
+    const M = 1920 * 1080;
+    const vols: ProbeVolume[] = n === 0 ? volumes : Array.from({ length: n }, (_, i) => ({ slot: i, center: [((i % 4) - 1.5) * 5, 2.5, (Math.floor(i / 4) - n / 8) * 5], halfSize: [3, 2.7, 3], projectionSize: [6, 5, 6], fade: 0.5 }));
+    const lo = [-12, -1, -6], span = [24, 7, 12];
+    const P = new Float32Array(M * 8);
+    let sd = 99; const r = () => ((sd = (sd * 1103515245 + 12345) >>> 0) / 4294967296);
+    for (let i = 0; i < M; i++) { const d = [r() * 2 - 1, r() * 2 - 1, r() * 2 - 1]; const l = Math.hypot(...d) || 1; P.set([lo[0] + r() * span[0], lo[1] + r() * span[1], lo[2] + r() * span[2], r(), d[0] / l, d[1] / l, d[2] / l, 0], i * 8); }
+    const inBuf = device.createBuffer({ size: P.byteLength, usage: U.STORAGE | U.COPY_DST });
+    device.queue.writeBuffer(inBuf, 0, P);
+    const outB = device.createBuffer({ size: M * 16, usage: U.STORAGE });
+    const bgl = device.createBindGroupLayout({ entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+    ] });
+    const bg = device.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: { buffer: inBuf } }, { binding: 1, resource: { buffer: outB } }] });
+    const KERNEL = /* wgsl */ `
+@group(0) @binding(0) var<storage, read> pin: array<vec4f>;
+@group(0) @binding(1) var<storage, read_write> pout: array<vec4f>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let i = id.x; if (i >= arrayLength(&pout)) { return; }
+  pout[i] = vec4f(probeRadianceWithEnvironment(pin[2u * i].xyz, pin[2u * i + 1u].xyz, pin[2u * i].w), 1.0);
+}`;
+    const make = (orientedVolumes?: boolean) => {
+      const set = new ProbeSet(device, { capacity: Math.max(3, vols.length), sourceSize: SOURCE, ...(orientedVolumes === undefined ? {} : { orientedVolumes }) });
+      const enc = device.createCommandEncoder();
+      for (let s2 = 0; s2 < vols.length; s2++) set.capture(enc, s2, cubes[s2 % 4]);
+      set.captureEnvironment(enc, cubes[0]);
+      device.queue.submit([enc.finish()]);
+      set.setVolumes(vols); set.update();
+      const pipe = device.createComputePipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bgl, set.bindGroupLayout] }), compute: { module: device.createShaderModule({ code: set.wgsl({ group: 1 }) + KERNEL }), entryPoint: 'main' } });
+      return { set, pipe };
+    };
+    const variants = { in: make(undefined), out: make(false) };
+    const time = async (v: { set: ProbeSet; pipe: GPUComputePipeline }) => {
+      const t0 = performance.now();
+      const enc = device.createCommandEncoder();
+      for (let k = 0; k < 10; k++) { const pass = enc.beginComputePass(); pass.setPipeline(v.pipe); pass.setBindGroup(0, bg); pass.setBindGroup(1, v.set.bindGroup); pass.dispatchWorkgroups(Math.ceil(M / 64)); pass.end(); }
+      device.queue.submit([enc.finish()]);
+      await device.queue.onSubmittedWorkDone();
+      return (performance.now() - t0) / 10;
+    };
+    for (let w = 0; w < 3; w++) { await time(variants.in); await time(variants.out); }
+    const t: Record<string, number[]> = { in: [], out: [] };
+    for (let k = 0; k < rounds; k++) { t.in.push(await time(variants.in)); t.out.push(await time(variants.out)); }
+    const med = (a: number[]) => [...a].sort((x, y) => x - y)[a.length >> 1];
+    variants.in.set.dispose(); variants.out.set.dispose(); inBuf.destroy(); outB.destroy();
+    return { volumes: vols.length, branchIn: med(t.in), branchOut: med(t.out), all: t };
+  }
+
+  Object.assign(window, { __p: { run, compat, device, orientCost } });
 }
 
 function mul(a: Float32Array, b: Float32Array) {

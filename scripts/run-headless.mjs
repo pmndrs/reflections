@@ -3364,6 +3364,21 @@ async function babylonChecks(pages) {
     check(`${tag}: mirror floor reflects the scene (confident SSR)`, st.mirrorPixels > 1000 && st.mirrorConfident > 0.3,
       `${st.mirrorPixels} mirror px, ${(st.mirrorConfident * 100).toFixed(1)}% with confidence >= 0.9`);
     if (variant === 'auto') {
+      // T23 (W108): BabylonProbe.rotation through core. A probe turned 90 degrees about y with projection 16 x 4.2 x 12
+      // (its square influence box maps onto itself) = the axis-aligned probe with projection 12 x 4.2 x 16; the unturned
+      // probe differs. SSR off (probes and environment only), same capture point: no re-bake.
+      const ro = await p.T(`(async () => { const P = window.__p, saved = P.probes.getProbes().map((x) => ({ ...x })); P.setSSR(false); P.ssr.settings.frameIndex = 0;
+        const shot = async (probe) => { P.probes.setProbes([{ ...saved[0], ...probe }]); await P.step(2); return P.shot(); };
+        const s = Math.SQRT1_2, proj = saved[0].projectionSize;
+        const turned = await shot({ rotation: [0, s, 0, s] });
+        const swapped = await shot({ projectionSize: [proj[2], proj[1], proj[0]] });
+        const plain = await shot({});
+        P.probes.setProbes(saved); P.setSSR(true); delete P.ssr.settings.frameIndex; await P.step(2);
+        const d = eval('(' + ${JSON.stringify(IMAGE_STATS)} + ')');
+        return { turned: await d(turned, swapped), plain: await d(plain, swapped), proj, gpuErrors: (P.gpuErrors ?? []).length }; })()`);
+      check(`${tag}: a probe turned 90 degrees (BabylonProbe.rotation) = the axis-aligned probe with its projection box turned; unturned differs`,
+        ro.turned.max <= 2 && ro.turned.mean < 0.01 && ro.plain.mean > 20 * Math.max(ro.turned.mean, 0.005) && ro.gpuErrors === 0,
+        `turned vs swapped mean ${ro.turned.mean.toFixed(4)} max ${ro.turned.max} / 255; unturned vs swapped mean ${ro.plain.mean.toFixed(3)} max ${ro.plain.max} (projection ${ro.proj.join(' x ')})`);
       // W76: the babylon adapter dispatches core with its own settings object: core's defaults reach it (cone +
       // compensation at mirrorBias 0.5), and the cone's async variant comes up without errors
       const w76 = await p.T(`(async () => { const P = window.__p, t = () => P.ssr.tracer;
@@ -4100,6 +4115,14 @@ async function main() {
     if (only === 'probe-cluster-build') await probeClusterBuild(pages); // W63: a clustered volume list's build cost (compute), JSON to out/w63-cluster-build.json
     if (only === 'probe-lookup-parity') await probeLookupParity(pages); // W63: a lookup variant vs the shipped lookup, image for image
     if (only === 'probe-parity') await probeParity(pages); // W108: fixed frames of every probe path, pixel for pixel against a saved base (--parity-base)
+    if (only === 'probe-orient-cost') {
+      // W108 (T23): a core ProbeSet lookup with the oriented branch compiled in vs out, on axis-aligned volumes, 1920 x 1080 lookups
+      const p = await openPage(`http://127.0.0.1:${PORT}/probe-core/`); pages.push(p);
+      for (const n of [0, 8, 32]) {
+        const r = await p.T(`window.__p.orientCost(${Number(process.env.ORIENT_ROUNDS ?? 15)}, ${n})`);
+        console.log(`  ${r.volumes} volumes: branch in ${r.branchIn.toFixed(3)} ms, out ${r.branchOut.toFixed(3)} ms per 1080p of lookups (median of ${r.all.in.length})`);
+      }
+    }
     if (only === 'probe-lookup-cost') await probeLookupCost(pages); // W63: the lookup's cost per variant and volume count, JSON to out/w63-probe-lookup-cost.json
     if (only === 'offscreen-sizes') await offscreenSizeMeasure(pages); // W60 (D4700): offscreen per-probe sizes, JSON to out/w60-offscreen.json
     if (only === 'rt-hit-atlases') await rtHitAtlasChecks(pages); // W47 (D4702): RT hits over a mixed-size set alone (also part of ssr-rt)

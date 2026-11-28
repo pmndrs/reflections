@@ -92,6 +92,17 @@ export async function bakeProbes(renderer: THREE.WebGPURenderer, scene: THREE.Sc
   return probes;
 }
 
+export function orientedProbe(probes: ReflectionProbes) {
+  // #region probes-oriented
+  const room = new ReflectionProbe(6, 3, 4); // in the room's frame: width, height, depth
+  room.oriented = true;                      // the boxes follow the probe's world rotation
+  room.position.set(2, 1.5, -3);
+  room.rotation.y = Math.PI / 6;             // this room's walls run at 30 degrees
+  probes.add(room);
+  // #endregion
+  return room;
+}
+
 export async function rayTracedFallback(renderer: THREE.WebGPURenderer, scene: THREE.Scene, meshes: THREE.Mesh[]) {
   // #region ray-traced
   // needs `npm install @pmndrs/raytracer @pmndrs/bvh`
