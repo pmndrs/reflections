@@ -54,7 +54,7 @@ Row ids per cell. Out-of-scope rows are left out.
 | impact \ effort | S | M | L |
 |---|---|---|---|
 | **high** |  |  |  |
-| **med** | T14, T17, T29, T77 | T4, T6, T11, T15, T25, T26, T27, T37, T41, T54, T72 | T7, T18, T35, T48, T52, T59, T74 |
+| **med** | T14, T17, T29 | T4, T6, T11, T15, T25, T26, T27, T37, T41, T54, T72 | T7, T18, T35, T48, T52, T59, T74 |
 | **low** | T2, T9, T12, T13, T19, T32, T40, T42, T43, T45, T47, T55, T56, T57, T60, T61, T62, T63, T64, T75, T76 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
 
 ## The full table
@@ -70,7 +70,6 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | T76 | The cone hit colour (default since W76) loses a thin bright light's reflection with no denoiser and AA off: a strip at r 0.3 reads 2 % of the PT's peak vs 107 % with `hitColorFilter: 'off'`. The default output is unaffected (the upscaler + denoiser lose it either way) | low | S | experiment | D5680, W106, D5101 | Try: a ray that misses near on-screen geometry reads the pyramid at its end point; or a smaller cone scale (0.25 keeps 66 %). Check carConcept paint outliers (D5101) in the same run. |
 | T6 | Raw-signal fireflies with the denoiser off: r 0.35 sphere, car paint, offscreen floor at 512 px, pixi arcade `flicker` | med | M | experiment | W12, W17, W60, W18, W19, D50 | Track with T1's speckle count; re-measure after T3 / T4. W60's case is the SSR / probe blend against a sharper probe. |
 | T7 | Reflection-aware motion for the upscaler and denoiser: reflected detail smears in motion. The reactive mask exists (D4202, W36); reflection reprojection does not `flicker` | med | L | experiment | D4202, D3500, W36, decision 14 | Prototype the hit's reprojection (FFX reflection reprojection) as an upscaler input on facingMirrors; compare with the reactive mask. |
-| T77 | Examples render GTAO every frame even with `?specOcc` off (W111 counted 5 of 5 frames on examples/ssr), so every page view pays for it; three's render time also rose with each `setSpecOcc` rebuild (12.9 -> 18 -> 35 ms) | med | S | ready | W111, D5780 | Gate the AO pass on specOcc in examples/shared/ao.ts and the pages; check the rebuild growth for a leak (dispose the old graph); time at 1080p with the loop stopped. W112. |
 | T9 | Display sharpness: the AA softens the image. RCAS at 0.8 raised mirror-edge flicker 0.16 -> 4.2 % (W36), so sharpness stays 0 (D4201) | low | S | experiment | W40, D4201, D3500, W36 | Only values between 0 and 0.8, and with ?upscale=; keep only if T1's flicker numbers don't rise. |
 
 ### Edges & silhouettes
