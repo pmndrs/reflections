@@ -457,7 +457,7 @@ export const SETTINGS: Setting[] = [
   num('paintRoughness', 'materials', 'Paint roughness override', 0, 1, 0.01, null, { defaultNote: 'authored', apply: 'rebuild', appliesTo: ALL, tradeoff: 'W45: every clear-coated material at this roughness, normal map dropped (what a plain paint lobe sees). The path tracer too.' }),
   sel('glass', 'materials', 'Glass (isolation)', [['authored', 'authored'], ['noShadow', 'casts no shadow'], ['black', 'opaque black (its reflection only)'], ['hidden', 'hidden (the cabin without glass)']], null, {
     defaultNote: 'authored', apply: 'rebuild', appliesTo: ALL,
-    tradeoff: 'W54: isolates what the eye sees through transmissive glass (carConcept\'s cabin): black keeps only the glass\'s own reflection, hidden only the cabin behind it, noShadow lets the key light through as the path tracer does. Every method alike, the path tracer too.',
+    tradeoff: 'W54: isolates what the eye sees through transmissive glass (carConcept\'s cabin): black keeps only the glass\'s own reflection, hidden only the cabin behind it, noShadow lets the key light through as the path tracer does (since W111 the examples\' loader already skips castShadow on transmissive materials, so authored = noShadow). Every method alike, the path tracer too.',
   }),
 
   sel('geometryRoughness', 'materials', 'Geometry roughness (three)', [['three', 'three\'s (normal derivative added)'], ['off', 'off'], ['0.5', 'x 0.5'], ['0.25', 'x 0.25']], null, {

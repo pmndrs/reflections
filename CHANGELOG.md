@@ -10,6 +10,10 @@
   `emissive`); `BvhTraceMaterial` gains `alphaCutoff`, `opacity`,
   `roughnessMetalnessTexture` and `emissiveTexture`. `textures: false` now gives each material its textures' averages
   (before, the base colour factor alone).
+- Babylon and pixi: the probe sets now use distance-based roughness by default, as three's `ReflectionProbes` does.
+  A glossy probe lookup on a box-projected volume sharpens where the reflected surface is close.
+  `BabylonProbeSetOptions` / `PixiProbeSetOptions` take `distanceRoughness` (default true) and `roughnessLerp` (default
+  false). Core's `ProbeSet` keeps both off by default.
 - Core and three (the traced pass; Babylon and pixi have no traced pass): `traceSettings.hitLobeOcclusionRays` (default 0, off) and
   `hitLobeOcclusionLength` (default 0.3 x the hit's camera distance): short visibility rays over a traced hit's own
   specular lobe, on a fixed pattern (no noise), darken the lobe's probe light where nearby geometry blocks it (the floor
