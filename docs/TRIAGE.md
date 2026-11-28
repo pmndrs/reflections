@@ -32,7 +32,7 @@ Status values:
 
 ## Top 10, in order
 
-**Status 2026-11-27 (0.1.0 published).** The Top 10 below is from 2026-11-13. Since then T1 and T53 are done (W85: `--only flicker`, the T53 scenes, baseline), T10 is settled: quadCopy stays off (2026-11-28, see the Settled list), and T58 is done (0.1.0 on npm as `latest`). 2026-11-28: the maintainer said to go with the lead's recommendations. Wave W102-W106 is running: T21 + T22 + T29, the Babylon brightness gap, T24 + T55, T30. W106 found T3 already built (W72) and the default (W76); row closed, the leftover is T76. Next: T14 and T23.
+**Status 2026-11-27 (0.1.0 published).** The Top 10 below is from 2026-11-13. Since then T1 and T53 are done (W85: `--only flicker`, the T53 scenes, baseline), T10 is settled: quadCopy stays off (2026-11-28, see the Settled list), and T58 is done (0.1.0 on npm as `latest`). 2026-11-28: the maintainer said to go with the lead's recommendations. Wave W102-W106 is running: T21 + T22 + T29, the Babylon brightness gap, T24 + T55, T30. W106 found T3 already built (W72) and the default (W76); row closed, the leftover is T76. Next: T14 and T23. Audit 2026-11-29: every row checked against main; T5 and T16 deleted (removed in W76), built-but-not-promoted options (T4, T12, T40, T42) are now `decide`, partly built rows trimmed (T7, T9, T11, T14, T18, T37), raytracer-era wording (T20, T45, T57).
 
 1. **T1: flicker and firefly metrics.** Flicker is the #1 pain point, and none of the flicker experiments (T2-T7) can be judged without numbers per region (D3622, X0). First step: build X0's rest drift, orbit flicker, 2x2 energy, edge pan and raw speckle count as bench Measure columns, then baseline every scene.
 2. **T53: simple test scenes.** The maintainer asked for these so the bevels stop deciding the tuning. T10 and T14 are queued behind them (decisions 20, 21). First step: as bench scenes with the PT reference, add a cube or slab on the mirror, sharp edges above it, and a thin plate over the floor. Build T1 and T53 in one worktree (they are X0).
@@ -53,9 +53,9 @@ Row ids per cell. Out-of-scope rows are left out.
 
 | impact \ effort | S | M | L |
 |---|---|---|---|
-| **high** | T2 | T30 | T4 |
-| **med** | T5, T12, T16, T17, T21, T22, T24, T29, T69 | T6, T11, T14, T15, T23, T25, T26, T27, T40, T41, T54, T70 | T7, T18, T35, T36, T37, T38, T42, T48, T52, T59 |
-| **low** | T8, T9, T76, T13, T19, T32, T33, T43, T45, T47, T49, T55, T56, T57, T60, T61, T62, T63, T64, T71 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
+| **high** |  | T30 |  |
+| **med** | T17, T21, T22, T24, T29 | T4, T6, T11, T14, T15, T23, T25, T26, T27, T37, T41, T54, T72 | T7, T18, T35, T48, T52, T59, T74 |
+| **low** | T2, T8, T9, T12, T13, T19, T32, T33, T40, T42, T43, T45, T47, T49, T55, T56, T57, T60, T61, T62, T63, T64, T75, T76 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
 
 ## The full table
 
@@ -66,33 +66,31 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
 | T2 | Rotate the quad's traced pixel (X1 #1): W85 found no consistent gain (orbit +3-9 % on 3 scenes, -16 % offscreen only); option kept, default fixed | low | S | experiment | X1 #1, W39, D3663, W85 | Revisit only with T4 (ratio reuse). |
-| T4 | Ratio-estimator ray reuse (X3): 1 ray + reuse ≈ 4 rays of noise; replaces FFX's quad copy `flicker` | high | L | experiment | X3, decision 13, D50, D3550, D3663 | Phase A in core: rayReuse 'copy' \| 'ratio'; target denoised std at spq 1 ≈ copy at spq 4 on glossy floors. |
+| T4 | Ratio-estimator ray reuse (X3): built as `rayReuse: 'ratio'` (W73, b1eeae4), default stays 'copy' (ratio raised denoised std 30-50 %) `flicker` | med | M | decide | X3, decision 13, D50, D3550, D3663, W73 | Promote only if a later change (T37's BRDF weights upstream) makes ratio's denoised std fall below copy's. |
 | T76 | The cone hit colour (default since W76) loses a thin bright light's reflection with no denoiser and AA off: a strip at r 0.3 reads 2 % of the PT's peak vs 107 % with `hitColorFilter: 'off'`. The default output is unaffected (the upscaler + denoiser lose it either way) | low | S | experiment | D5680, W106, D5101 | Try: a ray that misses near on-screen geometry reads the pyramid at its end point; or a smaller cone scale (0.25 keeps 66 %). Check carConcept paint outliers (D5101) in the same run. |
-| T5 | History hit colour: confidence at screen edges (X1 #4), pops in pans `flicker` | med | S | experiment | X1 #4, D1002 | Add historyEdgeConfidence (default off); measure edge pan and the traced-ray count with ?rt=1. |
 | T6 | Raw-signal fireflies with the denoiser off: r 0.35 sphere, car paint, offscreen floor at 512 px, pixi arcade `flicker` | med | M | experiment | W12, W17, W60, W18, W19, D50 | Track with T1's speckle count; re-measure after T3 / T4. W60's case is the SSR / probe blend against a sharper probe. |
-| T7 | Reflection-aware motion for the upscaler and denoiser: reflected detail smears in motion; reactive mask; glass flag `flicker` | med | L | experiment | D4202, D3500, W36, decision 14 | Prototype the hit's reprojection (FFX reflection reprojection) as an upscaler input on facingMirrors; compare with a reactive mask. |
+| T7 | Reflection-aware motion for the upscaler and denoiser: reflected detail smears in motion. The reactive mask exists (D4202, W36); reflection reprojection does not `flicker` | med | L | experiment | D4202, D3500, W36, decision 14 | Prototype the hit's reprojection (FFX reflection reprojection) as an upscaler input on facingMirrors; compare with the reactive mask. |
 | T8 | Examples' GTAO grain reaches rough surfaces with ?specOcc=1 (no temporal filter or blur) `flicker` | low | S | ready | D4510, W39 | Add three's denoise node or a temporal pass in examples/shared/ao.ts; time it at 1080p. |
-| T9 | Display sharpness: the AA softens the image; RCAS is off at ratio 1 | low | S | experiment | W40, D4201, D3500 | Try RCAS sharpness > 0 and with ?upscale=; keep it only if T1's flicker numbers don't rise. |
+| T9 | Display sharpness: the AA softens the image. RCAS at 0.8 raised mirror-edge flicker 0.16 -> 4.2 % (W36), so sharpness stays 0 (D4201) | low | S | experiment | W40, D4201, D3500, W36 | Only values between 0 and 0.8, and with ?upscale=; keep only if T1's flicker numbers don't rise. |
 
 ### Edges & silhouettes
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T11 | Back-face depth layer (RT off): sphere fringe, dark band under the sill, white gap under the car, contact crescent | med | M | experiment | D2402, D4303, W41, W44, W21, W22 | One back-face depth target + thickness test; measure fringe px (W44's metric) and the sill band with RT off. |
-| T12 | Depth-scaled SSR thickness (X1 #2): one k for every scene scale; stripes and streaks behind objects | med | S | experiment | X1 #2, D1001, D1000, W9, W12, W17 | Add thicknessDepthFactor (default 0); sweep k on toyCar, rooms, carConcept, Sponza; streak % and stripe ratio. |
+| T11 | Back-face depth layer (RT off): sphere fringe, dark band under the sill, white gap under the car, contact crescent. W80's `maxCandidates` (opt-in) cuts thinPost misses 27 % but leaves this | med | M | experiment | D2402, D4303, W41, W44, W21, W22, W80 | One back-face depth target + thickness test; measure fringe px (W44's metric) and the sill band with RT off. |
+| T12 | Depth-scaled SSR thickness: built (`thicknessDepthFactor` / `thicknessDepthMode`, W71); W76 made 'relative' 0.02 the default with RT on. RT off stays 0 | low | S | decide | X1 #2, D5001, D1001, D1000, W71, W76 | Decide the RT-off default from W71's sweep (streak % and stripe ratio); flicker must not rise. |
 | T13 | hitLobeFilterMixed reads last frame's hit source without reprojection (one frame late in motion) | low | S | ready | D3641, W52 | Reproject the hit-source signal through motion before the lobe filter reads it. |
 
 ### Hit shading & occlusion
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T14 | Lobe occlusion for traced hits' specular (hub, floor under the car, reflected wheels), plus re-shade occlusion tuning | med | M | accepted | decision 20, D3681, D3513, D3510, D3540, D3542, D3640, D3642, W44, W52, W54, W55, W56 | A few BVH rays or a cone over the hit lobe (option, off); tune on T53's scenes first, then the floor under the car (24 vs PT 8). |
+| T14 | Lobe occlusion for traced hits' specular (hub, floor under the car, reflected wheels). Today: one visibility ray along R (D3513), `hitShadeVisibility` (D3640), `hitShadeOcclusion: 'screen'` (D3642); no lobe-wide test | med | M | accepted | decision 20, D3681, D3513, D3510, D3540, D3542, D3640, D3642, W44, W52, W54, W55, W56 | A few BVH rays or a cone over the hit lobe (option, off); tune on T53's scenes first, then the floor under the car (24 vs PT 8). |
 | T15 | Mirror-in-mirror under the re-shade shows the probe, not the other mirror's reflection | med | M | experiment | D3544, D4500, W44 | Blend last frame's specular where the camera's R and the ray's R agree; measure on facingMirrors. |
-| T16 | Shrink the lobe filter at grazing angles (X1 #3) | med | S | experiment | X1 #3, D3641, D3550 | Add hitLobeFilterGrazing; run the grazing sweep at 0 / 0.5 / 1 (--only ssr-exp-grazing) and the line spread at 15°. |
 | T17 | Hit weight ignores AO and envMapIntensity: dark-AO or env-0 materials still show SSR / traced hits at full Fresnel | med | S | decide | D2800, D4511 | Put it on the Decisions page: one multiply behind a setting, default today's output. |
-| T18 | Textured materials at traced hits (one colour per mesh today), normal side, alpha-tested foliage, undrawn triangles | med | L | ready | D902, D2901, D3571, D3600, D3602, W11 | UVs in the BVH and texture bindings in the provider; start with base-colour maps on Sponza. |
+| T18 | Traced hits: base-colour textures done (W97, D5540). Still averaged: emissive, roughness, metalness, normal maps; also normal side, alpha-tested foliage, undrawn triangles | med | L | ready | D902, D2901, D3571, D3600, D3602, W11, W97, D5540 | Alpha-tested foliage on Sponza first (visible holes), then roughness/metalness maps. |
 | T19 | Traced hits read 1.10x on-screen brightness at 256 px probes; ssr-rt checks pin probeRes=128 | low | S | experiment | W31, HANDOFF quality experiments | Compare the hits' roughness-1 lookup at 128 vs 256 px on contact; unpin the checks once explained. |
-| T20 | RT scene coverage: skinned meshes (GPU refit / setPoseCpu), hit shadow casters ignore castShadow | low | M | ready | D1703, D700, D2600, D3591, D2601 | Wire GpuMeshRefit and per-instance masks when a scene needs them (masks cost 1-6 %, D3591). No kit scene does today. |
+| T20 | RT scene coverage on @pmndrs/raytracer: skinned / morph meshes (`refit()` is top-level only, D5202), hit shadow casters ignore castShadow (`rayMasks` off by default) | low | M | ready | D5202, D5452, D2600, D3591, D2601 | Wire per-instance masks and a skinned-mesh rebuild path when a scene needs them. No kit scene does today. |
 
 ### Probes
 
@@ -123,19 +121,19 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
 | T35 | Near-mirror rest shimmer: GGX lobe noise the denoiser leaves; try a longer history for near-mirrors `flicker` | med | L | experiment | W40, W32, W39 | Measure with T1 at rest and in W39's pendulum; then a denoiser branch (W53-style) with a longer near-mirror history. |
-| T37 | The FFX denoiser loses 26-46 % of heavy-tailed glossy energy (luminance weight clips bright samples) `flicker` | med | L | experiment | D3550, W45, X3 phase B | Report to the denoiser repo now; try BRDF / pdf weights in the prefilter (X3 phase B) after T4's phase A. |
+| T37 | The FFX denoiser loses 26-46 % of heavy-tailed glossy energy. W78 built `sampleDirection` BRDF/pdf weights and `denoiserKeepHistoryOnBlack` (on by default), but `denoiser` 2.0.0 from npm lacks them (D5454) `flicker` | med | M | waiting | D3550, W45, W78, D5454, X3 phase B | Land pmndrs/denoiser#50 (keepHistoryOnBlack) and upstream the BRDF weights; then re-measure. |
 | T39 | FFX spatial filter spreads rough neighbours into small near-mirror parts (carConcept's chrome star) | low | L | experiment | D3721, W56 | On a denoiser branch: harder roughness / normal weights for near-mirror centres, or no spatial pass below an alpha. |
 
 ### Performance
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T40 | Half-rate glossy RT misses + bilateral fill (X4); the cheaper-RT roughness gate | med | M | experiment | X4, decision 14, SPEC open question 4 | Add tracedMissRate 'half' and the bilateralFill kernel; RT ms and error vs PT on offscreen, carConcept, moving. |
+| T40 | Half-rate glossy RT misses + bilateral fill: built (`tracedMissRate: 'half'`, `bilateralFill`, W74, 6b2e35f), option, not the RT default | low | S | decide | X4, decision 14, W74 | Revisit only at a lower roughness gate. |
 | T41 | One probe walk per lit material: three's radiance and irradiance contexts each walk the volumes at one P | med | M | ready | W63 | Return radiance and irradiance from one walk (and the composite's lookups); time at 1080p on Sponza. |
-| T42 | Half-res trace and denoise with joint bilateral upsample (X5) | med | L | experiment | X5, D1400 | After T40: step 1 all half-res, step 2 mirrors at full res; target ≥ 0.5 ms saved at 1080p inside the line-spread gate. |
+| T42 | Half-res trace and denoise with joint bilateral upsample: built (`reflectionResolution: 'half'`, W75, 8117447); the 'performance' preset uses it (W77); W76 removed the mirror full-res step | low | S | decide | X5, D1400, W75, W76, W77 | Nothing unless someone re-tests full-res mirrors. |
 | T43 | Skip the probe-table re-pack and upload when volumes didn't change; share the hit shading's copy | low | S | ready | W63, D2900 | Add a version on ReflectionProbes; skip pack + upload (+64 KB per set, 13-41 us CPU) when unchanged. |
 | T44 | Denoised hybrid's extra signal pass and second probe lookup | low | M | ready | D1401, W10 | Write probeEnv to a second MRT target; time the denoised hybrid (0.9-1.4 ms over raw at 1080p). |
-| T45 | Shadow-ray traversal order (anyHitOrder) on our hit shadow rays | low | S | experiment | D2601, W25, D903 | Time 'far' / 'larger' / 'near' on moving and Sponza at 1080p; the hits never change, only the cost. |
+| T45 | Shadow-ray traversal order on hit shadow rays: D2601 was about three-mesh-bvh's port (deleted in W89); @pmndrs/raytracer walks its own way | low | S | experiment | D2601, D5452, W25 | Re-time against the raytracer's walk on moving and Sponza at 1080p, or delete. |
 | T46 | Time the three adapter's G-buffer, copies and composite (8th coat target); caller-allocated outputs; RT buffer headroom | low | M | ready | W6, D606, D2002, D3541, HANDOFF Performance | Timestamp each pass; then let core take caller-allocated outputs (33 MB of copies per 1080p frame). |
 | T47 | Re-time on a quiet or discrete GPU: PROBE_UNROLL_MAX_VOLUMES, probe-count guidance, D4400 medians | low | S | ready | W63, W38, D4400 | One quiet-machine run with the render loop stopped (rule 3); update the constant and SPEC's guidance. |
 
@@ -156,7 +154,7 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | T54 | Path-traced ground truth for the ssr kits (moving, mirrors), then retune the hybrid thresholds against it | med | M | ready | HANDOFF tracked fixes (Q2), D52, D4301, D4402, D4802, D4701, D3513, D901, W37, W38 | Reuse the compare page's WebGPU tracer (W21 / W23) on the ssr kits; then sweep D52's cut-offs. |
 | T55 | Check runner: a full run passes the 10-min limit, leaves Chromes behind; flakes; parity on full lit images | low | S | ready | W47, W48, W49, W63, W38, W7, F3 | Split the default run or raise the limit; close Chromes on timeout; compare atlas texels for probe parity. |
 | T56 | Tooling odds: the cone filter's async compile (first frames run 'off', then pop to 'cone', D5301), grey out #29 controls, cube2d compile error, probe weight export, bench three-side upscale | low | S | ready | D3590, W48, W53, W35, D4801, D4803, D3620, D3621, D1502, W51 | One small tooling worktree; each item is under an hour. Also the shared Sponza view and the dts heap. |
-| T57 | Re-run the W21 compare readouts against the WebGPU + OIDN reference (clear coat in) | low | S | ready | W23, W21, D2305, D2303 | Re-run docs/research/showcase-compare.md when its numbers next matter; raise samples for sub-8-bit calls. |
+| T57 | Re-run the W21 compare readouts against the current PT reference (@pmndrs/pathtracer 0.1.0, D5453; clear coat in) | low | S | ready | W23, W21, D2305, D2303, D5453 | Re-run docs/research/showcase-compare.md when its numbers next matter; raise samples for sub-8-bit calls. |
 | T72 | Drop-in follow-ups (W84): an `antialias: 'upscaler'` option on `Reflections` (optional peer, dynamic import; cuts the remaining shimmer), a `/react` entry for `useReflections` once R3F v10 leaves alpha, auto / time-sliced re-bake, moving-mesh refit wiring, `hitColor: 'final'` | med | M | ready | W84 | The upscaler AA option first (flicker); the `/react` entry waits on R3F v10 stable and the maintainer's call. |
 | T74 | NRC hit shading (W86): opt-in once pmndrs/pathtracer publishes its hash cache + strict-indirect transport as a package and a `HitShading` injection exists; historyFrames >= 128 and a freeze option for the flicker rule; measure drift at training stride 8-64 first | med | L | waiting | W86, docs/research/w86 | Waiting on pathtracer packaging; probes stay the default. |
 | T75 | Site + CI follow-ups (W83): ~~custom domain or a tested BASE_PATH=/reflections build~~ done 2026-11-27 (served at pmndrs.github.io/reflections like the siblings; pages.yml reads the base path from the Pages settings); scrub FFX marks from the generated settings reference?; showcase panel links to compare / bench in the source html (the pinned denoiser clone is gone since W89: `denoiser` comes from npm); GitHub Actions don't start until the org's billing is fixed or the repo is public | low | S | decide | W83 | Maintainer: domain and publishing call. |
