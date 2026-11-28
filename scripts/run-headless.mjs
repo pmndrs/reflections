@@ -2677,11 +2677,14 @@ async function probeParity(pages) {
     for (const rt of [false, true]) {
       const before = results.logs.length;
       const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&probeLayout=shipped&texLimit=adapter&scene=${scene}${rt ? '&rt=1' : ''}`); pages.push(p);
-      await p.T("(window.__p.setDenoise(false), window.__p.setHitColor('current'), true)");
+      // the blue noise pinned (the frame count before a shot follows compile times)
+      await p.T("(window.__p.setDenoise(false), window.__p.setHitColor('current'), window.__p.ssr.settings.frameIndex = 0, true)");
       for (const L of layouts) {
         await p.T(L === 'shipped' ? 'window.__p.setProbeVolumes(null)' : `window.__p.setProbeLayout(${JSON.stringify(L)})`);
         for (const v of rt ? ['final'] : ['final', 'probeSpecular']) {
           await p.T(`(window.__p.setView(${JSON.stringify(v)}), true)`);
+          // the cone's pipeline compiles in the background (W76): shoot once it is in, or the shot depends on compile time
+          await p.T(CONE_READY);
           await p.T('window.__p.step(6)');
           await keep(p, `ssr-${scene}${rt ? '-rt' : ''}-${L}-${v}`, 'window.__p.shot()');
         }
