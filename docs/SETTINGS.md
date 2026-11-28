@@ -190,7 +190,7 @@ The ray-traced fallback over the SSR miss list: provider, which misses are trace
 
 ## Materials (examples)
 
-Example-side material options, not package API: roughness from normal variance (specAA, W46) and the W45 experiments.
+Material options: roughness from normal variance (specAA, W46, examples-side), three's geometry roughness (W56, examples-side), the package's geometric specular AA (`applySpecularAA`, W105) and the W45 experiments.
 
 | Setting | URL key | API | Default | Range | Apply | Trade-off | GPU cost | Applies to |
 |---|---|---|---|---|---|---|---|---|
@@ -200,6 +200,9 @@ Example-side material options, not package API: roughness from normal variance (
 | Paint roughness override | `paintRoughness` |  | authored | 0 .. 1 | rebuild | W45: every clear-coated material at this roughness, normal map dropped (what a plain paint lobe sees). The path tracer too. |  | every method |
 | Glass (isolation) | `glass` |  | authored | `authored`, `noShadow`, `black`, `hidden` | rebuild | W54: isolates what the eye sees through transmissive glass (carConcept's cabin): black keeps only the glass's own reflection, hidden only the cabin behind it, noShadow lets the key light through as the path tracer does. Every method alike, the path tracer too. |  | every method |
 | Geometry roughness (three) | `geometryRoughness` | examples geometryRoughness.ts (W56) | three | `three`, `off`, `0.5`, `0.25` | rebuild | W56 (D3720): three r187 adds the screen-space derivative of the view normal to every standard material's roughness (getRoughness); off / scaled re-assigns three's roughness after its setupVariants. Reaches three's lit term, the G-buffer's shading roughness (the composite's probe term) and the bake; never the path tracer. Any other scale by URL (?geometryRoughness=0.75). |  | ours + three SSR |
+| Geometric specular AA | `specularAA` | applySpecularAA / Reflections specularAA (W105) | `off` | `off`, `variance` | rebuild | W105 (T30, D5660): replaces three's geometry roughness (+ the max normal derivative on perceptual roughness) with a clamped variance on alpha^2, alpha'^2 = alpha^2 + min(2 sigma^2 (\|dn/dx\|^2 + \|dn/dy\|^2), kappa) (Tokuyoshi & Kaplanyan 2019 / 2021), in three's lit term, the G-buffer (normalRoughness.w and shadingRoughness) and the bake alike. Calmer display (carConcept orbit -6.6 %, rest -22 %; Sponza orbit -5 %) but raw speckle on the car paint +139 %, its displayed quad grid +13-55 %, and a blurrier small mirror (the chrome star 96 -> 124 vs the PT's 53): off by default. Package option; wins over Geometry roughness (three). Never the path tracer. | within noise at 1080p (Sponza paired median +0.05 ms, shared GPU; W105) | ours + three SSR |
+| Specular AA kernel variance | `specularAAVariance` | applySpecularAA({ variance }) | 0.159 | 0 .. 1 | rebuild | sigma^2 of the variance specular AA: 1 / (2 pi) is the papers' conservative kernel, half of it their less conservative one (sharper, more sparkle). Only with Geometric specular AA = variance. |  | ours + three SSR |
+| Specular AA in the traced roughness | `specularAATrace` | applySpecularAA({ traceRoughness }) | `filtered` | `filtered`, `material` | rebuild | W105: whether the G-buffer's normalRoughness.w (what the tracer samples and the denoiser filters at) takes the filtered roughness. material keeps it authored, as three's own term never reached it. Only with Geometric specular AA = variance. |  | ours (incl. probes only) |
 
 ## three SSRNode (reference)
 

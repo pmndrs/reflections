@@ -99,7 +99,8 @@ describe('three: RT hit shading binds every atlas of a mixed-size set (D4702)', 
     const set = makeSet(false);
     const hs = new ThreeHitShading(device, gpu);
     hs.prepare(new THREE.Texture(), set);
-    expect(hs.shading.wgsl).toBe(probeHitShading(fakeDevice().device, { layout: probeLayoutFor(set), mirrorX: true, count: 3 }).wgsl);
+    // no probe of the set is oriented, so three compiles the lookup without the oriented-box branch (T23, D5721)
+    expect(hs.shading.wgsl).toBe(probeHitShading(fakeDevice().device, { layout: probeLayoutFor(set), mirrorX: true, count: 3, orientedVolumes: false }).wgsl);
     hs.bindGroup(1, {});
     expect(bindings(groups[groups.length - 1])).toEqual([0, 1, 2, 3]);
   });
