@@ -17,6 +17,8 @@
 //   pnpm check -- --only probe-bindings          # W62: Sponza's three-size probe set at the default 16 sampled textures
 //   pnpm check -- --only probe-bindings-measure  # W62: Sponza with fewer probe sizes vs the path tracer (MAD, PSNR), lookup ms; out/w62-probe-bindings.json
 //   pnpm check -- --only probe-layouts-measure   # W61: probe layouts at equal memory, error vs RT / path tracer, seams, timing (minutes); out/w61-probe-layouts.json
+//   pnpm check -- --only probe-pair             # W109 (T41): one volume walk for a lit material's two probe lookups = two walks (0 px); PAIR_CASES=rooms|all
+//   pnpm check -- --only probe-pair-cost        # W109: core lookup pairs, two walks vs one, ms per 1080p; probe-table-cost: T43's per-frame table CPU / bytes
 //   pnpm check -- --only probes --time-lookup   # probe lookup ms at 1080p: core on the 2D array (warp), core on the cube array, the pre-phase-2 TSL node
 //   pnpm check -- --only mirror-bias --mirror-bias   # W32 / D49: mirrorBias noise / bias sweep (minutes), JSON to out/mirror-bias.json
 //   pnpm check -- --only ray-reuse                    # W73 / D5040: rayReuse 'copy' is the default path, 'ratio' runs and lowers raw noise
@@ -2519,8 +2521,9 @@ const LOOKUP_AB = `async (counts, variants, pose, rounds, stat) => {
   const t = async () => { await p.step(4); const r = await p.renderTime(30); return stat === 'p10' ? r.p10 : r.ms; };
   const rows = [];
   for (const n of counts) {
-    const vols = n === 'shipped' ? null : p.probeGrid(n);
-    await p.setProbeVolumes(vols, vols ? { resolution: 128 } : {});
+    // W109: 'layout:<name>' bakes a W61 layout (Sponza's showcase default: layout:oneSize128)
+    if (typeof n === 'string' && n.startsWith('layout:')) await p.setProbeLayout(n.slice(7));
+    else { const vols = n === 'shipped' ? null : p.probeGrid(n); await p.setProbeVolumes(vols, vols ? { resolution: 128 } : {}); }
     const free = [], all = {}, comp = {};
     for (let r = 0; r < rounds; r++) {
       p.setProbeParts(false, false); free.push(await t());
@@ -2541,7 +2544,7 @@ async function probeLookupAB(pages) {
   const all = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
   const scenes = process.env.W63_SCENES?.split(',') ?? ['rooms', 'showcaseSponza'];
   const variants = process.env.W63_VARIANTS?.split('|') ?? ['', 'loop,skip', 'grid,skip'];
-  const counts = process.env.W63_COUNTS?.split(',').map((c) => (c === 'shipped' ? c : Number(c))) ?? [4, 8, 16, 32];
+  const counts = process.env.W63_COUNTS?.split(',').map((c) => (c === 'shipped' || c.startsWith('layout:') ? c : Number(c))) ?? [4, 8, 16, 32];
   const rounds = Number(process.env.W63_ROUNDS ?? 3);
   const poses = { rooms: 'default', offscreen: 'default', showcaseSponza: 'courtyard' };
   for (const scene of scenes) {
@@ -2775,6 +2778,50 @@ async function probeParity(pages) {
     p.close(); pages.splice(pages.indexOf(p), 1);
   }
   console.log(`  probe-parity: shots in ${path.relative(process.cwd(), dir)}${base ? `, compared with '${base}'` : ''}`);
+}
+/**
+ * W109 (`--only probe-pair`, T41): a lit material's radiance and irradiance probe lookups share one volume walk
+ * (core probeLookupPairFunctionWgsl). examples/ssr, rooms and Sponza (shipped and oneSize128): the frames with the
+ * pair and with each lookup walking on its own (`lookupExp=nopair`, as before W109) are the same pixels (views raw =
+ * three's lit image and final), and the lit programs hold the pair and no single lookup.
+ */
+const PAIR_SHOTS = `async (views, diffSrc) => {
+  const p = window.__p; const out = {}, shots = {};
+  for (const mode of ['nopair', '']) {
+    p.setLookupExp(mode);
+    for (const v of views) { p.setView(v); p.ssr.settings.frameIndex = 0; await p.step(6); shots[mode + ':' + v] = await p.shot(); }
+  }
+  // diffed in the page: several MB of PNGs in one CDP reply never arrive (Sponza)
+  const diff = eval('(' + diffSrc + ')');
+  for (const v of views) out[v] = await diff(shots['nopair:' + v], shots[':' + v]);
+  // fragment programs are keyed by their code (r187 Pipelines)
+  const code = [...p.renderer._pipelines.programs.fragment.keys()].filter((c) => /probesLookupPair\\d+\\(/.test(c));
+  // calls per program (not the fn line): one, or a pair is built twice
+  const calls = code.map((c) => (c.match(/probesLookupPair\\d+\\(/g) ?? []).length - (c.match(/fn probesLookupPair\\d+\\(/g) ?? []).length);
+  out.programs = { pair: code.length, pairAndSingle: code.filter((c) => /fn probesLookup\\d+\\(/.test(c)).length, maxCalls: Math.max(0, ...calls) };
+  return out;
+}`;
+async function probePairChecks(pages) {
+  const views = ['raw', 'final'];
+  // PAIR_CASES=rooms: rooms only; =all: Sponza's shipped layout too. The shots are diffed in the page (Sponza's PNGs
+  // are too large for one CDP reply)
+  const sponza = process.env.PAIR_CASES !== 'rooms';
+  const cases = [['rooms', 'shipped'], ...(sponza ? [['showcaseSponza', 'oneSize128']] : []), ...(sponza && process.env.PAIR_CASES === 'all' ? [['showcaseSponza', 'shipped']] : [])];
+  for (const [scene, layout] of cases) {
+    const before = results.logs.length;
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&probeLayout=${layout}&texLimit=adapter&scene=${scene}`); pages.push(p);
+    await p.T("(window.__p.setDenoise(false), window.__p.setHitColor('current'), true)");
+    await p.T(CONE_READY);
+    const r = await p.T(`(${PAIR_SHOTS})(${JSON.stringify(views)}, ${JSON.stringify(PIXEL_DIFF)})`);
+    check(`probe pair ${scene} ${layout}: lit programs hold the one-walk pair, called once, without a single lookup beside it`, r.programs.pair > 0 && r.programs.pairAndSingle === 0 && r.programs.maxCalls === 1, JSON.stringify(r.programs));
+    for (const v of views) {
+      const d = r[v];
+      check(`probe pair ${scene} ${layout} ${v}: one walk = two walks, 0 differing pixels`, d.px === 0, `${d.px} of ${d.total} px differ, max ${d.max} / 255`);
+    }
+    const bad = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    check(`probe pair ${scene} ${layout}: no validation errors or exceptions`, bad.length === 0, bad.slice(0, 2).join(' | '));
+    p.close(); pages.splice(pages.indexOf(p), 1);
+  }
 }
 async function probeLookupCost(pages) {
   fs.mkdirSync(OUT, { recursive: true });
@@ -4196,12 +4243,36 @@ async function main() {
     if (only === 'probe-cluster-build') await probeClusterBuild(pages); // W63: a clustered volume list's build cost (compute), JSON to out/w63-cluster-build.json
     if (only === 'probe-lookup-parity') await probeLookupParity(pages); // W63: a lookup variant vs the shipped lookup, image for image
     if (only === 'probe-parity') await probeParity(pages); // W108: fixed frames of every probe path, pixel for pixel against a saved base (--parity-base)
+    if (runs('probe-pair')) await probePairChecks(pages); // W109 (T41): one volume walk for a material's radiance + irradiance, = two walks to the pixel
     if (only === 'probe-orient-cost') {
       // W108 (T23): a core ProbeSet lookup with the oriented branch compiled in vs out, on axis-aligned volumes, 1920 x 1080 lookups
       const p = await openPage(`http://127.0.0.1:${PORT}/probe-core/`); pages.push(p);
       for (const n of [0, 8, 32]) {
         const r = await p.T(`window.__p.orientCost(${Number(process.env.ORIENT_ROUNDS ?? 15)}, ${n})`);
         console.log(`  ${r.volumes} volumes: branch in ${r.branchIn.toFixed(3)} ms, out ${r.branchOut.toFixed(3)} ms per 1080p of lookups (median of ${r.all.in.length})`);
+      }
+    }
+    if (only === 'probe-table-cost') {
+      // W109 (T43): the probe table per frame on examples/ssr (RT off, loop stopped): checks, packs and bytes uploaded per frame
+      // with the version check vs packing on every check (as before T43), and the CPU cost of one check / pack / upload
+      for (const [scene, layout] of [['rooms', 'shipped'], ['showcaseSponza', 'oneSize128']]) {
+        const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&w=1920&h=1080&probeLayout=${layout}&texLimit=adapter&scene=${scene}`); pages.push(p);
+        const r = await p.T(`(async () => { const P = window.__p, S = P.tableStats; P.setDenoise(false); P.setRT(false); await P.step(4);
+          const per = async (always) => { S.always = always; await P.step(2); const a = { ...S }; await P.step(30); return { checks: (S.checks - a.checks) / 30, packs: (S.packs - a.packs) / 30, bytes: (S.bytes - a.bytes) / 30 }; };
+          const versioned = await per(false), always = await per(true); S.always = false;
+          return { versioned, always, cost: P.tableCost(200, 9) }; })()`);
+        const c = r.cost, us = (ms) => (ms * 1000).toFixed(1);
+        console.log(`  ${scene} ${layout} (${c.probes} probes, table ${c.bytes} B): per frame, version check: ${r.versioned.checks} checks, ${r.versioned.packs} packs, ${r.versioned.bytes} B; packing on every check: ${r.always.checks} checks, ${r.always.packs} packs, ${r.always.bytes} B`);
+        console.log(`    CPU per call: check ${us(c.check)} us, pack ${us(c.pack)} us, upload (writeBuffer) ${us(c.upload)} us -> per frame ${us(r.versioned.checks * c.check)} us (version check) vs ${us(r.always.checks * (c.pack + c.upload))} us (pack + upload per check, before T43)`);
+        p.close(); pages.splice(pages.indexOf(p), 1);
+      }
+    }
+    if (only === 'probe-pair-cost') {
+      // W109 (T41): core lookup pairs (R at the surface's roughness, N at 1) at one P, two walks vs one, 1920 x 1080 per dispatch
+      const p = await openPage(`http://127.0.0.1:${PORT}/probe-core/`); pages.push(p);
+      for (const [n, count] of [[0, true], [0, false], [8, false], [32, false]]) {
+        const r = await p.T(`window.__p.pairCost(${Number(process.env.PAIR_ROUNDS ?? 15)}, ${n}, ${count})`);
+        console.log(`  ${r.volumes} volumes${count ? ' (unrolled)' : ' (grid)'}: two walks ${r.two.toFixed(3)} ms, one walk ${r.one.toFixed(3)} ms per 1080p of lookup pairs (median of ${r.all.two.length})`);
       }
     }
     if (only === 'probe-lookup-cost') await probeLookupCost(pages); // W63: the lookup's cost per variant and volume count, JSON to out/w63-probe-lookup-cost.json
@@ -4336,6 +4407,13 @@ async function main() {
         check('probe core: axis-aligned output bit for bit with the oriented branch compiled in, and with an explicit identity rotation', o.branchIn === 0 && o.identity === 0,
           `branch in ${o.branchIn}, identity ${o.identity}`);
       }
+      // W109 (T41): the one-walk pair's columns against two lookups of their own (with and without the environment), bit for bit
+      // (three's materials use the environment form; the coverage form, no environment, divides both lookups by one coverage, which the
+      // compiler turns into one reciprocal: a last-bit difference, so three pairs only environment-form nodes)
+      check('probe core: two lookups from one volume walk = two lookups of their own, bit for bit with the environment (grid, unrolled, oriented + seam options, r187)',
+        Object.values(r.pair).every((rows) => rows[0].max === 0 && rows[1].max === 0), JSON.stringify(r.pair));
+      check('probe core: the pair\'s coverage form (no environment) = its own lookups to float rounding (< 1e-6)', Object.values(r.pair).every((rows) => rows[2].max < 1e-6),
+        Object.entries(r.pair).map(([k, rows]) => `${k} ${rows[2].max.toExponential(1)} (${rows[2].n} lanes)`).join(', '));
       check('sssr probe fallback: constant probes = constant fallback (to one f16 step)', r.sssr.constantVsProbes === 0, `${r.sssr.constantVsProbes} px differ`);
       check('sssr probe fallback: structured probes reach the fallback pixels', r.sssr.structuredVsConstant > r.sssr.pixels * 0.05, `${r.sssr.structuredVsConstant} of ${r.sssr.pixels} px`);
       const rt = r.sssr.rt;

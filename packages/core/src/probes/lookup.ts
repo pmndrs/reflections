@@ -303,7 +303,25 @@ function walkWgsl(count: number | undefined, volume: (k: number | undefined) => 
   return gridWalk(volume(undefined), row, !X.includes('noskip'));
 }
 
-const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: string, samp: string) => {
+/**
+ * The names one lookup of a body uses (W109, T41): the first keeps the plain names, so a one-lookup
+ * body is the text it always was; lookup k > 0 of a shared walk suffixes its inputs (`R_k`, `N_k`,
+ * `roughness_k`) and its running values (`dir_k`, `rough_k`, `lod_k`, `radiance_k`).
+ */
+const lookupNames = (k: number) => {
+  const s = k === 0 ? '' : `_${k}`;
+  return { N: `N${s}`, R: `R${s}`, roughness: `roughness${s}`, dir: `dir${s}`, rough: `rough${s}`, lod: `lod${s}`, radiance: `radiance${s}` };
+};
+
+/**
+ * The lookup body for `lookups` lookups at one P (W109, T41: three's lit materials look the set up
+ * along R at their roughness and along N at roughness 1 at the same point). The volume walk (the grid
+ * cell, each listed volume's rows, box test and weight) runs once; each lookup does its own box
+ * projection, sample and re-fit with that shared weight, and its own environment sample, in the same
+ * arithmetic a lookup of its own does. One lookup: the body as it always was, returning vec4f; more:
+ * mat4x4f, column k lookup k's vec4f.
+ */
+const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: string, samp: string, lookups = 1) => {
   const X = PROBE_LOOKUP_EXPERIMENT.mode.split(',');
   const atlases = atlasCount(o);
   const multi = atlases > 1;
@@ -316,19 +334,23 @@ const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: stri
   const seam = o.distanceRoughness === true || o.roughnessLerp === true;
   // T23: oriented volumes test and project in their own frame (lp is local there, r2 the local offset)
   const orient = orientedPath(o);
-  const localT = 'pr_parallaxDistance(lp, pr_toLocal(pr_q, dir), r3.xyz, r2.xyz)';
-  const projection = !seam
-    ? (orient
-      ? `        if (pr_or) { corrected = P + normalize(dir) * ${localT} - r4.xyz; }\n        else { corrected = pr_parallax(P, dir, r3.xyz, r0.xyz + r2.xyz, r4.xyz); }\n`
-      : '        corrected = pr_parallax(P, dir, r3.xyz, r0.xyz + r2.xyz, r4.xyz);\n')
-    : [
-      orient
-        ? `        var t: f32;\n        if (pr_or) { t = ${localT}; } else { t = pr_parallaxDistance(P, dir, r3.xyz, r0.xyz + r2.xyz); }`
-        : '        let t = pr_parallaxDistance(P, dir, r3.xyz, r0.xyz + r2.xyz);',
-      '        corrected = P + normalize(dir) * t - r4.xyz;',
-      ...(o.distanceRoughness === true ? [`        vlod = ${lodFn}(pr_distanceRoughness(t, length(corrected), rough), ${multi ? 'vmax' : 'hdr.y'});`] : []),
-      ...(o.roughnessLerp === true ? ['        corrected = mix(normalize(corrected), normalize(dir), rough);'] : []),
-    ].join('\n') + '\n';
+  const ks = Array.from({ length: lookups }, (_, k) => k);
+  const projection = (k: number) => {
+    const { dir, rough } = lookupNames(k);
+    const localT = `pr_parallaxDistance(lp, pr_toLocal(pr_q, ${dir}), r3.xyz, r2.xyz)`;
+    return !seam
+      ? (orient
+        ? `        if (pr_or) { corrected = P + normalize(${dir}) * ${localT} - r4.xyz; }\n        else { corrected = pr_parallax(P, ${dir}, r3.xyz, r0.xyz + r2.xyz, r4.xyz); }\n`
+        : `        corrected = pr_parallax(P, ${dir}, r3.xyz, r0.xyz + r2.xyz, r4.xyz);\n`)
+      : [
+        orient
+          ? `        var t: f32;\n        if (pr_or) { t = ${localT}; } else { t = pr_parallaxDistance(P, ${dir}, r3.xyz, r0.xyz + r2.xyz); }`
+          : `        let t = pr_parallaxDistance(P, ${dir}, r3.xyz, r0.xyz + r2.xyz);`,
+        `        corrected = P + normalize(${dir}) * t - r4.xyz;`,
+        ...(o.distanceRoughness === true ? [`        vlod = ${lodFn}(pr_distanceRoughness(t, length(corrected), ${rough}), ${multi ? 'vmax' : 'hdr.y'});`] : []),
+        ...(o.roughnessLerp === true ? [`        corrected = mix(normalize(corrected), normalize(${dir}), ${rough});`] : []),
+      ].join('\n') + '\n';
+  };
   // Several atlases (D4700): each volume's maxLod and irradiance base come from header rows 2 / 3 by
   // its atlas, and its sample reads that atlas: named at compile time when `volumeAtlases` fixes
   // it, else picked by a branch on the table's atlas index. One atlas: the code as it always was.
@@ -340,6 +362,24 @@ const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: stri
     const branches = Array.from({ length: atlases }, (_, a) => `${a === 0 ? '      ' : ' else '}${a < atlases - 1 ? `if (va == ${a}u) ` : ''}{ c = ${sample}(${atlasName(tex, a)}, ${samp}, ${sampleArgs}).rgb; }`);
     return `      var c = vec3f(0.0);\n${branches.join('')}\n`;
   };
+  // one lookup's part of a covering volume: projection, sample, re-fit, accumulate (lookup k of a
+  // shared walk in its own block, so its locals don't meet the other lookups')
+  const sampleVolume = (k: number, atlasK: number | undefined) => {
+    const { N, rough, lod, dir, radiance } = lookupNames(k);
+    const text = /* wgsl */ `      var corrected = ${dir};
+      var vlod = ${multi ? `${lodFn}(${rough}, vmax)` : lod};
+      if ((u32(r1.w) & 1u) != 0u && insideProjection) {
+${projection(k)}      }
+      let slot = u32(r2.w);
+${pick(atlasK, `slot, ${texDir('corrected')}, vlod`)}      if (refitOn) {
+        let s = irrRow + ${multi ? '(vbase + slot)' : 'slot'} * PR_IRRADIANCE_ROWS;
+        let probeIrr = pr_shIrradiance(${row('s')}, ${row('s + 1u')}, ${row('s + 2u')}, ${N});
+        c *= clamp(frameIrr / max(probeIrr, vec3f(1e-4)), vec3f(0.0), vec3f(irr.y));
+      }
+      ${radiance} += c * weight;
+`;
+    return lookups === 1 ? text : `      {\n${text}      }\n`;
+  };
   const volume = (k: number | undefined) => X.includes('boxonly') ? /* wgsl */ `    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
     let r0 = ${row('b')};
     let r1 = ${row('b + 1u')};
@@ -347,8 +387,7 @@ const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: stri
     let d = r1.xyz - abs(lp);
     let inside = min(d.x, min(d.y, d.z));
     let weight = clamp(inside / max(r0.w, 1e-6), 0.0, 1.0) * remaining;
-    radiance += vec3f(weight);
-    remaining -= weight;
+${ks.map((j) => `    ${lookupNames(j).radiance} += vec3f(weight);\n`).join('')}    remaining -= weight;
 ` : /* wgsl */ `    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
     let r0 = ${row('b')};
     let r1 = ${row('b + 1u')};
@@ -369,26 +408,35 @@ ${!multi ? '' : k !== undefined
       let vbase = u32(atlBase[va]);
 `}      // the projection box is centred at centre + offset; the capture point is r4
       let insideProjection = all(abs(lp - r2.xyz) <= r3.xyz * 0.5);
-      var corrected = dir;
-      var vlod = ${multi ? `${lodFn}(rough, vmax)` : 'lod'};
-      if ((u32(r1.w) & 1u) != 0u && insideProjection) {
-${projection}      }
-      let slot = u32(r2.w);
-${pick(k, `slot, ${texDir('corrected')}, vlod`)}      if (refitOn) {
-        let s = irrRow + ${multi ? '(vbase + slot)' : 'slot'} * PR_IRRADIANCE_ROWS;
-        let probeIrr = pr_shIrradiance(${row('s')}, ${row('s + 1u')}, ${row('s + 2u')}, N);
-        c *= clamp(frameIrr / max(probeIrr, vec3f(1e-4)), vec3f(0.0), vec3f(irr.y));
-      }
-      radiance += c * weight;
-    }
+${ks.map((j) => sampleVolume(j, k)).join('')}    }
     remaining -= weight;
 `;
+  // per lookup: its roughness, lod and (possibly bent) direction; its environment sample
+  const start = (k: number) => {
+    const { N, R, roughness, dir, rough, lod, radiance } = lookupNames(k);
+    return { head: `  let ${rough} = clamp(${roughness}, 0.0, 1.0);\n  let ${lod} = ${lodFn}(${rough}, hdr.y);\n`, dir: `  var ${dir} = ${R};\n  if (${o.dominantDirection === true}) { ${dir} = pr_dominantDirection(${N}, ${R}, ${roughness}); }\n  var ${radiance} = vec3f(0.0);\n` };
+  };
+  const environment = (k: number) => {
+    const { N, dir, lod, radiance } = lookupNames(k);
+    const text = `    // the same (possibly bent) direction as the volumes, into the environment's frame
+    let envDir = (envRotation * vec4f(${dir}, 0.0)).xyz;
+    var c = ${sample}(${tex}, ${samp}, slot, ${texDir('envDir')}, ${lod}).rgb;
+    if (refitOn) {
+      let s = irrRow + slot * PR_IRRADIANCE_ROWS;
+      let probeIrr = pr_shIrradiance(${row('s')}, ${row('s + 1u')}, ${row('s + 2u')}, ${N});
+      c *= clamp(frameIrr / max(probeIrr, vec3f(1e-4)), vec3f(0.0), vec3f(irr.y));
+    }
+    ${radiance} += c * (remaining + (1.0 - enabled));
+`;
+    return lookups === 1 ? text : `    {\n${text}    }\n`;
+  };
+  const result = (form: (radiance: string) => string) => lookups === 1
+    ? form('radiance')
+    : `mat4x4f(${[...ks.map((k) => form(lookupNames(k).radiance)), ...Array.from({ length: 4 - lookups }, () => 'vec4f(0.0)')].join(', ')})`;
   return /* wgsl */ `
   let hdr = ${row('0u')};
   let count = u32(hdr.x);
-  let rough = clamp(roughness, 0.0, 1.0);
-  let lod = ${lodFn}(rough, hdr.y);
-  let enabled = hdr.z;
+${ks.map((k) => start(k).head).join('')}  let enabled = hdr.z;
   let envSlot = hdr.w;
   let irr = ${row('1u')};
   let irrRow = u32(irr.x);${multi ? `
@@ -396,25 +444,13 @@ ${pick(k, `slot, ${texDir('corrected')}, vlod`)}      if (refitOn) {
   var atlBase = ${row('3u')};` : ''}
   // a negative frameIrr switches the re-fit off (no provider)
   let refitOn = ${o.refit === true} && all(frameIrr >= vec3f(0.0));
-  var dir = R;
-  if (${o.dominantDirection === true}) { dir = pr_dominantDirection(N, R, roughness); }
-  var radiance = vec3f(0.0);
-  var remaining = enabled;
+${ks.map((k) => start(k).dir).join('')}  var remaining = enabled;
 ${walkWgsl(o.count, (k) => volume(k === undefined ? undefined : o.volumeAtlases?.[k]), row)}  let coverage = enabled - remaining;
-  if (!withEnv) { return vec4f(radiance / max(coverage, 1e-6), coverage); }
+  if (!withEnv) { return ${result((r) => `vec4f(${r} / max(coverage, 1e-6), coverage)`)}; }
   if (envSlot >= 0.0) {
     let slot = u32(envSlot);
-    // the same (possibly bent) direction as the volumes, into the environment's frame
-    let envDir = (envRotation * vec4f(dir, 0.0)).xyz;
-    var c = ${sample}(${tex}, ${samp}, slot, ${texDir('envDir')}, lod).rgb;
-    if (refitOn) {
-      let s = irrRow + slot * PR_IRRADIANCE_ROWS;
-      let probeIrr = pr_shIrradiance(${row('s')}, ${row('s + 1u')}, ${row('s + 2u')}, N);
-      c *= clamp(frameIrr / max(probeIrr, vec3f(1e-4)), vec3f(0.0), vec3f(irr.y));
-    }
-    radiance += c * (remaining + (1.0 - enabled));
-  }
-  return vec4f(radiance, 1.0);
+${ks.map(environment).join('')}  }
+  return ${result((r) => `vec4f(${r}, 1.0)`)};
 `;
 };
 
@@ -528,6 +564,23 @@ export function probeLookupFunctionWgsl(options: ProbeLookupOptions, name = 'pro
   // several atlases (D4700): atlas_1, atlas_2, ... after atlas, same type
   const extra = Array.from({ length: atlasCount(options) - 1 }, (_, k) => `${atlasName('atlas', k + 1)}: ${options.layout.textureType}, `).join('');
   return `fn ${name}(atlas: ${options.layout.textureType}, ${extra}samp: sampler, table: ptr<storage, array<vec4f>, read>, ${SIGNATURE}) -> vec4f {${lookupBody(options, (i) => `(*table)[${i}]`, 'atlas', 'samp')}}\n`;
+}
+
+/**
+ * Two lookups at one position from one volume walk (W109, T41): like {@link probeLookupFunctionWgsl}, with
+ * a second normal, direction and roughness after the first's:
+ *   fn <name>(atlas..., samp, table, P, N, R: vec3f, roughness: f32, N_1, R_1: vec3f, roughness_1: f32,
+ *             envRotation: mat4x4f, frameIrr: vec3f, withEnv: bool) -> mat4x4f
+ * Column 0 is what `probeLookupFunctionWgsl` returns for (P, N, R, roughness), column 1 the same for
+ * (P, N_1, R_1, roughness_1), each in the same arithmetic as a lookup of its own (columns 2 and 3 are 0).
+ * The grid cell, each listed volume's rows, its box test and its weight are read and computed once:
+ * three's lit materials look the environment node up twice at every pixel (radiance along R at the
+ * surface's roughness, irradiance along N at roughness 1).
+ */
+export function probeLookupPairFunctionWgsl(options: ProbeLookupOptions, name = 'probeLookupPair'): string {
+  const extra = Array.from({ length: atlasCount(options) - 1 }, (_, k) => `${atlasName('atlas', k + 1)}: ${options.layout.textureType}, `).join('');
+  const signature = 'P: vec3f, N: vec3f, R: vec3f, roughness: f32, N_1: vec3f, R_1: vec3f, roughness_1: f32, envRotation: mat4x4f, frameIrr: vec3f, withEnv: bool';
+  return `fn ${name}(atlas: ${options.layout.textureType}, ${extra}samp: sampler, table: ptr<storage, array<vec4f>, read>, ${signature}) -> mat4x4f {${lookupBody(options, (i) => `(*table)[${i}]`, 'atlas', 'samp', 2)}}\n`;
 }
 
 export interface ProbeLookupModuleOptions extends ProbeLookupOptions {

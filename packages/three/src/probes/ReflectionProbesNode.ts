@@ -39,11 +39,12 @@
 // and the texture id is in the cache key, so every render object rebinds (D501).
 
 import * as THREE from 'three/webgpu';
-import { bool, cameraPosition, code, cubeTexture, float, mat4, materialEnvRotation, nodeObject, normalWorld, positionWorld, reflectVector, sampler, storage, texture, vec3, vec4, wgslFn } from 'three/tsl';
+import { bool, cameraPosition, code, cubeTexture, float, mat4, materialEnvRotation, nodeObject, normalWorld, positionWorld, reflectVector, roughness as materialRoughness, sampler, storage, texture, vec3, vec4, wgslFn } from 'three/tsl';
 import {
-  PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludeChunks, probeProxyShareFunctionWgsl,
+  PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludeChunks, probeLookupPairFunctionWgsl, probeProxyShareFunctionWgsl,
   probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLodMapping, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
 } from '@pmndrs/reflections-core';
+import { PROBE_LOOKUP_EXPERIMENT } from '@pmndrs/reflections-core/probes/lookup';
 import { probeOrigin, probeWorldOffset, probeWorldRotation, probeWorldScale, type ReflectionProbes } from './ReflectionProbes';
 import { watchTextureLimits } from './stageLimits';
 
@@ -128,27 +129,58 @@ function includesFor(layout: ProbeLayout): N[] {
     return node;
   });
 }
-function lookupFor(options: CoreLookupOptions): { fn: N; includes: N[] } {
+function lookupFor(options: CoreLookupOptions, pair = false): { fn: N; includes: N[] } {
   const includes = includesFor(options.layout);
   const layoutKey = `${options.layout.id}:${options.layout.mipLevelCount}`;
   const atlasKey = (options.atlases ?? 1) > 1 ? `:${options.atlases}:${options.volumeAtlases?.join(',') ?? '-'}` : '';
+  // the one-walk pair (W109, T41) or the single lookup
+  const wgsl = pair ? probeLookupPairFunctionWgsl : probeLookupFunctionWgsl;
   // keyed by the generated code too (W63): what the options compile to is what the variant is
-  const key = `${layoutKey}:${options.lodMapping}:${options.dominantDirection === true}:${options.refit === true}:${options.distanceRoughness === true}:${options.roughnessLerp === true}:${options.count ?? -1}${atlasKey}:${probeLookupFunctionWgsl({ ...options, mirrorX: true }, 'k')}`;
+  const key = `${layoutKey}:${options.lodMapping}:${options.dominantDirection === true}:${options.refit === true}:${options.distanceRoughness === true}:${options.roughnessLerp === true}:${options.count ?? -1}${atlasKey}:${wgsl({ ...options, mirrorX: true }, 'k')}`;
   let entry = _lookups.get(key);
   if (!entry) {
     // a name per variant: a shader holding two variants (two sets, or two lookups of one) would
     // otherwise see three rename one with a warning
-    entry = { fn: wgslFn(probeLookupFunctionWgsl({ ...options, mirrorX: true }, `probesLookup${_lookups.size}`), includes) as N, includes };
+    entry = { fn: wgslFn(wgsl({ ...options, mirrorX: true }, `probesLookup${pair ? 'Pair' : ''}${_lookups.size}`), includes) as N, includes };
     _lookups.set(key, entry);
   }
   return entry;
 }
 
 /**
+ * Which of EnvironmentNode's lookups a material-path setup is (W109, T41). r187's EnvironmentNode looks
+ * the environment node up in a radiance context (`getUV`: the bent reflection vector, `getTextureLevel`:
+ * the material's `roughness`) and an irradiance context (`getUV`: `normalWorld`, level 1), each in its
+ * own isolate; clear coat and retro-reflection add more radiance-like contexts.
+ */
+function contextRole(direction: N, level: N): 'radiance' | 'irradiance' | null {
+  if (level === materialRoughness) return 'radiance';
+  if (direction === normalWorld && level?.isConstNode === true && level.value === 1) return 'irradiance';
+  return null;
+}
+
+/**
+ * One volume walk for a material's radiance and irradiance lookups (W109, T41): the radiance context's
+ * setup builds the pair (core `probeLookupPairFunctionWgsl`, both lookups' inputs) once per shader and
+ * returns column 0; the irradiance context's returns column 1 of the same value. The value is a global
+ * var node, so the isolate that builds second reads the first one's variable instead of rebuilding it.
+ * `irradiance` set first (an irradiance context before any radiance one): that one looked up on its
+ * own, so the radiance doesn't pair either.
+ */
+interface LookupPair { value: N | null; irradiance: boolean }
+
+/**
  * One volume table per probe set, shared by every node that samples it (a material, a composite with
  * several lookups): one storage binding per set, one upload per render.
  */
-interface SetTable { attribute: THREE.StorageBufferAttribute; node: N; rows: number; renderId: number; irradianceVersion: number; packed: Float32Array<ArrayBuffer> }
+interface SetTable { attribute: THREE.StorageBufferAttribute; node: N; rows: number; renderId: number; irradianceVersion: number; version: number; buffer: GPUBuffer | null; packed: Float32Array<ArrayBuffer> }
+
+/**
+ * Bench only (W109, T43; not exported from the package index): how often the nodes' tables were checked
+ * (once per render per set), packed and uploaded, and the bytes uploaded. `always` packs and uploads on
+ * every check, as before T43.
+ */
+export const probeTableStats = { checks: 0, packs: 0, bytes: 0, always: false };
 const _tables = new WeakMap<ReflectionProbes, SetTable>();
 function tableFor(probes: ReflectionProbes): SetTable {
   const count = probes.bakedProbes.length;
@@ -156,7 +188,7 @@ function tableFor(probes: ReflectionProbes): SetTable {
   let t = _tables.get(probes);
   if (t === undefined || t.rows !== rows) {
     const attribute = new THREE.StorageBufferAttribute(new Float32Array(rows * 4), 4);
-    t = { attribute, node: storage(attribute, 'vec4', rows).toReadOnly(), rows, renderId: -1, irradianceVersion: -1, packed: new Float32Array((PROBE_HEADER_ROWS + count * PROBE_ROWS_PER_VOLUME) * 4) };
+    t = { attribute, node: storage(attribute, 'vec4', rows).toReadOnly(), rows, renderId: -1, irradianceVersion: -1, version: -1, buffer: null, packed: new Float32Array((PROBE_HEADER_ROWS + count * PROBE_ROWS_PER_VOLUME) * 4) };
     _tables.set(probes, t);
   }
   return t;
@@ -241,25 +273,37 @@ function probeAtlasTable(probes: ReflectionProbes) {
 }
 
 /**
- * Packs the set's table (core packProbeTable) and uploads it with queue.writeBuffer, once per render
- * (`renderId`, -1: always); copies the bake's L1 SH into the irradiance rows when it changed.
+ * Checks the set's table once per render (`renderId`, -1: always) and, when the set's
+ * {@link ReflectionProbes.updateVersion} moved (T43: a probe or the set changed, a bake, a capture
+ * starting or ending), packs it (core packProbeTable) and uploads it with queue.writeBuffer; copies the
+ * bake's L1 SH into the irradiance rows when it changed.
  */
 function writeTable(probes: ReflectionProbes, t: SetTable, renderer: THREE.WebGPURenderer, renderId: number) {
   if (renderId !== -1 && t.renderId === renderId) return;
   t.renderId = renderId;
+  probeTableStats.checks++;
   const count = probes.bakedProbes.length;
-  // captures see only the environment, so baking doesn't feed back into itself
-  t.packed = packReflectionProbesTable(probes, t.packed, { atlases: 'all' });
+  const version = probes.updateVersion();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const backend = renderer.backend as any;
   const buffer: GPUBuffer | undefined = backend.get(t.attribute).buffer;
+  const repack = version !== t.version || probeTableStats.always;
+  if (repack) {
+    // captures see only the environment, so baking doesn't feed back into itself
+    t.packed = packReflectionProbesTable(probes, t.packed, { atlases: 'all' });
+    t.version = version;
+    probeTableStats.packs++;
+  }
   if (buffer === undefined) {
     // not created yet: three uploads the array when it first binds the table
     (t.attribute.array as Float32Array).set(t.packed);
     return;
   }
   const device: GPUDevice = backend.device;
-  device.queue.writeBuffer(buffer, 0, t.packed);
+  // a buffer three made (or remade) since the last upload holds the array: write it, and the irradiance rows, once
+  const fresh = buffer !== t.buffer;
+  if (fresh) { t.buffer = buffer; t.irradianceVersion = -1; }
+  if (repack || fresh) { device.queue.writeBuffer(buffer, 0, t.packed); probeTableStats.bytes += t.packed.byteLength; }
   const irradiance = probes.irradiance;
   if (irradiance !== null && probes.irradianceVersion !== t.irradianceVersion) {
     const offset = probeIrradianceRow(count) * 16;
@@ -365,6 +409,8 @@ export class ReflectionProbesNode extends THREE.Node {
   private volumes = 0;
   private seamFix = 'warp';
   private storage = 'cube2d';
+  /** Per shader being built: its radiance / irradiance pair (W109, T41). */
+  private pairs = new WeakMap<object, LookupPair>();
 
   constructor(probes: ReflectionProbes, options: ProbeLookupOptions | null = null) {
     super(options?.coverage === true ? 'vec4' : 'vec3');
@@ -452,7 +498,8 @@ export class ReflectionProbesNode extends THREE.Node {
     const { context } = builder;
     const position: N = this.positionNode ?? positionWorld;
     const direction: N = this.directionNode ?? (context.getUV ? context.getUV(this, builder) : reflectVector);
-    const roughness: N = float(this.roughnessNode ?? (context.getTextureLevel ? context.getTextureLevel(this) : 0)).clamp();
+    const level: N = this.roughnessNode ?? (context.getTextureLevel ? context.getTextureLevel(this) : 0);
+    const roughness: N = float(level).clamp();
     // re-fit: on with a frame irradiance unless switched off (D803)
     const refit = this.frameIrradianceNode !== null && this.refit !== false;
     const dominant = this.normalNode !== null;
@@ -462,14 +509,32 @@ export class ReflectionProbesNode extends THREE.Node {
     // direction) and rotates the bent one, so volumes and environment agree
     const envRotation: N = this.directionNode === null ? materialEnvRotation : mat4(new THREE.Matrix4());
     // the oriented-box path only when a baked probe is oriented (T23): an axis-aligned set compiles the lookup it always did
-    const { fn } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit, ...seam, count: this.volumes, ...atlasOptions(probes), orientedVolumes: this.oriented });
+    const lookupOptions: CoreLookupOptions = { layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit, ...seam, count: this.volumes, ...atlasOptions(probes), orientedVolumes: this.oriented };
     const extraAtlases: Record<string, N> = {};
     this.arrays.forEach((a, k) => { extraAtlases[`atlas_${k + 1}`] = a; });
-    const result: N = fn({
-      atlas: this.array, ...extraAtlases, samp: sampler(this.array), table: this.table.node,
-      P: vec3(position), N: vec3(normal), R: vec3(direction), roughness, envRotation,
+    const args = {
+      atlas: this.array, ...extraAtlases, samp: sampler(this.array), table: this.table.node, P: vec3(position), envRotation,
       frameIrr: refit ? vec3(this.frameIrradianceNode) : vec3(-1), withEnv: bool(!this.coverage),
-    }).toVar();
+    };
+    // W109 (T41): a lit material's radiance and irradiance lookups share one volume walk
+    const paired = this.pairRole(builder, direction, level);
+    let result: N;
+    if (paired?.role === 'radiance') {
+      // the irradiance context's inputs, as its own setup would build them: N (the normal node, else
+      // normalWorld, which is also its direction), normalWorld, level 1
+      const value: N = lookupFor(lookupOptions, true).fn({
+        ...args, N: vec3(normal), R: vec3(direction), roughness,
+        N_1: vec3(this.normalNode ?? normalWorld), R_1: vec3(normalWorld), roughness_1: float(float(1)).clamp(),
+      }).toVar();
+      // one variable for the shader: the other isolate reads it from the global cache
+      value.global = true;
+      paired.pair.value = value;
+      result = value.element(0);
+    } else if (paired?.role === 'irradiance') {
+      result = paired.pair.value.element(1);
+    } else {
+      result = lookupFor(lookupOptions).fn({ ...args, N: vec3(normal), R: vec3(direction), roughness }).toVar();
+    }
     if (this.aoNode === null) return this.coverage ? result : result.rgb;
     const { includes } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit });
     const occlusion = wgslFn('fn probesSpecularOcclusion(NdotV: f32, ao: f32, roughness: f32) -> f32 { return probeSpecularOcclusion(NdotV, ao, roughness); }', includes) as N;
@@ -477,6 +542,38 @@ export class ReflectionProbesNode extends THREE.Node {
     const n: N = this.normalNode ?? normalWorld;
     const so: N = occlusion({ NdotV: vec3(n).dot(vec3(V)).clamp(), ao: float(this.aoNode), roughness });
     return this.coverage ? vec4(result.rgb.mul(so), result.a) : result.rgb.mul(so);
+  }
+
+  /**
+   * Whether this setup is one half of a material's radiance / irradiance pair (W109, T41): the material
+   * path (no explicit position, direction or roughness) of a standard / physical material (EnvironmentNode's
+   * two contexts) without retro-reflection (whose context reads like the radiance one), the radiance
+   * context first, the environment form (not `coverage`). Anything else looks up on its own. `?lookupExp=nopair` (bench) turns it off.
+   */
+  private pairRole(builder: N, direction: N, level: N): { role: 'radiance' | 'irradiance'; pair: LookupPair } | null {
+    if (this.positionNode !== null || this.directionNode !== null || this.roughnessNode !== null) return null;
+    // the coverage form (reflectionProbesLocal) divides both lookups by one coverage, which the compiler may turn into one
+    // reciprocal: a last-bit difference from two walks, so it keeps its own lookups (the environment form is bit for bit)
+    if (this.coverage) return null;
+    if (PROBE_LOOKUP_EXPERIMENT.mode.split(',').includes('nopair')) return null;
+    const material = builder.material;
+    // the builder holds the material as given: a MeshStandardMaterial / MeshPhysicalMaterial is built through its node twin
+    const standard = material?.isMeshStandardNodeMaterial === true || material?.isMeshStandardMaterial === true;
+    if (!standard || material.useRetroreflection === true || material.retroreflectivity > 0) return null;
+    const role = contextRole(direction, level);
+    if (role === null) return null;
+    const pair = this.pairs.get(builder);
+    if (role === 'radiance') {
+      // a second radiance-like context, or an irradiance one went first: on its own
+      if (pair !== undefined) return null;
+      const created: LookupPair = { value: null, irradiance: false };
+      this.pairs.set(builder, created);
+      return { role, pair: created };
+    }
+    if (pair === undefined) { this.pairs.set(builder, { value: null, irradiance: true }); return null; }
+    if (pair.value === null || pair.irradiance) return null;
+    pair.irradiance = true;
+    return { role, pair };
   }
 }
 
