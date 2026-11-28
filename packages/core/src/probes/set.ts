@@ -9,7 +9,7 @@
 //
 //   const set = new ProbeSet(device, { capacity: 3 });
 //   set.capture(encoder, slot, cubeTexture);           // per probe, and captureEnvironment(...)
-//   set.setVolumes([{ slot: 0, center, halfSize, projectionSize }, ...]);
+//   set.setVolumes([{ slot: 0, center, halfSize, projectionSize }, ...]);   // `rotation` turns a box (T23)
 //   set.update();                                        // uploads the table (cheap; call per frame if probes move)
 //   // shader: set.wgsl({ group: 1 }) defines probeRadiance(P, R, roughness) -> vec4f, ...
 //   pass.setBindGroup(1, set.bindGroup);
@@ -77,6 +77,12 @@ export interface ProbeSetOptions {
   frameIrradianceWgsl?: string;
   /** Roughness to mip. Default 'alpha' (D101); 'r187' for three r187's PMREM mapping everywhere. */
   lodMapping?: ProbeLodMapping;
+  /**
+   * Compile the oriented-box path (T23, W108; volumes with a `rotation`). Default true: the set's
+   * volumes can change after its WGSL is built, and an axis-aligned volume takes the old code behind a
+   * flag. False compiles it out; oriented volumes then read as their unrotated boxes.
+   */
+  orientedVolumes?: boolean;
   /** Shader stages the bind group is visible to. Default COMPUTE | FRAGMENT. */
   visibility?: number;
 }
@@ -203,6 +209,7 @@ export class ProbeSet {
       layout: this.layout, group, suffix, captureTransform: this.transform, dominantDirection: o.dominantDirection,
       ...(this.atlases.length > 1 ? { atlases: this.atlases.length, atlasBinding: atlasBinding ?? 3 } : {}),
       refit: o.refit, distanceRoughness: o.distanceRoughness, roughnessLerp: o.roughnessLerp, frameIrradianceWgsl: o.frameIrradianceWgsl, lodMapping: o.lodMapping,
+      ...(o.orientedVolumes === false ? { orientedVolumes: false } : {}),
     };
   }
 

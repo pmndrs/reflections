@@ -44,13 +44,13 @@ import {
   PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, createProbeLayout, packProbeTable, probeLookupFunctionWgsl, probeLookupIncludeChunks, probeProxyShareFunctionWgsl,
   probeIrradianceRow, probeTableRows, type ProbeLayout, type ProbeLodMapping, type ProbeLookupOptions as CoreLookupOptions, type ProbeVolume,
 } from '@pmndrs/reflections-core';
-import { probeOrigin, probeWorldScale, type ReflectionProbes } from './ReflectionProbes';
+import { probeOrigin, probeWorldOffset, probeWorldRotation, probeWorldScale, type ReflectionProbes } from './ReflectionProbes';
 import { watchTextureLimits } from './stageLimits';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any; // TSL's node typings are too strict for hand-written shader maths
 
-const _p = new THREE.Vector3(), _o = new THREE.Vector3(), _s = new THREE.Vector3();
+const _p = new THREE.Vector3(), _o = new THREE.Vector3(), _s = new THREE.Vector3(), _q = new THREE.Quaternion(), _qi = new THREE.Quaternion();
 
 /** Explicit lookup inputs (see {@link sampleReflectionProbes}); absent, the material provides them. */
 export interface ProbeLookupInputs { position: N; direction: N; roughness: N }
@@ -165,8 +165,9 @@ function tableFor(probes: ReflectionProbes): SetTable {
 /**
  * The volumes of the last bake, in lookup order (smallest first, slot = index), as core's table
  * wants them: world centre, half size, projection box and offset, capture origin, the set's
- * `boxProjection`. For engines or passes that bind the probe atlas themselves (the trace hit
- * shading, D2900); see {@link packReflectionProbesTable} for the whole table.
+ * `boxProjection`, and for an `oriented` probe its world rotation (T23: sizes and the projection
+ * offset in the probe's frame). For engines or passes that bind the probe atlas themselves (the trace
+ * hit shading, D2900); see {@link packReflectionProbesTable} for the whole table.
  */
 export function reflectionProbeVolumes(probes: ReflectionProbes): ProbeVolume[] {
   return probes.bakedProbes.map((probe, i) => {
@@ -175,15 +176,24 @@ export function reflectionProbeVolumes(probes: ReflectionProbes): ProbeVolume[] 
     probeWorldScale(probe, _s);
     const half = probe.influenceSize.clone().multiply(_s).multiplyScalar(0.5);
     const projection = (probe.projectionSize ?? probe.influenceSize).clone().multiply(_s);
-    const offset = probe.projectionOffset.clone().multiply(_s);
+    // oriented (T23): the offset through the world matrix, back into the box's frame (a mirrored axis keeps its side)
+    const oriented = probe.oriented === true;
+    if (oriented) probeWorldRotation(probe, _q);
+    const offset = oriented ? probeWorldOffset(probe, probe.projectionOffset, new THREE.Vector3()).applyQuaternion(_qi.copy(_q).invert()) : probe.projectionOffset.clone().multiply(_s);
     // its atlas and the slot within it (D4700; one atlas: slot = index)
     return {
       slot: probes.bakedSlots[i] ?? i, atlas: probes.bakedAtlases[i] ?? 0,
       center: [_p.x, _p.y, _p.z], halfSize: [half.x, half.y, half.z], fade: probe.blendDistance,
       projectionSize: [projection.x, projection.y, projection.z], projectionOffset: [offset.x, offset.y, offset.z],
       origin: [_o.x, _o.y, _o.z], boxProjection: probes.boxProjection,
+      ...(oriented ? { rotation: [_q.x, _q.y, _q.z, _q.w] as const } : {}),
     };
   });
+}
+
+/** Whether any probe of the last bake is `oriented` (T23): the lookups compile the oriented-box path only then. @internal also the RT hit shading's */
+export function orientedSignature(probes: ReflectionProbes): boolean {
+  return probes.bakedProbes.some((p) => p.oriented === true);
 }
 
 /** Options of {@link packReflectionProbesTable}. */
@@ -331,6 +341,8 @@ export class ReflectionProbesNode extends THREE.Node {
   protected arrays: N[] = [];
   /** {@link atlasSignature} of the compiled lookup. */
   private atlases = '1';
+  /** {@link orientedSignature} of the compiled lookup (T23). */
+  private oriented = false;
   /** Explicit lookup inputs; null ones come from the material (environment node). */
   readonly positionNode: N = null;
   readonly directionNode: N = null;
@@ -394,7 +406,7 @@ export class ReflectionProbesNode extends THREE.Node {
     // several atlases (D4700): their count, each volume's atlas and their textures too
     const multi = probes.textures.length > 1;
     return THREE.NodeUtils.hash(super.customCacheKey(), probes.bakedProbes.length, probes.bakedSeamFix === 'warp' ? 1 : 0, probes.bakedLayout === 'cube-array' ? 1 : 0, probes.texture?.id ?? 0,
-      distanceRoughness ? 1 : 0, roughnessLerp ? 1 : 0, lodMapping === 'r187' ? 1 : 0,
+      distanceRoughness ? 1 : 0, roughnessLerp ? 1 : 0, lodMapping === 'r187' ? 1 : 0, orientedSignature(probes) ? 1 : 0,
       ...(multi ? [THREE.NodeUtils.hashString(atlasSignature(probes)), ...probes.textures.map((t) => t.id)] : []));
   }
 
@@ -414,7 +426,7 @@ export class ReflectionProbesNode extends THREE.Node {
     this.array.value = probes.texture!;
     for (let k = 0; k < this.arrays.length; k++) if (probes.textures[k + 1]) this.arrays[k].value = probes.textures[k + 1];
     // (a change of the set's seam options bumps its nodes itself: ReflectionProbes.touchUsers)
-    if (probes.bakedProbes.length !== this.volumes || probes.bakedSeamFix !== this.seamFix || atlasSignature(probes) !== this.atlases) {
+    if (probes.bakedProbes.length !== this.volumes || probes.bakedSeamFix !== this.seamFix || atlasSignature(probes) !== this.atlases || orientedSignature(probes) !== this.oriented) {
       this.needsUpdate = true;
       return;
     }
@@ -429,6 +441,7 @@ export class ReflectionProbesNode extends THREE.Node {
     this.seamFix = probes.bakedSeamFix;
     this.volumes = probes.bakedProbes.length;
     this.atlases = atlasSignature(probes);
+    this.oriented = orientedSignature(probes);
     const seam = this.seamOptions();
     this.table = tableFor(probes);
     this.updateBefore();
@@ -448,7 +461,8 @@ export class ReflectionProbesNode extends THREE.Node {
     // an explicit direction is looked up as given; core bends the direction first (dominant
     // direction) and rotates the bent one, so volumes and environment agree
     const envRotation: N = this.directionNode === null ? materialEnvRotation : mat4(new THREE.Matrix4());
-    const { fn } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit, ...seam, count: this.volumes, ...atlasOptions(probes) });
+    // the oriented-box path only when a baked probe is oriented (T23): an axis-aligned set compiles the lookup it always did
+    const { fn } = lookupFor({ layout: probeLayoutFor(probes), mirrorX: true, dominantDirection: dominant, refit, ...seam, count: this.volumes, ...atlasOptions(probes), orientedVolumes: this.oriented });
     const extraAtlases: Record<string, N> = {};
     this.arrays.forEach((a, k) => { extraAtlases[`atlas_${k + 1}`] = a; });
     const result: N = fn({
@@ -514,6 +528,7 @@ export class ReflectionProbesProxyNode extends THREE.Node {
   private table: SetTable | null = null;
   private renderer: THREE.WebGPURenderer | null = null;
   private volumes = 0;
+  private oriented = false;
 
   constructor(probes: ReflectionProbes, position: N, direction: N, near: N, far: N) {
     super('float');
@@ -528,11 +543,11 @@ export class ReflectionProbesProxyNode extends THREE.Node {
   }
 
   customCacheKey() {
-    return THREE.NodeUtils.hash(super.customCacheKey(), this.probes.bakedProbes.length);
+    return THREE.NodeUtils.hash(super.customCacheKey(), this.probes.bakedProbes.length, orientedSignature(this.probes) ? 1 : 0);
   }
 
   updateBefore(frame?: { renderId: number }): undefined {
-    if (this.probes.bakedProbes.length !== this.volumes) { this.needsUpdate = true; return; }
+    if (this.probes.bakedProbes.length !== this.volumes || orientedSignature(this.probes) !== this.oriented) { this.needsUpdate = true; return; }
     if (this.renderer !== null && this.table !== null) writeTable(this.probes, this.table, this.renderer, frame?.renderId ?? -1);
   }
 
@@ -540,13 +555,15 @@ export class ReflectionProbesProxyNode extends THREE.Node {
     const probes = this.probes;
     this.renderer = builder.renderer;
     this.volumes = probes.bakedProbes.length;
+    this.oriented = orientedSignature(probes);
     this.table = tableFor(probes);
     this.updateBefore();
     const { includes } = lookupFor({ layout: probeLayoutFor(probes) });
     // keyed by the generated code (W63), one name per variant
-    const key = probeProxyShareFunctionWgsl({ count: this.volumes }, 'k');
+    const options = { count: this.volumes, orientedVolumes: this.oriented };
+    const key = probeProxyShareFunctionWgsl(options, 'k');
     let fn = _proxyFns.get(key);
-    if (!fn) _proxyFns.set(key, (fn = wgslFn(probeProxyShareFunctionWgsl({ count: this.volumes }, `probesProxyShare${_proxyFns.size || ''}`), includes) as N));
+    if (!fn) _proxyFns.set(key, (fn = wgslFn(probeProxyShareFunctionWgsl(options, `probesProxyShare${_proxyFns.size || ''}`), includes) as N));
     return fn({ table: this.table.node, P: vec3(this.positionNode), dir: vec3(this.directionNode), near: float(this.nearNode), far: float(this.farNode) });
   }
 }

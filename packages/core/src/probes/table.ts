@@ -16,9 +16,15 @@
 //     +2  projection-box offset.xyz from the centre, atlas slot
 //     +3  projection-box size.xyz (full size), priority (informational: the order is what counts)
 //     +4  capture point.xyz (world: centre + originOffset), atlas index (0 with one atlas)
+//     +5  rotation: the unit quaternion (x, y, z, w) taking the box's local frame to world (T23, W108);
+//         (0, 0, 0, 1) for an axis-aligned box. Flags bit 1 (row +1 w) is set when it is not the
+//         identity: the lookup then reads this row and tests and projects in the box's local frame
+//         (the influence box, its fade, the projection box and its offset all turn with it; the
+//         capture point and the captures themselves stay in world space)
 //   then, for a capacity of at least PROBE_GRID_MIN_VOLUMES, the volume grid (W63, D4950) from the grid
-//   row (probeGridRow): a world-space grid over the volumes' influence boxes, each cell listing the
-//   volumes whose box touches it, so the lookup walks only those (in table order: exact):
+//   row (probeGridRow): a world-space grid over the volumes' influence boxes (an oriented box by its
+//   world bounds), each cell listing the volumes whose box touches it, so the lookup walks only those
+//   (in table order: exact):
 //     +0  grid min.xyz (world), 1 / cell size
 //     +1  cells per axis.xyz, rows per cell
 //     +2  cells, x fastest, then y, then z; each cell `rows per cell` rows of 4 lanes, lane l bit b
@@ -35,7 +41,7 @@
 // (ascending), then by influence volume (smallest first, #35046's rule), then by input order.
 
 export const PROBE_HEADER_ROWS = 4;
-export const PROBE_ROWS_PER_VOLUME = 5;
+export const PROBE_ROWS_PER_VOLUME = 6;
 export const PROBE_IRRADIANCE_ROWS = 3;
 /**
  * Atlases one probe table addresses: one per probe face size, so a set mixes at most four sizes
@@ -50,8 +56,17 @@ export const PROBE_IRRADIANCE_ROWS = 3;
 export const PROBE_MAX_ATLASES = 4;
 
 export type Vec3 = readonly [number, number, number];
+/** A quaternion (x, y, z, w). */
+export type ProbeQuaternion = readonly [number, number, number, number];
 
-/** One probe volume, in world units (axis-aligned; rotation is not supported, as in #35046). */
+/** Flags (volume row +1 w): bit 0 box projection, bit 1 an oriented box (row +5 holds its rotation). */
+export const PROBE_FLAG_BOX_PROJECTION = 1;
+export const PROBE_FLAG_ORIENTED = 2;
+
+/**
+ * One probe volume, in world units. Axis-aligned unless {@link rotation} turns it (T23; #35046's boxes
+ * are always world-axis-aligned).
+ */
 export interface ProbeVolume {
   /** Atlas slot the probe's capture lives in (within its atlas, {@link atlas}). */
   slot: number;
@@ -74,6 +89,14 @@ export interface ProbeVolume {
   origin?: Vec3;
   /** Box-project lookups inside the projection box. Default true. */
   boxProjection?: boolean;
+  /**
+   * Orientation of the boxes (T23): the quaternion (x, y, z, w) that takes the box's local frame to
+   * world, about {@link center}. `halfSize`, `projectionSize` and `projectionOffset` are in that local
+   * frame; `center` and `origin` stay world points, and the captures stay world-aligned cubes. Need not
+   * be normalized. Default (or the identity): an axis-aligned box, which packs and looks up exactly
+   * as before rotations existed.
+   */
+  rotation?: ProbeQuaternion;
   /** Lower comes first. Default: by influence volume, smallest first. */
   priority?: number;
 }
@@ -164,28 +187,78 @@ export function packProbeTable(header: ProbeTableHeader, volumes: readonly Probe
     const ps = v.projectionSize ?? [2 * v.halfSize[0], 2 * v.halfSize[1], 2 * v.halfSize[2]];
     const po = v.projectionOffset ?? [0, 0, 0];
     const origin = v.origin ?? v.center;
+    const q = probeVolumeRotation(v);
     f.set([...v.center, v.fade ?? 0.5], o);
-    f.set([...v.halfSize, v.boxProjection === false ? 0 : 1], o + 4);
+    f.set([...v.halfSize, (v.boxProjection === false ? 0 : PROBE_FLAG_BOX_PROJECTION) + (q === null ? 0 : PROBE_FLAG_ORIENTED)], o + 4);
     f.set([...po, v.slot], o + 8);
     f.set([...ps, v.priority ?? 0], o + 12);
     const atlas = v.atlas ?? 0;
     if (atlas < 0 || atlas >= Math.max(1, header.atlases?.length ?? 1)) throw new Error(`packProbeTable: volume ${i} is in atlas ${atlas}, the header has ${header.atlases?.length ?? 1}`);
     f.set([...origin, atlas], o + 16);
+    f.set(q ?? IDENTITY, o + 20);
   });
   return f.subarray(0, rows * 4);
+}
+
+const IDENTITY: ProbeQuaternion = [0, 0, 0, 1];
+
+/**
+ * A volume's rotation as the table holds it: the normalized quaternion with w >= 0, or null for an
+ * axis-aligned box (no rotation, the identity, or a zero quaternion), which packs flags bit 1 clear
+ * and row +5 the identity, so the lookup takes the axis-aligned path, bit for bit as before (T23).
+ */
+export function probeVolumeRotation(v: Pick<ProbeVolume, 'rotation'>): ProbeQuaternion | null {
+  const q = v.rotation;
+  if (q === undefined) return null;
+  const n = Math.hypot(q[0], q[1], q[2], q[3]);
+  if (!(n > 0) || !Number.isFinite(n)) return null;
+  const s = (q[3] < 0 ? -1 : 1) / n;
+  const r: ProbeQuaternion = [q[0] * s, q[1] * s, q[2] * s, q[3] * s];
+  return r[0] === 0 && r[1] === 0 && r[2] === 0 ? null : r;
+}
+
+/** `v` rotated by the unit quaternion `q` (local to world); the conjugate rotates world to local. */
+export function rotateByQuat(q: ProbeQuaternion, v: Vec3): [number, number, number] {
+  const [x, y, z, w] = q;
+  // t = 2 cross(q.xyz, v); v + w t + cross(q.xyz, t): the lookup's form (pr_toLocal with the conjugate)
+  const tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
+  return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)];
+}
+
+/** The world point `P` in the box frame of `v`: relative to its centre, turned by the inverse rotation. */
+export function probeVolumeLocal(v: Pick<ProbeVolume, 'center' | 'rotation'>, P: Vec3): [number, number, number] {
+  const lp: Vec3 = [P[0] - v.center[0], P[1] - v.center[1], P[2] - v.center[2]];
+  const q = probeVolumeRotation(v);
+  return q === null ? [...lp] : rotateByQuat([-q[0], -q[1], -q[2], q[3]], lp);
+}
+
+/**
+ * World-space half extent of a volume's influence box: its half-size for an axis-aligned box; for an
+ * oriented one, the half-size of the box's world bounds (sum over its local axes of |axis| x half-size).
+ */
+export function probeVolumeWorldHalfSize(v: Pick<ProbeVolume, 'halfSize' | 'rotation'>): [number, number, number] {
+  const q = probeVolumeRotation(v);
+  if (q === null) return [...v.halfSize];
+  const out: [number, number, number] = [0, 0, 0];
+  for (let j = 0; j < 3; j++) {
+    const axis = rotateByQuat(q, [j === 0 ? 1 : 0, j === 1 ? 1 : 0, j === 2 ? 1 : 0]);
+    for (let a = 0; a < 3; a++) out[a] += Math.abs(axis[a]) * v.halfSize[j];
+  }
+  return out;
 }
 
 /**
  * Writes the volume grid (see the layout above) at row `row` of `f`: cubic cells over the union of
  * the influence boxes, at most PROBE_GRID_MAX_CELLS, each listing every volume whose box (grown by
- * a hundredth of a cell, so float rounding on the GPU can't drop one) touches it. Volumes with an
- * empty box (a negative half-size: masked out) are in no cell. The rows must be zero.
+ * a hundredth of a cell, so float rounding on the GPU can't drop one) touches it; an oriented box by
+ * its world bounds (T23: a cell it doesn't reach costs that cell's pixels one box test). Volumes with
+ * an empty box (a negative half-size: masked out) are in no cell. The rows must be zero.
  */
 function packProbeGrid(f: Float32Array, row: number, rowsPerCell: number, volumes: readonly ProbeVolume[]) {
-  const live = volumes.map((v, i) => ({ v, i })).filter(({ v }) => v.halfSize[0] > 0 && v.halfSize[1] > 0 && v.halfSize[2] > 0);
+  const live = volumes.map((v, i) => ({ v, i, h: probeVolumeWorldHalfSize(v) })).filter(({ v }) => v.halfSize[0] > 0 && v.halfSize[1] > 0 && v.halfSize[2] > 0);
   if (live.length === 0) { f.set([0, 0, 0, 1, 0, 0, 0, rowsPerCell], row * 4); return; } // no cell: every lookup misses
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-  for (const { v } of live) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], v.center[a] - v.halfSize[a]); hi[a] = Math.max(hi[a], v.center[a] + v.halfSize[a]); }
+  for (const { v, h } of live) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], v.center[a] - h[a]); hi[a] = Math.max(hi[a], v.center[a] + h[a]); }
   const ext = lo.map((l, a) => Math.max(hi[a] - l, 1e-3));
   let cell = Math.cbrt((ext[0] * ext[1] * ext[2]) / PROBE_GRID_MAX_CELLS);
   let dims = ext.map((e) => Math.max(1, Math.ceil(e / cell)));
@@ -194,9 +267,9 @@ function packProbeGrid(f: Float32Array, row: number, rowsPerCell: number, volume
   const origin = lo.map((l, a) => l - 0.5 * (dims[a] * cell - ext[a]));
   f.set([origin[0], origin[1], origin[2], 1 / cell, dims[0], dims[1], dims[2], rowsPerCell], row * 4);
   const base = (row + 2) * 4, eps = 0.01;
-  for (const { v, i } of live) {
-    const r0 = [0, 1, 2].map((a) => Math.max(0, Math.floor((v.center[a] - v.halfSize[a] - origin[a]) / cell - eps)));
-    const r1 = [0, 1, 2].map((a) => Math.min(dims[a] - 1, Math.floor((v.center[a] + v.halfSize[a] - origin[a]) / cell + eps)));
+  for (const { v, i, h } of live) {
+    const r0 = [0, 1, 2].map((a) => Math.max(0, Math.floor((v.center[a] - h[a] - origin[a]) / cell - eps)));
+    const r1 = [0, 1, 2].map((a) => Math.min(dims[a] - 1, Math.floor((v.center[a] + h[a] - origin[a]) / cell + eps)));
     const lane = Math.floor(i / PROBE_GRID_LANE_BITS), bit = 2 ** (i % PROBE_GRID_LANE_BITS);
     for (let z = r0[2]; z <= r1[2]; z++) for (let y = r0[1]; y <= r1[1]; y++) for (let x = r0[0]; x <= r1[0]; x++) {
       const k = base + (x + dims[0] * (y + dims[1] * z)) * rowsPerCell * 4 + lane;

@@ -18,7 +18,10 @@
 // outside the cell has no weight at P, so the result is the full walk's.
 // Each takes `clamp(distance inside its influence box / fade) * remaining` of the weight and leaves
 // the rest to the next; inside its projection box the direction is box-projected (Lagarde's BPCEM,
-// the guarded form of #35046) and sampled from the capture point. What is left over goes to the
+// the guarded form of #35046) and sampled from the capture point. An oriented volume (T23, W108: flags
+// bit 1, its rotation in row +5) does the box test, the fade and the projection in its own frame (P
+// and the direction turned by the inverse rotation; the corrected direction is built back in world
+// space, as the captures are); an axis-aligned one runs the code it always did, bit for bit. What is left over goes to the
 // environment slot (or, for the coverage form, the radiance is normalized by the weight it got).
 // lod: three r187's PMREM mapping `maxLod * r * (2 - r)` (D3), r perceptual roughness, except
 // between the sharp mips (both below r = 0.3), where the default 'alpha' mapping blends linearly in
@@ -109,6 +112,14 @@ export interface ProbeLookupOptions {
    */
   atlases?: number;
   /**
+   * Compile the oriented-box path (T23, W108): a volume whose flags carry PROBE_FLAG_ORIENTED is tested
+   * and projected in its own frame (one more table row and two quaternion rotations per covering volume,
+   * behind a branch on the flag; axis-aligned volumes take the old code). Default true. An engine that
+   * knows the set has no oriented volume at compile time (three, which recompiles per bake) passes
+   * false and gets the lookup it always had; oriented volumes then read as their unrotated boxes.
+   */
+  orientedVolumes?: boolean;
+  /**
    * With `count` and several `atlases`: the atlas of each unrolled volume, fixed at compile time
    * (an engine that recompiles per bake, three), so each volume samples its own texture with no
    * branch. Absent, or past PROBE_UNROLL_MAX_VOLUMES (the grid walk), each volume's atlas is read
@@ -175,6 +186,13 @@ fn pr_parallaxDistance(P: vec3f, dir: vec3f, boxSize: vec3f, boxPos: vec3f) -> f
   let dist = (side * (boxSize * 0.5) + boxPos - P) / safe;
   return min(dist.x, min(dist.y, dist.z));
 }
+// v in an oriented volume's frame (T23): the inverse of the unit quaternion q (local to world), i.e.
+// its conjugate, as v + w t + cross(u, t), t = 2 cross(u, v), u = -q.xyz.
+fn pr_toLocal(q: vec4f, v: vec3f) -> vec3f {
+  let u = -q.xyz;
+  let t = 2.0 * cross(u, v);
+  return v + q.w * t + cross(u, t);
+}
 // Lagarde 2014 (Frostbite), computeDistanceBaseRoughness (Listing 25), in perceptual roughness r
 // (Frostbite's linearRoughness): dHit from the shading point, dCentre from the capture point, both
 // to the projection-box hit.
@@ -237,7 +255,8 @@ export const PROBE_UNROLL_MAX_VOLUMES = 4;
  * for `--only probe-lookup-cost` / `probe-lookup-ab`, comma-separated: 'legacy' (unroll whenever
  * `count` is given, the walk before W63), 'loop' (a runtime loop over every volume), 'skip' (with
  * those two: stop once the weight is spent), 'grid' (the grid walk at any count), 'noskip' (the grid
- * walk without the early-out), 'nosample' / 'boxonly' (profiling: no atlas sample / box test only).
+ * walk without the early-out), 'nosample' / 'boxonly' (profiling: no atlas sample / box test only),
+ * 'orient' / 'noorient' (W108: the oriented-box branch compiled in / out whatever `orientedVolumes` says).
  * '' is the shipped walk.
  */
 export const PROBE_LOOKUP_EXPERIMENT: { mode: string } = { mode: '' };
@@ -295,10 +314,17 @@ const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: stri
   const lodFn = `pr_lod_${o.lodMapping ?? DEFAULT_PROBE_LOD_MAPPING}`;
   // box projection; with Lagarde's seam options (D53) pr_parallax with its distance t kept (App. F)
   const seam = o.distanceRoughness === true || o.roughnessLerp === true;
+  // T23: oriented volumes test and project in their own frame (lp is local there, r2 the local offset)
+  const orient = orientedPath(o);
+  const localT = 'pr_parallaxDistance(lp, pr_toLocal(pr_q, dir), r3.xyz, r2.xyz)';
   const projection = !seam
-    ? '        corrected = pr_parallax(P, dir, r3.xyz, r0.xyz + r2.xyz, r4.xyz);\n'
+    ? (orient
+      ? `        if (pr_or) { corrected = P + normalize(dir) * ${localT} - r4.xyz; }\n        else { corrected = pr_parallax(P, dir, r3.xyz, r0.xyz + r2.xyz, r4.xyz); }\n`
+      : '        corrected = pr_parallax(P, dir, r3.xyz, r0.xyz + r2.xyz, r4.xyz);\n')
     : [
-      '        let t = pr_parallaxDistance(P, dir, r3.xyz, r0.xyz + r2.xyz);',
+      orient
+        ? `        var t: f32;\n        if (pr_or) { t = ${localT}; } else { t = pr_parallaxDistance(P, dir, r3.xyz, r0.xyz + r2.xyz); }`
+        : '        let t = pr_parallaxDistance(P, dir, r3.xyz, r0.xyz + r2.xyz);',
       '        corrected = P + normalize(dir) * t - r4.xyz;',
       ...(o.distanceRoughness === true ? [`        vlod = ${lodFn}(pr_distanceRoughness(t, length(corrected), rough), ${multi ? 'vmax' : 'hdr.y'});`] : []),
       ...(o.roughnessLerp === true ? ['        corrected = mix(normalize(corrected), normalize(dir), rough);'] : []),
@@ -326,8 +352,7 @@ const lookupBody = (o: ProbeLookupOptions, row: (i: string) => string, tex: stri
 ` : /* wgsl */ `    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
     let r0 = ${row('b')};
     let r1 = ${row('b + 1u')};
-    let lp = P - r0.xyz;
-    let d = r1.xyz - abs(lp);
+${localFrame(orient, row)}    let d = r1.xyz - abs(lp);
     // negative outside the box, so the clamped fade is zero there
     let inside = min(d.x, min(d.y, d.z));
     let weight = clamp(inside / max(r0.w, 1e-6), 0.0, 1.0) * remaining;
@@ -393,6 +418,22 @@ ${walkWgsl(o.count, (k) => volume(k === undefined ? undefined : o.volumeAtlases?
 `;
 };
 
+/** Whether a lookup compiles the oriented-box path (T23): `orientedVolumes` (default true), or the bench override. */
+function orientedPath(o: Pick<ProbeLookupOptions, 'orientedVolumes'>): boolean {
+  const X = PROBE_LOOKUP_EXPERIMENT.mode.split(',');
+  return X.includes('orient') || (o.orientedVolumes !== false && !X.includes('noorient'));
+}
+
+/**
+ * `lp`, P in the volume's frame (T23): P - centre, turned by the inverse rotation when the volume is
+ * oriented (`pr_or`; `pr_q` its rotation). Without the oriented path, the line it always was.
+ */
+const localFrame = (orient: boolean, row: (i: string) => string) => (!orient ? '    let lp = P - r0.xyz;\n' : /* wgsl */ `    let pr_or = (u32(r1.w) & 2u) != 0u;
+    var pr_q = vec4f(0.0, 0.0, 0.0, 1.0);
+    var lp = P - r0.xyz;
+    if (pr_or) { pr_q = ${row('b + 5u')}; lp = pr_toLocal(pr_q, lp); }
+`);
+
 const SIGNATURE = 'P: vec3f, N: vec3f, R: vec3f, roughness: f32, envRotation: mat4x4f, frameIrr: vec3f, withEnv: bool';
 
 /**
@@ -402,12 +443,17 @@ const SIGNATURE = 'P: vec3f, N: vec3f, R: vec3f, roughness: f32, envRotation: ma
  * onto). Volumes sampled without box projection and the environment are at infinity and add 0. In
  * scope: P, dir, near, far. Returns the share of the probe term whose surface lies within ~near.
  */
-const proxyBody = (o: Pick<ProbeLookupOptions, 'count'>, row: (i: string) => string) => {
+const proxyBody = (o: Pick<ProbeLookupOptions, 'count' | 'orientedVolumes'>, row: (i: string) => string) => {
+  const orient = orientedPath(o);
+  const distance = orient
+    ? `        var pr_t: f32;
+        if (pr_or) { pr_t = pr_parallaxDistance(lp, pr_toLocal(pr_q, dir), r3.xyz, r2.xyz); } else { pr_t = pr_parallaxDistance(P, dir, r3.xyz, r0.xyz + r2.xyz); }
+        share += weight * (1.0 - smoothstep(near, far, pr_t));`
+    : '        share += weight * (1.0 - smoothstep(near, far, pr_parallaxDistance(P, dir, r3.xyz, r0.xyz + r2.xyz)));';
   const volume = /* wgsl */ `    let b = PR_HEADER_ROWS + i * PR_ROWS_PER_VOLUME;
     let r0 = ${row('b')};
     let r1 = ${row('b + 1u')};
-    let lp = P - r0.xyz;
-    let d = r1.xyz - abs(lp);
+${localFrame(orient, row)}    let d = r1.xyz - abs(lp);
     let inside = min(d.x, min(d.y, d.z));
     let weight = clamp(inside / max(r0.w, 1e-6), 0.0, 1.0) * remaining;
     if (weight > 0.0) {
@@ -415,7 +461,7 @@ const proxyBody = (o: Pick<ProbeLookupOptions, 'count'>, row: (i: string) => str
       let r3 = ${row('b + 3u')};
       let insideProjection = all(abs(lp - r2.xyz) <= r3.xyz * 0.5);
       if ((u32(r1.w) & 1u) != 0u && insideProjection) {
-        share += weight * (1.0 - smoothstep(near, far, pr_parallaxDistance(P, dir, r3.xyz, r0.xyz + r2.xyz)));
+${distance}
       }
     }
     remaining -= weight;
@@ -439,7 +485,7 @@ ${walkWgsl(o.count, () => volume, row)}  return share;
  * share(h + tolerance) = 0 means the probe's surface is behind the hit (DIVERGES D2400). Needs
  * {@link probeLookupIncludesWgsl} in the module. `count` unrolls the volume loop as in the lookup.
  */
-export function probeProxyShareFunctionWgsl(options: Pick<ProbeLookupOptions, 'count'> = {}, name = 'probeProxyShare'): string {
+export function probeProxyShareFunctionWgsl(options: Pick<ProbeLookupOptions, 'count' | 'orientedVolumes'> = {}, name = 'probeProxyShare'): string {
   return `fn ${name}(table: ptr<storage, array<vec4f>, read>, P: vec3f, dir: vec3f, near: f32, far: f32) -> f32 {${proxyBody(options, (i) => `(*table)[${i}]`)}}\n`;
 }
 

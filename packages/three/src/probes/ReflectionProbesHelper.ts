@@ -1,15 +1,25 @@
 // Visualizes a ReflectionProbes set: a mirror sphere at each capture position, the outline of each
 // influence volume and, where it differs, the outline of each projection volume. The volumes are
-// world-space boxes, so the helper draws in world space whatever its parent's transform.
+// world-space boxes, so the helper draws in world space whatever its parent's transform; an
+// `oriented` probe's boxes are drawn turned by its world rotation (T23, W108).
 // Port of ReflectionProbesHelper.js from three.js PR #35046 (Ben Houston), as of 706ccdf2b8.
 // (The sphere sits at the capture point, which differs from the box centre with `originOffset`.)
 
 import * as THREE from 'three/webgpu';
-import { probeOrigin, probeWorldScale, type ReflectionProbe, type ReflectionProbes } from './ReflectionProbes';
+import { probeOrigin, probeWorldOffset, probeWorldRotation, probeWorldScale, type ReflectionProbe, type ReflectionProbes } from './ReflectionProbes';
 
 const _position = new THREE.Vector3();
 const _size = new THREE.Vector3();
 const _scale = new THREE.Vector3();
+const _offset = new THREE.Vector3();
+const _rotation = new THREE.Quaternion();
+
+/** A box outline centred at `center`, `size` along its own axes, turned by `rotation` (Box3Helper keeps its quaternion). */
+function boxOutline(center: THREE.Vector3, size: THREE.Vector3, rotation: THREE.Quaternion, color: THREE.ColorRepresentation) {
+  const helper = new THREE.Box3Helper(new THREE.Box3().setFromCenterAndSize(center, size), color);
+  helper.quaternion.copy(rotation);
+  return helper;
+}
 
 export class ReflectionProbesHelper extends THREE.Object3D {
   readonly probes: ReflectionProbes;
@@ -40,14 +50,16 @@ export class ReflectionProbesHelper extends THREE.Object3D {
       if (probe.isReflectionProbe !== true) continue;
       probe.getWorldPosition(_position);
       probeWorldScale(probe, _scale);
+      // axis-aligned unless the probe is oriented (T23)
+      if (probe.oriented === true) probeWorldRotation(probe, _rotation); else _rotation.identity();
       const sphere = new THREE.Mesh(this.geometry, this.material);
       probeOrigin(probe, sphere.position); // the capture point (the box centre unless originOffset is set)
       _size.copy(probe.influenceSize).multiply(_scale);
-      this.add(sphere, new THREE.Box3Helper(new THREE.Box3().setFromCenterAndSize(_position, _size), this.color));
+      this.add(sphere, boxOutline(_position, _size, _rotation, this.color));
       if (probe.projectionSize !== null || probe.projectionOffset.lengthSq() > 0) {
         _size.copy(probe.projectionSize ?? probe.influenceSize).multiply(_scale);
-        _position.add(_scale.multiply(probe.projectionOffset));
-        this.add(new THREE.Box3Helper(new THREE.Box3().setFromCenterAndSize(_position, _size), this.projectionColor));
+        _position.add(probe.oriented === true ? probeWorldOffset(probe, probe.projectionOffset, _offset) : _scale.multiply(probe.projectionOffset));
+        this.add(boxOutline(_position, _size, _rotation, this.projectionColor));
       }
     }
   }

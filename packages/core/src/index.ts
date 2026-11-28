@@ -16,7 +16,8 @@ export {
 export {
   packProbeTable, sortProbeVolumes, probeTableRows, probeIrradianceRow, planProbeAtlases, PROBE_HEADER_ROWS, PROBE_ROWS_PER_VOLUME, PROBE_IRRADIANCE_ROWS, PROBE_MAX_ATLASES,
   probeGridRow, probeGridRows, PROBE_GRID_MAX_CELLS, PROBE_GRID_MIN_VOLUMES, PROBE_GRID_LANE_BITS,
-  type ProbeVolume, type ProbeTableHeader, type ProbeTableAtlas, type ProbeAtlasPlan,
+  PROBE_FLAG_BOX_PROJECTION, PROBE_FLAG_ORIENTED, probeVolumeRotation, probeVolumeLocal, probeVolumeWorldHalfSize, rotateByQuat,
+  type ProbeVolume, type ProbeTableHeader, type ProbeTableAtlas, type ProbeAtlasPlan, type ProbeQuaternion,
 } from './probes/table';
 export { ProbeIrradiance, type ProbeIrradianceOptions } from './probes/irradiance';
 export {

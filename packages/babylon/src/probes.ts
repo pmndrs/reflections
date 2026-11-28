@@ -21,7 +21,7 @@
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh.js';
 import { ReflectionProbe } from '@babylonjs/core/Probes/reflectionProbe.js';
 import type { Scene } from '@babylonjs/core/scene.js';
-import { ProbeSet, type ProbeSetOptions, type ProbeVolume } from '@pmndrs/reflections-core';
+import { ProbeSet, rotateByQuat, type ProbeQuaternion, type ProbeSetOptions, type ProbeVolume } from '@pmndrs/reflections-core';
 import { asWebGPUEngine, getDevice, getGPUTexture } from './internal/babylonWebGPU';
 
 type Vec3 = readonly [number, number, number];
@@ -121,10 +121,17 @@ export interface BabylonProbe {
   influenceSize: Vec3;
   /** Box-projection size (parallax). Default: no box projection. */
   projectionSize?: Vec3;
-  /** Projection box centre relative to `position` (three's `ReflectionProbe.projectionOffset`). Default 0. */
+  /** Projection box centre relative to `position` (three's `ReflectionProbe.projectionOffset`), in the box's frame when `rotation` is set. Default 0. */
   projectionOffset?: Vec3;
   /**
-   * Capture point relative to `position` (three's `ReflectionProbe.originOffset`). Default 0. With the offsets an
+   * The boxes' orientation (T23, W108): a unit quaternion (x, y, z, w) taking the box's own axes to
+   * world, as a Babylon `Quaternion` holds it (e.g. a mesh's `rotationQuaternion`, or
+   * `Quaternion.FromEulerAngles(...)`). The influence and projection boxes and both offsets turn with
+   * it; the capture stays a world-aligned cube. Default: axis-aligned.
+   */
+  rotation?: ProbeQuaternion;
+  /**
+   * Capture point relative to `position` (three's `ReflectionProbe.originOffset`; turned by `rotation`). Default 0. With the offsets an
    * influence box can reach below the floor (so the floor gets full weight, not the fade at its face) while the
    * capture point and the projection box stay where the room is.
    */
@@ -146,11 +153,13 @@ export interface BabylonProbeSetOptions extends Partial<Pick<ProbeSetOptions, 's
   environment?: AbstractMesh[] | null;
 }
 
-/** Where a probe captures: `position + originOffset`. */
+/** Where a probe captures: `position + originOffset` (the offset turned by `rotation`). */
 const captureOrigin = (p: BabylonProbe): Vec3 => {
   const o = p.originOffset ?? [0, 0, 0];
-  return [p.position[0] + o[0], p.position[1] + o[1], p.position[2] + o[2]];
+  const w = p.rotation ? rotateByQuat(normalized(p.rotation), o) : o;
+  return [p.position[0] + w[0], p.position[1] + w[1], p.position[2] + w[2]];
 };
+const normalized = (q: ProbeQuaternion): ProbeQuaternion => { const n = Math.hypot(...q) || 1; return [q[0] / n, q[1] / n, q[2] / n, q[3] / n]; };
 
 export class BabylonProbeSet {
   readonly scene: Scene;
@@ -199,6 +208,7 @@ export class BabylonProbeSet {
       fade: p.fade ?? 1, priority: p.priority,
       ...(p.projectionSize ? { boxProjection: true, projectionSize: p.projectionSize, projectionOffset: p.projectionOffset } : { boxProjection: false }),
       ...(p.originOffset ? { origin: captureOrigin(p) } : {}),
+      ...(p.rotation ? { rotation: p.rotation } : {}),
     }));
     this.set.setVolumes(volumes);
     this.set.update();

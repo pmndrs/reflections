@@ -2672,7 +2672,8 @@ async function probeParity(pages) {
     }
   };
   const layouts = ['shipped', 'few', 'many', 'mixed'];
-  for (const scene of (process.env.PARITY_SCENES?.split(',') ?? ['rooms', 'showcaseSponza'])) {
+  const want = (page) => !process.env.PARITY_PAGES || process.env.PARITY_PAGES.split(',').includes(page); // ssr, probes, babylon
+  for (const scene of want('ssr') ? (process.env.PARITY_SCENES?.split(',') ?? ['rooms', 'showcaseSponza']) : []) {
     for (const rt of [false, true]) {
       const before = results.logs.length;
       const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&probeLayout=shipped&texLimit=adapter&scene=${scene}${rt ? '&rt=1' : ''}`); pages.push(p);
@@ -2691,7 +2692,7 @@ async function probeParity(pages) {
       p.close(); pages.splice(pages.indexOf(p), 1);
     }
   }
-  {
+  if (want('probes')) {
     const p = await openPage(`http://127.0.0.1:${PORT}/probes/`); pages.push(p);
     await p.T(FREEZE);
     for (const lookup of ['auto', 'warp']) {
@@ -2703,8 +2704,12 @@ async function probeParity(pages) {
     await compareAll();
     p.close(); pages.splice(pages.indexOf(p), 1);
   }
-  {
+  if (want('babylon')) {
     const p = await openPage(`http://127.0.0.1:${PORT}/babylon/?manual`); pages.push(p);
+    // the cone's pipeline compiles in the background (W76): shoot once it is in, or the shot depends on compile time
+    await p.T(`(async () => { const P = window.__p, t = () => P.ssr.tracer;
+      for (let i = 0; i < 100 && !t()?.outputs.hitColorFilterActive; i++) { await P.step(1); await new Promise((r) => setTimeout(r, 100)); }
+      return !!t()?.outputs.hitColorFilterActive; })()`);
     await p.T('window.__p.step(2)');
     await keep(p, 'babylon', 'window.__p.shot()');
     await compareAll();
