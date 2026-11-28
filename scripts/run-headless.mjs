@@ -3967,6 +3967,17 @@ async function main() {
         `lit mean ${f(ev.litVsBefore.mean)}, removed max ${ev.afterVsBefore.max} / 255`);
       const hp = await C('helper');
       check('helper draws world-space influence and projection boxes', hp.children === 9 && hp.boxes === 6 && hp.centreErr < 1e-6, JSON.stringify(hp));
+      {
+        // T23 (W108): the world turned 0.5 rad about y, camera along: oriented boxes keep the unturned image, axis-aligned ones don't
+        const ro = await C('rotated');
+        for (const [k, d] of Object.entries(ro)) if (d && typeof d === 'object' && 'a' in d) { savePng(`probes-rotated-${k}.png`, d.a); delete d.a; delete d.b; }
+        const g = (d) => `mean ${f(d.mean, 4)}, max ${d.max}, ${f(d.over * 100, 3)} % px > 2/255`;
+        check('oriented boxes: `oriented` on unturned probes = the axis-aligned image (0 px)', ro.identity.max === 0, g(ro.identity));
+        check('oriented boxes: the world turned 0.5 rad (rooms, lights, probes, camera) with oriented probes = the unturned image but for world-aligned texels',
+          ro.oriented.mean < 0.5 && ro.oriented.over < 0.03 && ro.oriented.mean < ro.aabb.mean / 4, `${g(ro.oriented)}; world-axis-aligned boxes: ${g(ro.aabb)}`);
+        check('oriented boxes: turned back, the image returns (0 px)', ro.back.max === 0, g(ro.back));
+        check('oriented boxes: the helper draws each box with its probe\'s world rotation', ro.boxes === 6 && ro.helperErr < 1e-6, `${ro.boxes} boxes, err ${ro.helperErr.toExponential(1)}`);
+      }
 
       if (args.includes('--time-bake')) {
         // loop stopped (FREEZE); median ms per bake, 5 bakes per submit-wait, 7 bursts
