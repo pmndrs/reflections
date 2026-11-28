@@ -306,7 +306,7 @@ For the fine-tune pass once the phases are built and running. Nothing here block
 - W96: engines/pixi is still the arcade, not the two rooms: pixi-3d 0.1.0-beta.2 has CubeGeometry, CylinderGeometry, ConeGeometry, TorusKnotGeometry and PointLight, so a rooms page is feasible with the beta (point-light shadows unverified).
 - W96: the pixi adapter's `ScreenSpaceReflections.dispatch` overwrites `settings.frameIndex` with the frame's, as Babylon's did (fixed there in W96); harmless while pixi has the denoiser.
 - Lead (2026-11-27): probes `time-sliced bake over 3 calls = full bake` failed once in the long run (max 5/255, `over` rounds to 0.000 %, a few px); alone 2/2 at max 0. Shadow-map timing in a long run, like the earlier long-run flakes.
-- W104: catalog `engines/core` compare switch-back failed once in a full run under load (0.1565 / 255, bound 0.05; alone 0.035 / 0.032, 2/2 pass). The time-slice flake did not show in that run (max 0 / 255).
+- W104: catalog `engines/core` compare switch-back failed once in a full run under load (0.1565 / 255, bound 0.05; alone 0.035 / 0.032, 2/2 pass). Same check on `perf/presets` once in a later `--only catalog` (0.1845; alone 0.0183, 2/2 pass): the catalog's switch-back bound (0.05) is tight for a page that re-renders after the switch under GPU load. The time-slice flake did not show in that run (max 0 / 255).
 
 ## Agreed interfaces between streams
 
