@@ -2633,6 +2633,85 @@ async function probeLookupParity(pages) {
   fs.writeFileSync(path.join(OUT, 'w63-probe-lookup-parity.json'), JSON.stringify({ mode, rows }, null, 1));
   return rows;
 }
+/**
+ * W108 (`--only probe-parity [--parity-tag <name>] [--parity-base <name>]`): fixed frames of every probe path, saved to
+ * out/probe-parity/<tag>/ (default tag 'current'), and with --parity-base compared pixel for pixel against that tag's
+ * shots (the count of pixels that differ in any channel, which must be 0). For a change that must leave axis-aligned
+ * probes bit-identical (T23, oriented boxes): shoot the base on main, then the branch. Covered: examples/ssr (three's
+ * lookup unrolled and on the grid walk, one and several atlases, the traced hits' core lookup with rt=1) on rooms and
+ * Sponza, examples/probes (cube array and 2D array, the grid of mirror spheres), examples/babylon (core's ProbeSet).
+ */
+const PIXEL_DIFF = `async (a, b) => {
+  const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+  const A = await px(a), B = await px(b);
+  if (A.length !== B.length) return { px: -1, max: 255, total: A.length / 4 };
+  let n = 0, m = 0;
+  for (let k = 0; k < A.length; k += 4) { let d = 0; for (let c = 0; c < 4; c++) d = Math.max(d, Math.abs(A[k + c] - B[k + c])); if (d > 0) n++; if (d > m) m = d; }
+  return { px: n, max: m, total: A.length / 4 };
+}`;
+async function probeParity(pages) {
+  const tag = args.includes('--parity-tag') ? args[args.indexOf('--parity-tag') + 1] : 'current';
+  const base = args.includes('--parity-base') ? args[args.indexOf('--parity-base') + 1] : null;
+  const dir = path.join(OUT, 'probe-parity', tag);
+  fs.mkdirSync(dir, { recursive: true });
+  const shots = [];
+  const keep = async (p, name, expr) => {
+    const url = await p.T(expr);
+    fs.writeFileSync(path.join(dir, `${name}.png`), Buffer.from(url.split(',')[1], 'base64'));
+    shots.push({ p, name, url });
+  };
+  const compareAll = async () => {
+    if (base === null) return;
+    for (const s of shots.splice(0)) {
+      const file = path.join(OUT, 'probe-parity', base, `${s.name}.png`);
+      if (!fs.existsSync(file)) { check(`parity ${s.name}: base shot exists`, false, file); continue; }
+      const b = `data:image/png;base64,${fs.readFileSync(file).toString('base64')}`;
+      const d = await s.p.T(`(${PIXEL_DIFF})(${JSON.stringify(s.url)}, ${JSON.stringify(b)})`);
+      check(`parity ${s.name} vs '${base}': 0 differing pixels`, d.px === 0, `${d.px} of ${d.total} px differ, max ${d.max} / 255`);
+    }
+  };
+  const layouts = ['shipped', 'few', 'many', 'mixed'];
+  for (const scene of (process.env.PARITY_SCENES?.split(',') ?? ['rooms', 'showcaseSponza'])) {
+    for (const rt of [false, true]) {
+      const before = results.logs.length;
+      const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&probeLayout=shipped&texLimit=adapter&scene=${scene}${rt ? '&rt=1' : ''}`); pages.push(p);
+      await p.T("(window.__p.setDenoise(false), window.__p.setHitColor('current'), true)");
+      for (const L of layouts) {
+        await p.T(L === 'shipped' ? 'window.__p.setProbeVolumes(null)' : `window.__p.setProbeLayout(${JSON.stringify(L)})`);
+        for (const v of rt ? ['final'] : ['final', 'probeSpecular']) {
+          await p.T(`(window.__p.setView(${JSON.stringify(v)}), true)`);
+          await p.T('window.__p.step(6)');
+          await keep(p, `ssr-${scene}${rt ? '-rt' : ''}-${L}-${v}`, 'window.__p.shot()');
+        }
+      }
+      await compareAll();
+      const bad = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+      check(`parity ssr ${scene}${rt ? ' rt=1' : ''}: no validation errors or exceptions`, bad.length === 0, bad.slice(0, 2).join(' | '));
+      p.close(); pages.splice(pages.indexOf(p), 1);
+    }
+  }
+  {
+    const p = await openPage(`http://127.0.0.1:${PORT}/probes/`); pages.push(p);
+    await p.T(FREEZE);
+    for (const lookup of ['auto', 'warp']) {
+      await keep(p, `probes-${lookup}`, `(async () => { const P = window.__p; P.setLookup('${lookup}'); P.capture(); for (let i = 0; i < 3; i++) await P.shot(); return P.shot(); })()`);
+      // the sphere's spin is wherever the loop left it before FREEZE: pin it, or its tessellation moves between runs
+      await keep(p, `probes-${lookup}-grid`, `(async () => { const P = window.__p; P.setGrid(true, 0.05); P.setObject('Sphere', [0, 1.4, 1.2], 0); P.dynamicObject.rotation.set(0, 0, 0); P.capture();
+        for (let i = 0; i < 8; i++) await P.shot(); const s = await P.shot(); P.setGrid(false); P.setObject('None'); return s; })()`);
+    }
+    await compareAll();
+    p.close(); pages.splice(pages.indexOf(p), 1);
+  }
+  {
+    const p = await openPage(`http://127.0.0.1:${PORT}/babylon/?manual`); pages.push(p);
+    await p.T('window.__p.step(2)');
+    await keep(p, 'babylon', 'window.__p.shot()');
+    await compareAll();
+    p.close(); pages.splice(pages.indexOf(p), 1);
+  }
+  console.log(`  probe-parity: shots in ${path.relative(process.cwd(), dir)}${base ? `, compared with '${base}'` : ''}`);
+}
 async function probeLookupCost(pages) {
   fs.mkdirSync(OUT, { recursive: true });
   const file = path.join(OUT, 'w63-probe-lookup-cost.json');
@@ -4003,6 +4082,7 @@ async function main() {
     if (only === 'probe-lookup-ab') await probeLookupAB(pages); // W63: lookup variants interleaved in one page, JSON to out/w63-probe-lookup-ab.json
     if (only === 'probe-cluster-build') await probeClusterBuild(pages); // W63: a clustered volume list's build cost (compute), JSON to out/w63-cluster-build.json
     if (only === 'probe-lookup-parity') await probeLookupParity(pages); // W63: a lookup variant vs the shipped lookup, image for image
+    if (only === 'probe-parity') await probeParity(pages); // W108: fixed frames of every probe path, pixel for pixel against a saved base (--parity-base)
     if (only === 'probe-lookup-cost') await probeLookupCost(pages); // W63: the lookup's cost per variant and volume count, JSON to out/w63-probe-lookup-cost.json
     if (only === 'offscreen-sizes') await offscreenSizeMeasure(pages); // W60 (D4700): offscreen per-probe sizes, JSON to out/w60-offscreen.json
     if (only === 'rt-hit-atlases') await rtHitAtlasChecks(pages); // W47 (D4702): RT hits over a mixed-size set alone (also part of ssr-rt)
