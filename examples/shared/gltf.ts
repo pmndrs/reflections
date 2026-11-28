@@ -29,10 +29,16 @@ export async function availableAssets(): Promise<AssetEntry[]> {
   }
 }
 
+/** True when any of the mesh's materials is transmissive (KHR_materials_transmission: `transmission > 0`). */
+const transmissive = (mesh: THREE.Mesh) =>
+  ([] as THREE.Material[]).concat(mesh.material ?? []).some((m) => ((m as THREE.MeshPhysicalMaterial).transmission ?? 0) > 0);
+
 export async function loadGLTF(url: string): Promise<THREE.Group> {
   const gltf = await new GLTFLoader().loadAsync(url);
   gltf.scene.traverse((o) => {
-    if ((o as THREE.Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; }
+    // transmissive glass casts no shadow-map shadow: three's shadow map would treat it as opaque, while
+    // the path tracer lets the key light through (W111, T33, D3682)
+    if ((o as THREE.Mesh).isMesh) { o.castShadow = !transmissive(o as THREE.Mesh); o.receiveShadow = true; }
   });
   return gltf.scene;
 }
