@@ -18,7 +18,7 @@
 //             probe set holding the constant c must give the image of the constant fallback c, bit for
 //             bit; a structured capture must change the fallback pixels
 import {
-  ProbeSet, probeLookupWgsl, ProbeCaptureRemap, rotateByQuat, probeVolumeLocal, probeVolumeRotation, type ProbeQuaternion, LayoutPrefilter, createProbeLayout, maxLodFor, CAPTURE_MIRROR_X, CAPTURE_MIRROR_Y, CAPTURE_BABYLON_FACES, CAPTURE_CAMERA_FACES, type ProbeCaptureTransform,
+  ProbeSet, probeLookupWgsl, probeLookupFunctionWgsl, probeLookupPairFunctionWgsl, ProbeCaptureRemap, rotateByQuat, probeVolumeLocal, probeVolumeRotation, type ProbeQuaternion, LayoutPrefilter, createProbeLayout, maxLodFor, CAPTURE_MIRROR_X, CAPTURE_MIRROR_Y, CAPTURE_BABYLON_FACES, CAPTURE_CAMERA_FACES, type ProbeCaptureTransform,
   createScreenSpaceReflections, createTracedReflections, constantRadianceFallback, probeHitShading, type HitShading, type TraceProvider, type TracedReflectionsStats, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
   type FrameInputs, type ProbeLayoutId, type ProbeSetFormat, type ProbeVolume, type ScreenSpaceReflectionsInputs, reflectionsRequiredLimits,
 } from '@pmndrs/reflections/core';
@@ -249,6 +249,7 @@ async function main() {
     result.sizes = await sizes();
     result.transform = await transform();
     result.oriented = await oriented();
+    result.pair = await pair();
     result.sssr = await sssr();
     return result;
   }
@@ -467,6 +468,74 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     for (const t of cubeAt.values()) t.destroy();
     say(`slot sizes (D4700): ${res.map((x) => `${x.layout} ${x.per.map((q) => `${q.what} ${q.plain}/${q.refit}`).join(', ')}`).join('; ')}`);
     return res;
+  }
+
+  // ---- T41 (W109): two lookups at one P from one volume walk (probeLookupPairFunctionWgsl) = two lookups of their own, bit for bit
+  async function pair() {
+    const N = 8192;
+    let seed3 = 4242;
+    const r = () => ((seed3 = (seed3 * 1103515245 + 12345) >>> 0) / 4294967296);
+    const Q: ProbeQuaternion = [0.1, 0.3, -0.05, 0.95];
+    const turned: ProbeVolume[] = volumes.map((v, i) => (i === 1 ? { ...v, rotation: Q } : v));
+    // per point: P (around the rooms), R and roughness, N (the second lookup's direction and normal)
+    const P = new Float32Array(N * 12);
+    for (let i = 0; i < N; i++) {
+      const v = volumes[Math.floor(r() * volumes.length)];
+      const unit = () => { const d = [r() * 2 - 1, r() * 2 - 1, r() * 2 - 1]; const l = Math.hypot(...d) || 1; return d.map((x) => x / l); };
+      P.set([...[0, 1, 2].map((k) => v.center[k] + (r() * 2.3 - 1.15) * v.halfSize[k]), 0, ...unit(), r(), ...unit(), 0], i * 12);
+    }
+    const ptsBuf = device.createBuffer({ size: N * 48, usage: U.STORAGE | U.COPY_DST });
+    const outBuf = device.createBuffer({ size: N * 48, usage: U.STORAGE | U.COPY_SRC });
+    device.queue.writeBuffer(ptsBuf, 0, P);
+    const group = device.createBindGroup({ layout: evalBgl, entries: [{ binding: 0, resource: { buffer: ptsBuf } }, { binding: 1, resource: { buffer: outBuf } }] });
+    const run = async (vols: ProbeVolume[], extra: Partial<Parameters<typeof probeLookupFunctionWgsl>[0]>) => {
+      const set = new ProbeSet(device, { capacity: 3, sourceSize: SOURCE });
+      const enc = device.createCommandEncoder();
+      for (let s = 0; s < 3; s++) set.capture(enc, s, cubes[s % 2 === 0 ? 0 : 4]);
+      set.captureEnvironment(enc, cubes[0]);
+      set.setVolumes(vols);
+      set.update();
+      const o = { ...set.lookupOptions({ group: 1 }), ...extra };
+      // the column minus its own lookup: exactly 0 where they agree bit for bit
+      const code = `${set.wgsl({ group: 1 })}\n${probeLookupFunctionWgsl(o, 'w109Single')}\n${probeLookupPairFunctionWgsl(o, 'w109Pair')}
+@group(0) @binding(0) var<storage, read> pts: array<vec4f>;
+@group(0) @binding(1) var<storage, read_write> outv: array<vec4f>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let i = id.x;
+  if (i >= arrayLength(&pts) / 3u) { return; }
+  let P = pts[3u * i].xyz; let R = pts[3u * i + 1u].xyz; let rough = pts[3u * i + 1u].w; let N = pts[3u * i + 2u].xyz;
+  let m = w109Pair(pr_atlas, pr_sampler, &pr_table, P, R, R, rough, N, N, 1.0, PR_IDENTITY, vec3f(-1.0), true);
+  let c = w109Pair(pr_atlas, pr_sampler, &pr_table, P, R, R, rough, N, N, 1.0, PR_IDENTITY, vec3f(-1.0), false);
+  outv[3u * i] = m[0] - w109Single(pr_atlas, pr_sampler, &pr_table, P, R, R, rough, PR_IDENTITY, vec3f(-1.0), true);
+  outv[3u * i + 1u] = m[1] - w109Single(pr_atlas, pr_sampler, &pr_table, P, N, N, 1.0, PR_IDENTITY, vec3f(-1.0), true);
+  // the coverage form (no environment) of both, and the unused columns (zero)
+  let c0 = c[0] - w109Single(pr_atlas, pr_sampler, &pr_table, P, R, R, rough, PR_IDENTITY, vec3f(-1.0), false);
+  let c1 = c[1] - w109Single(pr_atlas, pr_sampler, &pr_table, P, N, N, 1.0, PR_IDENTITY, vec3f(-1.0), false);
+  outv[3u * i + 2u] = abs(c0) + abs(c1) + abs(m[2]) + abs(m[3]);
+}`;
+      const pipe = device.createComputePipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [evalBgl, set.bindGroupLayout] }), compute: { module: device.createShaderModule({ code }), entryPoint: 'main' } });
+      const p = enc.beginComputePass(); p.setPipeline(pipe); p.setBindGroup(0, group); p.setBindGroup(1, set.bindGroup); p.dispatchWorkgroups(N / 64); p.end();
+      device.queue.submit([enc.finish()]);
+      const out = await readBuffer(outBuf);
+      set.dispose();
+      // per row (0 radiance, 1 irradiance, 2 coverage forms + unused columns): max |diff| and how many lanes differ
+      const rows = [0, 1, 2].map((row) => {
+        let max = 0, n = 0;
+        for (let i = 0; i < N; i++) for (let c = 0; c < 4; c++) { const x = out[(i * 3 + row) * 4 + c]; if (x !== 0) n++; max = Math.max(max, Number.isFinite(x) ? Math.abs(x) : Infinity); }
+        return { max, n };
+      });
+      return rows;
+    };
+    const cases: Record<string, { max: number; n: number }[]> = {
+      grid: await run(volumes, {}),
+      unrolled: await run(volumes, { count: 3, orientedVolumes: false }),
+      orientedSeam: await run(turned, { distanceRoughness: true, roughnessLerp: true, dominantDirection: true }),
+      r187: await run(volumes, { lodMapping: 'r187', count: 3 }),
+    };
+    ptsBuf.destroy(); outBuf.destroy();
+    say(`pair (T41): one walk vs two, max |diff| (lanes) per row ${Object.entries(cases).map(([k, v]) => `${k} ${v.map((x) => `${x.max} (${x.n})`).join(' / ')}`).join(', ')}`);
+    return cases;
   }
 
   // ---- the SSSR radiance-fallback seam on sssr-core's analytic scene

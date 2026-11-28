@@ -2754,6 +2754,45 @@ async function probeParity(pages) {
   }
   console.log(`  probe-parity: shots in ${path.relative(process.cwd(), dir)}${base ? `, compared with '${base}'` : ''}`);
 }
+/**
+ * W109 (`--only probe-pair`, T41): a lit material's radiance and irradiance probe lookups share one volume walk
+ * (core probeLookupPairFunctionWgsl). examples/ssr, rooms and Sponza (shipped and oneSize128): the frames with the
+ * pair and with each lookup walking on its own (`lookupExp=nopair`, as before W109) are the same pixels (views raw =
+ * three's lit image and final), and the lit programs hold the pair and no single lookup.
+ */
+const PAIR_SHOTS = `async (views) => {
+  const p = window.__p; const out = {};
+  for (const mode of ['nopair', '']) {
+    p.setLookupExp(mode);
+    for (const v of views) { p.setView(v); p.ssr.settings.frameIndex = 0; await p.step(6); out[mode + ':' + v] = await p.shot(); }
+  }
+  // fragment programs are keyed by their code (r187 Pipelines)
+  const code = [...p.renderer._pipelines.programs.fragment.keys()].filter((c) => /probesLookupPair\\d+\\(/.test(c));
+  // calls per program (not the fn line): one, or a pair is built twice
+  const calls = code.map((c) => (c.match(/probesLookupPair\\d+\\(/g) ?? []).length - (c.match(/fn probesLookupPair\\d+\\(/g) ?? []).length);
+  out.programs = { pair: code.length, pairAndSingle: code.filter((c) => /fn probesLookup\\d+\\(/.test(c)).length, maxCalls: Math.max(0, ...calls) };
+  return out;
+}`;
+async function probePairChecks(pages) {
+  const views = ['raw', 'final'];
+  // Sponza recompiles slowly: its shipped layout only with PAIR_CASES=all
+  const cases = process.env.PAIR_CASES === 'all' ? [['rooms', 'shipped'], ['showcaseSponza', 'oneSize128'], ['showcaseSponza', 'shipped']] : process.env.PAIR_CASES === 'rooms' ? [['rooms', 'shipped']] : [['rooms', 'shipped'], ['showcaseSponza', 'oneSize128']];
+  for (const [scene, layout] of cases) {
+    const before = results.logs.length;
+    const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&probeLayout=${layout}&texLimit=adapter&scene=${scene}`); pages.push(p);
+    await p.T("(window.__p.setDenoise(false), window.__p.setHitColor('current'), true)");
+    await p.T(CONE_READY);
+    const r = await p.T(`(${PAIR_SHOTS})(${JSON.stringify(views)})`);
+    check(`probe pair ${scene} ${layout}: lit programs hold the one-walk pair, called once, without a single lookup beside it`, r.programs.pair > 0 && r.programs.pairAndSingle === 0 && r.programs.maxCalls === 1, JSON.stringify(r.programs));
+    for (const v of views) {
+      const d = await p.T(`(${PIXEL_DIFF})(${JSON.stringify(r['nopair:' + v])}, ${JSON.stringify(r[':' + v])})`);
+      check(`probe pair ${scene} ${layout} ${v}: one walk = two walks, 0 differing pixels`, d.px === 0, `${d.px} of ${d.total} px differ, max ${d.max} / 255`);
+    }
+    const bad = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+    check(`probe pair ${scene} ${layout}: no validation errors or exceptions`, bad.length === 0, bad.slice(0, 2).join(' | '));
+    p.close(); pages.splice(pages.indexOf(p), 1);
+  }
+}
 async function probeLookupCost(pages) {
   fs.mkdirSync(OUT, { recursive: true });
   const file = path.join(OUT, 'w63-probe-lookup-cost.json');
@@ -4174,6 +4213,7 @@ async function main() {
     if (only === 'probe-cluster-build') await probeClusterBuild(pages); // W63: a clustered volume list's build cost (compute), JSON to out/w63-cluster-build.json
     if (only === 'probe-lookup-parity') await probeLookupParity(pages); // W63: a lookup variant vs the shipped lookup, image for image
     if (only === 'probe-parity') await probeParity(pages); // W108: fixed frames of every probe path, pixel for pixel against a saved base (--parity-base)
+    if (runs('probe-pair')) await probePairChecks(pages); // W109 (T41): one volume walk for a material's radiance + irradiance, = two walks to the pixel
     if (only === 'probe-orient-cost') {
       // W108 (T23): a core ProbeSet lookup with the oriented branch compiled in vs out, on axis-aligned volumes, 1920 x 1080 lookups
       const p = await openPage(`http://127.0.0.1:${PORT}/probe-core/`); pages.push(p);
@@ -4314,6 +4354,13 @@ async function main() {
         check('probe core: axis-aligned output bit for bit with the oriented branch compiled in, and with an explicit identity rotation', o.branchIn === 0 && o.identity === 0,
           `branch in ${o.branchIn}, identity ${o.identity}`);
       }
+      // W109 (T41): the one-walk pair's columns against two lookups of their own (with and without the environment), bit for bit
+      // (three's materials use the environment form; the coverage form, no environment, divides both lookups by one coverage, which the
+      // compiler turns into one reciprocal: a last-bit difference, so three pairs only environment-form nodes)
+      check('probe core: two lookups from one volume walk = two lookups of their own, bit for bit with the environment (grid, unrolled, oriented + seam options, r187)',
+        Object.values(r.pair).every((rows) => rows[0].max === 0 && rows[1].max === 0), JSON.stringify(r.pair));
+      check('probe core: the pair\'s coverage form (no environment) = its own lookups to float rounding (< 1e-6)', Object.values(r.pair).every((rows) => rows[2].max < 1e-6),
+        Object.entries(r.pair).map(([k, rows]) => `${k} ${rows[2].max.toExponential(1)} (${rows[2].n} lanes)`).join(', '));
       check('sssr probe fallback: constant probes = constant fallback (to one f16 step)', r.sssr.constantVsProbes === 0, `${r.sssr.constantVsProbes} px differ`);
       check('sssr probe fallback: structured probes reach the fallback pixels', r.sssr.structuredVsConstant > r.sssr.pixels * 0.05, `${r.sssr.structuredVsConstant} of ${r.sssr.pixels} px`);
       const rt = r.sssr.rt;

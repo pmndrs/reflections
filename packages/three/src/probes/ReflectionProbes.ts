@@ -301,6 +301,14 @@ export class ReflectionProbes extends THREE.Object3D {
   irradiance: GPUBuffer | null = null;
   /** Bumped when `irradiance` is recomputed. */
   irradianceVersion = 0;
+  /**
+   * Counts changes to what the set's volume table holds (T43, W109), as of the last
+   * {@link updateVersion}: the lookups re-pack and upload the table only when it moved.
+   */
+  version = 0;
+  /** What the table was last packed from (see {@link updateVersion}). */
+  private tableInputs = new Float64Array(0);
+  private tableProbes: ReflectionProbe[] = [];
 
   /** One atlas per probe resolution, `textures[k]`'s render target (D4700). */
   private renderTargets: THREE.RenderTarget[] = [];
@@ -331,6 +339,41 @@ export class ReflectionProbes extends THREE.Object3D {
    */
   track(node: THREE.Node) {
     this.users.add(new WeakRef(node));
+  }
+
+  /**
+   * Compares everything the volume table is packed from with the last call and bumps {@link version}
+   * when anything changed (T43, W109): each baked probe's world matrix (brought up to date, as the
+   * packing does), `influenceSize`, `projectionSize`, `projectionOffset`, `originOffset`,
+   * `blendDistance`, `oriented`, atlas and slot; the set's `boxProjection`, `capturing`, `refitClamp`,
+   * environment slot, atlases and their mip counts, and the baked probes themselves. A few µs for a
+   * dozen probes, against tens of µs to pack the table and its volume grid (and a 64 KB upload). The
+   * probe nodes call it before each render; call it yourself to pack the table only on change.
+   */
+  updateVersion(): number {
+    const probes = this.bakedProbes, textures = this.textures;
+    const n = 5 + 2 * textures.length + probes.length * 33;
+    let a = this.tableInputs;
+    let changed = a.length !== n || this.tableProbes.length !== probes.length || probes.some((p, i) => p !== this.tableProbes[i]);
+    if (a.length !== n) a = this.tableInputs = new Float64Array(n);
+    let k = 0;
+    const put = (x: number) => { if (a[k] !== x) { a[k] = x; changed = true; } k++; };
+    put(this.boxProjection ? 1 : 0); put(this.capturing ? 1 : 0); put(this.refitClamp); put(this.bakedEnvironmentSlot); put(textures.length);
+    for (const t of textures) { put(t.id); put(t.mipmaps?.length ?? 0); }
+    for (let i = 0; i < probes.length; i++) {
+      const p = probes[i];
+      p.updateWorldMatrix(true, false);
+      const m = p.matrixWorld.elements;
+      for (let j = 0; j < 16; j++) put(m[j]);
+      const ps = p.projectionSize;
+      put(p.influenceSize.x); put(p.influenceSize.y); put(p.influenceSize.z);
+      put(ps === null ? 1 : 0); put(ps?.x ?? 0); put(ps?.y ?? 0); put(ps?.z ?? 0);
+      put(p.projectionOffset.x); put(p.projectionOffset.y); put(p.projectionOffset.z);
+      put(p.originOffset.x); put(p.originOffset.y); put(p.originOffset.z);
+      put(p.blendDistance); put(p.oriented ? 1 : 0); put(this.bakedAtlases[i] ?? 0); put(this.bakedSlots[i] ?? i);
+    }
+    if (changed) { this.version++; this.tableProbes = probes.slice(); }
+    return this.version;
   }
 
   /** Marks every tracked node for rebuild (its cache key changed). */

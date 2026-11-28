@@ -35,6 +35,7 @@
 import * as THREE from 'three/webgpu';
 import { renderOutput, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { PROBE_LOOKUP_EXPERIMENT } from '@pmndrs/reflections-core/probes/lookup';
+import { packReflectionProbesTable, probeTableStats } from '@pmndrs/reflections-three/probes/ReflectionProbesNode';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   HybridReflections, ReflectionProbe, applyReflectionsPreset, defaultHitMaterial, type DenoiserHitSourceMode, type ReflectionsPresetName, ReflectionProbes, type BakeOptions, ScreenSpaceReflectionsPass, getGPUTexture, installCubeArraySupport, reflectionProbes, reflectionsRequiredLimits,
@@ -903,6 +904,20 @@ async function main() {
       rtHitRadiance: (extra?: N) => rtHitRadiance(extra),
       stop: stopLoop, start: startLoop,
       get probes() { return probes; },
+      /** W109 (T43) bench: the probe nodes' table checks / packs / bytes uploaded (`always`: pack + upload on every check, as before T43). */
+      tableStats: probeTableStats,
+      /** W109 (T43) bench: CPU ms per call, median of `rounds` x `n` calls: the version check vs a pack + 64 KB upload. */
+      tableCost(n = 200, rounds = 9) {
+        if (!probes) return null;
+        const set = probes, buf = device.createBuffer({ size: 1 << 20, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+        let packed = new Float32Array(0) as Float32Array<ArrayBuffer>;
+        const med = (f: () => void) => { const v: number[] = []; for (let r = 0; r < rounds; r++) { const t0 = performance.now(); for (let i = 0; i < n; i++) f(); v.push((performance.now() - t0) / n); } v.sort((a, b) => a - b); return v[v.length >> 1]; };
+        const check = med(() => set.updateVersion());
+        const pack = med(() => { packed = packReflectionProbesTable(set, packed, { atlases: 'all' }); });
+        const upload = med(() => device.queue.writeBuffer(buf, 0, packed));
+        buf.destroy();
+        return { check, pack, upload, bytes: packed.byteLength, probes: set.bakedProbes.length };
+      },
       /**
        * W37: re-bake the scene's probes with the page's options plus `extra` (`bounces`, `exclude`
        * as a predicate over meshes or a list). `include: true` first clears every
