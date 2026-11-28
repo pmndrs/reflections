@@ -130,6 +130,12 @@ graph.addTask(composite);
 The geometry task needs `disableImageProcessing = true`, so the tracer and the composite get linear HDR. Feed the
 composite's `outputTexture` to your image-processing task. `examples/babylon/src/main.ts` has the whole graph.
 
+If you rebuild the graph (for a new size, say), build the image-processing task on a `ThinImageProcessingPostProcess`
+given the configuration: `new ThinImageProcessingPostProcess('present', engine, { imageProcessingConfiguration:
+scene.imageProcessingConfiguration })`. The default one compiles its tone mapping and sRGB encode only when that
+configuration changes. `FrameGraph.dispose()` resets its tasks without disposing them, so the configuration doesn't
+change on a rebuild, and the new task presents linear colour, much darker.
+
 ## The parts
 
 | Piece | What it does |

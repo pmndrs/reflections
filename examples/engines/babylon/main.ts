@@ -33,6 +33,7 @@ import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder.js';
 import { CreatePlane } from '@babylonjs/core/Meshes/Builders/planeBuilder.js';
 import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder.js';
 import { CreateTorusKnot } from '@babylonjs/core/Meshes/Builders/torusKnotBuilder.js';
+import { ThinImageProcessingPostProcess } from '@babylonjs/core/PostProcesses/thinImageProcessingPostProcess.js';
 import { Scene } from '@babylonjs/core/scene.js';
 // Deep imports skip Babylon's side effects: the WebGPU extensions (render targets, MRT) and the geometry renderer load here.
 import '@babylonjs/core/Engines/WebGPU/Extensions/index.js';
@@ -165,10 +166,6 @@ async function main() {
     const width = engine.getRenderWidth(), height = engine.getRenderHeight();
     ssr.configure(width, height);
     scene.frameGraph = null;
-    // FrameGraph.dispose() only resets its tasks. Dispose them too: the old present otherwise keeps the scene's
-    // image processing marked 'applied by a post process', so the new present never compiles its defines and
-    // draws linear colour with no exposure, ACES or sRGB encode (a resize made the page ~50/255 darker, W103).
-    for (const task of graph?.tasks ?? []) task.dispose();
     graph?.dispose();
     graph = new FrameGraph(scene);
     const size = { width, height };
@@ -218,7 +215,12 @@ async function main() {
     composite.hitDistanceTexture = trace.hitDistanceTexture;
     graph.addTask(composite);
     // -----------------------------------------------------------------------------------------------------------
-    const present = new FrameGraphImageProcessingTask('present', graph);
+    // The present is given the scene's image processing explicitly, so it compiles its defines when built. Without it,
+    // it compiles them only when that configuration changes: on the first build (applyByPostProcess turns on), but not
+    // on a rebuild for a new size (FrameGraph.dispose() resets the old tasks without disposing them, so it stays on),
+    // and the page then drew linear colour with no exposure, ACES or sRGB encode (~50/255 darker than three, W103).
+    const present = new FrameGraphImageProcessingTask('present', graph,
+      new ThinImageProcessingPostProcess('present', engine, { imageProcessingConfiguration: scene.imageProcessingConfiguration }));
     present.sourceTexture = composite.outputTexture;
     present.targetTexture = backbufferColorTextureHandle;
     const ip = present.postProcess;
@@ -264,13 +266,31 @@ async function main() {
     if (animateBox.checked) setTime(time + Math.min(0.05, engine.getDeltaTime() / 1000));
     frame();
   });
-  addEventListener('resize', async () => {
-    if (resizing) return;
-    resizing = true;
-    engine.resize();
-    await build();
-    resizing = false;
-  });
+  // Rebuilds are queued, not dropped: a resize that lands during a rebuild still gets its own (else the canvas kept
+  // the old size). A shot first catches up with the canvas's size, as the resize event can come after it.
+  let rebuilt = Promise.resolve();
+  const fits = () => canvas.clientWidth === engine.getRenderWidth() && canvas.clientHeight === engine.getRenderHeight();
+  const resize = () => {
+    rebuilt = rebuilt.then(async () => {
+      if (fits()) return;
+      resizing = true;
+      engine.resize();
+      await build();
+      resizing = false;
+    }).catch((e) => console.error(e));
+    return rebuilt;
+  };
+  addEventListener('resize', resize);
+  const sized = () => (fits() ? rebuilt : resize());
+  // The tracer's default hit-colour cone builds its pipeline asynchronously (core, W76) and a tracer runs without it until
+  // then, a new one after each resize too: a shot waits for it, so two shots never set 'off' against 'cone' (W103: 0.17 / 255).
+  const traced = async () => {
+    for (let i = 0; i < 200 && ssr.enabled && ssr.settings.hitColorFilter !== 'off' && !ssr.core?.outputs.hitColorFilterActive; i++) {
+      frame();
+      await getDevice(engine).queue.onSubmittedWorkDone();
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  };
 
   const gpuErrors: string[] = [];
   getDevice(engine).addEventListener('uncapturederror', (e) => { const m = (e as GPUUncapturedErrorEvent).error.message; gpuErrors.push(m); console.error('WebGPU validation:', m); });
@@ -280,7 +300,7 @@ async function main() {
   (window as unknown as { __p: unknown }).__p = {
     stop() { looping = false; engine.stopRenderLoop(); },
     /** Render n frames, then the PNG data URL of the canvas. */
-    async shot(n = 1) { for (let i = 0; i < n - 1; i++) frame(); frame(); const url = canvas.toDataURL('image/png'); await getDevice(engine).queue.onSubmittedWorkDone(); return url; },
+    async shot(n = 1) { await sized(); await traced(); for (let i = 0; i < n - 1; i++) frame(); frame(); const url = canvas.toDataURL('image/png'); await getDevice(engine).queue.onSubmittedWorkDone(); return url; },
     /** The baseline of `brief.compare`: true turns screen space off (probes only). */
     setCompare(on: boolean) { setSSR(!on); },
     setView,

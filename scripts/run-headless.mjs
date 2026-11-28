@@ -3534,12 +3534,12 @@ async function engineChecks() {
     } finally { p.close(); }
   }
   // per-channel difference to three (decoded in a scratch page). Whole image: the stated bound per engine (r3f is three;
-  // core's renderer lights a little brighter; Babylon's direct light is about half of three's, W99: three without its diffuse
-  // IBL reads luminance 49.6 / 39.2, Babylon without bounce 24.2 / 14.2; bounce light from the probes is in since W99,
-  // 60.5 -> 50.2 / 255). Screen space alone: what turning it on adds, (on - off), against three's (on - off): the reflections'
-  // own difference.
+  // core's renderer lights a little brighter; Babylon: bounce light from the probes since W99, 60.5 -> 50.2 / 255, and W103
+  // found the rest was the page's present losing ACES and the sRGB encode on a rebuild, 50.2 -> 6.9 / 255; what is left is
+  // cube shadows vs three's PCF, no denoiser on the floor, Babylon's gamma 2.2). Screen space alone: what turning it on
+  // adds, (on - off), against three's (on - off): the reflections' own difference.
   if (!shots.three) return;
-  const BOUND = { r3f: 1, core: 16, babylon: 54 };
+  const BOUND = { r3f: 1, core: 16, babylon: 10 };
   const SSR_BOUND = { r3f: 0.5, core: 2, babylon: 2 };
   const DELTA = `async (a0, a1, b0, b1) => {
     const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
