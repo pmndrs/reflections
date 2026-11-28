@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Core and three (the traced pass; Babylon and pixi have no traced pass): `traceSettings.hitLobeOcclusionRays` (default 0, off) and
+  `hitLobeOcclusionLength` (default 0.3 x the hit's camera distance): short visibility rays over a traced hit's own
+  specular lobe, on a fixed pattern (no noise), darken the lobe's probe light where nearby geometry blocks it (the floor
+  under a car, inside a wheel). 2 rays cost about +0.5 ms at 1080p on carConcept.
 - three: a material that samples the probes and binds more textures (or samplers) per stage than the device allows now
   gets one console warning naming it, the count, how many are probe atlases, the limit and the fix
   (`reflectionsRequiredLimits(adapter)`, or fewer probe sizes), when three builds it and before WebGPU rejects its

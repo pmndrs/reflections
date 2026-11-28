@@ -1,0 +1,381 @@
+{
+ "date": "2026-11-28T15:33:10.595Z",
+ "label": "w107-n1",
+ "results": [
+  {
+   "config": "off",
+   "scene": "bench:plateFloor/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 427045,
+     "drift": 0.0601,
+     "pct8": 0,
+     "rest": 0.0006,
+     "orbitStd": 0.0785,
+     "d2": 0.1342,
+     "quad": 0.158,
+     "quadRaw": 0.9587,
+     "speckle": 0.0001,
+     "drift2": 0.0612,
+     "orbitStd2": 0.0782
+    },
+    "plateRefl": {
+     "px": 16430,
+     "drift": 0.1177,
+     "pct8": 0,
+     "rest": 0.0012,
+     "orbitStd": 0.1333,
+     "d2": 0.1336,
+     "quad": 0.4154,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 0.1165,
+     "orbitStd2": 0.1339
+    },
+    "underPlate": {
+     "px": 22940,
+     "drift": 0.098,
+     "pct8": 0,
+     "rest": 0.0011,
+     "orbitStd": 0.2478,
+     "d2": 0.0856,
+     "quad": 0.2978,
+     "quadRaw": 0.7661,
+     "speckle": 0,
+     "drift2": 0.095,
+     "orbitStd2": 0.2453
+    },
+    "_pan": 0.3796
+   }
+  },
+  {
+   "config": "off",
+   "scene": "bench:carConcept@w50/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 458630,
+     "drift": 0.3057,
+     "pct8": 0.0098,
+     "rest": 0.0074,
+     "orbitStd": 0.3626,
+     "d2": 0.2958,
+     "quad": 0.072,
+     "quadRaw": 0.9326,
+     "speckle": 0.0527,
+     "drift2": 0.306,
+     "orbitStd2": 0.3642
+    },
+    "wheel": {
+     "px": 9900,
+     "drift": 0.6821,
+     "pct8": 0,
+     "rest": 0.0157,
+     "orbitStd": 1.0419,
+     "d2": 0.765,
+     "quad": 0.6076,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 0.6404,
+     "orbitStd2": 1.0644
+    },
+    "car": {
+     "px": 85400,
+     "drift": 0.5138,
+     "pct8": 0,
+     "rest": 0.0101,
+     "orbitStd": 0.56,
+     "d2": 0.4735,
+     "quad": 0.2522,
+     "quadRaw": 0.9878,
+     "speckle": 0.0095,
+     "drift2": 0.5054,
+     "orbitStd2": 0.5666
+    },
+    "_pan": 0.6051
+   }
+  },
+  {
+   "config": "off",
+   "scene": "bench:carConcept@hero/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 367551,
+     "drift": 0.2851,
+     "pct8": 0.0139,
+     "rest": 0.0065,
+     "orbitStd": 0.3327,
+     "d2": 0.3167,
+     "quad": 0.0908,
+     "quadRaw": 0.577,
+     "speckle": 0.0449,
+     "drift2": 0.2845,
+     "orbitStd2": 0.3315
+    },
+    "door (hero)": {
+     "px": 3993,
+     "drift": 0.3801,
+     "pct8": 0,
+     "rest": 0.0039,
+     "orbitStd": 0.5689,
+     "d2": 0.1998,
+     "quad": 0.3607,
+     "quadRaw": 0.988,
+     "speckle": 0.0157,
+     "drift2": 0.3671,
+     "orbitStd2": 0.5778
+    },
+    "_pan": 0.5592
+   }
+  },
+  {
+   "config": "lobe 4",
+   "scene": "bench:plateFloor/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 427045,
+     "drift": 0.0608,
+     "pct8": 0,
+     "rest": 0.0006,
+     "orbitStd": 0.0787,
+     "d2": 0.1343,
+     "quad": 0.1652,
+     "quadRaw": 0.9594,
+     "speckle": 0.0001,
+     "drift2": 0.0618,
+     "orbitStd2": 0.0783
+    },
+    "plateRefl": {
+     "px": 16430,
+     "drift": 0.1172,
+     "pct8": 0,
+     "rest": 0.0012,
+     "orbitStd": 0.1355,
+     "d2": 0.1363,
+     "quad": 0.4129,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 0.1186,
+     "orbitStd2": 0.1361
+    },
+    "underPlate": {
+     "px": 22940,
+     "drift": 0.1072,
+     "pct8": 0,
+     "rest": 0.0011,
+     "orbitStd": 0.2512,
+     "d2": 0.0878,
+     "quad": 0.3019,
+     "quadRaw": 0.7779,
+     "speckle": 0,
+     "drift2": 0.101,
+     "orbitStd2": 0.2469
+    },
+    "_pan": 0.3803
+   }
+  },
+  {
+   "config": "lobe 4",
+   "scene": "bench:carConcept@w50/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 458630,
+     "drift": 0.2808,
+     "pct8": 0.0584,
+     "rest": 0.0074,
+     "orbitStd": 0.3535,
+     "d2": 0.296,
+     "quad": 0.0603,
+     "quadRaw": 0.9326,
+     "speckle": 0.0524,
+     "drift2": 0.2828,
+     "orbitStd2": 0.3528
+    },
+    "wheel": {
+     "px": 9900,
+     "drift": 0.5862,
+     "pct8": 0,
+     "rest": 0.0154,
+     "orbitStd": 1.1081,
+     "d2": 0.7854,
+     "quad": 0.6166,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 0.554,
+     "orbitStd2": 1.1222
+    },
+    "car": {
+     "px": 85400,
+     "drift": 0.452,
+     "pct8": 0.0152,
+     "rest": 0.0101,
+     "orbitStd": 0.5513,
+     "d2": 0.4763,
+     "quad": 0.2749,
+     "quadRaw": 0.9878,
+     "speckle": 0.0095,
+     "drift2": 0.449,
+     "orbitStd2": 0.556
+    },
+    "_pan": 0.615
+   }
+  },
+  {
+   "config": "lobe 4",
+   "scene": "bench:carConcept@hero/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 367551,
+     "drift": 0.2487,
+     "pct8": 0.0367,
+     "rest": 0.0065,
+     "orbitStd": 0.3272,
+     "d2": 0.318,
+     "quad": 0.1053,
+     "quadRaw": 0.5771,
+     "speckle": 0.045,
+     "drift2": 0.2361,
+     "orbitStd2": 0.3248
+    },
+    "door (hero)": {
+     "px": 3993,
+     "drift": 0.3487,
+     "pct8": 0,
+     "rest": 0.0037,
+     "orbitStd": 0.5534,
+     "d2": 0.2021,
+     "quad": 0.3683,
+     "quadRaw": 0.988,
+     "speckle": 0.0157,
+     "drift2": 0.3182,
+     "orbitStd2": 0.5565
+    },
+    "_pan": 0.5604
+   }
+  },
+  {
+   "config": "lobe 8",
+   "scene": "bench:plateFloor/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 427045,
+     "drift": 0.0604,
+     "pct8": 0,
+     "rest": 0.0006,
+     "orbitStd": 0.0786,
+     "d2": 0.1343,
+     "quad": 0.1637,
+     "quadRaw": 0.9591,
+     "speckle": 0.0001,
+     "drift2": 0.0615,
+     "orbitStd2": 0.0782
+    },
+    "plateRefl": {
+     "px": 16430,
+     "drift": 0.1144,
+     "pct8": 0,
+     "rest": 0.0012,
+     "orbitStd": 0.1357,
+     "d2": 0.1356,
+     "quad": 0.4155,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 0.116,
+     "orbitStd2": 0.1368
+    },
+    "underPlate": {
+     "px": 22940,
+     "drift": 0.1028,
+     "pct8": 0,
+     "rest": 0.0013,
+     "orbitStd": 0.2494,
+     "d2": 0.0875,
+     "quad": 0.3032,
+     "quadRaw": 0.7755,
+     "speckle": 0,
+     "drift2": 0.1011,
+     "orbitStd2": 0.2443
+    },
+    "_pan": 0.3803
+   }
+  },
+  {
+   "config": "lobe 8",
+   "scene": "bench:carConcept@w50/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 458630,
+     "drift": 0.2708,
+     "pct8": 0.0637,
+     "rest": 0.0074,
+     "orbitStd": 0.355,
+     "d2": 0.296,
+     "quad": 0.0593,
+     "quadRaw": 0.9326,
+     "speckle": 0.0525,
+     "drift2": 0.2472,
+     "orbitStd2": 0.354
+    },
+    "wheel": {
+     "px": 9900,
+     "drift": 0.6011,
+     "pct8": 0,
+     "rest": 0.0151,
+     "orbitStd": 1.0986,
+     "d2": 0.7716,
+     "quad": 0.6288,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 0.5558,
+     "orbitStd2": 1.1151
+    },
+    "car": {
+     "px": 85400,
+     "drift": 0.4585,
+     "pct8": 0.0117,
+     "rest": 0.0103,
+     "orbitStd": 0.5523,
+     "d2": 0.4756,
+     "quad": 0.2697,
+     "quadRaw": 0.9878,
+     "speckle": 0.0095,
+     "drift2": 0.4357,
+     "orbitStd2": 0.5573
+    },
+    "_pan": 0.6151
+   }
+  },
+  {
+   "config": "lobe 8",
+   "scene": "bench:carConcept@hero/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 367551,
+     "drift": 0.2423,
+     "pct8": 0.0375,
+     "rest": 0.0065,
+     "orbitStd": 0.3298,
+     "d2": 0.3184,
+     "quad": 0.1037,
+     "quadRaw": 0.5771,
+     "speckle": 0.0451,
+     "drift2": 0.2323,
+     "orbitStd2": 0.3239
+    },
+    "door (hero)": {
+     "px": 3993,
+     "drift": 0.3087,
+     "pct8": 0,
+     "rest": 0.0038,
+     "orbitStd": 0.563,
+     "d2": 0.2023,
+     "quad": 0.3682,
+     "quadRaw": 0.988,
+     "speckle": 0.0157,
+     "drift2": 0.3006,
+     "orbitStd2": 0.5416
+    },
+    "_pan": 0.56
+   }
+  }
+ ]
+}
