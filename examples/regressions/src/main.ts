@@ -19,7 +19,7 @@ import { FrameGBuffer, getDevice, getGPUTexture } from '@pmndrs/reflections/thre
 import bc6hSrc from '../../../packages/core/src/encode/bc6h.ts?raw';
 import { gbufferFirstFrameChecks, gbufferLitPassChecks, rtHistoryChecks, rtStatsChecks, rtTileChecks, ssrHistoryChecks } from './ssr';
 import { hiZLimitChecks, probeEnvDominantChecks, probeIrradianceChecks, probeSourceSizeChecks, rtLimitChecks } from './core';
-import { probeRebakeChecks, probeScaleChecks } from './probes';
+import { probeRebakeChecks, probeScaleChecks, textureLimitChecks } from './probes';
 import { specularSwapAssetChecks, specularSwapChecks } from './swap';
 import { rtTextureChecks } from './rtTextures';
 
@@ -41,6 +41,7 @@ const F2: Record<string, () => Promise<unknown>> = {
   specularSwap: specularSwapChecks,
   specularSwapAssets: specularSwapAssetChecks,
   rtTextures: rtTextureChecks,
+  textureLimit: textureLimitChecks,
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

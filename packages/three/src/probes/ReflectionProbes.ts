@@ -192,8 +192,6 @@ const DEFAULT_RESOLUTION = 256;
 /** A face size as the bake takes it: rounded down to a power of two like #35046 (2712ba1b23), but from 64 (D23). */
 const faceSize = (resolution: number) => Math.max(64, THREE.MathUtils.floorPowerOfTwo(resolution));
 const DEFAULT_ROUGHNESS_LERP = false;
-/** Devices already warned about a set's atlas count against their sampled-texture limit (D4900). */
-const warnedSampledTextures = new WeakSet<GPUDevice>();
 /** Default {@link BakeOptions.bounces} (D4300, decided 2026-11-11, maintainer Q1: 2, tunable). */
 const DEFAULT_BOUNCES = 2;
 
@@ -355,16 +353,8 @@ export class ReflectionProbes extends THREE.Object3D {
     const seamFix: SeamFix = cubeArray ? 'none' : this.seamFix;
     const warp = seamFix === 'warp';
     const device0: GPUDevice = r.backend.device;
-    // each size is one more sampled texture wherever the set is looked up (D4700, D4900): materials
-    // and three's composite (12 + 1 per size in examples/ssr). At WebGPU's default 16 a three- or
-    // four-size set leaves a heavy material or an extra G-buffer target little room: say so once
-    const sampledLimit: number = r.backend.device.limits.maxSampledTexturesPerShaderStage;
-    if (plan.resolutions.length >= 3 && sampledLimit <= 16 && !warnedSampledTextures.has(r.backend.device)) {
-      warnedSampledTextures.add(r.backend.device);
-      console.warn(`ReflectionProbes: ${plan.resolutions.length} probe sizes (${plan.resolutions.join(', ')} px) are ${plan.resolutions.length} sampled textures in every shader that samples the set; `
-        + `this device allows ${sampledLimit} per stage. If a material or pass stops drawing, create the renderer with `
-        + `new WebGPURenderer({ requiredLimits: reflectionsRequiredLimits(adapter) }) (asks for up to 32), or use fewer sizes.`);
-    }
+    // each size is one more sampled texture (and sampler) wherever the set is looked up (D4700, D4900); the lookup node
+    // counts each material's bindings against the device's limits when three builds it and warns once per material (T24, D5640)
     // 6 layers per slot: the default limit (256 layers) holds 41 probes plus the environment per atlas
     plan.slots.forEach((slots, a) => {
       if (slots * 6 > device0.limits.maxTextureArrayLayers) {

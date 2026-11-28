@@ -45,7 +45,7 @@ Status values:
 9. **T3: cone-footprint hit colour + mirrorBias compensation (X2).** It goes after raw fireflies at the source and makes `mirrorBias` honest (D49, D3550). First step: `hitColorFilter: 'cone'` on a downsampler pyramid, gated on line spread.
 10. **T14: lobe occlusion for traced hits.** Accepted (decision 20). It is the one fix for the hub, the floor under the car (24 vs PT 8) and the reflected wheels (D3681, W56). First step: build it as an option, off by default, and tune it on T53's scenes before the car.
 
-Next in line: T4 (X3 ratio reuse: the biggest noise win on paper, but L, and it replaces the quad copy that T2 and T10 work on), T24 (silent texture-limit failure, S), T12 and T16 (X1, S each).
+Next in line: T4 (X3 ratio reuse: the biggest noise win on paper, but L, and it replaces the quad copy that T2 and T10 work on) T12 and T16 (X1, S each).
 
 ## Impact x effort
 
@@ -54,7 +54,7 @@ Row ids per cell. Out-of-scope rows are left out.
 | impact \ effort | S | M | L |
 |---|---|---|---|
 | **high** |  | T30 |  |
-| **med** | T17, T21, T22, T24, T29 | T4, T6, T11, T14, T15, T23, T25, T26, T27, T37, T41, T54, T72 | T7, T18, T35, T48, T52, T59, T74 |
+| **med** | T17, T29 | T4, T6, T11, T14, T15, T23, T25, T26, T27, T37, T41, T54, T72 | T7, T18, T35, T48, T52, T59, T74 |
 | **low** | T2, T8, T9, T12, T13, T19, T32, T33, T40, T42, T43, T45, T47, T49, T55, T56, T57, T60, T61, T62, T63, T64, T75, T76 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
 
 ## The full table
@@ -97,7 +97,6 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
 | T23 | Oriented probe boxes: a rotation per volume in core, three and the W63 grid | med | M | accepted | decision 18, D3701, D4950, W55 | Add 3 rotation rows per volume; box test and parallax in the local frame; check the front-tyre step goes. |
-| T24 | Material-side texture-limit warning: a three material past maxSampledTexturesPerShaderStage fails with no message of ours | med | S | ready | W62, decision 16, D4900 | At bake / reflectionProbes() time, count each lit material's sampled textures plus the atlases; warn with the fix. |
 | T25 | Near-mirror floors show the HDRI blurred: misses take the probe, the PT and three's SSR show it sharp | med | M | experiment | W21, W30, D1806 | Try a full-resolution environment past the probes for misses below the mirror threshold (three's path, not core). |
 | T26 | SSR-to-probe step on glossy floors is radiance, not blur; our env-slot captures read ~8/255 darker than PMREM ones | med | M | experiment | W26, D3201, D903, D25 | Compare the two roughness-1 irradiances of mirrorWall's sky (env slot vs PMREM), then re-run --only seam. |
 | T27 | Blended seams between neighbouring probes (hero in the RT-off floor, floor-quadrant probes) | med | M | decide | D4401, D4800, W38, W61 | Parked by the maintainer (2026-11-12); put it on the Decisions page after T21 / T23 land. |
@@ -150,7 +149,7 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
 | T54 | Path-traced ground truth for the ssr kits (moving, mirrors), then retune the hybrid thresholds against it | med | M | ready | HANDOFF tracked fixes (Q2), D52, D4301, D4402, D4802, D4701, D3513, D901, W37, W38 | Reuse the compare page's WebGPU tracer (W21 / W23) on the ssr kits; then sweep D52's cut-offs. |
-| T55 | Check runner: a full run passes the 10-min limit, leaves Chromes behind; flakes; parity on full lit images | low | S | ready | W47, W48, W49, W63, W38, W7, F3 | Split the default run or raise the limit; close Chromes on timeout; compare atlas texels for probe parity. |
+| T55 | Check runner: probe parity compares full lit images (W104 did the time limit and the Chrome teardown) | low | S | ready | W47, W48, W49, W63, W38, W7, F3, W104 | Compare atlas texels for probe parity. |
 | T56 | Tooling odds: the cone filter's async compile (first frames run 'off', then pop to 'cone', D5301), grey out #29 controls, cube2d compile error, probe weight export, bench three-side upscale | low | S | ready | D3590, W48, W53, W35, D4801, D4803, D3620, D3621, D1502, W51 | One small tooling worktree; each item is under an hour. Also the shared Sponza view and the dts heap. |
 | T57 | Re-run the W21 compare readouts against the current PT reference (@pmndrs/pathtracer 0.1.0, D5453; clear coat in) | low | S | ready | W23, W21, D2305, D2303, D5453 | Re-run docs/research/showcase-compare.md when its numbers next matter; raise samples for sub-8-bit calls. |
 | T72 | Drop-in follow-ups (W84): an `antialias: 'upscaler'` option on `Reflections` (optional peer, dynamic import; cuts the remaining shimmer), a `/react` entry for `useReflections` once R3F v10 leaves alpha, auto / time-sliced re-bake, moving-mesh refit wiring, `hitColor: 'final'` | med | M | ready | W84 | The upscaler AA option first (flicker); the `/react` entry waits on R3F v10 stable and the maintainer's call. |

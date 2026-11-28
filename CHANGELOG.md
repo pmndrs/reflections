@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- three: a material that samples the probes and binds more textures (or samplers) per stage than the device allows now
+  gets one console warning naming it, the count, how many are probe atlases, the limit and the fix
+  (`reflectionsRequiredLimits(adapter)`, or fewer probe sizes), when three builds it and before WebGPU rejects its
+  pipeline. It replaces the bake's warning at three or more probe sizes, which also fired when everything fit.
+
 ## 0.1.0
 
 First stable release (npm dist-tag `latest`), with the examples set. Changes since 0.1.0-alpha.0:

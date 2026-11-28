@@ -110,6 +110,103 @@ export async function probeRebakeChecks() {
   return { before, after, settled };
 }
 
+/**
+ * textureLimit (T24, W104, D5640): a material whose own maps plus the probe set's atlases pass the
+ * device's sampled-texture limit gets our console warning (naming it, the count and the limit) when
+ * three builds it, once; WebGPU rejects its pipeline with the same count. A light material on the same
+ * set gets none, and on a renderer with reflectionsRequiredLimits the heavy one draws without either.
+ * The page catches WebGPU's errors in an error scope and three's console error, so the deliberate
+ * failure stays out of the run's validation check; both come back in the result.
+ */
+export async function textureLimitChecks() {
+  const { reflectionProbes, reflectionsRequiredLimits } = await import('@pmndrs/reflections/three');
+  const tex = (i: number) => {
+    const t = new THREE.DataTexture(new Uint8Array([40 + i * 10, 120, 200 - i * 10, 255]), 1, 1);
+    t.needsUpdate = true;
+    return t;
+  };
+  const heavyMaps = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'clearcoatMap', 'clearcoatRoughnessMap', 'clearcoatNormalMap',
+    'sheenColorMap', 'sheenRoughnessMap', 'iridescenceMap', 'iridescenceThicknessMap', 'specularIntensityMap', 'specularColorMap'] as const;
+  const textures = heavyMaps.map((_, i) => tex(i));
+  const heavy = () => {
+    const m = new THREE.MeshPhysicalMaterial({ name: 'HeavyPhysical', clearcoat: 1, sheen: 1, iridescence: 1, roughness: 0.3, metalness: 0.5, emissive: 0x111111 });
+    heavyMaps.forEach((k, i) => { (m as unknown as Record<string, THREE.Texture>)[k] = textures[i]; });
+    return m;
+  };
+  const light = () => new THREE.MeshStandardMaterial({ name: 'LightStandard', map: textures[0], normalMap: textures[1], roughness: 0.3 });
+
+  const run = async (limits: 'default' | 'reflections') => {
+    const canvas = document.createElement('canvas');
+    let requiredLimits: Record<string, number> | undefined;
+    if (limits === 'reflections') {
+      const adapter = await navigator.gpu.requestAdapter();
+      requiredLimits = reflectionsRequiredLimits(adapter!);
+    }
+    const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, ...(requiredLimits ? { requiredLimits } : {}) });
+    renderer.setSize(64, 64, false);
+    await renderer.init();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const device: GPUDevice = (renderer as any).backend.device;
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0.1, 0.1, 0.1);
+    scene.environment = flatEnvironment(0.5, 0.5, 0.5);
+    scene.add(new THREE.Mesh(new THREE.BoxGeometry(10, 10, 10), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, side: THREE.BackSide })));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    // three probe sizes: the set default (64, with the environment), 128 and 256: three atlases
+    const probes = new ReflectionProbes();
+    const sizes = [null, 128, 256];
+    sizes.forEach((res, i) => { const p = new ReflectionProbe(3, 3, 3); p.position.set(i * 3 - 3, 0, 0); p.resolution = res; probes.add(p); });
+    scene.add(probes);
+    probes.bake(renderer, scene, { resolution: 64, bounces: 1 });
+    scene.environmentNode = reflectionProbes(probes) as never;
+    const geometry = new THREE.SphereGeometry(0.5, 16, 8);
+    const heavyMesh = new THREE.Mesh(geometry, heavy()); heavyMesh.name = 'heavySphere'; heavyMesh.position.set(-0.7, 0, 0);
+    const lightMesh = new THREE.Mesh(geometry, light()); lightMesh.name = 'lightSphere'; lightMesh.position.set(0.7, 0, 0);
+    scene.add(heavyMesh, lightMesh);
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 50);
+    camera.position.set(0, 0, 3);
+
+    // our warnings and three's error log, captured while the deliberate failure renders
+    const warnings: string[] = [], threeErrors: string[] = [], gpuErrors: string[] = [];
+    const warn = console.warn, error = console.error;
+    console.warn = (...a: unknown[]) => { const s = a.map(String).join(' '); if (s.startsWith('ReflectionProbes:')) warnings.push(s); else warn(...a); };
+    console.error = (...a: unknown[]) => { threeErrors.push(a.map(String).join(' ')); };
+    try {
+      for (let frame = 0; frame < 3; frame++) {
+        device.pushErrorScope('validation');
+        renderer.render(scene, camera);
+        const e = await device.popErrorScope();
+        if (e) gpuErrors.push(e.message);
+      }
+      // a re-bake with the node installed: the captures build the materials again for the cube camera
+      device.pushErrorScope('validation');
+      probes.bake(renderer, scene, { resolution: 64, bounces: 1 });
+      const e = await device.popErrorScope();
+      if (e) gpuErrors.push(e.message);
+      await device.queue.onSubmittedWorkDone();
+      await new Promise((r) => setTimeout(r, 200)); // three's own popErrorScope().then
+    } finally {
+      console.warn = warn; console.error = error;
+    }
+    // WebGPU's own count, from its message ("The number of sampled textures (17) in the Fragment stage ...")
+    const reported = [...gpuErrors, ...threeErrors].map((m) => /number of sampled textures \((\d+)\)/i.exec(m)?.[1]).find((x) => x !== undefined);
+    const ours = warnings.map((w) => /binds (\d+) sampled textures/.exec(w)?.[1]).find((x) => x !== undefined);
+    const out = {
+      limits, maxSampledTextures: device.limits.maxSampledTexturesPerShaderStage, maxSamplers: device.limits.maxSamplersPerShaderStage,
+      atlases: probes.textures.length, warnings, heavyWarned: warnings.filter((w) => w.includes('HeavyPhysical')).length,
+      lightWarned: warnings.filter((w) => w.includes('LightStandard')).length,
+      oursCount: ours === undefined ? null : Number(ours), webgpuCount: reported === undefined ? null : Number(reported),
+      gpuErrors: gpuErrors.map((m) => m.slice(0, 300)), threeErrors: threeErrors.map((m) => m.slice(0, 300)),
+    };
+    probes.dispose(); renderer.dispose();
+    return out;
+  };
+  const atDefault = await run('default');
+  const raised = await run('reflections');
+  textures.forEach((t) => t.dispose());
+  return { atDefault, raised };
+}
+
 export async function probeScaleChecks() {
   const renderer = await newRenderer();
   const out: Record<string, unknown> = {};
