@@ -55,7 +55,7 @@ Row ids per cell. Out-of-scope rows are left out.
 |---|---|---|---|
 | **high** |  |  |  |
 | **med** | T14, T17, T29 | T4, T6, T11, T15, T25, T26, T27, T37, T41, T54, T72 | T7, T18, T35, T48, T52, T59, T74 |
-| **low** | T2, T8, T9, T12, T13, T19, T32, T33, T40, T42, T43, T45, T47, T49, T55, T56, T57, T60, T61, T62, T63, T64, T75, T76 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
+| **low** | T2, T9, T12, T13, T19, T32, T40, T42, T43, T45, T47, T55, T56, T57, T60, T61, T62, T63, T64, T75, T76 | T20, T28, T44, T46, T50, T51 | T31, T34, T39 |
 
 ## The full table
 
@@ -70,7 +70,6 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | T76 | The cone hit colour (default since W76) loses a thin bright light's reflection with no denoiser and AA off: a strip at r 0.3 reads 2 % of the PT's peak vs 107 % with `hitColorFilter: 'off'`. The default output is unaffected (the upscaler + denoiser lose it either way) | low | S | experiment | D5680, W106, D5101 | Try: a ray that misses near on-screen geometry reads the pyramid at its end point; or a smaller cone scale (0.25 keeps 66 %). Check carConcept paint outliers (D5101) in the same run. |
 | T6 | Raw-signal fireflies with the denoiser off: r 0.35 sphere, car paint, offscreen floor at 512 px, pixi arcade `flicker` | med | M | experiment | W12, W17, W60, W18, W19, D50 | Track with T1's speckle count; re-measure after T3 / T4. W60's case is the SSR / probe blend against a sharper probe. |
 | T7 | Reflection-aware motion for the upscaler and denoiser: reflected detail smears in motion. The reactive mask exists (D4202, W36); reflection reprojection does not `flicker` | med | L | experiment | D4202, D3500, W36, decision 14 | Prototype the hit's reprojection (FFX reflection reprojection) as an upscaler input on facingMirrors; compare with the reactive mask. |
-| T8 | Examples' GTAO grain reaches rough surfaces with ?specOcc=1 (no temporal filter or blur) `flicker` | low | S | ready | D4510, W39 | Add three's denoise node or a temporal pass in examples/shared/ao.ts; time it at 1080p. |
 | T9 | Display sharpness: the AA softens the image. RCAS at 0.8 raised mirror-edge flicker 0.16 -> 4.2 % (W36), so sharpness stays 0 (D4201) | low | S | experiment | W40, D4201, D3500, W36 | Only values between 0 and 0.8, and with ?upscale=; keep only if T1's flicker numbers don't rise. |
 
 ### Edges & silhouettes
@@ -108,7 +107,6 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | T29 | Examples drop three's geometry roughness when the AA is on `flicker` | med | S | decide | decision 19, D3720, W56, W102 | W102: gate failed. Off under the upscaler raises flicker (orbit std +2-3 % on carConcept and Sponza, speckle +11-62 %); 0.25 too (speckle +7-21 %). Three's term stays. Revisit with T30 (a variance-form specular AA replacing three's term). |
 | T31 | Clear coat: subtract the coat's IBL in the composite (grazing edge line), then SSR / RT for the coat layer | low | L | experiment | D3512, D3741, D3541, D603, W41, W44, W58, W11 | Start with the coat env term (F_Schlick(0.04) x DFG at the coat roughness, coat normal) on carConcept's skirt line. |
 | T32 | Specular occlusion darkens near-mirror misses beside lit objects with RT off | low | S | ready | D4513, D3551, W39, W45, decision 7 | Fade SO toward 1 below the tracer's threshold, or weight it by hit distance / confidence. |
-| T33 | Transmissive glass casts shadow-map shadows in the examples | low | S | ready | D3682, W54 | Skip castShadow for materials with transmission > 0 in examples/shared/gltf.ts. |
 | T34 | Transparent objects in the G-buffer (glass is not split out of the pass) | low | L | experiment | D404, D3520, W42, W54 | No action: W54 found the glass reflection matches the PT (121.9 vs 121.7). Revisit on a scene where it doesn't. |
 
 ### Denoiser (other repo)
@@ -137,7 +135,6 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
 | T48 | Re-shade and denoiser on Babylon / pixi: diffuse albedo and F0 in their G-buffers, no denoiser hookup `flicker` | med | L | experiment | D55, D1803, W18, W19, D1802 | Hook the denoiser into examples/babylon first; check roughnessUnpack on the GPU there. |
-| T49 | Distance-based roughness is off in core's ProbeSet (Babylon, pixi), on in three | low | S | ready | D2701, W26 | Turn it on and run --only babylon and --only pixi3d. |
 | T50 | Babylon cleanup: SO on the fallback only, coat base layer, velocity.z, core conventions, capture transform | low | M | ready | D3000, D3002, D3003, D1800, D1801, D1805, W35 | D3000 first (its trigger has fired); the rest when a third engine needs them. |
 | T51 | pixi composite: material occlusion on reflections, split-sum vs pixi-3d's own env, three submits a frame | low | M | ready | D4512, D2004, D2006, W34, W39 | An env-only compare like Babylon's iblCompare; fix D4512 when a pixi-3d scene has AO maps. |
 | T52 | pixi-3d closed beta: G-buffer source, material values, no-env-specular switch, HDR filters, stale arcade probe | med | L | waiting | D2100, D2101, D2102, D2005, D2003, W19 | Waiting on pixi-3d going public with a G-buffer output and a no-environment-specular switch. |
