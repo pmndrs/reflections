@@ -2710,7 +2710,8 @@ async function probeParity(pages) {
     await p.T(`(async () => { const P = window.__p, t = () => P.ssr.tracer;
       for (let i = 0; i < 100 && !t()?.outputs.hitColorFilterActive; i++) { await P.step(1); await new Promise((r) => setTimeout(r, 100)); }
       return !!t()?.outputs.hitColorFilterActive; })()`);
-    await p.T('window.__p.step(2)');
+    // the blue noise turns with the frame count, which the load's compile time sets: pin it
+    await p.T('(window.__p.ssr.settings.frameIndex = 0, window.__p.step(2))');
     await keep(p, 'babylon', 'window.__p.shot()');
     await compareAll();
     p.close(); pages.splice(pages.indexOf(p), 1);
