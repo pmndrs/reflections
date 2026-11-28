@@ -3004,7 +3004,7 @@ async function showcaseChecks(pages) {
       return { off, on, material, back, changed, errors: P.gpuErrors.length };
     })()`);
     const gaErrs = results.logs.slice(beforeG).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
-    check('showcase carConcept: variance specular AA (applySpecularAA) raises the traced G-buffer roughness, \'material\' leaves it, \'off\' restores it', ga.errors === 0 && gaErrs.length === 0 && ga.changed > 0 && ga.on > ga.off + 1e-3 && Math.abs(ga.material - ga.off) < 1e-4 && Math.abs(ga.back - ga.off) < 1e-4,
+    check('showcase carConcept: variance specular AA (applySpecularAA) raises the traced G-buffer roughness, \'material\' leaves it, \'off\' restores it', ga.errors === 0 && gaErrs.length === 0 && ga.changed > 0 && ga.on > ga.off + 2e-3 && Math.abs(ga.material - ga.off) < 5e-4 && Math.abs(ga.back - ga.off) < 5e-4, // first run: off 0.0784, variance 0.0814, material / off again 0.0783 (TAA jitter moves the mean ~1e-4)
       `${ga.changed} materials; mean normalRoughness.w off ${ga.off.toFixed(4)}, variance ${ga.on.toFixed(4)}, traceRoughness material ${ga.material.toFixed(4)}, off again ${ga.back.toFixed(4)}${gaErrs.length ? '; ' + gaErrs[0] : ''}`);
   }
 }
