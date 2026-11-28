@@ -341,6 +341,8 @@ async function main() {
   /** W39: Lagarde's specular occlusion from a screen-space AO (GTAO) on the composite's probe part (D66, D4510). */
   let specOcc = q.get('specOcc') === '1';
   let ssao: ScreenSpaceAO | null = null;
+  /** W112 (T77): the display graph holds GTAO (specOcc on or the `ao` view shown); setView rebuilds when that changes. */
+  let aoBuilt = false;
   function setHitColor(m: HitColorMode) {
     if (!HIT_MODES.includes(m)) throw new Error(`hit colour ${m}?`);
     hitMode = m;
@@ -357,12 +359,14 @@ async function main() {
     const gridUV = uv().mul(3);
     const cell = gridUV.floor();
     const at = uGrid.equal(1).select(gridUV.fract(), uv());
-    // the AO source follows the scene's camera; only rendered while something samples it (specOcc or the ao view)
+    // the AO source follows the scene's camera. W112 (T77): GTAO renders every frame once any graph the frame
+    // draws references it, whatever uView selects, so it is built only when specOcc or the `ao` view reads it
     ssao?.dispose();
-    const ao = ssao = new ScreenSpaceAO(ssr.gbuffer, kit!.camera);
+    aoBuilt = specOcc || shownView === 'ao';
+    const ao = ssao = aoBuilt ? new ScreenSpaceAO(ssr.gbuffer, kit!.camera) : null;
     Object.assign(hybrid.options, {
       probes: useProbes && probesEnabled && compositeProbes ? probes : null, environment: kit!.scene.environment, environmentIntensity: kit!.scene.environmentIntensity,
-      ao: specOcc ? (u: N) => ao.sample(u) : null,
+      ao: specOcc && ao ? (u: N) => ao.sample(u) : null,
     });
     hybrid.rebuild();
     const c = composite = hybrid.composite({ uv: at });
@@ -411,7 +415,7 @@ async function main() {
             src.equal(2).select(vec3(0.95, 0.2, 0.85), src.equal(3).select(vec3(1, 0.55, 0.1), ssrHit))));
         }
         // W39: the AO input (GTAO on the G-buffer) and the specular occlusion factor the composite applies (1 with specOcc off)
-        case 'ao': return c.geometry.select(vec3(ao.sample(at)), vec3(0.02, 0.03, 0.08));
+        case 'ao': return ao ? c.geometry.select(vec3(ao.sample(at)), vec3(0.02, 0.03, 0.08)) : vec3(0);
         case 'specularOcclusion': return c.geometry.select(vec3(c.specularOcclusion), vec3(0.02, 0.03, 0.08));
         // W61: the dominant probe's colour (as the volume overlay draws it) over the lit image's luma
         case 'probeIndex': return c.geometry.select(probeColor(pw.dominant, pw.volumes).mul(litLuma.mul(0.7).add(0.3)), bg);
@@ -784,7 +788,7 @@ async function main() {
     uView.value = VIEWS.indexOf(v);
     viewSel.value = v;
     shownView = v;
-    if (PROBE_VIEWS.includes(v) !== probeViewsBuilt && composite) buildDisplay();
+    if ((PROBE_VIEWS.includes(v) !== probeViewsBuilt || (specOcc || v === 'ao') !== aoBuilt) && composite) buildDisplay();
   }
 
   await load(q.get('scene') ?? 'mirrorWall');

@@ -9,6 +9,9 @@
 // GTAO renders once per frame (its `updateBefore`) the first time a material that samples it is drawn:
 // the hybrid signal pass in `hybrid.update()`, after `ssr.render()` wrote this frame's G-buffer. No
 // temporal filtering (the node's `useTemporalFiltering` stays off), so it does not flicker at rest.
+// W112 (T77): "samples it" means "references it": a graph that holds `sample()` behind a uniform-picked
+// branch (a debug-view select) still renders GTAO every frame (~6 ms at 1080p). The pages construct it
+// only when specOcc or the `ao` view reads it, and rebuild their display when that changes.
 //
 // W111 (T8, D5780): GTAO turns its slice directions by a 5 x 5 tiled pattern (and jitters its steps), so
 // its raw output carries a fixed grain that reached rough surfaces through the specular occlusion and
