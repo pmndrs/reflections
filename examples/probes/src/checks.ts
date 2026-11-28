@@ -28,6 +28,7 @@ export interface Page {
   capture(live?: boolean): void;
   shot(): Promise<string>;
   setGrid(on: boolean, roughness?: number): void;
+  setRotation(angle: number, oriented?: boolean): void;
 }
 
 /** Mean and max abs difference (0-255, rgb) between two PNG data URLs, and the share of pixels off by > 2. */
@@ -721,6 +722,37 @@ export function makeChecks(p: Page) {
       cube.update = update;
       env.dispose();
       const result = { counts, litVsBefore: await diff(lit, before), afterVsBefore: await diff(after, before) };
+      restore();
+      return result;
+    },
+
+    /**
+     * T23 (W108): oriented boxes. The whole world (rooms, lights, probes) turned `angle` about y with the
+     * camera turned along: with `oriented` probes the boxes turn with the rooms and the image is the
+     * unturned page's (but for the captures' and shadow maps' texels, which stay world-aligned); with
+     * world-axis-aligned boxes (before T23) they no longer fit the walls. Also: `oriented` on unturned
+     * probes is the axis-aligned image bit for bit (the table packs them axis-aligned; the lookup has the
+     * branch compiled in), and the helper draws the turned boxes.
+     */
+    async rotated(angle = 0.5) {
+      const shot = async () => { p.setGrid(true, 0.05); p.dynamicObject.visible = true; p.dynamicObject.position.set(0, 1.4, 1.2); p.dynamicObject.rotation.set(0, 0, 0); p.dynamicMaterial.roughness = 0;
+        bake(); await settle(); return p.shot(); };
+      const reference = await shot();
+      p.setRotation(0, true);
+      const identity = await shot();
+      p.setRotation(angle, true);
+      const oriented = await shot();
+      // the helper's boxes carry the probes' world rotation
+      const q = new THREE.Quaternion(), probeQ = new THREE.Quaternion();
+      let helperErr = 0;
+      const boxes = p.probesHelper.children.filter((c) => (c as THREE.Box3Helper).isLineSegments) as THREE.Box3Helper[];
+      (p.probes.children as ReflectionProbe[]).forEach((probe, i) => { probe.getWorldQuaternion(probeQ); boxes[i * 2].getWorldQuaternion(q); helperErr = Math.max(helperErr, 1 - Math.abs(q.dot(probeQ))); });
+      p.setRotation(angle, false);
+      const aabb = await shot();
+      p.setRotation(0, false);
+      const back = await shot();
+      p.dynamicObject.visible = false; p.dynamicMaterial.roughness = 0;
+      const result = { identity: await diff(identity, reference), oriented: await diff(oriented, reference), aabb: await diff(aabb, reference), back: await diff(back, reference), helperErr, boxes: boxes.length };
       restore();
       return result;
     },

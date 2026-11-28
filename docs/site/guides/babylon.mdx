@@ -73,6 +73,8 @@ const ssr = new ScreenSpaceReflections({ engine, probes });
 A probe can capture from a point other than its influence box's centre (`originOffset`) and project onto a box
 offset from it (`projectionOffset`), as three's `ReflectionProbe` does: that lets a room's influence box reach below the
 floor, so the floor gets the probe's full weight, while the capture point and the walls stay where the room is.
+`rotation` (a quaternion `[x, y, z, w]`, as a Babylon `Quaternion` holds it) turns the boxes and both offsets, for a
+room or an object that is not aligned with the world axes; the capture stays a world-aligned cube.
 
 For bounce light, give each PBR material the probes' irradiance. three's materials get it from
 `scene.environmentNode`; Babylon has no per-pixel environment hook, so a material plugin runs the probe lookup in the

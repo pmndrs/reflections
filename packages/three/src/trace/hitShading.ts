@@ -17,7 +17,7 @@ import {
   type EnvironmentHitShading, type EnvironmentMapping, type HitLights, type HitShading, type ProbeHitShading,
 } from '@pmndrs/reflections-core';
 import { type ReflectionProbes } from '../probes/ReflectionProbes';
-import { ReflectionProbesNode, atlasOptions, atlasSignature, packReflectionProbesTable, probeLayoutFor } from '../probes/ReflectionProbesNode';
+import { ReflectionProbesNode, atlasOptions, atlasSignature, orientedSignature, packReflectionProbesTable, probeLayoutFor } from '../probes/ReflectionProbesNode';
 
 /**
  * The probes three lights `scene` with: those of a plain `reflectionProbes(probes)` environment
@@ -61,7 +61,8 @@ export class ThreeHitShading {
     if (probes?.texture && probes.bakedProbes) {
       const layout = probeLayoutFor(probes);
       // several atlases (D4700): their count and each volume's atlas are compiled in (D4702)
-      key = `probes:${layout.id}:${layout.mipLevelCount}:${probes.bakedProbes.length}:${atlasSignature(probes)}`;
+      // and whether a probe is oriented (T23): the oriented-box path is compiled in only then, as in the probe node
+      key = `probes:${layout.id}:${layout.mipLevelCount}:${probes.bakedProbes.length}:${atlasSignature(probes)}:${orientedSignature(probes) ? 'o' : ''}`;
       this.source = { kind: 'probes', probes };
     } else {
       key = (environment as THREE.CubeTexture).isCubeTexture ? 'cube' : 'equirect';
@@ -72,7 +73,7 @@ export class ThreeHitShading {
     this.key = key;
     if (this.source.kind === 'probes') {
       const p = this.source.probes;
-      this.probe = probeHitShading(this.device, { layout: probeLayoutFor(p), mirrorX: true, count: p.bakedProbes.length, ...atlasOptions(p) });
+      this.probe = probeHitShading(this.device, { layout: probeLayoutFor(p), mirrorX: true, count: p.bakedProbes.length, ...atlasOptions(p), orientedVolumes: orientedSignature(p) });
     } else {
       this.env = environmentHitShading(this.device, key as EnvironmentMapping);
     }

@@ -10,6 +10,9 @@
 // #35053 shim, installed at start-up unless ?shim=0; 'warp' / 'none': the 2D array with that seam
 // handling), and a diagnostic 'hw' mode that copies every probe into its own cube texture and samples
 // those with the hardware (seamless) cube sampler, from the same bake.
+// `?rotated=1` (T23, W108) turns the whole world (rooms, lights, probes) 0.5 rad about y (`&angle=` for
+// another) with `oriented` probes, whose boxes turn with it; `?rotated=aabb` the same with world-axis-
+// aligned boxes (before T23). The camera turns too, so the view matches the unturned page.
 // `window.__p` drives the page headlessly (poses, roughness, bake and frame timing, screenshots).
 
 import * as THREE from 'three/webgpu';
@@ -325,8 +328,29 @@ async function main() {
   // ---- headless hooks (same shape as the harness for the PR build) --------------------------
   const median = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
   const idle = () => device.queue.onSubmittedWorkDone();
+  // T23 (W108): the world under a pivot turned about y, probes oriented (their boxes turn) or not
+  const pivot = new THREE.Group();
+  let worldAngle = 0;
+  function setRotation(angle: number, oriented = true) {
+    const turn = (v: THREE.Vector3, a: number) => v.applyAxisAngle(new THREE.Vector3(0, 1, 0), a);
+    const target = controls.target.clone();
+    // the camera follows the world, so the view stays the unturned page's
+    camera.position.copy(turn(turn(camera.position.clone(), -worldAngle), angle));
+    controls.target.copy(turn(turn(target, -worldAngle), angle));
+    camera.lookAt(controls.target);
+    controls.update();
+    worldAngle = angle;
+    if (angle !== 0 && pivot.parent === null) { for (const o of [...scene.children]) pivot.add(o); scene.add(pivot); }
+    if (angle === 0 && pivot.parent !== null) { scene.remove(pivot); for (const o of [...pivot.children]) scene.add(o); }
+    pivot.rotation.y = angle;
+    scene.updateMatrixWorld(true);
+    for (const probe of probes.children as ReflectionProbe[]) probe.oriented = oriented;
+    probesHelper.update();
+  }
+  if (q.has('rotated')) { setRotation(Number(q.get('angle') ?? 0.5), q.get('rotated') !== 'aabb'); capture(); }
+
   const page = {
-      THREE, scene, camera, renderer, controls, probes, probesHelper, gridMaterial, dynamicMaterial, dynamicObject, grid, params, capture,
+      THREE, scene, camera, renderer, controls, probes, probesHelper, gridMaterial, dynamicMaterial, dynamicObject, grid, params, capture, setRotation,
       get node() { return node; },
       // setAnimationLoop(null) leaves three's internal rAF running, which keeps advancing the node
       // frame at times that depend on load; stop it too, so a stopped page only advances when told

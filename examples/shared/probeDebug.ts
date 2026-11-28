@@ -20,6 +20,19 @@ import { reflectionProbeVolumes, type ReflectionProbes } from '@pmndrs/reflectio
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 
+/**
+ * P in volume `v`'s frame (T23, W108): P - centre, turned by the inverse of its rotation when it is oriented
+ * (the conjugate quaternion, as core's pr_toLocal); axis-aligned: P - centre, as before.
+ */
+function localP(v: ReturnType<typeof reflectionProbeVolumes>[number], P: N): N {
+  const lp: N = P.sub(vec3(...v.center));
+  const q = v.rotation;
+  if (!q || (q[0] === 0 && q[1] === 0 && q[2] === 0)) return lp;
+  const n = Math.hypot(...q), u: N = vec3(-q[0] / n, -q[1] / n, -q[2] / n), w = q[3] / n;
+  const t: N = u.cross(lp).mul(2);
+  return lp.add(t.mul(w)).add(u.cross(t));
+}
+
 /** Hue of probe `i` (golden-ratio steps, so neighbours in table order differ). */
 const hue = (i: number) => (i * 0.618034) % 1;
 export const probePaletteColor = (i: number) => new THREE.Color().setHSL(hue(i), 0.8, 0.55);
@@ -41,7 +54,7 @@ export function probeWeights(probes: ReflectionProbes | null, P: N): ProbeWeight
   let remaining: N = float(1).toVar();
   let best: N = float(0).toVar(), dominant: N = float(-1).toVar(), count: N = float(0).toVar();
   vols.forEach((v, k) => {
-    const lp: N = P.sub(vec3(...v.center));
+    const lp: N = localP(v, P);
     const d: N = vec3(...v.halfSize).sub(lp.abs());
     const inside: N = d.x.min(d.y).min(d.z);
     const w: N = inside.div(Math.max(v.fade ?? 0.5, 1e-6)).clamp(0, 1).mul(remaining).toVar();
@@ -63,7 +76,7 @@ export function probeBlendColor(probes: ReflectionProbes | null, P: N): N {
   let remaining: N = float(1).toVar();
   let c: N = vec3(0).toVar();
   vols.forEach((v, k) => {
-    const lp: N = P.sub(vec3(...v.center));
+    const lp: N = localP(v, P);
     const d: N = vec3(...v.halfSize).sub(lp.abs());
     const w: N = d.x.min(d.y).min(d.z).div(Math.max(v.fade ?? 0.5, 1e-6)).clamp(0, 1).mul(remaining).toVar();
     const p = probePaletteColor(k);
@@ -102,10 +115,15 @@ export class ProbeVolumesOverlay extends THREE.Group {
       const c = probePaletteColor(i);
       const half = new THREE.Vector3(...v.halfSize);
       const centre = new THREE.Vector3(...v.center);
-      this.add(new THREE.Box3Helper(new THREE.Box3(centre.clone().sub(half), centre.clone().add(half)), c));
+      // an oriented volume (T23): the boxes turned about the centre, the projection offset in the box's frame
+      const q = new THREE.Quaternion(...(v.rotation ?? [0, 0, 0, 1])).normalize();
+      const ib = new THREE.Box3Helper(new THREE.Box3(centre.clone().sub(half), centre.clone().add(half)), c);
+      ib.quaternion.copy(q);
+      this.add(ib);
       const ps = new THREE.Vector3(...(v.projectionSize ?? v.halfSize.map((h) => h * 2) as [number, number, number]));
-      const pc = centre.clone().add(new THREE.Vector3(...(v.projectionOffset ?? [0, 0, 0])));
+      const pc = centre.clone().add(new THREE.Vector3(...(v.projectionOffset ?? [0, 0, 0])).applyQuaternion(q));
       const pb = new THREE.Box3Helper(new THREE.Box3().setFromCenterAndSize(pc, ps), c.clone().multiplyScalar(0.45));
+      pb.quaternion.copy(q);
       this.add(pb);
       const m = new THREE.Mesh(this.dot, new THREE.MeshBasicMaterial({ color: c }));
       m.position.set(...(v.origin ?? v.center));

@@ -58,12 +58,13 @@ const _size = new THREE.Vector3();
 const _clear = new THREE.Color();
 
 /**
- * A local reflection volume. Add it to a {@link ReflectionProbes} container. The volumes are
- * world-axis-aligned boxes centred on the probe; they follow its world position and scale
- * ({@link probeWorldScale}). Rotation is ignored, the probe's own and its parents': the boxes stay
- * aligned with the world axes. Each size (x, y, z) is scaled by the world length of the probe's
- * local axis of the same name, so a probe turned 90 degrees under a non-uniformly scaled parent
- * gets that parent's scale along the axis it now points at, not along the world axis it lies on.
+ * A local reflection volume. Add it to a {@link ReflectionProbes} container. The volumes are boxes
+ * centred on the probe; they follow its world position and scale ({@link probeWorldScale}). By default
+ * (as #35046) rotation is ignored, the probe's own and its parents': the boxes stay aligned with the
+ * world axes. With {@link oriented} (T23) they turn with the probe's world rotation instead, so a box
+ * fits a turned room or a part of a turned car. Each size (x, y, z) is scaled by the world length of the
+ * probe's local axis of the same name, so a probe turned 90 degrees under a non-uniformly scaled
+ * parent gets that parent's scale along the axis it now points at, not along the world axis it lies on.
  */
 export class ReflectionProbe extends THREE.Object3D {
   readonly isReflectionProbe = true;
@@ -72,8 +73,18 @@ export class ReflectionProbe extends THREE.Object3D {
   /** Size of the box reflections are projected onto, usually the room's walls. `null` uses `influenceSize`. */
   projectionSize: THREE.Vector3 | null = null;
   /**
+   * The boxes turn with the probe's world rotation, its own and its parents' (not in #35046; T23, W108;
+   * UE's box reflection captures and HDRP's volumes do this). Default false: world-axis-aligned boxes,
+   * as #35046. The influence box, its blend, the projection box and both offsets are then in the
+   * probe's frame; the captures stay world-aligned cubes taken at the capture point, so the probe's
+   * rotation never turns what it sees. A mirrored parent (negative scale) turns the box by the
+   * nearest rotation (a box is symmetric; the offsets keep their mirrored side). Changing it rebuilds
+   * the set's lookups on the next render.
+   */
+  oriented = false;
+  /**
    * Offset of the projection box's centre from the probe (#35046), scaled with the probe like the
-   * volume sizes; rotation is ignored. Use it when the capture point isn't at the room's centre: the
+   * volume sizes; rotation is ignored unless {@link oriented}. Use it when the capture point isn't at the room's centre: the
    * probe (and its influence volume) stays where it captures, the box moves onto the walls.
    * {@link originOffset} is the converse: the volumes stay, the capture point moves. Both can be set.
    */
@@ -84,7 +95,8 @@ export class ReflectionProbe extends THREE.Object3D {
    * Where the probe captures from, relative to the centre of its volumes (not in #35046; Godot's
    * `origin_offset`). Default zero: capture from the centre. Box projection still uses the volumes
    * as placed, so a room's box can stay on its walls while the capture point moves to where it
-   * sees the most of the room. Scaled with the probe like the volume sizes; rotation is ignored.
+   * sees the most of the room. Scaled with the probe like the volume sizes; rotation is ignored
+   * unless {@link oriented}.
    */
   readonly originOffset = new THREE.Vector3();
   /**
@@ -112,6 +124,7 @@ export class ReflectionProbe extends THREE.Object3D {
     this.blendDistance = source.blendDistance;
     this.originOffset.copy(source.originOffset);
     this.resolution = source.resolution;
+    this.oriented = source.oriented;
     return this;
   }
 }
@@ -635,10 +648,37 @@ export function probeWorldScale(object: THREE.Object3D, target: THREE.Vector3) {
   return target.set(Math.hypot(e[0], e[1], e[2]), Math.hypot(e[4], e[5], e[6]), Math.hypot(e[8], e[9], e[10]));
 }
 
-/** World-space capture point of a probe: its position plus its scaled `originOffset`. */
+/** World-space capture point of a probe: its position plus its scaled `originOffset` (turned too when {@link ReflectionProbe.oriented}). */
 export function probeOrigin(probe: ReflectionProbe, target: THREE.Vector3) {
+  if (probe.oriented === true) return probeWorldOffset(probe, probe.originOffset, _size).add(probe.getWorldPosition(target));
   probeWorldScale(probe, _size).multiply(probe.originOffset);
   return probe.getWorldPosition(target).add(_size);
+}
+
+const _m3 = new THREE.Matrix3(), _basis = new THREE.Matrix4(), _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3();
+
+/**
+ * The rotation an {@link ReflectionProbe.oriented} probe's boxes take (T23): its world matrix's basis,
+ * normalized, as a quaternion. With a mirrored parent (negative determinant) the x axis is flipped
+ * back, giving the nearest rotation (the box is symmetric). With shear, the basis's own rotation (Gram-
+ * Schmidt from x then y). The identity for a singular matrix.
+ */
+export function probeWorldRotation(object: THREE.Object3D, target: THREE.Quaternion) {
+  object.updateWorldMatrix(true, false);
+  const m = object.matrixWorld;
+  if (m.determinant() === 0) return target.identity();
+  m.extractBasis(_x, _y, _z);
+  if (m.determinant() < 0) _x.negate();
+  _x.normalize();
+  _y.addScaledVector(_x, -_y.dot(_x)).normalize();
+  _z.crossVectors(_x, _y);
+  return target.setFromRotationMatrix(_basis.makeBasis(_x, _y, _z));
+}
+
+/** `offset`, a vector in the probe's own frame, as a world vector: through the probe's world matrix (scale, rotation, mirror). */
+export function probeWorldOffset(object: THREE.Object3D, offset: THREE.Vector3, target: THREE.Vector3) {
+  object.updateWorldMatrix(true, false);
+  return target.copy(offset).applyMatrix3(_m3.setFromMatrix4(object.matrixWorld));
 }
 
 function volume(probe: ReflectionProbe) {

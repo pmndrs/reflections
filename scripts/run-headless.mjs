@@ -2666,6 +2666,94 @@ async function probeLookupParity(pages) {
   fs.writeFileSync(path.join(OUT, 'w63-probe-lookup-parity.json'), JSON.stringify({ mode, rows }, null, 1));
   return rows;
 }
+/**
+ * W108 (`--only probe-parity [--parity-tag <name>] [--parity-base <name>]`): fixed frames of every probe path, saved to
+ * out/probe-parity/<tag>/ (default tag 'current'), and with --parity-base compared pixel for pixel against that tag's
+ * shots (the count of pixels that differ in any channel, which must be 0). For a change that must leave axis-aligned
+ * probes bit-identical (T23, oriented boxes): shoot the base on main, then the branch. Covered: examples/ssr (three's
+ * lookup unrolled and on the grid walk, one and several atlases, the traced hits' core lookup with rt=1) on rooms and
+ * Sponza, examples/probes (cube array and 2D array, the grid of mirror spheres), examples/babylon (core's ProbeSet).
+ */
+const PIXEL_DIFF = `async (a, b) => {
+  const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+  const A = await px(a), B = await px(b);
+  if (A.length !== B.length) return { px: -1, max: 255, total: A.length / 4 };
+  let n = 0, m = 0;
+  for (let k = 0; k < A.length; k += 4) { let d = 0; for (let c = 0; c < 4; c++) d = Math.max(d, Math.abs(A[k + c] - B[k + c])); if (d > 0) n++; if (d > m) m = d; }
+  return { px: n, max: m, total: A.length / 4 };
+}`;
+async function probeParity(pages) {
+  const tag = args.includes('--parity-tag') ? args[args.indexOf('--parity-tag') + 1] : 'current';
+  const base = args.includes('--parity-base') ? args[args.indexOf('--parity-base') + 1] : null;
+  const dir = path.join(OUT, 'probe-parity', tag);
+  fs.mkdirSync(dir, { recursive: true });
+  const shots = [];
+  const keep = async (p, name, expr) => {
+    const url = await p.T(expr);
+    fs.writeFileSync(path.join(dir, `${name}.png`), Buffer.from(url.split(',')[1], 'base64'));
+    shots.push({ p, name, url });
+  };
+  const compareAll = async () => {
+    if (base === null) return;
+    for (const s of shots.splice(0)) {
+      const file = path.join(OUT, 'probe-parity', base, `${s.name}.png`);
+      if (!fs.existsSync(file)) { check(`parity ${s.name}: base shot exists`, false, file); continue; }
+      const b = `data:image/png;base64,${fs.readFileSync(file).toString('base64')}`;
+      const d = await s.p.T(`(${PIXEL_DIFF})(${JSON.stringify(s.url)}, ${JSON.stringify(b)})`);
+      check(`parity ${s.name} vs '${base}': 0 differing pixels`, d.px === 0, `${d.px} of ${d.total} px differ, max ${d.max} / 255`);
+    }
+  };
+  const layouts = ['shipped', 'few', 'many', 'mixed'];
+  const want = (page) => !process.env.PARITY_PAGES || process.env.PARITY_PAGES.split(',').includes(page); // ssr, probes, babylon
+  for (const scene of want('ssr') ? (process.env.PARITY_SCENES?.split(',') ?? ['rooms', 'showcaseSponza']) : []) {
+    for (const rt of [false, true]) {
+      const before = results.logs.length;
+      const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&aa=off&denoise=0&probeLayout=shipped&texLimit=adapter&scene=${scene}${rt ? '&rt=1' : ''}`); pages.push(p);
+      // the blue noise pinned (the frame count before a shot follows compile times)
+      await p.T("(window.__p.setDenoise(false), window.__p.setHitColor('current'), window.__p.ssr.settings.frameIndex = 0, true)");
+      for (const L of layouts) {
+        await p.T(L === 'shipped' ? 'window.__p.setProbeVolumes(null)' : `window.__p.setProbeLayout(${JSON.stringify(L)})`);
+        for (const v of rt ? ['final'] : ['final', 'probeSpecular']) {
+          await p.T(`(window.__p.setView(${JSON.stringify(v)}), true)`);
+          // the cone's pipeline compiles in the background (W76): shoot once it is in, or the shot depends on compile time
+          await p.T(CONE_READY);
+          await p.T('window.__p.step(6)');
+          await keep(p, `ssr-${scene}${rt ? '-rt' : ''}-${L}-${v}`, 'window.__p.shot()');
+        }
+      }
+      await compareAll();
+      const bad = results.logs.slice(before).filter((l) => /invalid|validation|uncaptured|exception/i.test(l));
+      check(`parity ssr ${scene}${rt ? ' rt=1' : ''}: no validation errors or exceptions`, bad.length === 0, bad.slice(0, 2).join(' | '));
+      p.close(); pages.splice(pages.indexOf(p), 1);
+    }
+  }
+  if (want('probes')) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/probes/`); pages.push(p);
+    await p.T(FREEZE);
+    for (const lookup of ['auto', 'warp']) {
+      await keep(p, `probes-${lookup}`, `(async () => { const P = window.__p; P.setLookup('${lookup}'); P.capture(); for (let i = 0; i < 3; i++) await P.shot(); return P.shot(); })()`);
+      // the sphere's spin is wherever the loop left it before FREEZE: pin it, or its tessellation moves between runs
+      await keep(p, `probes-${lookup}-grid`, `(async () => { const P = window.__p; P.setGrid(true, 0.05); P.setObject('Sphere', [0, 1.4, 1.2], 0); P.dynamicObject.rotation.set(0, 0, 0); P.capture();
+        for (let i = 0; i < 8; i++) await P.shot(); const s = await P.shot(); P.setGrid(false); P.setObject('None'); return s; })()`);
+    }
+    await compareAll();
+    p.close(); pages.splice(pages.indexOf(p), 1);
+  }
+  if (want('babylon')) {
+    const p = await openPage(`http://127.0.0.1:${PORT}/babylon/?manual`); pages.push(p);
+    // the cone's pipeline compiles in the background (W76): shoot once it is in, or the shot depends on compile time
+    await p.T(`(async () => { const P = window.__p, t = () => P.ssr.tracer;
+      for (let i = 0; i < 100 && !t()?.outputs.hitColorFilterActive; i++) { await P.step(1); await new Promise((r) => setTimeout(r, 100)); }
+      return !!t()?.outputs.hitColorFilterActive; })()`);
+    // the blue noise turns with the frame count, which the load's compile time sets: pin it
+    await p.T('(window.__p.ssr.settings.frameIndex = 0, window.__p.step(2))');
+    await keep(p, 'babylon', 'window.__p.shot()');
+    await compareAll();
+    p.close(); pages.splice(pages.indexOf(p), 1);
+  }
+  console.log(`  probe-parity: shots in ${path.relative(process.cwd(), dir)}${base ? `, compared with '${base}'` : ''}`);
+}
 async function probeLookupCost(pages) {
   fs.mkdirSync(OUT, { recursive: true });
   const file = path.join(OUT, 'w63-probe-lookup-cost.json');
@@ -3335,6 +3423,21 @@ async function babylonChecks(pages) {
     check(`${tag}: mirror floor reflects the scene (confident SSR)`, st.mirrorPixels > 1000 && st.mirrorConfident > 0.3,
       `${st.mirrorPixels} mirror px, ${(st.mirrorConfident * 100).toFixed(1)}% with confidence >= 0.9`);
     if (variant === 'auto') {
+      // T23 (W108): BabylonProbe.rotation through core. A probe turned 90 degrees about y with projection 16 x 4.2 x 12
+      // (its square influence box maps onto itself) = the axis-aligned probe with projection 12 x 4.2 x 16; the unturned
+      // probe differs. SSR off (probes and environment only), same capture point: no re-bake.
+      const ro = await p.T(`(async () => { const P = window.__p, saved = P.probes.getProbes().map((x) => ({ ...x })); P.setSSR(false); P.ssr.settings.frameIndex = 0;
+        const shot = async (probe) => { P.probes.setProbes([{ ...saved[0], ...probe }]); await P.step(2); return P.shot(); };
+        const s = Math.SQRT1_2, proj = saved[0].projectionSize;
+        const turned = await shot({ rotation: [0, s, 0, s] });
+        const swapped = await shot({ projectionSize: [proj[2], proj[1], proj[0]] });
+        const plain = await shot({});
+        P.probes.setProbes(saved); P.setSSR(true); delete P.ssr.settings.frameIndex; await P.step(2);
+        const d = eval('(' + ${JSON.stringify(IMAGE_STATS)} + ')');
+        return { turned: await d(turned, swapped), plain: await d(plain, swapped), proj, gpuErrors: (P.gpuErrors ?? []).length }; })()`);
+      check(`${tag}: a probe turned 90 degrees (BabylonProbe.rotation) = the axis-aligned probe with its projection box turned; unturned differs`,
+        ro.turned.max <= 2 && ro.turned.mean < 0.01 && ro.plain.mean > 20 * Math.max(ro.turned.mean, 0.005) && ro.gpuErrors === 0,
+        `turned vs swapped mean ${ro.turned.mean.toFixed(4)} max ${ro.turned.max} / 255; unturned vs swapped mean ${ro.plain.mean.toFixed(3)} max ${ro.plain.max} (projection ${ro.proj.join(' x ')})`);
       // W76: the babylon adapter dispatches core with its own settings object: core's defaults reach it (cone +
       // compensation at mirrorBias 0.5), and the cone's async variant comes up without errors
       const w76 = await p.T(`(async () => { const P = window.__p, t = () => P.ssr.tracer;
@@ -3938,6 +4041,17 @@ async function main() {
         `lit mean ${f(ev.litVsBefore.mean)}, removed max ${ev.afterVsBefore.max} / 255`);
       const hp = await C('helper');
       check('helper draws world-space influence and projection boxes', hp.children === 9 && hp.boxes === 6 && hp.centreErr < 1e-6, JSON.stringify(hp));
+      {
+        // T23 (W108): the world turned 0.5 rad about y, camera along: oriented boxes keep the unturned image, axis-aligned ones don't
+        const ro = await C('rotated');
+        for (const [k, d] of Object.entries(ro)) if (d && typeof d === 'object' && 'a' in d) { savePng(`probes-rotated-${k}.png`, d.a); delete d.a; delete d.b; }
+        const g = (d) => `mean ${f(d.mean, 4)}, max ${d.max}, ${f(d.over * 100, 3)} % px > 2/255`;
+        check('oriented boxes: `oriented` on unturned probes = the axis-aligned image (0 px)', ro.identity.max === 0, g(ro.identity));
+        check('oriented boxes: the world turned 0.5 rad (rooms, lights, probes, camera) with oriented probes = the unturned image but for world-aligned texels',
+          ro.oriented.mean < 0.5 && ro.oriented.over < 0.03 && ro.oriented.mean < ro.aabb.mean / 4, `${g(ro.oriented)}; world-axis-aligned boxes: ${g(ro.aabb)}`);
+        check('oriented boxes: turned back, the image returns (0 px)', ro.back.max === 0, g(ro.back));
+        check('oriented boxes: the helper draws each box with its probe\'s world rotation', ro.boxes === 6 && ro.helperErr < 1e-6, `${ro.boxes} boxes, err ${ro.helperErr.toExponential(1)}`);
+      }
 
       if (args.includes('--time-bake')) {
         // loop stopped (FREEZE); median ms per bake, 5 bakes per submit-wait, 7 bursts
@@ -4059,6 +4173,15 @@ async function main() {
     if (only === 'probe-lookup-ab') await probeLookupAB(pages); // W63: lookup variants interleaved in one page, JSON to out/w63-probe-lookup-ab.json
     if (only === 'probe-cluster-build') await probeClusterBuild(pages); // W63: a clustered volume list's build cost (compute), JSON to out/w63-cluster-build.json
     if (only === 'probe-lookup-parity') await probeLookupParity(pages); // W63: a lookup variant vs the shipped lookup, image for image
+    if (only === 'probe-parity') await probeParity(pages); // W108: fixed frames of every probe path, pixel for pixel against a saved base (--parity-base)
+    if (only === 'probe-orient-cost') {
+      // W108 (T23): a core ProbeSet lookup with the oriented branch compiled in vs out, on axis-aligned volumes, 1920 x 1080 lookups
+      const p = await openPage(`http://127.0.0.1:${PORT}/probe-core/`); pages.push(p);
+      for (const n of [0, 8, 32]) {
+        const r = await p.T(`window.__p.orientCost(${Number(process.env.ORIENT_ROUNDS ?? 15)}, ${n})`);
+        console.log(`  ${r.volumes} volumes: branch in ${r.branchIn.toFixed(3)} ms, out ${r.branchOut.toFixed(3)} ms per 1080p of lookups (median of ${r.all.in.length})`);
+      }
+    }
     if (only === 'probe-lookup-cost') await probeLookupCost(pages); // W63: the lookup's cost per variant and volume count, JSON to out/w63-probe-lookup-cost.json
     if (only === 'offscreen-sizes') await offscreenSizeMeasure(pages); // W60 (D4700): offscreen per-probe sizes, JSON to out/w60-offscreen.json
     if (only === 'rt-hit-atlases') await rtHitAtlasChecks(pages); // W47 (D4702): RT hits over a mixed-size set alone (also part of ssr-rt)
@@ -4177,6 +4300,19 @@ async function main() {
         check('compat mode: the prefilter path for it (GGX levels from a cube-only source copy) = the default path (D4100)', cm.prefilterDiffering === 0, `${cm.prefilterDiffering} of ${cm.prefilterValues} half values differ`);
         // not yet: the downsampler reads and writes mips of one texture in one dispatch, which compat rejects (D4100)
         console.log(`  compat mode, open (D4100): ${cm.sets.map((x) => `${x.asked}: ${(x.error ?? x.throws ?? `ok, vs core max ${x.vsCore}`).slice(0, 110)}`).join(' | ')}`);
+      }
+      {
+        // T23 (W108): oriented volumes. The turned rooms against the CPU lookup in each box's frame (coverage exact, the
+        // box-projected direction to the direction capture's bilinear error); the rotation dropped as the control
+        const o = r.oriented, f = (x) => `cov err ${x.covErr.toExponential(1)}, dir err mean ${x.dirMean.toFixed(4)} max ${x.dirMax.toFixed(3)}`;
+        check('probe core: oriented volumes (rooms turned 0.62 rad about a tilted axis) match the CPU lookup in the box frame: coverage, box-projected direction',
+          o.rot.covErr < 1e-4 && o.rot.dirMean < 0.01 && o.rot.dirMax < 0.05 && o.rot.covered > 4000 && o.rot.projected > 2000,
+          `${f(o.rot)}; ${o.rot.covered} covered, ${o.rot.projected} box-projected`);
+        check('probe core: axis-aligned rooms match the same CPU lookup equally well', o.axis.covErr < 1e-4 && o.axis.dirMean < 0.01 && o.axis.dirMax < 0.05, f(o.axis));
+        check('probe core: control: the turned rooms read axis-aligned (rotation dropped) miss the CPU lookup', o.dropped.covErr > 0.5 && o.dropped.dirMean > 10 * o.rot.dirMean, f(o.dropped));
+        check('probe core: orientedVolumes: false reads oriented volumes as their unrotated boxes', o.outVsDropped === 0, `max ${o.outVsDropped}`);
+        check('probe core: axis-aligned output bit for bit with the oriented branch compiled in, and with an explicit identity rotation', o.branchIn === 0 && o.identity === 0,
+          `branch in ${o.branchIn}, identity ${o.identity}`);
       }
       check('sssr probe fallback: constant probes = constant fallback (to one f16 step)', r.sssr.constantVsProbes === 0, `${r.sssr.constantVsProbes} px differ`);
       check('sssr probe fallback: structured probes reach the fallback pixels', r.sssr.structuredVsConstant > r.sssr.pixels * 0.05, `${r.sssr.structuredVsConstant} of ${r.sssr.pixels} px`);

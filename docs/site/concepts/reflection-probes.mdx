@@ -40,8 +40,34 @@ the lookup uses the environment, so a scene without probes keeps working.
 
 The API follows the three.js proposal [#35046](https://github.com/mrdoob/three.js/pull/35046) by Ben Houston, so code
 can move between this library and three. The extras on top are `sampleReflectionProbes` (use the lookup in any
-shader, such as a traced ray's miss), `originOffset`, live and time-sliced `bake`, `bake({ exclude })` to keep moving
+shader, such as a traced ray's miss), `originOffset`, `oriented` boxes, live and time-sliced `bake`, `bake({ exclude })` to keep moving
 mirrors out of captures, `bake({ environment: false })`, `seamFix`, and irradiance re-fit.
+
+## Turned rooms and objects
+
+By default a probe's boxes are aligned with the world axes, as in #35046: a probe ignores its own rotation and its
+parents'. A box then fits a room only if the room's walls run along x and z. Set `oriented` and the boxes turn with
+the probe's world rotation (its own and its parents'), so a probe fits a turned room, or a part of a turned car when
+the set sits under the car:
+
+{/* snippet: probes-oriented */}
+```ts
+const room = new ReflectionProbe(6, 3, 4); // in the room's frame: width, height, depth
+room.oriented = true;                      // the boxes follow the probe's world rotation
+room.position.set(2, 1.5, -3);
+room.rotation.y = Math.PI / 6;             // this room's walls run at 30 degrees
+probes.add(room);
+```
+
+The influence box, its blend distance, the projection box, `projectionOffset` and `originOffset` all turn with it.
+The capture itself stays a world-aligned cube taken at the capture point. Turning a probe does not turn what it
+sees, so a turned probe needs no new bake. A probe with no rotation renders the same, bit for bit, with `oriented`
+on or off. The lookup compiles the oriented path only when the set has an oriented probe, so axis-aligned sets cost
+what they did before. `ReflectionProbesHelper` draws the turned boxes. To see it, open the
+[probes page](/examples/probes/?rotated=1) turned half a radian (`?rotated=aabb` shows the same world with
+axis-aligned boxes).
+
+Babylon's `BabylonProbe` and core's `ProbeVolume` take the same thing as a `rotation` quaternion `[x, y, z, w]`.
 
 ## Storage
 

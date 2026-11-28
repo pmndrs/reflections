@@ -10,8 +10,11 @@
 //   - cabin: grown from the seats' centre, one face at a time in 1 cm steps, until the next step would take in
 //     a vertex (or triangle centroid) of the glass or the painted shell, and never below the floor mats. So the
 //     glass, whose reflection matched the path tracer (W54), stays outside the box and on the stage probe.
-// Probes are world-axis-aligned boxes (#35046; rotation is ignored) and the stage turns the car by -1.0 rad,
+// By default the boxes are world-axis-aligned (#35046; rotation is ignored) and the stage turns the car by -1.0 rad,
 // so a box fits a space only where the space's own bounds allow it (see docs/research/car-interior-probes-w55.md).
+// W108 (T23, D3701): `?carProbeOrient=oriented` places each wheel's box in that wheel's heading (its yaw, steering
+// included; not its spin) and the cabin's in the car's (the same shrink / grow, on the points turned into that frame), and gives the probe that
+// rotation (`ReflectionProbe.oriented`), so a wheel's box is the tyre's own bounds less the body, whatever the heading.
 // The capture point is the candidate inside the box (and, for a wheel, inside the wheel's cylinder) farthest
 // from every vertex of the car, so the capture camera doesn't sit inside a part.
 import * as THREE from 'three/webgpu';
@@ -20,6 +23,8 @@ import type { ShowcaseScene } from './scenes';
 
 export type CarProbesMode = 'off' | 'wheels' | 'cabin' | 'both' | 'cabinGlass';
 export const CAR_PROBES_MODES: CarProbesMode[] = ['off', 'wheels', 'cabin', 'both', 'cabinGlass'];
+/** W108 (T23): the boxes' frame: 'world' (world-axis-aligned, W55) or 'oriented' (each wheel's heading, the cabin the car's). */
+export type CarProbesOrient = 'world' | 'oriented';
 
 /**
  * W102 (T21, decision 18): the four wheel-well probes at 64 px, an option (default off, below) (W55: hub
@@ -28,14 +33,16 @@ export const CAR_PROBES_MODES: CarProbesMode[] = ['off', 'wheels', 'cabin', 'bot
 // W102 (T21) made `wheels` the default; the lead set it back to `off` (2026-11-29): the wheel region's flicker rose
 // 8-12 % (orbit, drift, d2, still) and the maintainer's rule is that no default may raise flicker. `?carProbes=wheels`
 // keeps the hub accuracy (41.5 -> 25.2 vs PT 27.1) at that cost.
-export const CAR_PROBES_DEFAULT: { mode: CarProbesMode; resolution: number } = { mode: 'off', resolution: 64 };
+export const CAR_PROBES_DEFAULT: { mode: CarProbesMode; resolution: number; orient: CarProbesOrient } = { mode: 'off', resolution: 64, orient: 'world' };
 
-/** `?carProbes=` / `?carProbeRes=` over {@link CAR_PROBES_DEFAULT}. */
-export function carProbesFromQuery(q: URLSearchParams): { mode: CarProbesMode; resolution: number } {
+/** `?carProbes=` / `?carProbeRes=` / `?carProbeOrient=` over {@link CAR_PROBES_DEFAULT}. */
+export function carProbesFromQuery(q: URLSearchParams): { mode: CarProbesMode; resolution: number; orient: CarProbesOrient } {
   const m = q.get('carProbes') as CarProbesMode | null;
+  const o = q.get('carProbeOrient');
   return {
     mode: m && CAR_PROBES_MODES.includes(m) ? m : CAR_PROBES_DEFAULT.mode,
     resolution: q.has('carProbeRes') ? Number(q.get('carProbeRes')) : CAR_PROBES_DEFAULT.resolution,
+    orient: o === 'oriented' || o === 'world' ? o : CAR_PROBES_DEFAULT.orient,
   };
 }
 
@@ -46,6 +53,8 @@ export interface CarProbeVolume {
   originOffset: Vec3;
   blendDistance: number;
   resolution: number | null;
+  /** W108 (T23): the box's rotation (x, y, z, w; `ReflectionProbe.oriented` with this quaternion), absent: world-axis-aligned. */
+  rotation?: [number, number, number, number];
 }
 
 const WHEEL = /^Wheel(Front|Rear)(L|R)$/;
@@ -155,16 +164,41 @@ function gridIn(box: THREE.Box3, n: number, inset = 0.1): THREE.Vector3[] {
   return out;
 }
 
-const volumeOf = (name: string, box: THREE.Box3, capture: THREE.Vector3, resolution: number | null): CarProbeVolume => {
+/** `box` and `capture` in the frame `frame` (world: null) as a volume in world terms; an oriented one when `frame` is set. */
+const volumeOf = (name: string, box: THREE.Box3, capture: THREE.Vector3, resolution: number | null, frame: THREE.Quaternion | null = null): CarProbeVolume => {
   const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
   return {
-    name, position: c.toArray() as Vec3, influenceSize: s.toArray() as Vec3,
+    // the centre back to world; the offset stays in the box's frame (an oriented probe turns it)
+    name, position: (frame ? c.clone().applyQuaternion(frame) : c).toArray() as Vec3, influenceSize: s.toArray() as Vec3,
     originOffset: capture.clone().sub(c).toArray() as Vec3,
     // 10 % of the shortest side: the small box takes over within a few cm of its faces
     blendDistance: 0.1 * Math.min(s.x, s.y, s.z),
     resolution,
+    ...(frame ? { rotation: frame.toArray() as [number, number, number, number] } : {}),
   };
 };
+
+/** Points (xyz triples) turned into the frame `q` (world to frame: by its inverse); `q` null: unchanged. */
+function intoFrame(pts: Float32Array, q: THREE.Quaternion | null): Float32Array {
+  if (!q) return pts;
+  const inv = q.clone().invert(), v = new THREE.Vector3(), out = new Float32Array(pts.length);
+  for (let i = 0; i < pts.length; i += 3) { v.set(pts[i], pts[i + 1], pts[i + 2]).applyQuaternion(inv); out[i] = v.x; out[i + 1] = v.y; out[i + 2] = v.z; }
+  return out;
+}
+
+/** Bounds of an object's meshes (every vertex) in the frame `q` (null: world), like Box3.setFromObject(o, true). */
+function boundsInFrame(o: THREE.Object3D, q: THREE.Quaternion | null): THREE.Box3 {
+  if (!q) return new THREE.Box3().setFromObject(o, true);
+  const inv = q.clone().invert(), box = new THREE.Box3(), v = new THREE.Vector3();
+  o.updateWorldMatrix(true, true);
+  o.traverse((m) => {
+    const mesh = m as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const pos = mesh.geometry.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) box.expandByPoint(v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld).applyQuaternion(inv));
+  });
+  return box;
+}
 
 /** carConcept's four wheel groups (W55 `?carProbeCapture=noWheels` hides them from every capture). */
 export function carWheels(kit: ShowcaseScene): THREE.Object3D[] {
@@ -177,10 +211,12 @@ export function carWheels(kit: ShowcaseScene): THREE.Object3D[] {
  * carConcept's interior probes for `mode` (none for 'off' or another scene), each at `resolution` px
  * (null = the set's default). Volumes in world space, for `ReflectionProbe`s next to the stage probe.
  */
-export function carInteriorProbes(kit: ShowcaseScene, mode: CarProbesMode, resolution: number | null): CarProbeVolume[] {
+export function carInteriorProbes(kit: ShowcaseScene, mode: CarProbesMode, resolution: number | null, orient: CarProbesOrient = 'world'): CarProbeVolume[] {
   if (mode === 'off' || kit.id !== 'carConcept' || !kit.hero) return [];
   const hero = kit.hero;
   hero.updateMatrixWorld(true);
+  // W108 (T23): 'oriented' works in the car's frame (its world rotation) for the cabin, in each wheel's for its well
+  const frame = orient === 'oriented' ? hero.getWorldQuaternion(new THREE.Quaternion()) : null;
   const shell: number[] = [], paint: number[] = [], all: number[] = [];
   const wheels: THREE.Object3D[] = [];
   hero.traverse((o) => {
@@ -191,15 +227,21 @@ export function carInteriorProbes(kit: ShowcaseScene, mode: CarProbesMode, resol
     const ms = ([] as THREE.Material[]).concat(mesh.material);
     if (ms.some(isPaint)) { meshPoints(mesh, shell); meshPoints(mesh, paint); } else if (ms.some(isGlass)) meshPoints(mesh, shell);
   });
-  const shellPts = new Float32Array(shell), paintPts = new Float32Array(paint), allPts = new Float32Array(all);
+  const shellW = new Float32Array(shell), allW = new Float32Array(all);
+  const shellPts = intoFrame(shellW, frame), paintPts = intoFrame(new Float32Array(paint), frame), allPts = intoFrame(allW, frame);
   const out: CarProbeVolume[] = [];
 
   if (mode === 'wheels' || mode === 'both') {
     for (const w of wheels) {
-      const cap = new THREE.Box3().setFromObject(w, true);
+      // the wheel's heading (its steering included) when oriented: the yaw of its world rotation only. Its full frame
+      // also carries the wheel's spin about the axle (20-45 degrees here), which would tilt the box's square section
+      // across the tyre's circle, corners into the arch and the floor
+      const wf = frame ? new THREE.Quaternion().setFromEuler(new THREE.Euler(0, new THREE.Euler().setFromQuaternion(w.getWorldQuaternion(new THREE.Quaternion()), 'YXZ').y, 0)) : null;
+      const wShell = intoFrame(shellW, wf), wAll = intoFrame(allW, wf);
+      const cap = boundsInFrame(w, wf);
       // lift the bottom off the floor (the floor stays on the stage probe): 2 % of the wheel's height
       cap.min.y += 0.02 * (cap.max.y - cap.min.y);
-      const box = shrink(cap, shellPts);
+      const box = shrink(cap, wShell);
       // capture inside the wheel's cylinder: candidates in the wheel's own frame, within 0.85 R of the axle
       const inv = new THREE.Matrix4().copy(w.matrixWorld).invert();
       const local = new THREE.Box3();
@@ -217,9 +259,9 @@ export function carInteriorProbes(kit: ShowcaseScene, mode: CarProbesMode, resol
       const cands = gridIn(local, 9, 0.05).filter((p) => {
         let r2 = 0; for (const k of ['x', 'y', 'z'] as const) if (k !== axis) r2 += (p[k] - lc[k]) ** 2;
         return r2 < (0.85 * R) ** 2;
-      }).map((p) => p.applyMatrix4(w.matrixWorld)).filter((p) => box.containsPoint(p));
-      const capture = clearest(cands, allPts) ?? box.getCenter(new THREE.Vector3());
-      out.push(volumeOf(w.name, box, capture, resolution));
+      }).map((p) => (wf ? p.applyMatrix4(w.matrixWorld).applyQuaternion(wf.clone().invert()) : p.applyMatrix4(w.matrixWorld))).filter((p) => box.containsPoint(p));
+      const capture = clearest(cands, wAll) ?? box.getCenter(new THREE.Vector3());
+      out.push(volumeOf(w.name, box, capture, resolution, wf));
     }
   }
 
@@ -228,15 +270,15 @@ export function carInteriorProbes(kit: ShowcaseScene, mode: CarProbesMode, resol
     const seats = new THREE.Box3();
     const mats = new THREE.Box3();
     hero.traverse((o) => {
-      if (/^InteriorSeatsColor/.test(o.name)) seats.expandByObject(o, true);
-      if (o.name === 'InteriorFloormats') mats.expandByObject(o, true);
+      if (/^InteriorSeatsColor/.test(o.name)) seats.union(boundsInFrame(o, frame));
+      if (o.name === 'InteriorFloormats') mats.union(boundsInFrame(o, frame));
     });
-    const car = new THREE.Box3().setFromObject(hero, true);
+    const car = boundsInFrame(hero, frame);
     const cap = car.clone();
     if (!mats.isEmpty()) cap.min.y = mats.max.y;
     const box = grow(seats.getCenter(new THREE.Vector3()), cap, mode === 'cabinGlass' ? paintPts : shellPts);
     const capture = clearest(gridIn(box, 8), allPts) ?? box.getCenter(new THREE.Vector3());
-    out.push(volumeOf('cabin', box, capture, resolution));
+    out.push(volumeOf('cabin', box, capture, resolution, frame));
   }
   return out;
 }

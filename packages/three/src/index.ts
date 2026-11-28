@@ -1,10 +1,10 @@
 // three.js WebGPURenderer adapter.
 
 // Reflection probes: the API of three.js #35046 (Ben Houston) on r187, plus extensions
-// (sampleReflectionProbes, originOffset, bake({ environment, probes }), seamFix).
+// (sampleReflectionProbes, originOffset, oriented, bake({ environment, probes }), seamFix).
 // reflectionProbesLocal / sampleReflectionProbesLocal: #35046 head's vec4 (radiance, coverage) form.
 export {
-  ReflectionProbe, ReflectionProbes, probeOrigin, probeWorldScale, type BakeOptions, type SeamFix,
+  ReflectionProbe, ReflectionProbes, probeOrigin, probeWorldScale, probeWorldRotation, type BakeOptions, type SeamFix,
 } from './probes/ReflectionProbes';
 export {
   ReflectionProbesNode, reflectionProbes, reflectionProbesLocal, sampleReflectionProbes, sampleReflectionProbesLocal,

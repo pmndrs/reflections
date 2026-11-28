@@ -412,6 +412,10 @@ export const SETTINGS: Setting[] = [
     defaultNote: 'off (wheels raise wheel flicker 8-12 %, W102)', apply: 'rebuild', appliesTo: OURS, api: 'examples showcase/src/carProbes.ts (W55)',
     tradeoff: 'W55: small probes inside carConcept beside the stage probe, boxes from the car\'s geometry (wheel bounds less the body paint; the cabin grown from the seats to the glass). The wells and the cabin then reflect their own capture instead of the open studio (D3680, D3681). W102 (T21, decision 18): wheels at 64 px is carConcept\'s default on the showcase, the bench and the compare page; off is the stage probe alone.',
   }),
+  sel('carProbeOrient', 'probes', 'Car interior probe boxes', [['world', 'world-axis-aligned (W55)'], ['oriented', 'oriented: each wheel\'s heading, the cabin the car\'s (T23)']], null, {
+    pageDefault: 'world', apply: 'rebuild', appliesTo: OURS, api: 'ReflectionProbe.oriented (T23)',
+    tradeoff: 'W108 (D3701): the carProbes boxes placed and turned to each wheel\'s heading (the cabin to the car\'s), so a box is the tyre\'s bounds less the body whatever the heading; world-axis-aligned boxes on the turned car leave part of the front tyres out (a faint step in their specular).',
+  }),
   sel('carProbeRes', 'probes', 'Car interior probe size', [['64', '64'], ['128', '128'], ['256', '256']], null, {
     pageDefault: '64', apply: 'rebuild', appliesTo: OURS, api: 'ReflectionProbe.resolution (D4700)',
     tradeoff: 'W55: face size of the carProbes probes; the stage probe keeps Resolution. A size other than the stage\'s is a second atlas (a mixed-size set).',

@@ -9,11 +9,16 @@
 //   transform D1805 / D2104 (W35): the capture transform. Captures in three's (x-mirrored),
 //             Babylon's (y-mirrored) and pixi-3d's (camera images) conventions, made from the test
 //             captures by a face remap, each looked up through its transform against the plain set
+//   oriented  T23 (W108): the rooms turned about a tilted axis, as oriented volumes, captured with the
+//             direction itself (kind 4), looked up at roughness 0 against the same lookup on the CPU in
+//             each box's frame (coverage and the box-projected direction); the unturned rooms the same way;
+//             the turned rooms read axis-aligned (rotation dropped) as the control; and bit parity of the
+//             axis-aligned path with the oriented branch compiled in, out, and an explicit identity
 //   sssr      the core tracer on its analytic scene (examples/sssr-core) with probeRadianceFallback: a
 //             probe set holding the constant c must give the image of the constant fallback c, bit for
 //             bit; a structured capture must change the fallback pixels
 import {
-  ProbeSet, probeLookupWgsl, ProbeCaptureRemap, LayoutPrefilter, createProbeLayout, maxLodFor, CAPTURE_MIRROR_X, CAPTURE_MIRROR_Y, CAPTURE_BABYLON_FACES, CAPTURE_CAMERA_FACES, type ProbeCaptureTransform,
+  ProbeSet, probeLookupWgsl, ProbeCaptureRemap, rotateByQuat, probeVolumeLocal, probeVolumeRotation, type ProbeQuaternion, LayoutPrefilter, createProbeLayout, maxLodFor, CAPTURE_MIRROR_X, CAPTURE_MIRROR_Y, CAPTURE_BABYLON_FACES, CAPTURE_CAMERA_FACES, type ProbeCaptureTransform,
   createScreenSpaceReflections, createTracedReflections, constantRadianceFallback, probeHitShading, type HitShading, type TraceProvider, type TracedReflectionsStats, probeRadianceFallback, screenSpaceInputsFromFrame, sortProbeVolumes,
   type FrameInputs, type ProbeLayoutId, type ProbeSetFormat, type ProbeVolume, type ScreenSpaceReflectionsInputs, reflectionsRequiredLimits,
 } from '@pmndrs/reflections/core';
@@ -27,7 +32,7 @@ const SOURCE = 64; // capture face size (maxLod 3)
 const C = [1, 0.5, 0.25] as const;
 
 // Test captures (texture-space directions): 0 a sky gradient with a hot spot and a bright band,
-// 1 the same tinted red, 2 the constant C, 3 the same tinted blue.
+// 1 the same tinted red, 2 the constant C, 3 the same tinted blue, 4 the direction itself (W108).
 const CUBE_WGSL = /* wgsl */ `
 @group(0) @binding(0) var dst: texture_storage_2d_array<rgba16float, write>;
 @group(0) @binding(1) var<uniform> U: vec4u; // size, kind
@@ -40,6 +45,7 @@ fn faceDirUV(face: u32, u: f32, v: f32) -> vec3f {
 }
 fn env(d: vec3f, kind: u32) -> vec3f {
   if (kind == 2u) { return vec3f(${C.join(', ')}); }
+  if (kind == 4u) { return d; }
   var c = mix(vec3f(0.3, 0.25, 0.2), vec3f(0.4, 0.6, 1.0), d.y * 0.5 + 0.5);
   c += vec3f(40.0, 36.0, 30.0) * pow(max(dot(d, normalize(vec3f(0.6, 0.5, -0.6))), 0.0), 400.0);
   if (abs(d.x) < 0.08) { c += vec3f(3.0, 2.5, 2.0); }
@@ -77,7 +83,7 @@ async function main() {
   const U = GPUBufferUsage;
 
   const cubePipe = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: CUBE_WGSL }), entryPoint: 'main' } });
-  const cubes = [0, 1, 2, 3].map((kind) => {
+  const cubes = [0, 1, 2, 3, 4].map((kind) => {
     const t = device.createTexture({ size: [SOURCE, SOURCE, 6], format: 'rgba16float', usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC });
     const u = device.createBuffer({ size: 16, usage: U.UNIFORM | U.COPY_DST });
     device.queue.writeBuffer(u, 0, new Uint32Array([SOURCE, kind, 0, 0]));
@@ -242,6 +248,7 @@ async function main() {
     result.mixed = await mixed();
     result.sizes = await sizes();
     result.transform = await transform();
+    result.oriented = await oriented();
     result.sssr = await sssr();
     return result;
   }
@@ -463,6 +470,110 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   }
 
   // ---- the SSSR radiance-fallback seam on sssr-core's analytic scene
+  // ---- T23 (W108): oriented volumes
+  async function oriented() {
+    const N = 8192;
+    const pivot = [0, 2.2, 0];
+    const Q: ProbeQuaternion = (() => { const ax = [0.3, 1, -0.2], l = Math.hypot(...ax), a = 0.62, s = Math.sin(a / 2) / l; return [ax[0] * s, ax[1] * s, ax[2] * s, Math.cos(a / 2)]; })();
+    const turn = (p: readonly number[]) => { const w = rotateByQuat(Q, [p[0] - pivot[0], p[1] - pivot[1], p[2] - pivot[2]]); return [w[0] + pivot[0], w[1] + pivot[1], w[2] + pivot[2]] as [number, number, number]; };
+    // the rooms turned about the pivot: centres and capture points move, sizes and offsets stay (box frame)
+    const turned: ProbeVolume[] = volumes.map((v) => ({ ...v, center: turn(v.center), origin: turn(v.origin ?? v.center), rotation: Q }));
+    let seed2 = 777;
+    const r = () => ((seed2 = (seed2 * 1103515245 + 12345) >>> 0) / 4294967296);
+    const pts = (vols: ProbeVolume[]) => {
+      const a = new Float32Array(N * 12);
+      for (let i = 0; i < N; i++) {
+        // inside and around a random room: a local point past its faces, to world
+        const v = vols[Math.floor(r() * vols.length)];
+        const q = probeVolumeRotation(v);
+        const lp: [number, number, number] = [0, 1, 2].map((k) => (r() * 2.3 - 1.15) * v.halfSize[k]) as [number, number, number];
+        const w = q ? rotateByQuat(q, lp) : lp;
+        let d = [r() * 2 - 1, r() * 2 - 1, r() * 2 - 1]; const l = Math.hypot(...d) || 1; d = d.map((x) => x / l);
+        a.set([w[0] + v.center[0], w[1] + v.center[1], w[2] + v.center[2], 0, ...d, 0, ...d, 1], i * 12);
+      }
+      return a;
+    };
+    const ptsBuf2 = device.createBuffer({ size: N * 48, usage: U.STORAGE | U.COPY_DST });
+    const outBuf2 = device.createBuffer({ size: N * 48, usage: U.STORAGE | U.COPY_SRC });
+    const group = device.createBindGroup({ layout: evalBgl, entries: [{ binding: 0, resource: { buffer: ptsBuf2 } }, { binding: 1, resource: { buffer: outBuf2 } }] });
+    const look = async (vols: ProbeVolume[], P: Float32Array<ArrayBuffer>, orientedVolumes?: boolean, kind = 4) => {
+      device.queue.writeBuffer(ptsBuf2, 0, P);
+      const set = new ProbeSet(device, { capacity: 3, sourceSize: SOURCE, ...(orientedVolumes === undefined ? {} : { orientedVolumes }) });
+      const enc = device.createCommandEncoder();
+      for (let s = 0; s < 3; s++) set.capture(enc, s, cubes[kind]);
+      set.captureEnvironment(enc, cubes[kind]);
+      set.setVolumes(vols);
+      set.update();
+      const pipe = device.createComputePipeline({
+        layout: device.createPipelineLayout({ bindGroupLayouts: [evalBgl, set.bindGroupLayout] }),
+        compute: { module: device.createShaderModule({ code: set.wgsl({ group: 1 }) + EVAL_WGSL }), entryPoint: 'main' },
+      });
+      const p = enc.beginComputePass(); p.setPipeline(pipe); p.setBindGroup(0, group); p.setBindGroup(1, set.bindGroup); p.dispatchWorkgroups(N / 64); p.end();
+      device.queue.submit([enc.finish()]);
+      const out = await readBuffer(outBuf2);
+      set.dispose();
+      return out;
+    };
+    // CPU lookup at roughness 0 on the direction capture: each covering volume's box-projected direction,
+    // in its own frame (P and dir turned by the inverse rotation; the corrected direction rebuilt in world)
+    const cpu = (vols: ProbeVolume[], P: number[], d: number[]) => {
+      let remaining = 1; const sum = [0, 0, 0];
+      for (const v of sortProbeVolumes(vols)) {
+        const q = probeVolumeRotation(v);
+        const lp = probeVolumeLocal(v, P as [number, number, number]);
+        const inside = Math.min(...[0, 1, 2].map((k) => v.halfSize[k] - Math.abs(lp[k])));
+        const w = Math.min(1, Math.max(0, inside / (v.fade ?? 0.5))) * remaining;
+        if (w <= 0) { remaining -= w; continue; }
+        const ps = v.projectionSize ?? v.halfSize.map((h) => 2 * h), po = v.projectionOffset ?? [0, 0, 0], o = v.origin ?? v.center;
+        const ld = q ? rotateByQuat([-q[0], -q[1], -q[2], q[3]], d as [number, number, number]) : d;
+        let c = d;
+        if ([0, 1, 2].every((k) => Math.abs(lp[k] - po[k]) <= ps[k] / 2)) {
+          const t = Math.min(...[0, 1, 2].map((k) => { const side = ld[k] >= 0 ? 1 : -1; return (side * ps[k] / 2 + po[k] - lp[k]) / (side * Math.max(Math.abs(ld[k]), 1e-6)); }));
+          c = [0, 1, 2].map((k) => P[k] + d[k] * t - o[k]);
+        }
+        const l = Math.hypot(...c);
+        for (let k = 0; k < 3; k++) sum[k] += (c[k] / l) * w;
+        remaining -= w;
+      }
+      const cov = 1 - remaining;
+      return { cov, dir: cov > 0 ? sum.map((x) => x / cov) : [0, 0, 0] };
+    };
+    const score = (vols: ProbeVolume[], P: Float32Array, out: Float32Array) => {
+      let covErr = 0, dirSum = 0, dirMax = 0, n = 0, inside = 0, projected = 0;
+      for (let i = 0; i < N; i++) {
+        const p = [P[i * 12], P[i * 12 + 1], P[i * 12 + 2]], d = [P[i * 12 + 4], P[i * 12 + 5], P[i * 12 + 6]];
+        const want = cpu(vols, p, d);
+        covErr = Math.max(covErr, Math.abs(out[i * 12 + 3] - want.cov));
+        if (want.cov < 1e-3) continue;
+        // the direction capture's mip 0, bilinear, against the exact unit direction (blended over volumes)
+        const e = Math.hypot(...[0, 1, 2].map((k) => out[i * 12 + k] - want.dir[k]));
+        dirSum += e; dirMax = Math.max(dirMax, e); n++;
+        if (want.cov > 0.999) inside++;
+        if (Math.hypot(...[0, 1, 2].map((k) => want.dir[k] - d[k])) > 0.05) projected++;
+      }
+      return { covErr, dirMean: dirSum / Math.max(n, 1), dirMax, covered: n, inside, projected };
+    };
+    const Pt = pts(turned), Pa = pts(volumes);
+    const turnedOut = await look(turned, Pt);
+    const rot = score(turned, Pt, turnedOut);
+    const axis = score(volumes, Pa, await look(volumes, Pa));
+    // control: the turned rooms with the rotation dropped (the lookup before T23), scored against the oriented CPU lookup
+    const flat = turned.map(({ rotation: _r, ...v }) => v);
+    const dropped = score(turned, Pt, await look(flat, Pt));
+    // compiled out (orientedVolumes: false): oriented volumes read as their unrotated boxes, i.e. the control
+    const compiledOut = await look(turned, Pt, false);
+    const droppedOut = await look(flat, Pt);
+    let outVsDropped = 0; for (let i = 0; i < compiledOut.length; i++) outVsDropped = Math.max(outVsDropped, Math.abs(compiledOut[i] - droppedOut[i]));
+    // axis-aligned parity, bit for bit: the runtime branch compiled in (default) vs out, and an explicit identity rotation, on the sky capture
+    const plain = await look(volumes, Pa, false, 0);
+    const exact = (a: Float32Array) => { let m = 0; for (let i = 0; i < a.length; i++) m = Math.max(m, Number.isFinite(a[i]) ? Math.abs(a[i] - plain[i]) : Infinity); return m; };
+    const branchIn = exact(await look(volumes, Pa, undefined, 0));
+    const identity = exact(await look(volumes.map((v) => ({ ...v, rotation: [0, 0, 0, 1] as ProbeQuaternion })), Pa, undefined, 0));
+    ptsBuf2.destroy(); outBuf2.destroy();
+    say(`oriented: turned rooms cov err ${rot.covErr.toExponential(1)}, dir err mean ${rot.dirMean.toFixed(4)} max ${rot.dirMax.toFixed(3)} (${rot.covered} covered, ${rot.projected} projected); axis-aligned mean ${axis.dirMean.toFixed(4)} max ${axis.dirMax.toFixed(3)}; rotation dropped: cov err ${dropped.covErr.toFixed(3)}, dir mean ${dropped.dirMean.toFixed(3)}; parity branch in ${branchIn}, identity ${identity}`);
+    return { rot, axis, dropped, outVsDropped, branchIn, identity };
+  }
+
   async function sssr() {
     const W = 480, H = 270;
     const usage = GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC;
@@ -751,7 +862,63 @@ fn traceFirstHit(origin: vec3f, dir: vec3f, tMax: f32) -> Hit {
   }
 
   say('ready: window.__p.run()');
-  Object.assign(window, { __p: { run, compat, device } });
+  /**
+   * W108 (T23): what the oriented branch costs a core ProbeSet lookup on axis-aligned volumes (not part of run()).
+   * The rooms (3 volumes, grid walk) or `n` grid volumes, one probeRadianceWithEnvironment per thread over 1920 x 1080
+   * random points in and around them, branch compiled in (default) vs out (orientedVolumes: false); wall ms per
+   * dispatch (10 dispatches per submit-wait), variants interleaved, median of `rounds`.
+   */
+  async function orientCost(rounds = 15, n = 0) {
+    const M = 1920 * 1080;
+    const vols: ProbeVolume[] = n === 0 ? volumes : Array.from({ length: n }, (_, i) => ({ slot: i, center: [((i % 4) - 1.5) * 5, 2.5, (Math.floor(i / 4) - n / 8) * 5], halfSize: [3, 2.7, 3], projectionSize: [6, 5, 6], fade: 0.5 }));
+    const lo = [-12, -1, -6], span = [24, 7, 12];
+    const P = new Float32Array(M * 8);
+    let sd = 99; const r = () => ((sd = (sd * 1103515245 + 12345) >>> 0) / 4294967296);
+    for (let i = 0; i < M; i++) { const d = [r() * 2 - 1, r() * 2 - 1, r() * 2 - 1]; const l = Math.hypot(...d) || 1; P.set([lo[0] + r() * span[0], lo[1] + r() * span[1], lo[2] + r() * span[2], r(), d[0] / l, d[1] / l, d[2] / l, 0], i * 8); }
+    const inBuf = device.createBuffer({ size: P.byteLength, usage: U.STORAGE | U.COPY_DST });
+    device.queue.writeBuffer(inBuf, 0, P);
+    const outB = device.createBuffer({ size: M * 16, usage: U.STORAGE });
+    const bgl = device.createBindGroupLayout({ entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+    ] });
+    const bg = device.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: { buffer: inBuf } }, { binding: 1, resource: { buffer: outB } }] });
+    const KERNEL = /* wgsl */ `
+@group(0) @binding(0) var<storage, read> pin: array<vec4f>;
+@group(0) @binding(1) var<storage, read_write> pout: array<vec4f>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3u) {
+  let i = id.x; if (i >= arrayLength(&pout)) { return; }
+  pout[i] = vec4f(probeRadianceWithEnvironment(pin[2u * i].xyz, pin[2u * i + 1u].xyz, pin[2u * i].w), 1.0);
+}`;
+    const make = (orientedVolumes?: boolean) => {
+      const set = new ProbeSet(device, { capacity: Math.max(3, vols.length), sourceSize: SOURCE, ...(orientedVolumes === undefined ? {} : { orientedVolumes }) });
+      const enc = device.createCommandEncoder();
+      for (let s2 = 0; s2 < vols.length; s2++) set.capture(enc, s2, cubes[s2 % 4]);
+      set.captureEnvironment(enc, cubes[0]);
+      device.queue.submit([enc.finish()]);
+      set.setVolumes(vols); set.update();
+      const pipe = device.createComputePipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bgl, set.bindGroupLayout] }), compute: { module: device.createShaderModule({ code: set.wgsl({ group: 1 }) + KERNEL }), entryPoint: 'main' } });
+      return { set, pipe };
+    };
+    const variants = { in: make(undefined), out: make(false) };
+    const time = async (v: { set: ProbeSet; pipe: GPUComputePipeline }) => {
+      const t0 = performance.now();
+      const enc = device.createCommandEncoder();
+      for (let k = 0; k < 10; k++) { const pass = enc.beginComputePass(); pass.setPipeline(v.pipe); pass.setBindGroup(0, bg); pass.setBindGroup(1, v.set.bindGroup); pass.dispatchWorkgroups(Math.ceil(M / 64)); pass.end(); }
+      device.queue.submit([enc.finish()]);
+      await device.queue.onSubmittedWorkDone();
+      return (performance.now() - t0) / 10;
+    };
+    for (let w = 0; w < 3; w++) { await time(variants.in); await time(variants.out); }
+    const t: Record<string, number[]> = { in: [], out: [] };
+    for (let k = 0; k < rounds; k++) { t.in.push(await time(variants.in)); t.out.push(await time(variants.out)); }
+    const med = (a: number[]) => [...a].sort((x, y) => x - y)[a.length >> 1];
+    variants.in.set.dispose(); variants.out.set.dispose(); inBuf.destroy(); outB.destroy();
+    return { volumes: vols.length, branchIn: med(t.in), branchOut: med(t.out), all: t };
+  }
+
+  Object.assign(window, { __p: { run, compat, device, orientCost } });
 }
 
 function mul(a: Float32Array, b: Float32Array) {
