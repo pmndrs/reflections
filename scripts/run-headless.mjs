@@ -1855,19 +1855,36 @@ async function haloOptionChecks(pages) {
 }
 
 /**
- * W107 (T14, D5700): lobe occlusion at traced hits (`hitLobeOcclusionRays`) runs and only darkens: contact, RT on,
- * denoiser and AA off, a fixed frame index, `hitShadeVisibility` 'all' on both sides so on-screen re-shaded hits take it
- * too. Off is the default and leaves the frame as it was (the same frame twice: 0 px apart).
+ * W107 (T14, D5700): lobe occlusion at traced hits (`hitLobeOcclusionRays`) runs and only darkens: the offscreen
+ * scene (its wall is reflected through traced off-screen hits), RT on, denoiser and AA off, a fixed frame index.
+ * 4 rays against 0: darker only; back to 0 rays: the frame it started from, to the pixel. HALO_FRAME's comparison
+ * without its stats() call (which renders between the frames).
  */
+const LOBE_FRAME = `async (trace, keep) => {
+  const p = window.__p;
+  const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+  p.setSettings({ frameIndex: 7 });
+  p.setTraceSettings(trace);
+  p.setView('final');
+  await p.step(8);
+  const B = await px(await p.shot());
+  if (keep) { window.__lobeRef = B; return {}; }
+  const A = window.__lobeRef, lum = (a, k) => 0.2126 * a[k] + 0.7152 * a[k + 1] + 0.0722 * a[k + 2];
+  let darker = 0, brighter = 0, n = 0;
+  for (let k = 0; k < A.length; k += 4) { n++; const d = lum(B, k) - lum(A, k); if (d < -2) darker++; else if (d > 2) brighter++; }
+  return { darker: darker / n, brighter: brighter / n };
+}`;
 async function lobeOcclusionChecks(pages) {
-  const ct = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&aa=off&scene=contact`);
-  pages.push(ct);
-  await ct.T(`(${HALO_FRAME})({}, { hitShadeVisibility: 'all' }, true)`);
-  const same = await ct.T(`(${HALO_FRAME})({}, { hitShadeVisibility: 'all', hitLobeOcclusionRays: 0 }, false)`);
-  const d = await ct.T(`(${HALO_FRAME})({}, { hitShadeVisibility: 'all', hitLobeOcclusionRays: 4 }, false)`);
-  check('rt: lobe occlusion at traced hits only darkens, and 0 rays is a no-op (contact, hitShadeVisibility all, D5700)',
-    same.darker + same.brighter === 0 && d.darker > 0.001 && d.brighter < 0.0005,
-    `0 rays: ${((same.darker + same.brighter) * 100).toFixed(3)}% px moved; 4 rays: px > 2/255 darker ${(d.darker * 100).toFixed(2)}%, brighter ${(d.brighter * 100).toFixed(3)}%`);
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&aa=off&scene=offscreen`);
+  pages.push(p);
+  await p.T(`(${LOBE_FRAME})({}, true)`); // warm-up
+  await p.T(`(${LOBE_FRAME})({}, true)`);
+  const d = await p.T(`(${LOBE_FRAME})({ hitLobeOcclusionRays: 4 }, false)`);
+  const back = await p.T(`(${LOBE_FRAME})({ hitLobeOcclusionRays: 0 }, false)`);
+  check('rt: lobe occlusion at traced hits only darkens, and 0 rays is the default frame (offscreen, D5700)',
+    d.darker > 0.002 && d.brighter < 0.0005 && back.darker + back.brighter === 0,
+    `4 rays: px > 2/255 darker ${(d.darker * 100).toFixed(2)}%, brighter ${(d.brighter * 100).toFixed(3)}%; back to 0 rays: ${((back.darker + back.brighter) * 100).toFixed(3)}% px moved`);
 }
 
 /**
