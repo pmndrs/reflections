@@ -4208,6 +4208,19 @@ async function main() {
         // not yet: the downsampler reads and writes mips of one texture in one dispatch, which compat rejects (D4100)
         console.log(`  compat mode, open (D4100): ${cm.sets.map((x) => `${x.asked}: ${(x.error ?? x.throws ?? `ok, vs core max ${x.vsCore}`).slice(0, 110)}`).join(' | ')}`);
       }
+      {
+        // T23 (W108): oriented volumes. The turned rooms against the CPU lookup in each box's frame (coverage exact, the
+        // box-projected direction to the direction capture's bilinear error); the rotation dropped as the control
+        const o = r.oriented, f = (x) => `cov err ${x.covErr.toExponential(1)}, dir err mean ${x.dirMean.toFixed(4)} max ${x.dirMax.toFixed(3)}`;
+        check('probe core: oriented volumes (rooms turned 0.62 rad about a tilted axis) match the CPU lookup in the box frame: coverage, box-projected direction',
+          o.rot.covErr < 1e-4 && o.rot.dirMean < 0.01 && o.rot.dirMax < 0.05 && o.rot.covered > 4000 && o.rot.projected > 2000,
+          `${f(o.rot)}; ${o.rot.covered} covered, ${o.rot.projected} box-projected`);
+        check('probe core: axis-aligned rooms match the same CPU lookup equally well', o.axis.covErr < 1e-4 && o.axis.dirMean < 0.01 && o.axis.dirMax < 0.05, f(o.axis));
+        check('probe core: control: the turned rooms read axis-aligned (rotation dropped) miss the CPU lookup', o.dropped.covErr > 0.5 && o.dropped.dirMean > 10 * o.rot.dirMean, f(o.dropped));
+        check('probe core: orientedVolumes: false reads oriented volumes as their unrotated boxes', o.outVsDropped === 0, `max ${o.outVsDropped}`);
+        check('probe core: axis-aligned output bit for bit with the oriented branch compiled in, and with an explicit identity rotation', o.branchIn === 0 && o.identity === 0,
+          `branch in ${o.branchIn}, identity ${o.identity}`);
+      }
       check('sssr probe fallback: constant probes = constant fallback (to one f16 step)', r.sssr.constantVsProbes === 0, `${r.sssr.constantVsProbes} px differ`);
       check('sssr probe fallback: structured probes reach the fallback pixels', r.sssr.structuredVsConstant > r.sssr.pixels * 0.05, `${r.sssr.structuredVsConstant} of ${r.sssr.pixels} px`);
       const rt = r.sssr.rt;
