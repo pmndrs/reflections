@@ -143,7 +143,13 @@ export interface BabylonProbe {
   renderList?: AbstractMesh[];
 }
 
-export interface BabylonProbeSetOptions extends Partial<Pick<ProbeSetOptions, 'sourceSize' | 'format' | 'dominantDirection' | 'lodMapping' | 'slotSizes'>> {
+export interface BabylonProbeSetOptions extends Partial<Pick<ProbeSetOptions, 'sourceSize' | 'format' | 'dominantDirection' | 'lodMapping' | 'slotSizes' | 'roughnessLerp'>> {
+  /**
+   * Lagarde 2014's distance-based roughness on box-projected volumes (D53): a glossy lookup sharpens
+   * toward the reflected point's contact with the projection box. Default true, as three's
+   * `ReflectionProbes.distanceRoughness` (W111, D2701); core's `ProbeSet` keeps it off by default.
+   */
+  distanceRoughness?: boolean;
   /** Probe slots. Default 4. */
   capacity?: number;
   /**
@@ -179,6 +185,8 @@ export class BabylonProbeSet {
       sourceSize: options.sourceSize ?? 128,
       format: options.format,
       dominantDirection: options.dominantDirection,
+      distanceRoughness: options.distanceRoughness ?? true,
+      roughnessLerp: options.roughnessLerp,
       lodMapping: options.lodMapping,
       environment: this.environmentMeshes !== null,
       slotSizes: options.slotSizes,
