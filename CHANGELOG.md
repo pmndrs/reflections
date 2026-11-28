@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Ray tracing (core provider, three): traced hits now read more of their material per hit. Alpha-tested materials
+  (three's `alphaTest`, with `map` alpha and `alphaMap`) let traced reflections and hit shadow rays through where three
+  cuts them out, so leaves and cards no longer block like solid planes; roughness / metalness maps are read at the hit's
+  uv instead of each map's average. Emissive maps can be too (`textures: { emissive: true }`, off by default: more
+  flicker). Each has a switch in the provider's `textures` option (`alphaTest`, `alphaCone`, `roughnessMetalness`,
+  `emissive`); `BvhTraceMaterial` gains `alphaCutoff`, `opacity`,
+  `roughnessMetalnessTexture` and `emissiveTexture`. `textures: false` now gives each material its textures' averages
+  (before, the base colour factor alone).
 - Core and three (the traced pass; Babylon and pixi have no traced pass): `traceSettings.hitLobeOcclusionRays` (default 0, off) and
   `hitLobeOcclusionLength` (default 0.3 x the hit's camera distance): short visibility rays over a traced hit's own
   specular lobe, on a fixed pattern (no noise), darken the lobe's probe light where nearby geometry blocks it (the floor

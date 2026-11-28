@@ -57,7 +57,10 @@ origin offset, and whether on-screen hits are reused instead of re-traced.
   Moving meshes keep their geometry: call `refit()` to update their transforms. That rebuilds the scene copy, so its
   CPU cost grows with the scene.
 - **Hit materials.** Hits are shaded from a per-triangle material table (colour, roughness, metalness), not from your
-  full material graph. Colours match three's on-screen look closely for standard materials.
+  full material graph. Colours match three's on-screen look closely for standard materials. Hits read the base colour and
+  roughness / metalness maps at their uv (emissive maps too with `textures: { emissive: true }` in the provider
+  options), and alpha-tested materials (`alphaTest`) let rays through where three cuts them out. Normal maps, node
+  materials and maps with a uv transform are not read (their average is used).
 - **Bindings.** The pass adds its own storage buffers and textures to the provider's. The scene copy is bound packed
   (one buffer), so three's default setup uses 8 storage buffers per stage and fits a plain `WebGPURenderer`. If a
   configuration does not fit, the pass warns once, sets `pass.traceError`, and screen space and probes carry on. It

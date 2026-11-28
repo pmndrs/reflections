@@ -197,8 +197,9 @@ export interface RaytracerTraceProviderOptions {
    *
    * W110, which textures are read per hit (each `false` folds that texture's mean into the factor, as before W110):
    * - `alphaTest` (default true): `alphaCutoff` materials let rays through where the base colour alpha is below the cutoff
-   *   (@pmndrs/bvh's triangle filter on their triangles only); `alphaCone` its level-of-detail cone (default 0.005 rad: a
-   *   coarse mip averages the leaves' alpha toward the cutoff and cards turn solid or vanish whole);
+   *   (@pmndrs/bvh's triangle filter on their triangles only); `alphaCone` its level-of-detail cone (default 0: the finest
+   *   level from the uv alone, the cheapest; a coarse mip averages the leaves' alpha toward the cutoff, so cards turn solid or
+   *   vanish whole);
    * - `roughnessMetalness` (default true): `roughnessMetalnessTexture`;
    * - `emissive` (default false, W110: the emissive map raised carConcept's wheel-region orbit flicker 13 %; off, the map's mean): `emissiveTexture`.
    */

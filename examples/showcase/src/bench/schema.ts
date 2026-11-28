@@ -306,9 +306,9 @@ export const SETTINGS: Setting[] = [
     tradeoff: 'W110 (T18, D5760): alphaTest materials (Sponza\'s plants and chains) let traced rays and hit shadow rays through where three discards the texel (base colour alpha x alphaMap below the cutoff), through @pmndrs/bvh\'s triangle filter on their triangles only. Off: the cards trace solid, as before W110.',
     cost: 'only rays that reach a flagged triangle pay (a table lookup and one texture read); see D5760',
   }),
-  num('rtAlphaCone', 'rt', 'Alpha test texture cone (rad)', 0, 0.1, 0.001, 0.005, {
+  num('rtAlphaCone', 'rt', 'Alpha test texture cone (rad)', 0, 0.1, 0.001, 0, {
     apply: 'rebuild', appliesTo: RT, api: 'createRaytracerTraceProviderFromObjects({ textures: { alphaCone } })',
-    tradeoff: 'W110 (D5760): the level-of-detail cone the alpha test reads the base colour alpha with (footprint t x cone). 0 = the finest mip (sharpest cut-outs, the most aliasing in motion); larger averages the leaves\' alpha toward the cutoff, so cards turn solid or vanish whole.',
+    tradeoff: 'W110 (D5760): the level-of-detail cone the alpha test reads the base colour alpha with (footprint t x cone). 0 (default) = the finest mip from the uv alone (Sponza +0.44 ms at 1080p for the alpha test; 0.005 adds the texture frame, +0.03 ms, same pixels at the bench views); larger averages the leaves\' alpha toward the cutoff, so cards turn solid or vanish whole.',
   }),
   num('rtCone', 'rt', 'Hit texture cone (rad)', 0, 0.1, 0.001, 0.05, {
     apply: 'rebuild', appliesTo: RT, api: 'createRaytracerTraceProviderFromObjects({ textures: { cone } })',
