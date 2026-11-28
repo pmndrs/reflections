@@ -27,7 +27,7 @@ export const GROUPS: { id: GroupId; title: string; blurb: string }[] = [
   { id: 'hybrid', title: 'Hybrid / composite', blurb: '`HybridReflections` and its composite.' },
   { id: 'denoiser', title: 'Denoiser', blurb: '`FfxReflectionDenoiser` (denoiser/ffx) behind the denoise seam. Its options are taken at construction: the bench rebuilds it on change (history drops).' },
   { id: 'probes', title: 'Probes', blurb: '`ReflectionProbes` and its `bake()` options. A change re-bakes (Rebuild).' },
-  { id: 'materials', title: 'Materials (examples)', blurb: 'Example-side material options, not package API: roughness from normal variance (specAA, W46) and the W45 experiments.' },
+  { id: 'materials', title: 'Materials (examples)', blurb: 'Material options: roughness from normal variance (specAA, W46, examples-side), three\'s geometry roughness (W56, examples-side), the package\'s geometric specular AA (`applySpecularAA`, W105) and the W45 experiments.' },
   { id: 'three', title: 'three SSRNode (reference)', blurb: 'three r187\'s stock SSRNode, its TemporalReproject + RecurrentDenoise, and denoiser/three\'s ffxReflections: the three SSR methods only.' },
   { id: 'pathtracer', title: 'Path tracer (reference)', blurb: '@pmndrs/pathtracer + OIDN, the ground truth Measure compares against.' },
 ];
@@ -433,7 +433,8 @@ export const SETTINGS: Setting[] = [
 
   sel('specularAA', 'materials', 'Geometric specular AA', [['off', 'off (three\'s geometry roughness)'], ['variance', 'variance (Tokuyoshi & Kaplanyan)']], 'off', {
     apply: 'rebuild', appliesTo: RASTER, api: 'applySpecularAA / Reflections specularAA (W105)',
-    tradeoff: 'W105 (T30, D5660): replaces three\'s geometry roughness (+ the max normal derivative on perceptual roughness) with a clamped variance on alpha^2, alpha\'^2 = alpha^2 + min(2 sigma^2 (|dn/dx|^2 + |dn/dy|^2), kappa) (Tokuyoshi & Kaplanyan 2019 / 2021), in three\'s lit term, the G-buffer (normalRoughness.w and shadingRoughness) and the bake alike. Package option; wins over Geometry roughness (three). Never the path tracer.',
+    tradeoff: 'W105 (T30, D5660): replaces three\'s geometry roughness (+ the max normal derivative on perceptual roughness) with a clamped variance on alpha^2, alpha\'^2 = alpha^2 + min(2 sigma^2 (|dn/dx|^2 + |dn/dy|^2), kappa) (Tokuyoshi & Kaplanyan 2019 / 2021), in three\'s lit term, the G-buffer (normalRoughness.w and shadingRoughness) and the bake alike. Calmer display (carConcept orbit -6.6 %, rest -22 %; Sponza orbit -5 %) but raw speckle on the car paint +139 %, its displayed quad grid +13-55 %, and a blurrier small mirror (the chrome star 96 -> 124 vs the PT\'s 53): off by default. Package option; wins over Geometry roughness (three). Never the path tracer.',
+    cost: 'within noise at 1080p (Sponza paired median +0.05 ms, shared GPU; W105)',
   }),
   num('specularAAVariance', 'materials', 'Specular AA kernel variance', 0, 1, 0.01, 0.159, {
     apply: 'rebuild', appliesTo: RASTER, api: 'applySpecularAA({ variance })',
