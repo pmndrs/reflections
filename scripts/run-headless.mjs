@@ -1855,6 +1855,39 @@ async function haloOptionChecks(pages) {
 }
 
 /**
+ * W107 (T14, D5700): lobe occlusion at traced hits (`hitLobeOcclusionRays`) runs and only darkens: the offscreen
+ * scene (its wall is reflected through traced off-screen hits), RT on, denoiser and AA off, a fixed frame index.
+ * 4 rays against 0: darker only; back to 0 rays: the frame it started from, to the pixel. HALO_FRAME's comparison
+ * without its stats() call (which renders between the frames).
+ */
+const LOBE_FRAME = `async (trace, keep) => {
+  const p = window.__p;
+  const load = (u) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = u; });
+  const px = async (u) => { const i = await load(u); const c = new OffscreenCanvas(i.width, i.height); const g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data; };
+  p.setSettings({ frameIndex: 7 });
+  p.setTraceSettings(trace);
+  p.setView('final');
+  await p.step(8);
+  const B = await px(await p.shot());
+  if (keep) { window.__lobeRef = B; return {}; }
+  const A = window.__lobeRef, lum = (a, k) => 0.2126 * a[k] + 0.7152 * a[k + 1] + 0.0722 * a[k + 2];
+  let darker = 0, brighter = 0, n = 0;
+  for (let k = 0; k < A.length; k += 4) { n++; const d = lum(B, k) - lum(A, k); if (d < -2) darker++; else if (d > 2) brighter++; }
+  return { darker: darker / n, brighter: brighter / n };
+}`;
+async function lobeOcclusionChecks(pages) {
+  const p = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&aa=off&scene=offscreen`);
+  pages.push(p);
+  await p.T(`(${LOBE_FRAME})({}, true)`); // warm-up
+  await p.T(`(${LOBE_FRAME})({}, true)`);
+  const d = await p.T(`(${LOBE_FRAME})({ hitLobeOcclusionRays: 4 }, false)`);
+  const back = await p.T(`(${LOBE_FRAME})({ hitLobeOcclusionRays: 0 }, false)`);
+  check('rt: lobe occlusion at traced hits only darkens, and 0 rays is the default frame (offscreen, D5700)',
+    d.darker > 0.002 && d.brighter < 0.0005 && back.darker + back.brighter === 0,
+    `4 rays: px > 2/255 darker ${(d.darker * 100).toFixed(2)}%, brighter ${(d.brighter * 100).toFixed(3)}%; back to 0 rays: ${((back.darker + back.brighter) * 100).toFixed(3)}% px moved`);
+}
+
+/**
  * `--only hit-source` (W53, D3660-D3662): the showcase, carConcept at W50's view, RT on, AA off,
  * 960x540. Off, the seam hands the denoiser no hit source; on (`setHitSource`), it builds one with
  * screen-space and traced codes, the FFX denoiser takes it, and the frame changes, with no
@@ -4124,7 +4157,7 @@ async function main() {
         fs.writeFileSync(path.join(OUT, 'seam-pt.json'), JSON.stringify(rows, null, 1));
       }
     }
-    if (runs('ssr-rt')) await ssrRtChecks(pages);
+    if (runs('ssr-rt')) { await ssrRtChecks(pages); await lobeOcclusionChecks(pages); } // W107 (T14, D5700)
     if (only === 'halo-options') await haloOptionChecks(pages); // W52 (D3640-D3642)
     if (only === 'ssr-exp-x1') await x1Checks(pages); // W71 (X1, D5000-D5003): defaults identical on examples/ssr
     if (only === 'ssr-exp-grazing') await grazingSweep(pages); // W71 (X1 #3): grazing sweep vs the path tracer (minutes), JSON to out/w71-grazing.json

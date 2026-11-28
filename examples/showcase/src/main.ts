@@ -31,7 +31,7 @@
 // Probes (W102): carConcept can add a probe in each wheel well at 64 px (T21, off by default for flicker, ./carProbes.ts; ?carProbes=off|wheels|cabin|both,
 // ?carProbeRes=<px>); Sponza bakes W62's oneSize128 layout (T22: floor slabs + an 8-cell grid, 11 volumes at 128 px;
 // ?probeLayout=shipped the seven hand-placed boxes, or any layout of ../../shared/probeLayouts.ts).
-// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=0|1|<k> ?specularAA=variance ?specularAAVariance=<sigma^2> (W105) ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?shadeVis=all ?lobeMix=<0..1> ?shadeOcc=screen ?lobeFilter=<k> (W52) ?hitSource=hits|all ?hitDistW=<k> (W53: the denoiser keeps hit sources apart / weights by hit distance) ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
+// URL: ?scene=<id> ?pose=<name> ?rt=1 ?ssr=0 ?probes=0 ?specOcc=1 ?specAA=0|1|<k> ?specularAA=variance ?specularAAVariance=<sigma^2> (W105) ?probeRes=<px> ?bounces=<n> (probe bake passes, default 2) ?denoise=0 ?shadeVis=all ?lobeMix=<0..1> ?shadeOcc=screen ?lobeFilter=<k> (W52) ?lobeOcc=<rays> ?lobeOccLen=<k> (W107) ?hitSource=hits|all ?hitDistW=<k> (W53: the denoiser keeps hit sources apart / weights by hit distance) ?aa=upscaler|taa|off ?upscale=<preset> ?reactive=<0..1> ?off ?view=<view> ?w=&h= (fixed size) ?manual
 // `window.__p` drives the page headlessly (scripts/run-headless.mjs, section `showcase`).
 import * as THREE from 'three/webgpu';
 import { mix, renderOutput, uniform, uv, vec3, vec4 } from 'three/tsl';
@@ -226,6 +226,9 @@ async function main() {
   // W52 halo options (D3640-D3642), URL only (the bench, examples/showcase/bench.html, has the knobs):
   // ?shadeVis=all ?lobeMix=<0..1> ?shadeOcc=screen; ?lobeFilter=<k> the lobe filter itself (D3550)
   if (q.has('shadeVis')) ssr.traceSettings.hitShadeVisibility = q.get('shadeVis') as 'offscreen' | 'all';
+  // W107 (T14, D5700): ?lobeOcc=<rays> ?lobeOccLen=<x hit distance>
+  if (q.has('lobeOcc')) ssr.traceSettings.hitLobeOcclusionRays = Number(q.get('lobeOcc'));
+  if (q.has('lobeOccLen')) ssr.traceSettings.hitLobeOcclusionLength = Number(q.get('lobeOccLen'));
   if (q.has('lobeMix')) ssr.settings.hitLobeFilterMixed = Number(q.get('lobeMix'));
   if (q.has('shadeOcc')) ssr.settings.hitShadeOcclusion = q.get('shadeOcc') as 'off' | 'screen';
   if (q.has('lobeFilter')) ssr.settings.hitLobeFilter = Number(q.get('lobeFilter'));

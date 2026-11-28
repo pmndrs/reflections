@@ -92,12 +92,62 @@ fn hitShadeLobe(s: HitSpecular, P: vec3f, N: vec3f, dir: vec3f, emissive: vec3f,
   // Specular visibility (D3513): one any-hit ray along R; where geometry blocks it, what the lobe sees
   // is not the environment / probe (a car's sill over a mirror floor sees its own underside). Rough
   // lobes leak around the blocker, so the occlusion fades out from roughness 0.3 to 1.
-  var vis = 1.0;
-  if (!traceLightVisible(P, N, R, HIT_SHADOW_RAY_LENGTH)) { vis = smoothstep(0.3, 1.0, s.roughness); }
+  var visR = 1.0;
+  if (!traceLightVisible(P, N, R, HIT_SHADOW_RAY_LENGTH)) { visR = smoothstep(0.3, 1.0, s.roughness); }
+  // W107 (T14, D5700): lobe occlusion, short rays over the lobe (0 rays: 1, as before). It only
+  // darkens: min with the ray along R. Skipped where that ray already left nothing, and for lobes
+  // narrower than HIT_LOBE_OCCLUSION_MIN_ROUGHNESS, which the ray along R stands for.
+  var lobe = 1.0;
+  if (hitLobeOcclusionRays > 0u && visR > 0.0 && s.roughness >= HIT_LOBE_OCCLUSION_MIN_ROUGHNESS) { lobe = hitLobeVisibility(P, N, dir, s.roughness); }
+  let vis = min(visR, lobe);
   let envBase = hitSpecularRadiance(P, R, hitLookupRoughness(s.roughness)) * vis;
   var envCoat = envBase;
-  if (s.clearcoat > 0.0 && abs(s.clearcoatRoughness - s.roughness) > 0.02) { envCoat = hitSpecularRadiance(P, R, hitLookupRoughness(s.clearcoatRoughness)) * select(smoothstep(0.3, 1.0, s.clearcoatRoughness), 1.0, vis >= 1.0); }
+  // the clear coat takes the base lobe's share only when it is itself wide enough (else the ray along R)
+  if (s.clearcoat > 0.0 && abs(s.clearcoatRoughness - s.roughness) > 0.02) { envCoat = hitSpecularRadiance(P, R, hitLookupRoughness(s.clearcoatRoughness)) * min(select(smoothstep(0.3, 1.0, s.clearcoatRoughness), 1.0, visR >= 1.0), select(1.0, lobe, s.clearcoatRoughness >= HIT_LOBE_OCCLUSION_MIN_ROUGHNESS)); }
   return emissive + hitLayered(s, diffuse, envBase, envCoat, NdotV);
+}
+// W107 (T14, D5700): the share of a hit's specular lobe that leaves the hit unblocked within
+// hitLobeOcclusionLength. hitLobeOcclusionRays half vectors from the GGX distribution at the hit's
+// own alpha, on a FIXED pattern (stratified u, golden-angle phi; the same for every pixel and frame,
+// so it adds no noise: a blocker's edge crossing the pattern steps the result by one ray's weight),
+// in a frame tied to the plane of incidence (phi 0 toward R's tangent part, so the pattern follows
+// the geometry smoothly). L = reflect(dir, H); L below the surface is skipped (the lobe's masked
+// part). Each ray weighs G1(L) x VdotH / NdotH (its share of the split sum's integral under GGX
+// sampling); a blocked ray contributes nothing (no second bounce, as D3513). The rays are the pass's
+// shadow query, origin offset along N like every hit ray.
+const HIT_LOBE_OCCLUSION_MIN_ROUGHNESS: f32 = 0.25;
+fn hitLobeVisibility(P: vec3f, N: vec3f, dir: vec3f, roughness: f32) -> f32 {
+  let a = max(roughness * roughness, 1e-3);
+  let a2 = a * a;
+  let V = -dir;
+  var T = reflect(dir, N);
+  T = T - N * dot(T, N);
+  if (dot(T, T) < 1e-8) {
+    // normal incidence: any tangent (Duff et al. 2017)
+    let sg = select(-1.0, 1.0, N.z >= 0.0);
+    let ia = -1.0 / (sg + N.z);
+    T = vec3f(1.0 + sg * N.x * N.x * ia, sg * N.x * N.y * ia, -sg * N.x);
+  }
+  T = normalize(T);
+  let B = cross(N, T);
+  let n = min(hitLobeOcclusionRays, 16u);
+  var open = 0.0;
+  var total = 0.0;
+  for (var i = 0u; i < n; i++) {
+    let u = (f32(i) + 0.5) / f32(n);
+    let phi = f32(i) * 2.39996323;
+    let cosT = sqrt((1.0 - u) / (1.0 + (a2 - 1.0) * u));
+    let sinT = sqrt(max(0.0, 1.0 - cosT * cosT));
+    let H = T * (sinT * cos(phi)) + B * (sinT * sin(phi)) + N * cosT;
+    let L = reflect(dir, H);
+    let NdotL = dot(N, L);
+    if (NdotL <= 1e-4) { continue; }
+    let g1 = 2.0 * NdotL / (NdotL + sqrt(a2 + (1.0 - a2) * NdotL * NdotL));
+    let w = g1 * max(dot(V, H), 0.0) / max(cosT, 1e-4);
+    total += w;
+    if (traceLightVisible(P, N, L, hitLobeOcclusionLength)) { open += w; }
+  }
+  return select(1.0, open / total, total > 0.0);
 }
 `;
 

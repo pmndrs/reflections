@@ -1,0 +1,6 @@
+ssr-rt exit 0 : 30 PASS, 0 FAIL; sections (s): setup 0, ssr-rt 12; total 12 s
+hybrid exit 0 : 20 PASS, 0 FAIL; sections (s): setup 0, hybrid 23; total 23 s
+showcase exit 0 : 9 PASS, 0 FAIL; sections (s): setup 0, showcase 9; total 9 s
+babylon exit 0 : 10 PASS, 0 FAIL; sections (s): setup 0, babylon 11; total 11 s
+flicker exit 0 : 2 PASS, 0 FAIL; sections (s): setup 36; total 36 s
+catalog exit 0 : 60 PASS, 0 FAIL; sections (s): setup 0, catalog 121; total 121 s
