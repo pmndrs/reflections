@@ -190,6 +190,30 @@ async function plateFloor(aspect: number): Promise<ShowcaseScene> {
   }, aspect);
 }
 
+/**
+ * W110 (T18): an alpha-tested slatted card (`alphaTest` 0.5, half its width cut out) 1.2 m above the glossy floor, an orange
+ * wall behind it. At pose `down` the camera looks 49 degrees down: card and wall are above the frame, so their floor
+ * reflection is all traced rays (SSR has nothing on screen to hit), and a solid card would block the wall in it.
+ */
+async function fenceFloor(aspect: number): Promise<ShowcaseScene> {
+  const s = simpleScene('fenceFloor', 'Alpha-tested slats above a glossy floor (W110)', (scene) => {
+    const n = 64, data = new Uint8Array(n * n * 4);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) data.set([60, 150, 70, (x >> 3) & 1 ? 0 : 255], (y * n + x) * 4);
+    const map = new THREE.DataTexture(data, n, n);
+    map.colorSpace = THREE.SRGBColorSpace;
+    map.needsUpdate = true;
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.8), new THREE.MeshStandardMaterial({ map, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.7 }));
+    card.position.set(0, 1.2, 0);
+    card.name = 'card';
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2, 0.1), diffuse(0xe0701c));
+    wall.position.set(0, 1, -0.6);
+    wall.name = 'wall';
+    scene.add(card, wall);
+  }, aspect);
+  s.views.down = { pos: [0, 1.15, 1.6], target: [0, 0, 0.6], fov: 40 };
+  return s;
+}
+
 /** The bench's procedural scenes (no asset download; they need the studio HDRI file only). */
 export const METRIC_SCENES: ShowcaseEntry[] = [
   { id: 'lineSpread', title: 'Line spread (X0)', asset: '', hdri: STUDIO_HDRI, build: (a) => lineSpread(a) },
@@ -198,4 +222,5 @@ export const METRIC_SCENES: ShowcaseEntry[] = [
   { id: 'cubeFloor', title: 'Cube and slab on a glossy floor (T53)', asset: '', hdri: STUDIO_HDRI, build: cubeFloor },
   { id: 'edgesFloor', title: 'Sharp-edged panel above a glossy floor (T53)', asset: '', hdri: STUDIO_HDRI, build: edgesFloor },
   { id: 'plateFloor', title: 'Thin plate over a glossy floor (T53)', asset: '', hdri: STUDIO_HDRI, build: plateFloor },
+  { id: 'fenceFloor', title: 'Alpha-tested slats above a glossy floor (W110)', asset: '', hdri: STUDIO_HDRI, build: fenceFloor },
 ];
