@@ -30,7 +30,11 @@
 //   pnpm check -- --only ssr-rt --rt-shadow-timing   # D903: GPU ms of hit shadow rays, kit scenes, 960x540 + 1080p (also ssr-rt-builders)
 //   pnpm check -- --only rt-materials [--rt-material-assets]   # W49: per-triangle hit materials, both providers (+ the asset survey)
 //
-// Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails.
+// Screenshots go to ./out/ (or $OUT). Exit code 1 if a check fails, 3 on a time-out.
+// Time budget per section (T55): 10 min, catalog 30, the measurement modes 60; CHECK_SECTION_BUDGET_MS overrides.
+// Every exit (end, failure, time-out, crash, SIGINT/TERM/HUP) kills the Chromes this run launched (matched by their
+// profile, reflections-<port>-<pid>-...) and the examples server it started; a run also clears Chromes left on its
+// port by a runner that died without that (SIGKILL).
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -49,8 +53,32 @@ const probeBenchFull = args.includes('--probe-bench');
 const ssrBenchFull = args.includes('--ssr-bench');
 const mirrorBiasFull = args.includes('--mirror-bias'); // W32 (D49): the full mirrorBias noise / bias sweep
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
-const runs = (section) => !only || only === section;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Time budgets (T55, W104). Each section gets its own budget, re-armed when `runs()` enters it, instead
+ * of one limit for the whole run: the default run grew past any fixed total (catalog, engines), and a
+ * hang is caught in the section it happens in, which the message names. The measurement modes keep
+ * their hour. CHECK_SECTION_BUDGET_MS overrides every budget (to test the time-out path).
+ */
+const LONG_RUN = probeBenchFull || ssrBenchFull || mirrorBiasFull || ['probe-layouts-measure', 'probe-bindings-measure', 'probe-lookup-cost', 'probe-lookup-ab', 'probe-lookup-parity', 'ssr-exp-baseline', 'ssr-exp-grazing'].includes(only);
+const budgetFor = (section) => Number(process.env.CHECK_SECTION_BUDGET_MS) || (LONG_RUN ? 3_600_000 : section === 'catalog' ? 1_800_000 : 600_000);
+const runStart = Date.now();
+const sectionTimes = [];
+let watchdog = null;
+function enterSection(section) {
+  const now = Date.now();
+  if (sectionTimes.length) sectionTimes.at(-1).s = (now - sectionTimes.at(-1).t0) / 1000;
+  sectionTimes.push({ section, t0: now, s: null });
+  const ms = budgetFor(section);
+  clearTimeout(watchdog);
+  watchdog = setTimeout(() => {
+    console.error(`FAILED: timed out in '${section}' after ${ms / 1000} s (${((Date.now() - runStart) / 1000).toFixed(0)} s into the run)`);
+    process.exit(3); // the 'exit' handler kills this run's Chromes and its examples server
+  }, ms);
+  watchdog.unref();
+}
+const runs = (section) => { const yes = !only || only === section; if (yes) enterSection(section); return yes; };
 
 const results = { checks: [], logs: [] };
 const check = (name, ok, detail = '') => {
@@ -106,6 +134,30 @@ const savePng = (name, dataUrl) => {
  * process still naming its profile, then removes the profile (W61).
  */
 const liveChromes = new Map();
+/** Profiles are named per port and runner (T55): `reflections-<port>-<pid>-<time>-<random>` in the temp dir. */
+const PROFILE_PREFIX = `reflections-${PORT}-`;
+/** The examples server this run started (null when it reused one); killed on every exit path. */
+let server = null;
+/**
+ * Chromes left by an earlier runner on this port that died without its exit handler (SIGKILL, a crash
+ * of node itself): their profile names a pid that no longer runs. Kill those (matched by profile path
+ * only) and remove the profiles. Never touches another port's or a live runner's Chromes.
+ */
+function sweepOrphanChromes() {
+  let dirs = [];
+  try { dirs = fs.readdirSync(os.tmpdir()).filter((d) => d.startsWith(PROFILE_PREFIX)); } catch { return; }
+  for (const d of dirs) {
+    const pid = Number(d.slice(PROFILE_PREFIX.length).split('-')[0]);
+    if (!pid || pid === process.pid) continue;
+    let alive = true;
+    try { process.kill(pid, 0); } catch (e) { alive = e.code === 'EPERM'; }
+    if (alive) continue;
+    const dir = path.join(os.tmpdir(), d);
+    const found = spawnSync('pgrep', ['-f', '--', dir], { encoding: 'utf8' }).stdout.trim();
+    if (found) { console.log(`  (killing ${found.split('\n').length} Chrome process(es) left by runner ${pid} on port ${PORT})`); spawnSync('pkill', ['-9', '-f', '--', dir]); }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
 function killChrome(chrome) {
   const dir = liveChromes.get(chrome);
   liveChromes.delete(chrome);
@@ -117,14 +169,15 @@ function killChrome(chrome) {
   }
 }
 const killAllChromes = () => { for (const c of [...liveChromes.keys()]) killChrome(c); };
-process.on('exit', killAllChromes);
-for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { killAllChromes(); process.exit(130); });
+const killServer = () => { if (server) { try { process.kill(-server.pid, 'SIGTERM'); } catch { /* gone */ } server = null; } };
+process.on('exit', () => { killAllChromes(); killServer(); });
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => process.exit(130)); // the 'exit' handler cleans up
 /** Open `url` in a fresh headless Chrome; resolves once `window.__p` exists. */
 async function openPage(url0, extraArgs = []) {
   const url = url0;
   // Port 0: Chrome picks a free port and writes it to DevToolsActivePort. A random fixed port could
   // collide with another worktree's Chrome, and then this run drove that run's page (F2).
-  const userDataDir = path.join(os.tmpdir(), `reflections-${Date.now()}-${process.pid}-${Math.floor(Math.random() * 1e9)}`);
+  const userDataDir = path.join(os.tmpdir(), `${PROFILE_PREFIX}${process.pid}-${Date.now()}-${Math.floor(Math.random() * 1e9)}`);
   const chrome = spawn(CHROME, [
     '--headless=new', '--no-sandbox', '--use-angle=metal', '--enable-unsafe-webgpu',
     '--enable-features=Vulkan', '--window-size=1100,900', '--remote-debugging-port=0', ...extraArgs,
@@ -3630,8 +3683,8 @@ async function dropInChecks(pages, name, url, { frames = 30, maxFlicker = 0.5 } 
 }
 
 async function main() {
-  setTimeout(() => { console.error('FAILED: timed out'); /* the 'exit' handler kills this run's Chromes */ process.exit(3); }, probeBenchFull || ssrBenchFull || mirrorBiasFull || only === 'probe-layouts-measure' || only === 'probe-bindings-measure' || only === 'probe-lookup-cost' || only === 'probe-lookup-ab' || only === 'probe-lookup-parity' || only === 'ssr-exp-baseline' || only === 'ssr-exp-grazing' ? 3_600_000 : only === 'catalog' ? 1_800_000 : 600_000).unref();
-  let server = null;
+  enterSection('setup'); // re-armed per section by runs() (T55)
+  sweepOrphanChromes();
   if (!(await up(`http://127.0.0.1:${PORT}/probes/`))) {
     server = spawn('pnpm', ['exec', 'vite', '--config', 'examples/vite.config.ts'], { cwd: ROOT, stdio: 'ignore', detached: true });
     const deadline = Date.now() + 30_000;
@@ -4139,8 +4192,10 @@ async function main() {
     if (results.logs.length) console.log('console warnings/errors:\n  ' + [...new Set(results.logs)].slice(0, 12).join('\n  '));
   } finally {
     for (const p of pages) p.close();
-    if (server) { try { process.kill(-server.pid, 'SIGTERM'); } catch { /* noop */ } }
+    killServer();
   }
+  if (sectionTimes.length) sectionTimes.at(-1).s = (Date.now() - sectionTimes.at(-1).t0) / 1000;
+  console.log(`\nsections (s): ${sectionTimes.map((x) => `${x.section} ${x.s.toFixed(0)}`).join(', ')}; total ${((Date.now() - runStart) / 1000).toFixed(0)} s`);
   const failed = results.checks.filter((c) => !c.ok);
   console.log(failed.length ? `\n${failed.length} check(s) FAILED` : '\nall checks passed');
   process.exit(failed.length ? 1 : 0);
