@@ -109,7 +109,8 @@ export interface TracedReflectionsSettings {
    * within `hitLobeOcclusionLength`. It only darkens (min with D3513's ray along R), and applies
    * where that ray does: hits shaded from the BVH's material, and on-screen re-shades with
    * `hitShadeVisibility` 'all'. For closed spaces the probes don't resolve: the floor under a car,
-   * the inside of a wheel. Needs `hitShadows`. 0 = off (default), at most 16.
+   * the inside of a wheel. Lobes narrower than perceptual roughness 0.25 keep the ray along R alone.
+   * Needs `hitShadows`. 0 = off (default); 1 runs as 2 (the least that tests the lobe); at most 16.
    */
   hitLobeOcclusionRays?: number;
   /**
@@ -432,7 +433,8 @@ export function createTracedReflections(device: GPUDevice, options: TracedReflec
     f[66] = (s.roughnessThreshold ?? 0.447) ** 2;
     // 67, 79: W107 (T14, D5700) lobe occlusion at hits (67 was W71's hitLobeFilterGrazing, removed by W76)
     f[67] = Math.max(0, s.hitLobeOcclusionLength ?? DEFAULT_HIT_LOBE_OCCLUSION_LENGTH);
-    u[79] = Math.min(16, Math.max(0, Math.floor(s.hitLobeOcclusionRays ?? 0)));
+    const lobeRays = Math.min(16, Math.max(0, Math.floor(s.hitLobeOcclusionRays ?? 0)));
+    u[79] = lobeRays === 1 ? 2 : lobeRays; // one ray of the pattern lands on the lobe's grazing side (below the surface): 2 is the least that tests it
     // 68-75: W74 (X4) the half-rate fill
     bilateralFillWeightWords(resolveBilateralFillWeights({
       planeTolerance: s.fillPlaneTolerance, normalPower: s.fillNormalPower, roughnessTolerance: s.fillRoughnessTolerance,

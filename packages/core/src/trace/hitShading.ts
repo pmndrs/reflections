@@ -95,13 +95,15 @@ fn hitShadeLobe(s: HitSpecular, P: vec3f, N: vec3f, dir: vec3f, emissive: vec3f,
   var visR = 1.0;
   if (!traceLightVisible(P, N, R, HIT_SHADOW_RAY_LENGTH)) { visR = smoothstep(0.3, 1.0, s.roughness); }
   // W107 (T14, D5700): lobe occlusion, short rays over the lobe (0 rays: 1, as before). It only
-  // darkens: min with the ray along R. Skipped where that ray already left nothing.
+  // darkens: min with the ray along R. Skipped where that ray already left nothing, and for lobes
+  // narrower than HIT_LOBE_OCCLUSION_MIN_ROUGHNESS, which the ray along R stands for.
   var lobe = 1.0;
-  if (hitLobeOcclusionRays > 0u && visR > 0.0) { lobe = hitLobeVisibility(P, N, dir, s.roughness); }
+  if (hitLobeOcclusionRays > 0u && visR > 0.0 && s.roughness >= HIT_LOBE_OCCLUSION_MIN_ROUGHNESS) { lobe = hitLobeVisibility(P, N, dir, s.roughness); }
   let vis = min(visR, lobe);
   let envBase = hitSpecularRadiance(P, R, hitLookupRoughness(s.roughness)) * vis;
   var envCoat = envBase;
-  if (s.clearcoat > 0.0 && abs(s.clearcoatRoughness - s.roughness) > 0.02) { envCoat = hitSpecularRadiance(P, R, hitLookupRoughness(s.clearcoatRoughness)) * min(select(smoothstep(0.3, 1.0, s.clearcoatRoughness), 1.0, visR >= 1.0), lobe); }
+  // the clear coat takes the base lobe's share only when it is itself wide enough (else the ray along R)
+  if (s.clearcoat > 0.0 && abs(s.clearcoatRoughness - s.roughness) > 0.02) { envCoat = hitSpecularRadiance(P, R, hitLookupRoughness(s.clearcoatRoughness)) * min(select(smoothstep(0.3, 1.0, s.clearcoatRoughness), 1.0, visR >= 1.0), select(1.0, lobe, s.clearcoatRoughness >= HIT_LOBE_OCCLUSION_MIN_ROUGHNESS)); }
   return emissive + hitLayered(s, diffuse, envBase, envCoat, NdotV);
 }
 // W107 (T14, D5700): the share of a hit's specular lobe that leaves the hit unblocked within
@@ -113,6 +115,7 @@ fn hitShadeLobe(s: HitSpecular, P: vec3f, N: vec3f, dir: vec3f, emissive: vec3f,
 // part). Each ray weighs G1(L) x VdotH / NdotH (its share of the split sum's integral under GGX
 // sampling); a blocked ray contributes nothing (no second bounce, as D3513). The rays are the pass's
 // shadow query, origin offset along N like every hit ray.
+const HIT_LOBE_OCCLUSION_MIN_ROUGHNESS: f32 = 0.25;
 fn hitLobeVisibility(P: vec3f, N: vec3f, dir: vec3f, roughness: f32) -> f32 {
   let a = max(roughness * roughness, 1e-3);
   let a2 = a * a;
