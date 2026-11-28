@@ -1,0 +1,105 @@
+{
+ "date": "2026-11-28T14:50:55.196Z",
+ "label": "w102-C1-0.25",
+ "results": [
+  {
+   "config": "geo 0.25",
+   "scene": "bench:carConcept@w50",
+   "regions": {
+    "reflection": {
+     "px": 458630,
+     "drift": 0.2719,
+     "pct8": 0.0081,
+     "rest": 0.0071,
+     "orbitStd": 0.3764,
+     "d2": 0.3185,
+     "quad": 0.0504,
+     "quadRaw": 0.8424,
+     "speckle": 0.0559,
+     "drift2": 0.2696,
+     "orbitStd2": 0.3781
+    },
+    "wheel": {
+     "px": 9900,
+     "drift": 1.3115,
+     "pct8": 0.0303,
+     "rest": 0.0271,
+     "orbitStd": 2.075,
+     "d2": 1.6981,
+     "quad": 0.1413,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 1.3424,
+     "orbitStd2": 2.1516
+    },
+    "car": {
+     "px": 85400,
+     "drift": 0.5845,
+     "pct8": 0.0035,
+     "rest": 0.0118,
+     "orbitStd": 0.7568,
+     "d2": 0.654,
+     "quad": 0.0961,
+     "quadRaw": 0.985,
+     "speckle": 0.0181,
+     "drift2": 0.5801,
+     "orbitStd2": 0.7662
+    },
+    "_pan": 0.684
+   }
+  },
+  {
+   "config": "geo 0.25",
+   "scene": "bench:carConcept@hero",
+   "regions": {
+    "reflection": {
+     "px": 367551,
+     "drift": 0.5049,
+     "pct8": 0.1458,
+     "rest": 0.0106,
+     "orbitStd": 0.336,
+     "d2": 0.3278,
+     "quad": 0.1067,
+     "quadRaw": 0.3853,
+     "speckle": 0.0507,
+     "drift2": 0.2181,
+     "orbitStd2": 0.3337
+    },
+    "door (hero)": {
+     "px": 3993,
+     "drift": 1.2317,
+     "pct8": 0,
+     "rest": 0.0086,
+     "orbitStd": 0.5177,
+     "d2": 0.1936,
+     "quad": 0.1877,
+     "quadRaw": 0.9685,
+     "speckle": 0.0657,
+     "drift2": 0.207,
+     "orbitStd2": 0.5039
+    },
+    "_pan": 0.5423
+   }
+  },
+  {
+   "config": "geo 0.25",
+   "scene": "bench:sponza@hero",
+   "regions": {
+    "reflection": {
+     "px": 119966,
+     "drift": 0.3028,
+     "pct8": 0.0017,
+     "rest": 0.0103,
+     "orbitStd": 0.5452,
+     "d2": 4.7949,
+     "quad": -0.0024,
+     "quadRaw": 0.4374,
+     "speckle": 0.3924,
+     "drift2": 0.299,
+     "orbitStd2": 0.5477
+    },
+    "_pan": 6.592
+   }
+  }
+ ]
+}

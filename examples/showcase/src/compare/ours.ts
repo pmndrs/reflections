@@ -27,7 +27,7 @@ import { brdfFromQuery, hitSourceDenoiserOptions, hitSourceFromQuery, syncDenois
 import { probeLayout, type ProbeLayoutName } from '../../../shared/probeLayouts';
 import { setSpecularAA, specAAFromQuery, specAAHitMaterial, specAAStrength } from '../specAA';
 import type { FloorKind } from '../scenes';
-import { carInteriorProbes, carWheels, type CarProbesMode } from '../carProbes';
+import { carInteriorProbes, carProbesFromQuery, carWheels } from '../carProbes';
 import { hybridReaders } from '../../../shared/metrics/three';
 import { presetUrlKeys } from '../bench/schema';
 import {
@@ -161,8 +161,10 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
   applySSROn();
 
   // probes, as the showcase bakes them; W61: ?probeLayout=few|medium|many|manyCell|mixed (&probeBlend=) bakes
-  // that layout at the equal memory budget instead (../../../shared/probeLayouts.ts, Sponza only)
-  const layout = params.has('probeLayout') ? probeLayout(kit.id, params.get('probeLayout') as ProbeLayoutName, kit.probes, { blend: Number(params.get('probeBlend') ?? 0.25) }) : null;
+  // that layout at the equal memory budget instead (../../../shared/probeLayouts.ts, Sponza only); W102 (T22):
+  // the scene's own default layout (Sponza: oneSize128) when the URL names none, ?probeLayout=shipped the hand-placed set
+  const layoutName = (params.get('probeLayout') ?? kit.probeLayout ?? null) as ProbeLayoutName | null;
+  const layout = layoutName ? probeLayout(kit.id, layoutName, kit.probes, { blend: Number(params.get('probeBlend') ?? 0.25) }) : null;
   const probes = new ReflectionProbes();
   // W51: ?probeStorage=auto|cube-array|cube2d (ReflectionProbes.layout)
   if (params.has('probeStorage')) probes.layout = params.get('probeStorage') as N;
@@ -176,9 +178,10 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     if (v.resolution !== undefined) p.resolution = v.resolution;
     probes.add(p);
   }
-  // W55: ?carProbes=wheels|cabin|both adds carConcept's interior probes (wheel wells, cabin; boxes from the car's
-  // geometry, ../carProbes.ts) at ?carProbeRes= px (default 128; the stage probe keeps its size)
-  const carVolumes = carInteriorProbes(kit, (params.get('carProbes') ?? 'off') as CarProbesMode, Number(params.get('carProbeRes') ?? 128));
+  // W55: ?carProbes=off|wheels|cabin|both carConcept's interior probes (wheel wells, cabin; boxes from the car's
+  // geometry, ../carProbes.ts) at ?carProbeRes= px (the stage probe keeps its size); W102 (T21): wheels at 64 px; default off (flicker)
+  const carQ = carProbesFromQuery(params);
+  const carVolumes = carInteriorProbes(kit, carQ.mode, carQ.resolution);
   for (const v of carVolumes) {
     const p = new ReflectionProbe(...v.influenceSize);
     p.name = v.name;

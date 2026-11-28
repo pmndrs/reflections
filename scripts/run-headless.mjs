@@ -2265,7 +2265,7 @@ async function probeLayoutMeasure(pages) {
         await p.T('window.__p.freeze(true)');
         const rows = [];
         for (const [name, blend] of PROBE_LAYOUT_VARIANTS.slice(0, 6)) {
-          await p.T(`(window.__p.setParam('probeLayout', ${JSON.stringify(name === 'shipped' ? null : name)}), window.__p.setParam('probeBlend', ${JSON.stringify(String(blend ?? 0.25))}), window.__p.drop('probes'), window.__p.drop('ours-denoised'), true)`);
+          await p.T(`(window.__p.setParam('probeLayout', ${JSON.stringify(name)}), window.__p.setParam('probeBlend', ${JSON.stringify(String(blend ?? 0.25))}), window.__p.drop('probes'), window.__p.drop('ours-denoised'), true)`);
           const m = await p.T("window.__p.measure({ samples: 64, warmup: 24, frames: 8, methods: ['probes', 'ours-denoised'], orbitFrames: 0 })");
           rows.push({ layout: name, glossyPixels: m.glossyPixels, referenceSamples: m.referenceSamples, rows: m.rows.map(({ method, mad, bias, stdMean, info }) => ({ method, mad, bias, stdMean, probes: info?.probes, probeLayout: info?.probeLayout })) });
           console.log(`  sponza vs path traced ${pose} ${name}: ${m.glossyPixels} glossy px, ${m.rows.map((x) => `${x.method} MAD ${x.mad.toFixed(2)} bias ${x.bias.toFixed(2)} (${x.info?.probes} probes)`).join(', ')}`);
@@ -2351,7 +2351,7 @@ async function probeBindingMeasure(pages) {
       await p.T('window.__p.freeze(true)');
       const rows = all.pt[pose] ?? [];
       for (const name of variants) {
-        await p.T(`(window.__p.setParam('probeLayout', ${JSON.stringify(name === 'shipped' ? null : name)}), window.__p.drop('probes'), window.__p.drop('ours-denoised'), true)`);
+        await p.T(`(window.__p.setParam('probeLayout', ${JSON.stringify(name)}), window.__p.drop('probes'), window.__p.drop('ours-denoised'), true)`);
         const m = await p.T("window.__p.measure({ samples: 64, warmup: 24, frames: 8, methods: ['probes', 'ours-denoised'], orbitFrames: 0 })");
         const row = { layout: name, glossyPixels: m.glossyPixels, referenceSamples: m.referenceSamples, rows: m.rows.map(({ method, mad, psnr, bias, stdMean, info }) => ({ method, mad, psnr, bias, stdMean, probes: info?.probes, probeLayout: info?.probeLayout })) };
         const k = rows.findIndex((r) => r.layout === name);

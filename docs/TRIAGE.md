@@ -96,8 +96,6 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T21 | Wheel-well probes at 64 px as carConcept's default | med | S | accepted | decision 18, D3700, W55 | Make carProbes=wheels&carProbeRes=64 the showcase and bench default; re-run the bench Measure. W102. |
-| T22 | Showcase Sponza: switch to oneSize128 (11 volumes at 128 px, +3.5 dB vs PT at a third of the memory) | med | S | accepted | decision 12, W61, W62, W63 | Switch (lead's call under the maintainer's 2026-11-28 'use your recommendations'): flip the showcase layout and re-run --only showcase. W102. |
 | T23 | Oriented probe boxes: a rotation per volume in core, three and the W63 grid | med | M | accepted | decision 18, D3701, D4950, W55 | Add 3 rotation rows per volume; box test and parallax in the local frame; check the front-tyre step goes. |
 | T24 | Material-side texture-limit warning: a three material past maxSampledTexturesPerShaderStage fails with no message of ours | med | S | ready | W62, decision 16, D4900 | At bake / reflectionProbes() time, count each lit material's sampled textures plus the atlases; warn with the fix. |
 | T25 | Near-mirror floors show the HDRI blurred: misses take the probe, the PT and three's SSR show it sharp | med | M | experiment | W21, W30, D1806 | Try a full-resolution environment past the probes for misses below the mirror threshold (three's path, not core). |
@@ -109,7 +107,7 @@ Grouped by area. Within an area, rows are roughly in the order to do them.
 
 | id | item | impact | effort | status | refs | next step |
 |---|---|---|---|---|---|---|
-| T29 | Examples drop three's geometry roughness when the AA is on `flicker` | med | S | accepted | decision 19, D3720, W56 | W102: set geometryRoughness off under the upscaler / AA, but flip only if `--only flicker` shows no rise above noise (flicker rule; W56 measured +1.3 % paint flicker with AA). Otherwise keep it and log the numbers. |
+| T29 | Examples drop three's geometry roughness when the AA is on `flicker` | med | S | decide | decision 19, D3720, W56, W102 | W102: gate failed. Off under the upscaler raises flicker (orbit std +2-3 % on carConcept and Sponza, speckle +11-62 %); 0.25 too (speckle +7-21 %). Three's term stays. Revisit with T30 (a variance-form specular AA replacing three's term). |
 | T30 | Specular AA as a package option: normal variance (specAA) + a geometric term, replacing three's geometry roughness `flicker` | high | M | experiment | D3570, D3552, D3571, D3720, W46, W56, decision 3 | Variance-form AA (Tokuyoshi 2019) next to specAA; measure curved-edge sparkle with T1 and the chrome star. Needs a node-material hook. |
 | T31 | Clear coat: subtract the coat's IBL in the composite (grazing edge line), then SSR / RT for the coat layer | low | L | experiment | D3512, D3741, D3541, D603, W41, W44, W58, W11 | Start with the coat env term (F_Schlick(0.04) x DFG at the coat roughness, coat normal) on carConcept's skirt line. |
 | T32 | Specular occlusion darkens near-mirror misses beside lit objects with RT off | low | S | ready | D4513, D3551, W39, W45, decision 7 | Fade SO toward 1 below the tracer's threshold, or weight it by hit distance / confidence. |
@@ -198,6 +196,8 @@ Findings and calls a new worker might otherwise redo. Each has a pointer.
 - **Sphere fringe:** RT already removes it (50 -> 0 px). The idea of a thinner test when RT is on was dropped. Only the RT-off back-face layer is left (T11). W44, D4303.
 - **Basic, Lambert and Phong materials** get no reflections, by design. It's documented in the README. Decision 15, D2802.
 - **The denoiser is on by default**, with an opt-out. D50.
+- **carConcept's wheel-well probes stay off by default (was T21).** W102 built them at 64 px (`?carProbes=wheels`): hub 41.5 -> 25.2 (PT 27.1), but the wheel region's flicker rose 8-12 % (orbit, drift, d2, still). Flicker beats accuracy, so the lead set the default back to off on 2026-11-29. D5600.
+- **Sponza's showcase layout is oneSize128 (was T22, W102).** Display flicker fell on all five metrics (drift -8 %, d2 -11 %); speckle +10 %. D5601.
 - **quadCopy stays 'off' by default (was T10).** W85: 'sameSurface' leaves display flicker flat on 8 scenes but raises raw speckle +32 % (contact) / +47 % (carConcept). Under the flicker rule a rise is a no. The option stays. Lead's call, 2026-11-28, under the maintainer's 'use your recommendations'.
 - **Sponza's 18 sampled textures** came from three's composite binding every atlas twice. Fixed; four sizes fit the default 16. W62, D4804.
 - **Probe lookup cost per volume** is fixed by W63's grid (32 volumes: 9.6 -> 0.85 ms at 1080p). D4950.

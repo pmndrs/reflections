@@ -1,0 +1,105 @@
+{
+ "date": "2026-11-28T14:57:09.647Z",
+ "label": "w102-E1-new",
+ "results": [
+  {
+   "config": "new defaults",
+   "scene": "bench:carConcept@w50",
+   "regions": {
+    "reflection": {
+     "px": 458630,
+     "drift": 0.5154,
+     "pct8": 0.1443,
+     "rest": 0.0082,
+     "orbitStd": 0.3771,
+     "d2": 0.3228,
+     "quad": 0.0501,
+     "quadRaw": 0.8868,
+     "speckle": 0.0461,
+     "drift2": 0.2952,
+     "orbitStd2": 0.3798
+    },
+    "wheel": {
+     "px": 9900,
+     "drift": 1.4542,
+     "pct8": 0.0303,
+     "rest": 0.0269,
+     "orbitStd": 2.0629,
+     "d2": 1.6964,
+     "quad": 0.1416,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 1.3553,
+     "orbitStd2": 2.1399
+    },
+    "car": {
+     "px": 85400,
+     "drift": 0.7849,
+     "pct8": 0.0176,
+     "rest": 0.0121,
+     "orbitStd": 0.7449,
+     "d2": 0.653,
+     "quad": 0.1025,
+     "quadRaw": 0.9895,
+     "speckle": 0.0124,
+     "drift2": 0.5997,
+     "orbitStd2": 0.7571
+    },
+    "_pan": 0.6813
+   }
+  },
+  {
+   "config": "new defaults",
+   "scene": "bench:carConcept@hero",
+   "regions": {
+    "reflection": {
+     "px": 367551,
+     "drift": 0.471,
+     "pct8": 0.1232,
+     "rest": 0.0105,
+     "orbitStd": 0.3318,
+     "d2": 0.3281,
+     "quad": 0.1005,
+     "quadRaw": 0.3854,
+     "speckle": 0.0438,
+     "drift2": 0.2345,
+     "orbitStd2": 0.3297
+    },
+    "door (hero)": {
+     "px": 3993,
+     "drift": 1.1487,
+     "pct8": 0,
+     "rest": 0.0099,
+     "orbitStd": 0.5005,
+     "d2": 0.1959,
+     "quad": 0.3106,
+     "quadRaw": 0.9781,
+     "speckle": 0.0751,
+     "drift2": 0.2168,
+     "orbitStd2": 0.4917
+    },
+    "_pan": 0.5423
+   }
+  },
+  {
+   "config": "new defaults",
+   "scene": "bench:sponza@hero",
+   "regions": {
+    "reflection": {
+     "px": 119966,
+     "drift": 0.2972,
+     "pct8": 0.0008,
+     "rest": 0.0102,
+     "orbitStd": 0.5366,
+     "d2": 4.734,
+     "quad": -0.0037,
+     "quadRaw": 0.4637,
+     "speckle": 0.3666,
+     "drift2": 0.2885,
+     "orbitStd2": 0.5392
+    },
+    "_pan": 6.6032
+   }
+  }
+ ]
+}

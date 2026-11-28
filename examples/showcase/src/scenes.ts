@@ -7,6 +7,7 @@
 import * as THREE from 'three/webgpu';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { assetUrl, loadGLTF, standOnFloor, type CameraView, type ProbeVolume, type Vec3 } from '../../shared';
+import type { ProbeLayoutName } from '../../shared/probeLayouts';
 
 export type FloorKind = 'mirror' | 'lacquer';
 
@@ -28,7 +29,13 @@ export interface ShowcaseScene {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   views: Record<string, CameraView>;
+  /** The hand-placed probe volumes (the `shipped` layout of ../../shared/probeLayouts.ts). */
   probes: (ProbeVolume & { projectionOffset?: Vec3 })[];
+  /**
+   * W102 (T22, decision 12): the layout the showcase and the bench bake when the URL names none
+   * (`probeLayout(id, name, probes)`); absent: `probes` as they are. `?probeLayout=shipped` bakes `probes`.
+   */
+  probeLayout?: ProbeLayoutName;
   floor: ShowcaseFloor;
   exposure: number;
   /** Bake settings for the probes (far plane in scene units). */
@@ -220,6 +227,9 @@ async function sponza(aspect: number): Promise<ShowcaseScene> {
   return {
     id: 'sponza', title: 'Sponza', credit: 'Sponza: Crytek (CryENGINE limited licence), Khronos glTF; sky: Poly Haven (CC0)',
     scene, views, floor, probes, exposure: 0.7,
+    // W102 (T22): W62's slabs + 8-cell grid, all 11 volumes and the environment at 128 px (PSNR vs the PT courtyard /
+    // low 16.58 / 15.12 -> 20.51 / 18.29 dB, 33.5 -> 12.6 MB); the seven boxes above stay as `?probeLayout=shipped`
+    probeLayout: 'oneSize128',
     camera: camera(views.courtyard, aspect, 0.05, 80),
     bake: { near: 0.05, far: 60 },
   };
