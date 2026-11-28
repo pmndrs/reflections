@@ -1855,6 +1855,22 @@ async function haloOptionChecks(pages) {
 }
 
 /**
+ * W107 (T14, D5700): lobe occlusion at traced hits (`hitLobeOcclusionRays`) runs and only darkens: contact, RT on,
+ * denoiser and AA off, a fixed frame index, `hitShadeVisibility` 'all' on both sides so on-screen re-shaded hits take it
+ * too. Off is the default and leaves the frame as it was (the same frame twice: 0 px apart).
+ */
+async function lobeOcclusionChecks(pages) {
+  const ct = await openPage(`http://127.0.0.1:${PORT}/ssr/?manual&rt=1&denoise=0&aa=off&scene=contact`);
+  pages.push(ct);
+  await ct.T(`(${HALO_FRAME})({}, { hitShadeVisibility: 'all' }, true)`);
+  const same = await ct.T(`(${HALO_FRAME})({}, { hitShadeVisibility: 'all', hitLobeOcclusionRays: 0 }, false)`);
+  const d = await ct.T(`(${HALO_FRAME})({}, { hitShadeVisibility: 'all', hitLobeOcclusionRays: 4 }, false)`);
+  check('rt: lobe occlusion at traced hits only darkens, and 0 rays is a no-op (contact, hitShadeVisibility all, D5700)',
+    same.darker + same.brighter === 0 && d.darker > 0.001 && d.brighter < 0.0005,
+    `0 rays: ${((same.darker + same.brighter) * 100).toFixed(3)}% px moved; 4 rays: px > 2/255 darker ${(d.darker * 100).toFixed(2)}%, brighter ${(d.brighter * 100).toFixed(3)}%`);
+}
+
+/**
  * `--only hit-source` (W53, D3660-D3662): the showcase, carConcept at W50's view, RT on, AA off,
  * 960x540. Off, the seam hands the denoiser no hit source; on (`setHitSource`), it builds one with
  * screen-space and traced codes, the FFX denoiser takes it, and the frame changes, with no
@@ -3987,7 +4003,7 @@ async function main() {
         fs.writeFileSync(path.join(OUT, 'seam-pt.json'), JSON.stringify(rows, null, 1));
       }
     }
-    if (runs('ssr-rt')) await ssrRtChecks(pages);
+    if (runs('ssr-rt')) { await ssrRtChecks(pages); await lobeOcclusionChecks(pages); } // W107 (T14, D5700)
     if (only === 'halo-options') await haloOptionChecks(pages); // W52 (D3640-D3642)
     if (only === 'ssr-exp-x1') await x1Checks(pages); // W71 (X1, D5000-D5003): defaults identical on examples/ssr
     if (only === 'ssr-exp-grazing') await grazingSweep(pages); // W71 (X1 #3): grazing sweep vs the path tracer (minutes), JSON to out/w71-grazing.json
