@@ -347,7 +347,7 @@ const textureOptions = (o: RaytracerTraceProviderOptions) => {
   const t = o.textures || {};
   const on = o.textures !== false;
   return {
-    maxSize: t.maxSize ?? 1024, maxBuckets: t.maxBuckets ?? 4, cone: t.cone ?? 0.05, alphaCone: t.alphaCone ?? 0.005,
+    maxSize: t.maxSize ?? 1024, maxBuckets: t.maxBuckets ?? 4, cone: t.cone ?? 0.05, alphaCone: t.alphaCone ?? 0,
     baseColor: on, alphaTest: on && t.alphaTest !== false, roughnessMetalness: on && t.roughnessMetalness !== false, emissive: on && t.emissive === true,
   };
 };
@@ -368,6 +368,8 @@ export interface AlphaTestPlan {
 
 /** Most runs the filter's table holds (WGSL text: ~30 bytes each); past it the rest stay solid (warned). */
 export const ALPHA_TEST_MAX_RUNS = 1024;
+/** Up to this many runs the filter tests them as an if-chain of literals; past it, a binary search over const arrays. */
+const ALPHA_TEST_INLINE_RUNS = 16;
 
 /** W110: {@link AlphaTestPlan} of a scene; `alphaTested(material, meshHasUvs)` says which materials cut out. */
 export function alphaTestPlan(scene: BvhTraceScene, alphaTested: (material: number, meshHasUvs: boolean) => boolean): AlphaTestPlan {
@@ -450,8 +452,13 @@ function alphaTestedOf(scene: BvhTraceScene, options: RaytracerTraceProviderOpti
 const alphaFilterWgsl = (plan: AlphaTestPlan, cone: number) => {
   const runs = plan.runs.slice(0, ALPHA_TEST_MAX_RUNS);
   const k = runs.length;
-  return /* wgsl */ `
-const RTP_ALPHA_RUNS = array<vec4u, ${k}>(${runs.map((r) => `vec4u(${r.instances[0]}u,${r.instances[1]}u,${r.triangles[0]}u,${r.triangles[1]}u)`).join(',')});
+  // a few runs: an if-chain of literals (no array the compiler may copy per call); many: two const arrays, binary search
+  const lookup = k <= ALPHA_TEST_INLINE_RUNS
+    ? `fn rtpAlphaMaterial(instance: u32, triangle: u32) -> u32 {
+${runs.map((r) => `  if (instance >= ${r.instances[0]}u && instance < ${r.instances[1]}u${r.triangles[0] > 0 ? ` && triangle >= ${r.triangles[0]}u` : ''} && triangle < ${r.triangles[1]}u) { return ${r.material}u; }`).join('\n')}
+  return 0xffffffffu;
+}`
+    : `const RTP_ALPHA_RUNS = array<vec4u, ${k}>(${runs.map((r) => `vec4u(${r.instances[0]}u,${r.instances[1]}u,${r.triangles[0]}u,${r.triangles[1]}u)`).join(',')});
 const RTP_ALPHA_MATERIALS = array<u32, ${k}>(${runs.map((r) => `${r.material}u`).join(',')});
 fn rtpAlphaMaterial(instance: u32, triangle: u32) -> u32 {
   var lo = 0u;
@@ -466,7 +473,16 @@ fn rtpAlphaMaterial(instance: u32, triangle: u32) -> u32 {
     if (triangle >= r.z && triangle < r.w) { return RTP_ALPHA_MATERIALS[i]; }
   }
   return 0xffffffffu;
-}
+}`;
+  // cone 0 (default): the finest level, from the uv alone (no texture frame to work out per candidate)
+  const sample = cone > 0
+    ? `let s = rtSurface(h, RtRay(vec3f(0.0), 0.0, vec3f(0.0, 0.0, 1.0), candidate.t), RT_SURF_UV | RT_SURF_TEXFRAME);
+    let r = rtTexRecord(m.baseColorTexture);
+    a = a * rtTexSampleRecord(r, s.uv, rtTexLodOf(r, s.uvDensity * max(candidate.t, 0.0) * ${cone.toFixed(6)})).a;`
+    : `let s = rtSurface(h, RtRay(vec3f(0.0), 0.0, vec3f(0.0, 0.0, 1.0), candidate.t), RT_SURF_UV);
+    a = a * rtTexSample(m.baseColorTexture, s.uv, 0.0).a;`;
+  return /* wgsl */ `
+${lookup}
 fn bvhTrianglePasses(candidate: BvhCandidate) -> bool {
   let id = rtpAlphaMaterial(candidate.instance, candidate.triangle);
   if (id == 0xffffffffu) { return false; }
@@ -475,9 +491,7 @@ fn bvhTrianglePasses(candidate: BvhCandidate) -> bool {
   var a = m.opacity;
   if (m.baseColorTexture != RT_TEXTURE_NONE) {
     let h = RtHit(candidate.t, candidate.instance, candidate.triangle, candidate.frontFace, candidate.barycentrics, id, vec3f(0.0, 0.0, 1.0), 0.0);
-    let s = rtSurface(h, RtRay(vec3f(0.0), 0.0, vec3f(0.0, 0.0, 1.0), candidate.t), RT_SURF_UV | RT_SURF_TEXFRAME);
-    let r = rtTexRecord(m.baseColorTexture);
-    a = a * rtTexSampleRecord(r, s.uv, rtTexLodOf(r, s.uvDensity * max(candidate.t, 0.0) * ${cone.toFixed(6)})).a;
+    ${sample}
   }
   return a < m.alphaCutoff;
 }

@@ -1,14 +1,12 @@
-// W110 debug: what the bench's ours-rt built (provider info) with a setting off and back on
-const key = typeof KEY !== 'undefined' ? KEY : 'rtAlpha';
+// W110: what the bench's ours-rt provider holds per configuration (texture count and bytes, alpha runs / flagged triangles)
+const configs = typeof CONFIGS !== 'undefined' ? CONFIGS : [['W97 (base colour)', { rtAlpha: false, rtRoughMetal: false }], ['defaults', {}], ['+ emissive', { rtEmissiveMap: true }]];
 const out = [];
-for (const v of [false, null]) {
-  P.setSetting(key, v);
-  const pend = P.pending();
-  if (pend.methods.length) await P.rebuild();
-  P.setPose('low');
-  P.setSides?.(['ours-rt', 'ours-rt']);
-  await P.step(4);
-  const info = P.info().info['ours-rt'];
-  out.push({ v, pend, provider: info?.provider });
+for (const [name, set] of configs) {
+  for (const [k, v] of Object.entries(set)) P.setSetting(k, v);
+  if (P.pending().methods.length) await P.rebuild();
+  await P.step(2);
+  out.push({ name, provider: P.info().info['ours-rt']?.provider });
+  for (const k of Object.keys(set)) P.setSetting(k, null);
+  if (P.pending().methods.length) await P.rebuild();
 }
 return out;
