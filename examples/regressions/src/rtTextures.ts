@@ -115,7 +115,7 @@ function quadTexture(q: { tl: number[]; tr: number[]; bl: number[]; br: number[]
  *    three's `alphaMap` (green 0 on the left, no map), and with `textures.alphaTest: false` (every ray stops at t 3, as before);
  *  - roughness / metalness: a linear map (g, b) per quadrant x the material's factors (0.8, 1): traceHitSpecular's roughness and
  *    F0 per quadrant (glTF's one texture, and three's two maps);
- *  - emissive: an sRGB emissive map per quadrant x emissive x intensity.
+ *  - emissive (`textures.emissive: true`; default off: the map's mean): an sRGB emissive map per quadrant x emissive x intensity.
  */
 async function materialMapChecks(device: GPUDevice) {
   const at = (x: number, y: number): [number[], number[]] => [[x, y, 3, 0], [0, 0, -1, 0]];
@@ -149,12 +149,13 @@ async function materialMapChecks(device: GPUDevice) {
   // emissive per quadrant (sRGB) x emissive 1, 0.5, 0.25 x intensity 2
   const emQuads = { tl: [255, 255, 255], tr: [255, 0, 0], bl: [0, 0, 0], br: [0, 128, 255] };
   const em = quadTexture(emQuads, THREE.SRGBColorSpace);
-  const emissive = await run([plane(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: new THREE.Color(1, 0.5, 0.25), emissiveIntensity: 2, emissiveMap: em }))]);
+  const emissive = await run([plane(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: new THREE.Color(1, 0.5, 0.25), emissiveIntensity: 2, emissiveMap: em }))], { textures: { emissive: true } });
+  const emissiveDefault = await run([plane(new THREE.MeshStandardMaterial({ color: 0x000000, emissive: new THREE.Color(1, 0.5, 0.25), emissiveIntensity: 2, emissiveMap: em }))]);
   const names = ['tl', 'tr', 'bl', 'br'] as const;
   const wantRough = names.map((k) => +(0.8 * rmQuads[k][1] / 255).toFixed(3));
   const wantF0 = names.map((k) => { const m = rmQuads[k][2] / 255; return base.map((b) => +(0.04 + (b - 0.04) * m).toFixed(3)); });
   const wantEm = names.map((k) => emQuads[k].map((c, j) => +(srgbToLinear(c / 255) * [1, 0.5, 0.25][j] * 2).toFixed(3)));
-  return { alpha, alphaOff, alphaMap, rough, rough2, roughOff, emissive, wantRough, wantF0, wantEm };
+  return { alpha, alphaOff, alphaMap, rough, rough2, roughOff, emissive, emissiveDefault, wantRough, wantF0, wantEm };
 }
 
 export async function rtTextureChecks() {

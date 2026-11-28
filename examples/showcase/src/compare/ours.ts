@@ -244,8 +244,8 @@ export async function createOurs(id: Extract<MethodId, 'ours-raw' | 'ours-denois
     const shadingNormals = params.get('rtShadingNormals') !== '0';
     // W82 (T70): ?rtShade=1 shades traced hits with the raytracer's rtShade instead of the probes
     const builder = (params.get('bvhBuilder') ?? 'auto') as N;
-    // W110 (T18): ?rtAlpha=0 / ?rtRoughMetal=0 / ?rtEmissiveMap=0 read those textures' means instead
-    const textures = { alphaTest: params.get('rtAlpha') !== '0', roughnessMetalness: params.get('rtRoughMetal') !== '0', emissive: params.get('rtEmissiveMap') !== '0', ...(params.has('rtAlphaCone') ? { alphaCone: Number(params.get('rtAlphaCone')) } : {}), ...(params.has('rtCone') ? { cone: Number(params.get('rtCone')) } : {}) };
+    // W110 (T18): ?rtAlpha=0 / ?rtRoughMetal=0 read those textures' means instead; ?rtEmissiveMap=1 reads emissive maps (default off: flicker)
+    const textures = { alphaTest: params.get('rtAlpha') !== '0', roughnessMetalness: params.get('rtRoughMetal') !== '0', emissive: params.get('rtEmissiveMap') === '1', ...(params.has('rtAlphaCone') ? { alphaCone: Number(params.get('rtAlphaCone')) } : {}), ...(params.has('rtCone') ? { cone: Number(params.get('rtCone')) } : {}) };
     const built = await createRaytracerTraceProviderFromObjects(device, traceMeshes, { ...(material ? { material } : {}), shadingNormals, textures, ...(builder !== 'auto' ? { builder } : {}) });
     provider = built.provider;
     const pi = built.provider.info;

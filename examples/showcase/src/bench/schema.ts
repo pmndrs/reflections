@@ -318,9 +318,9 @@ export const SETTINGS: Setting[] = [
     apply: 'rebuild', appliesTo: RT, api: 'createRaytracerTraceProviderFromObjects({ textures: { roughnessMetalness } })',
     tradeoff: 'W110 (T18, D5761): traced hits read the metallic-roughness map at their uv (same buckets and cone as the base colour) instead of the map\'s mean per mesh.',
   }),
-  bool('rtEmissiveMap', 'rt', 'Emissive maps at traced hits', true, {
-    apply: 'rebuild', appliesTo: RT, api: 'createRaytracerTraceProviderFromObjects({ textures: { emissive } })',
-    tradeoff: 'W110 (T18, D5761): traced hits read the emissive map at their uv instead of its mean (ToyCar\'s small lights no longer glow over the whole body).',
+  bool('rtEmissiveMap', 'rt', 'Emissive maps at traced hits (opt-in)', false, {
+    apply: 'rebuild', appliesTo: RT, api: 'createRaytracerTraceProviderFromObjects({ textures: { emissive: true } })',
+    tradeoff: 'W110 (T18, D5761): traced hits read the emissive map at their uv instead of its mean. carConcept w50 vs the PT: the changed px 39.3 -> 27.4 MAD, the wheel region 31.2 -> 24.0; but the wheel region\'s orbit flicker +13 % (d2 +9 %), so off by default (the maintainer\'s flicker rule).',
   }),
   num('s.missRoughnessThreshold', 'rt', 'Glossy threshold (traced)', 0, 1, 0.01, 1, {
     appliesTo: RT, api: 'settings.missRoughnessThreshold',

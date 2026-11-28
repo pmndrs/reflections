@@ -1394,7 +1394,10 @@ function f2Checks(r) {
       check('rt: traced hits read roughness (g) and metalness (b) maps per quadrant, glTF one texture (W110)', roughOk(mm.rough), roughDesc(mm.rough));
       check("rt: three's separate roughness and metalness maps combine into one (W110)", roughOk(mm.rough2), roughDesc(mm.rough2));
       check('rt: textures.roughnessMetalness false gives every quadrant the map means (W110)', mm.roughOff.hits.every((h) => Math.abs(h.roughness - mm.roughOff.hits[0].roughness) < 1e-3), roughDesc(mm.roughOff));
-      check('rt: traced hits read the emissive map per quadrant x emissive x intensity (W110)',
+      check('rt: by default (textures.emissive off, flicker) every quadrant takes the emissive map\'s mean (W110)',
+        mm.emissiveDefault.hits.every((h) => h.emissive.every((c, j) => Math.abs(c - mm.emissiveDefault.hits[0].emissive[j]) < 1e-3)) && mm.emissiveDefault.hits[0].emissive[0] > 0.1,
+        mm.emissiveDefault.hits.map((h) => h.emissive.join(',')).join('; '));
+      check('rt: textures.emissive true reads the emissive map per quadrant x emissive x intensity (W110)',
         mm.emissive.hits.every((h, i) => h.emissive.every((c, j) => Math.abs(c - mm.wantEm[i][j]) < 0.02 * Math.max(1, mm.wantEm[i][j]))),
         mm.emissive.hits.map((h, i) => `${h.emissive.join(',')} (want ${mm.wantEm[i].join(',')})`).join('; '));
     }

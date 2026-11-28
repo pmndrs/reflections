@@ -91,10 +91,10 @@ const rtShade = q.get('rtShade') === '1';
 /** W89 (D5450): `&rtPacking=split` binds the scene copy as table + data (5 storage buffers) instead of packed (4). */
 const rtPacking = q.get('rtPacking') === 'split' ? 'split' as const : 'auto' as const;
 // W97: traced hits sample base colour textures. `?rtTextures=0`: the maps' averages (before W97); `?rtCone=0.012`: the LOD ray cone (default 0.05).
-// W110: `?rtAlpha=0` / `?rtRoughMetal=0` / `?rtEmissiveMap=0` switch the alpha test / roughness-metalness / emissive maps off (their means).
+// W110: `?rtAlpha=0` / `?rtRoughMetal=0` switch the alpha test / roughness-metalness maps off (their means); `?rtEmissiveMap=1` reads emissive maps (default off).
 const rtTextures = q.get('rtTextures') === '0' ? false as const : {
   ...(q.get('rtCone') ? { cone: Number(q.get('rtCone')) } : {}),
-  alphaTest: q.get('rtAlpha') !== '0', roughnessMetalness: q.get('rtRoughMetal') !== '0', emissive: q.get('rtEmissiveMap') !== '0',
+  alphaTest: q.get('rtAlpha') !== '0', roughnessMetalness: q.get('rtRoughMetal') !== '0', emissive: q.get('rtEmissiveMap') === '1',
 };
 /** `&shadingNormals=0`: traced hits shaded with the flat geometric normal (D1700 A/B). */
 const shadingNormals = q.get('shadingNormals') !== '0';

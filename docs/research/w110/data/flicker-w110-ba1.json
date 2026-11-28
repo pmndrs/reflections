@@ -1,0 +1,430 @@
+{
+ "date": "2026-11-28T16:38:43.484Z",
+ "label": "w110-ba1",
+ "results": [
+  {
+   "config": "on",
+   "scene": "ssr:contact",
+   "regions": {
+    "reflection": {
+     "px": 279484,
+     "drift": 0.3674,
+     "pct8": 0.0004,
+     "rest": 0.0062,
+     "orbitStd": 0.4928,
+     "d2": 0.5696,
+     "quad": 0.3945,
+     "quadRaw": 0.7537,
+     "speckle": 0.0189,
+     "drift2": 0.3805,
+     "orbitStd2": 0.4757
+    },
+    "_pan": 3.8146
+   }
+  },
+  {
+   "config": "on",
+   "scene": "ssr:moving",
+   "regions": {
+    "reflection": {
+     "px": 219771,
+     "drift": 0.3833,
+     "pct8": 0.0737,
+     "rest": 0.0108,
+     "orbitStd": 0.5388,
+     "d2": 1.0042,
+     "quad": 0.0682,
+     "quadRaw": 0.3088,
+     "speckle": 0.0391,
+     "drift2": 0.3828,
+     "orbitStd2": 0.5413
+    },
+    "_pan": 9.0867
+   }
+  },
+  {
+   "config": "on",
+   "scene": "bench:carConcept@w50/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 458630,
+     "drift": 0.3068,
+     "pct8": 0.0111,
+     "rest": 0.0075,
+     "orbitStd": 0.3658,
+     "d2": 0.298,
+     "quad": 0.0716,
+     "quadRaw": 0.9325,
+     "speckle": 0.052,
+     "drift2": 0.3062,
+     "orbitStd2": 0.365
+    },
+    "wheel": {
+     "px": 9900,
+     "drift": 0.6917,
+     "pct8": 0.0303,
+     "rest": 0.016,
+     "orbitStd": 1.165,
+     "d2": 0.8195,
+     "quad": 0.586,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 0.6243,
+     "orbitStd2": 1.181
+    },
+    "car": {
+     "px": 85400,
+     "drift": 0.5119,
+     "pct8": 0.0035,
+     "rest": 0.0101,
+     "orbitStd": 0.5749,
+     "d2": 0.4823,
+     "quad": 0.2431,
+     "quadRaw": 0.9878,
+     "speckle": 0.0092,
+     "drift2": 0.5022,
+     "orbitStd2": 0.5801
+    },
+    "_pan": 0.5959
+   }
+  },
+  {
+   "config": "on",
+   "scene": "bench:toyCar@hero/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 334950,
+     "drift": 0.1567,
+     "pct8": 0.0236,
+     "rest": 0.0046,
+     "orbitStd": 0.231,
+     "d2": 0.3174,
+     "quad": 0.1091,
+     "quadRaw": 0.2492,
+     "speckle": 0.0141,
+     "drift2": 0.1576,
+     "orbitStd2": 0.2322
+    },
+    "_pan": 0.5568
+   }
+  },
+  {
+   "config": "base",
+   "scene": "ssr:contact",
+   "regions": {
+    "reflection": {
+     "px": 279596,
+     "drift": 0.4117,
+     "pct8": 0.0004,
+     "rest": 0.0063,
+     "orbitStd": 0.4791,
+     "d2": 0.5697,
+     "quad": 0.4197,
+     "quadRaw": 0.7503,
+     "speckle": 0.0182,
+     "drift2": 0.4049,
+     "orbitStd2": 0.4805
+    },
+    "_pan": 3.8172
+   }
+  },
+  {
+   "config": "base",
+   "scene": "ssr:moving",
+   "regions": {
+    "reflection": {
+     "px": 219771,
+     "drift": 0.3833,
+     "pct8": 0.0737,
+     "rest": 0.0108,
+     "orbitStd": 0.5388,
+     "d2": 1.0042,
+     "quad": 0.0682,
+     "quadRaw": 0.3088,
+     "speckle": 0.0391,
+     "drift2": 0.3828,
+     "orbitStd2": 0.5413
+    },
+    "_pan": 9.0867
+   }
+  },
+  {
+   "config": "base",
+   "scene": "bench:carConcept@w50/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 458630,
+     "drift": 0.3044,
+     "pct8": 0.0089,
+     "rest": 0.0074,
+     "orbitStd": 0.3612,
+     "d2": 0.2955,
+     "quad": 0.0704,
+     "quadRaw": 0.9326,
+     "speckle": 0.0527,
+     "drift2": 0.3045,
+     "orbitStd2": 0.3629
+    },
+    "wheel": {
+     "px": 9900,
+     "drift": 0.6773,
+     "pct8": 0,
+     "rest": 0.0151,
+     "orbitStd": 1.0313,
+     "d2": 0.7529,
+     "quad": 0.6071,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 0.6319,
+     "orbitStd2": 1.0553
+    },
+    "car": {
+     "px": 85400,
+     "drift": 0.5098,
+     "pct8": 0,
+     "rest": 0.01,
+     "orbitStd": 0.5556,
+     "d2": 0.4718,
+     "quad": 0.2474,
+     "quadRaw": 0.9878,
+     "speckle": 0.0095,
+     "drift2": 0.5015,
+     "orbitStd2": 0.5623
+    },
+    "_pan": 0.6003
+   }
+  },
+  {
+   "config": "base",
+   "scene": "bench:toyCar@hero/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 334950,
+     "drift": 0.1579,
+     "pct8": 0.0218,
+     "rest": 0.0051,
+     "orbitStd": 0.2308,
+     "d2": 0.319,
+     "quad": 0.1035,
+     "quadRaw": 0.2488,
+     "speckle": 0.0134,
+     "drift2": 0.1577,
+     "orbitStd2": 0.2319
+    },
+    "_pan": 0.5571
+   }
+  },
+  {
+   "config": "emOff",
+   "scene": "ssr:contact",
+   "regions": {
+    "reflection": {
+     "px": 279781,
+     "drift": 0.3605,
+     "pct8": 0.0004,
+     "rest": 0.0064,
+     "orbitStd": 0.4854,
+     "d2": 0.5703,
+     "quad": 0.3929,
+     "quadRaw": 0.7533,
+     "speckle": 0.0179,
+     "drift2": 0.36,
+     "orbitStd2": 0.4855
+    },
+    "_pan": 3.8169
+   }
+  },
+  {
+   "config": "emOff",
+   "scene": "ssr:moving",
+   "regions": {
+    "reflection": {
+     "px": 219771,
+     "drift": 0.3833,
+     "pct8": 0.0737,
+     "rest": 0.0108,
+     "orbitStd": 0.5388,
+     "d2": 1.0042,
+     "quad": 0.0682,
+     "quadRaw": 0.3088,
+     "speckle": 0.0391,
+     "drift2": 0.3828,
+     "orbitStd2": 0.5413
+    },
+    "_pan": 9.0867
+   }
+  },
+  {
+   "config": "emOff",
+   "scene": "bench:carConcept@w50/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 458630,
+     "drift": 0.3054,
+     "pct8": 0.0089,
+     "rest": 0.0074,
+     "orbitStd": 0.3618,
+     "d2": 0.2963,
+     "quad": 0.0708,
+     "quadRaw": 0.9326,
+     "speckle": 0.0527,
+     "drift2": 0.3059,
+     "orbitStd2": 0.3639
+    },
+    "wheel": {
+     "px": 9900,
+     "drift": 0.6803,
+     "pct8": 0,
+     "rest": 0.0153,
+     "orbitStd": 1.03,
+     "d2": 0.7525,
+     "quad": 0.6068,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 0.6341,
+     "orbitStd2": 1.0534
+    },
+    "car": {
+     "px": 85400,
+     "drift": 0.5104,
+     "pct8": 0,
+     "rest": 0.01,
+     "orbitStd": 0.5574,
+     "d2": 0.4741,
+     "quad": 0.2481,
+     "quadRaw": 0.9878,
+     "speckle": 0.0095,
+     "drift2": 0.5033,
+     "orbitStd2": 0.5642
+    },
+    "_pan": 0.5997
+   }
+  },
+  {
+   "config": "emOff",
+   "scene": "bench:toyCar@hero/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 334950,
+     "drift": 0.1564,
+     "pct8": 0.0227,
+     "rest": 0.0048,
+     "orbitStd": 0.2307,
+     "d2": 0.3175,
+     "quad": 0.1029,
+     "quadRaw": 0.2492,
+     "speckle": 0.0142,
+     "drift2": 0.1572,
+     "orbitStd2": 0.2314
+    },
+    "_pan": 0.5568
+   }
+  },
+  {
+   "config": "rmOff",
+   "scene": "ssr:contact",
+   "regions": {
+    "reflection": {
+     "px": 279596,
+     "drift": 0.4117,
+     "pct8": 0.0004,
+     "rest": 0.0063,
+     "orbitStd": 0.4791,
+     "d2": 0.5697,
+     "quad": 0.4197,
+     "quadRaw": 0.7503,
+     "speckle": 0.0182,
+     "drift2": 0.4049,
+     "orbitStd2": 0.4805
+    },
+    "_pan": 3.8172
+   }
+  },
+  {
+   "config": "rmOff",
+   "scene": "ssr:moving",
+   "regions": {
+    "reflection": {
+     "px": 220419,
+     "drift": 0.3799,
+     "pct8": 0.0712,
+     "rest": 0.0108,
+     "orbitStd": 0.5247,
+     "d2": 0.9887,
+     "quad": 0.0542,
+     "quadRaw": 0.3388,
+     "speckle": 0.0519,
+     "drift2": 0.3784,
+     "orbitStd2": 0.5258
+    },
+    "_pan": 8.9751
+   }
+  },
+  {
+   "config": "rmOff",
+   "scene": "bench:carConcept@w50/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 458630,
+     "drift": 0.306,
+     "pct8": 0.0107,
+     "rest": 0.0074,
+     "orbitStd": 0.3639,
+     "d2": 0.297,
+     "quad": 0.0713,
+     "quadRaw": 0.9325,
+     "speckle": 0.052,
+     "drift2": 0.3049,
+     "orbitStd2": 0.3653
+    },
+    "wheel": {
+     "px": 9900,
+     "drift": 0.6902,
+     "pct8": 0.0303,
+     "rest": 0.0158,
+     "orbitStd": 1.1669,
+     "d2": 0.8202,
+     "quad": 0.5861,
+     "quadRaw": 1,
+     "speckle": 0,
+     "drift2": 0.6216,
+     "orbitStd2": 1.1823
+    },
+    "car": {
+     "px": 85400,
+     "drift": 0.511,
+     "pct8": 0.0035,
+     "rest": 0.0101,
+     "orbitStd": 0.5731,
+     "d2": 0.4794,
+     "quad": 0.2425,
+     "quadRaw": 0.9878,
+     "speckle": 0.0092,
+     "drift2": 0.5005,
+     "orbitStd2": 0.5791
+    },
+    "_pan": 0.5967
+   }
+  },
+  {
+   "config": "rmOff",
+   "scene": "bench:toyCar@hero/ours-rt",
+   "regions": {
+    "reflection": {
+     "px": 334950,
+     "drift": 0.1581,
+     "pct8": 0.0248,
+     "rest": 0.005,
+     "orbitStd": 0.2312,
+     "d2": 0.3193,
+     "quad": 0.1007,
+     "quadRaw": 0.2488,
+     "speckle": 0.0134,
+     "drift2": 0.1578,
+     "orbitStd2": 0.2324
+    },
+    "_pan": 0.5571
+   }
+  }
+ ]
+}

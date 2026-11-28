@@ -261,8 +261,8 @@ async function main() {
     const t0 = performance.now();
     const forKit = kit;
     // core's @pmndrs/raytracer provider (the only one since W89); rtShade (opt-in) uses the same provider
-    // W110 (T18): ?rtAlpha=0 / ?rtRoughMetal=0 / ?rtEmissiveMap=0 read those textures' means at traced hits instead
-    const textures = { alphaTest: q.get('rtAlpha') !== '0', roughnessMetalness: q.get('rtRoughMetal') !== '0', emissive: q.get('rtEmissiveMap') !== '0' };
+    // W110 (T18): ?rtAlpha=0 / ?rtRoughMetal=0 read those textures' means at traced hits instead; ?rtEmissiveMap=1 reads emissive maps (default off: flicker)
+    const textures = { alphaTest: q.get('rtAlpha') !== '0', roughnessMetalness: q.get('rtRoughMetal') !== '0', emissive: q.get('rtEmissiveMap') === '1' };
     const built = await createRaytracerTraceProviderFromObjects(device, meshes, { material: specAAHitMaterial, textures });
     const p = built.provider, triangles = built.provider.info.triangles;
     const update = () => { const s = bvhTraceSceneFromObjects(meshes, { material: specAAHitMaterial }); if (s.scene.materials) built.provider.setMaterials(s.scene.materials); };

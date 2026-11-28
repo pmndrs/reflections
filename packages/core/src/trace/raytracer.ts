@@ -200,7 +200,7 @@ export interface RaytracerTraceProviderOptions {
    *   (@pmndrs/bvh's triangle filter on their triangles only); `alphaCone` its level-of-detail cone (default 0.005 rad: a
    *   coarse mip averages the leaves' alpha toward the cutoff and cards turn solid or vanish whole);
    * - `roughnessMetalness` (default true): `roughnessMetalnessTexture`;
-   * - `emissive` (default true): `emissiveTexture`.
+   * - `emissive` (default false, W110: the emissive map raised carConcept's wheel-region orbit flicker 13 %; off, the map's mean): `emissiveTexture`.
    */
   textures?: false | {
     maxSize?: number; maxBuckets?: number; cone?: number;
@@ -348,7 +348,7 @@ const textureOptions = (o: RaytracerTraceProviderOptions) => {
   const on = o.textures !== false;
   return {
     maxSize: t.maxSize ?? 1024, maxBuckets: t.maxBuckets ?? 4, cone: t.cone ?? 0.05, alphaCone: t.alphaCone ?? 0.005,
-    baseColor: on, alphaTest: on && t.alphaTest !== false, roughnessMetalness: on && t.roughnessMetalness !== false, emissive: on && t.emissive !== false,
+    baseColor: on, alphaTest: on && t.alphaTest !== false, roughnessMetalness: on && t.roughnessMetalness !== false, emissive: on && t.emissive === true,
   };
 };
 
